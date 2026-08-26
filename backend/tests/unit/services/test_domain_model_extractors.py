@@ -51,8 +51,10 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import (
     PaperStudyWindowExtractor,
+    StructuredExperimentalPaperMap,
     StructuredPaperSkim,
     StructuredPaperSourceSignalScreen,
+    StructuredReviewPaperMap,
     build_paper_skim_prompt,
     build_paper_source_signal_prompt,
 )
@@ -71,52 +73,57 @@ from infra.llm.usage import capture_llm_usage
 
 
 def test_paper_skim_contract_bounds_model_output():
-    model_schema = StructuredPaperSkim.model_json_schema()
-    schema = model_schema["properties"]
+    experimental_schema = StructuredExperimentalPaperMap.model_json_schema()
+    schema = experimental_schema["properties"]
 
-    assert schema["studies"]["maxItems"] == 4
-    assert schema["unresolved_signals"]["maxItems"] == 8
+    assert schema["studies"]["maxItems"] == 2
+    assert schema["unresolved_signals"]["maxItems"] == 4
     assert schema["output_saturated"]["type"] == "boolean"
-    study_schema = model_schema["$defs"]["StructuredPaperStudy"]["properties"]
-    relationship_schema = model_schema["$defs"][
-        "StructuredPaperStudyRelationship"
+    study_schema = experimental_schema["$defs"]["StructuredPaperMapStudy"][
+        "properties"
+    ]
+    relationship_schema = experimental_schema["$defs"][
+        "StructuredPaperMapRelationship"
     ]["properties"]
-    assert study_schema["material_scope"]["maxItems"] == 8
-    assert study_schema["process_context"]["maxItems"] == 12
+    assert study_schema["material_scope"]["maxItems"] == 4
+    assert study_schema["process_context"]["maxItems"] == 4
     assert study_schema["process_context"]["items"]["maxLength"] == 160
-    assert study_schema["sample_context"]["maxItems"] == 12
-    assert study_schema["sample_context"]["items"]["maxLength"] == 160
-    assert study_schema["test_context"]["maxItems"] == 12
-    assert study_schema["test_context"]["items"]["maxLength"] == 160
-    assert study_schema["fixed_conditions"]["maxItems"] == 12
-    assert study_schema["relationships"]["maxItems"] == 6
-    assert relationship_schema["varied_factors"]["maxItems"] == 12
+    assert "sample_context" not in study_schema
+    assert "test_context" not in study_schema
+    assert "comparator" not in study_schema
+    assert "fixed_conditions" not in study_schema
+    assert study_schema["relationships"]["maxItems"] == 4
+    assert relationship_schema["varied_factors"]["maxItems"] == 6
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
-    assert relationship_schema["source_unit_ids"]["maxItems"] == 12
-    signal_schema = model_schema["$defs"]["StructuredPaperStudySignal"][
+    assert relationship_schema["source_unit_ids"]["maxItems"] == 4
+    signal_schema = experimental_schema["$defs"]["StructuredPaperMapSignal"][
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
-    assert signal_schema["process_context"]["maxItems"] == 12
+    assert signal_schema["process_context"]["maxItems"] == 4
     assert signal_schema["process_context"]["items"]["maxLength"] == 160
-    assert signal_schema["sample_context"]["maxItems"] == 12
-    assert signal_schema["test_context"]["maxItems"] == 12
+    assert "sample_context" not in signal_schema
+    assert "test_context" not in signal_schema
     assert signal_schema["source_unit_ids"]["minItems"] == 1
-    assert signal_schema["source_unit_ids"]["maxItems"] == 12
+    assert signal_schema["source_unit_ids"]["maxItems"] == 4
     assert "source_unit_coverage" not in schema
-    assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
+    assert "review_synthesis" not in schema
     assert schema["warnings"]["items"]["maxLength"] == 240
-    review_schema = model_schema["$defs"]["StructuredReviewSynthesisMap"][
+
+    review_model_schema = StructuredReviewPaperMap.model_json_schema()
+    review_schema = review_model_schema["$defs"]["StructuredReviewSynthesisMap"][
         "properties"
     ]
-    review_item_schema = model_schema["$defs"]["StructuredReviewKnowledgeItem"][
-        "properties"
-    ]
-    assert review_schema["synthesis_claims"]["maxItems"] == 4
-    assert review_schema["disputes"]["maxItems"] == 4
-    assert review_schema["evidence_gaps"]["maxItems"] == 4
-    assert review_schema["citation_leads"]["maxItems"] == 6
-    assert review_item_schema["content"]["maxLength"] == 400
+    review_item_schema = review_model_schema["$defs"][
+        "StructuredReviewKnowledgeItem"
+    ]["properties"]
+    assert "studies" not in review_model_schema["properties"]
+    assert "unresolved_signals" not in review_model_schema["properties"]
+    assert review_schema["synthesis_claims"]["maxItems"] == 2
+    assert review_schema["disputes"]["maxItems"] == 2
+    assert review_schema["evidence_gaps"]["maxItems"] == 2
+    assert review_schema["citation_leads"]["maxItems"] == 3
+    assert review_item_schema["content"]["maxLength"] == 240
     assert review_item_schema["source_unit_ids"]["minItems"] == 1
     assert review_item_schema["source_unit_ids"]["maxItems"] == 4
 
@@ -128,7 +135,7 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
         "properties"
     ]
 
-    assert schema["signals"]["maxItems"] == 12
+    assert schema["signals"]["maxItems"] == 8
     assert schema["output_saturated"]["type"] == "boolean"
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
     assert signal_schema["material_scope"]["maxItems"] == 4
@@ -253,7 +260,7 @@ def test_paper_source_signal_prompt_preserves_review_and_primary_source_roles():
     assert "outcome='microstructure'" in user_prompt
     assert "do not also return 'mechanical properties'" in user_prompt
     assert "'etc.' or 'including' do not name hidden axes" in user_prompt
-    assert "only when more than 12 distinct explicit research axes" in user_prompt
+    assert "only when more than 8 distinct explicit research axes" in user_prompt
 
 
 def test_paper_source_signal_screen_binds_source_identity_in_backend():
@@ -505,7 +512,7 @@ def test_paper_skim_prompt_defines_lightweight_research_map_contract():
     assert "Map the paper's stated research scope" in user_prompt
     assert "not full experiment reconstruction" in user_prompt
     assert "candidate scope, not proven Evidence" in user_prompt
-    assert "Leave sample_context, test_context, comparator, and fixed_conditions empty" in user_prompt
+    assert "fields are intentionally absent" in user_prompt
     assert "`window_id` is this bounded window's identity" in user_prompt
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
@@ -516,19 +523,50 @@ def test_paper_skim_prompt_defines_lightweight_research_map_contract():
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "copy `source_unit_ids`" in user_prompt
-    assert "at most 12 unique `source_unit_ids`" in user_prompt
+    assert "at most 4 unique `source_unit_ids`" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
-    assert "up to 4 studies" in user_prompt
-    assert "up to 6 relationships per study" in user_prompt
-    assert "up to 8 unresolved signals" in user_prompt
+    assert "up to 2 studies" in user_prompt
+    assert "up to 4 relationships per study" in user_prompt
+    assert "up to 4 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
     assert "neutral scientific axis" in user_prompt
-    assert "at most 12 varied-factor labels" in user_prompt
+    assert "at most 6 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
     assert "result direction, value, or comparison sentence" in user_prompt
     assert "source_unit_coverage" not in user_prompt
+
+
+def test_experimental_paper_map_schema_excludes_review_only_output():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "experimental",
+                "studies": [],
+                "unresolved_signals": [],
+                "evidence_density": "low",
+                "confidence": 0.7,
+                "warnings": [],
+                "output_saturated": False,
+            }
+        )
+    )
+
+    PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "experimental-paper",
+            "document_profile": {"doc_type": "experimental"},
+            "source_units": [],
+        }
+    )
+
+    request_text = json.dumps(
+        client.chat.completions.calls[0]["messages"],
+        ensure_ascii=False,
+    )
+    assert "StructuredReviewSynthesisMap" not in request_text
+    assert "StructuredReviewKnowledgeItem" not in request_text
 
 
 def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
@@ -554,10 +592,10 @@ def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
         }
     )
 
-    assert "review-author synthesis mapping" in user_prompt
-    assert "not cited-study reconstruction" in user_prompt
-    assert "claim_scope=synthesis" in user_prompt
-    assert "return no study or unresolved signal" in user_prompt
+    assert "Map only scientific synthesis authored by one review paper" in user_prompt
+    assert "not reconstruction of cited experiments" in user_prompt
+    assert "do not return a second study representation" in user_prompt
+    assert "Do not return `studies` or `unresolved_signals`" in user_prompt
     assert "Across studies, preheating generally reduced residual stress" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
     assert "synthesis_claims" in user_prompt
@@ -567,44 +605,75 @@ def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
     assert "never primary Evidence" in user_prompt
 
 
+def test_review_paper_map_derives_candidate_relationship_without_duplicate_output():
+    source_unit_id = "source-unit-000001"
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "review",
+                "review_synthesis": {
+                    "synthesis_claims": [
+                        {
+                            "content": "Preheating generally reduces residual stress.",
+                            "variables": ["preheating condition"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "citation_leads": [
+                        {
+                            "content": "Miranda et al. [20]",
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.8,
+                        }
+                    ],
+                },
+                "evidence_density": "high",
+                "confidence": 0.9,
+                "warnings": [],
+                "output_saturated": False,
+            }
+        )
+    )
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "review-paper",
+            "document_profile": {"doc_type": "review"},
+            "source_units": [
+                {
+                    "source_unit_id": source_unit_id,
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": (
+                        "Across studies, preheating generally reduced residual stress."
+                    ),
+                }
+            ],
+        }
+    )
+
+    request_text = json.dumps(
+        client.chat.completions.calls[0]["messages"],
+        ensure_ascii=False,
+    )
+    assert "StructuredPaperStudy" not in request_text
+    assert skim.studies[0].claim_scope == "synthesis"
+    assert skim.studies[0].relationships[0].varied_factors == [
+        "preheating condition"
+    ]
+    assert skim.studies[0].relationships[0].outcome == "residual stress"
+    assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
+
+
 def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
     source_unit_id = "source-unit-000001"
     client = _FakeOpenAIClient(
         json.dumps(
             {
                 "doc_role": "review",
-                "studies": [
-                    {
-                        "experiment_label": "Miranda et al.",
-                        "claim_scope": "background",
-                        "relationships": [
-                            {
-                                "varied_factors": ["build plate temperature"],
-                                "outcome": "residual stress",
-                                "source_unit_ids": [source_unit_id],
-                            }
-                        ],
-                    },
-                    {
-                        "experiment_label": "review synthesis",
-                        "claim_scope": "synthesis",
-                        "relationships": [
-                            {
-                                "varied_factors": ["preheating condition"],
-                                "outcome": "residual stress",
-                                "source_unit_ids": [source_unit_id],
-                            }
-                        ],
-                    },
-                ],
-                "unresolved_signals": [
-                    {
-                        "signal_type": "outcome",
-                        "label": "porosity",
-                        "claim_scope": "background",
-                        "source_unit_ids": [source_unit_id],
-                    }
-                ],
                 "review_synthesis": {
                     "synthesis_claims": [
                         {
@@ -2000,7 +2069,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     assert "duplicate study identities" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "at most 12 IDs" in client.chat.completions.calls[1]["messages"][-1][
+    assert "at most 4 IDs" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
 
@@ -2220,7 +2289,6 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
                                 "crack formation",
                                 "internal stresses",
                                 "microstructure",
-                                "mechanical properties",
                             )
                         ],
                         "confidence": 0.92,
@@ -2267,7 +2335,6 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
     ]
     assert [signal.label for signal in skim.unresolved_signals] == [
         "microstructure",
-        "mechanical properties"
     ]
     assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
     assert len(skim.warnings[0]) <= 240
@@ -2280,7 +2347,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
             {
                 "design_type": "experimental",
                 "claim_scope": "current_work",
-                "material_scope": [f"material-{index}" for index in range(9)],
+                "material_scope": [f"material-{index}" for index in range(5)],
                 "process_context": ["selective laser melting"],
                 "relationships": [
                     {
@@ -2303,12 +2370,12 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
         "studies": [
             {
                 **invalid["studies"][0],
-                "material_scope": [f"material-{index}" for index in range(8)],
+                "material_scope": [f"material-{index}" for index in range(4)],
             },
             {
                 "design_type": "experimental",
                 "claim_scope": "current_work",
-                "material_scope": ["material-9"],
+                "material_scope": ["material-4"],
                 "process_context": ["selective laser melting"],
                 "relationships": [
                     {
@@ -2344,7 +2411,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
 
     assert len(skim.studies) == 2
     assert skim.studies[0].material_scope == [
-        f"material-{index}" for index in range(8)
+        f"material-{index}" for index in range(4)
     ]
     assert skim.studies[1].relationships[0].varied_factors == ["scan speed"]
     assert len(client.chat.completions.calls) == 2

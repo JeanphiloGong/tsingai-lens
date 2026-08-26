@@ -19,8 +19,8 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import (
+    PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT,
     PAPER_SKIM_PROMPT_TOKEN_LIMIT,
-    PAPER_SKIM_SOURCE_UNIT_LIMIT,
     PaperStudyWindowExtractor,
     StructuredPaperSkim,
     StructuredPaperStudy,
@@ -85,7 +85,7 @@ _SOURCE_UNIT_POSITION_PATTERN = re.compile(r"source-unit-(\d+)")
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS = 300
 _MIN_DOCUMENT_RECOVERY_CALLS = 4
-_MAX_DOCUMENT_RECOVERY_CALLS = 12
+_MAX_DOCUMENT_RECOVERY_CALLS = 16
 _NUMBERED_CITATION_PATTERN = re.compile(
     r"\[(?:\s*\d{1,4}\s*(?:(?:,|[-\u2013])\s*\d{1,4}\s*)*)\]"
 )
@@ -227,7 +227,13 @@ class PaperSkimService:
             window_skims: list[PaperSkim] = []
             paper_signals: list[_PaperSignalInput] = []
             window_count = len(payloads)
-            recovery_call_budget = self._document_recovery_call_budget(window_count)
+            selected_source_unit_count = sum(
+                len(payload.get("source_units") or ()) for payload in payloads
+            )
+            recovery_call_budget = self._document_recovery_call_budget(
+                window_count,
+                selected_source_unit_count=selected_source_unit_count,
+            )
             extraction_budget = _PaperExtractionBudget(
                 deadline=monotonic() + self._document_time_budget_seconds(),
                 max_calls=window_count + recovery_call_budget,
@@ -461,7 +467,11 @@ class PaperSkimService:
         return value
 
     @staticmethod
-    def _document_recovery_call_budget(window_count: int) -> int:
+    def _document_recovery_call_budget(
+        window_count: int,
+        *,
+        selected_source_unit_count: int,
+    ) -> int:
         raw_value = os.getenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "").strip()
         if raw_value:
             try:
@@ -482,7 +492,11 @@ class PaperSkimService:
                 )
         return min(
             _MAX_DOCUMENT_RECOVERY_CALLS,
-            max(_MIN_DOCUMENT_RECOVERY_CALLS, (window_count + 1) // 2),
+            max(
+                _MIN_DOCUMENT_RECOVERY_CALLS,
+                window_count,
+                selected_source_unit_count + 4,
+            ),
         )
 
     def _build_paper_skim_payloads(
@@ -1003,7 +1017,7 @@ class PaperSkimService:
         windows: list[tuple[_SkimSourceItem, ...]] = []
         current: list[_SkimSourceItem] = []
         for item in items:
-            if current and len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT:
+            if current and len(current) >= PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT:
                 windows.append(tuple(current))
                 current = []
             current.append(item)
@@ -1324,6 +1338,24 @@ class PaperSkimService:
                 for unit in payload.get("source_units") or ()
                 if isinstance(unit, Mapping)
             )
+            failure_kind = self._single_source_recovery_kind(exc)
+            if (
+                len(source_units) > 1
+                and failure_kind is not None
+                and callable(
+                    getattr(study_window_extractor, "extract_source_signals", None)
+                )
+            ):
+                return self._recover_source_units_through_compact_signals(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    source_units=source_units,
+                    study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
+                    attempt=attempt,
+                    full_failure_kind=failure_kind,
+                )
             if len(source_units) > 1:
                 logger.warning(
                     "Paper skim batch failed; splitting retry "
@@ -1359,141 +1391,41 @@ class PaperSkimService:
                     child_signals.extend(retry_signals)
                 return tuple(child_skims), tuple(child_signals)
 
-            failure_kind = self._single_source_recovery_kind(exc)
             final_error = exc
             final_failure_kind = failure_kind
             if (
                 len(source_units) == 1
                 and failure_kind is not None
-                and content_split_depth < _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH
+                and content_split_depth == 0
             ):
-                fragments = self._split_single_source_unit_for_retry(source_units[0])
-                if fragments:
-                    logger.warning(
-                        "Paper skim singleton failed; splitting Source content "
-                        "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                        "content_split_depth=%s failure_kind=%s",
-                        collection_id,
-                        document_id,
-                        payload.get("window_id"),
-                        attempt,
-                        content_split_depth,
-                        failure_kind,
-                    )
-                    fragment_skims: list[PaperSkim] = []
-                    fragment_signals: list[_PaperSignalInput] = []
-                    for branch, fragment in zip(
-                        ("left", "right"),
-                        fragments,
-                        strict=True,
-                    ):
-                        retry_skims, retry_signals = self._extract_window_batch(
-                            collection_id=collection_id,
-                            document_id=document_id,
-                            payload=self._payload_with_source_units(
-                                payload,
-                                source_units=(fragment,),
-                                suffix=f"content-{branch}",
-                            ),
-                            study_window_extractor=study_window_extractor,
-                            extraction_budget=extraction_budget,
-                            attempt=attempt + 1,
-                            content_split_depth=content_split_depth + 1,
-                        )
-                        fragment_skims.extend(retry_skims)
-                        fragment_signals.extend(retry_signals)
-                    return (
-                        self._collapse_single_source_fragment_coverage(
-                            payload=payload,
-                            skims=tuple(fragment_skims),
-                        ),
-                        tuple(fragment_signals),
-                    )
-
-            if len(source_units) == 1 and (
-                failure_kind == "output_saturated"
-                or failure_kind in _SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS
+                compact_result = self._recover_single_source_through_compact_signals(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
+                    attempt=attempt,
+                    full_failure_kind=failure_kind,
+                )
+                if compact_result is not None:
+                    return compact_result
+            if (
+                len(source_units) == 1
+                and failure_kind is not None
             ):
-                for compact_attempt in range(
-                    1,
-                    _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT + 1,
-                ):
-                    if not extraction_budget.reserve(recovery=True):
-                        final_failure_kind = (
-                            extraction_budget.failure_kind
-                            or "recovery_budget_exhausted"
-                        )
-                        final_error = RuntimeError(final_failure_kind)
-                        break
-                    try:
-                        compact = study_window_extractor.extract_source_signals(
-                            dict(payload)
-                        )
-                        fallback_warning = (
-                            "Paper-scope mapping could not produce valid structured "
-                            "output for one Source; retained explicit source-local "
-                            "signals for paper reconciliation."
-                        )
-                        compact = compact.model_copy(
-                            update={
-                                "warnings": [
-                                    fallback_warning,
-                                    *compact.warnings,
-                                ][:2]
-                            }
-                        )
-                        window_skim, window_signals = self._resolve_window_result(
-                            document_id=document_id,
-                            payload=payload,
-                            parsed=compact,
-                        )
-                        logger.warning(
-                            "Paper skim singleton recovered through source-local "
-                            "signals collection_id=%s document_id=%s window_id=%s "
-                            "attempt=%s compact_attempt=%s source_unit_count=1 "
-                            "full_failure_kind=%s signal_count=%s",
-                            collection_id,
-                            document_id,
-                            payload.get("window_id"),
-                            attempt,
-                            compact_attempt,
-                            failure_kind,
-                            len(compact.unresolved_signals),
-                        )
-                        return (window_skim,), window_signals
-                    except Exception as compact_exc:  # noqa: BLE001
-                        compact_failure_kind = self._single_source_recovery_kind(
-                            compact_exc
-                        )
-                        final_error = compact_exc
-                        final_failure_kind = (
-                            f"compact_{compact_failure_kind}"
-                            if compact_failure_kind
-                            else "compact_non_recoverable"
-                        )
-                        will_retry = (
-                            compact_attempt < _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT
-                            and compact_failure_kind
-                            in _SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS
-                        )
-                        logger.warning(
-                            "Paper skim compact singleton recovery failed "
-                            "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                            "compact_attempt=%s compact_attempt_limit=%s "
-                            "failure_kind=%s will_retry=%s error=%s",
-                            collection_id,
-                            document_id,
-                            payload.get("window_id"),
-                            attempt,
-                            compact_attempt,
-                            _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT,
-                            compact_failure_kind or "non_recoverable",
-                            will_retry,
-                            compact_exc,
-                        )
-                        if will_retry:
-                            continue
-                        break
+                fragment_result = self._recover_single_source_through_fragments(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    source_unit=source_units[0],
+                    study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
+                    attempt=attempt,
+                    content_split_depth=content_split_depth,
+                    failure_kind=failure_kind,
+                )
+                if fragment_result is not None:
+                    return fragment_result
 
             logger.warning(
                 "Paper skim Source-unit extraction failed permanently "
@@ -1517,6 +1449,273 @@ class PaperSkimService:
                 ),
                 (),
             )
+
+    def _recover_source_units_through_compact_signals(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payload: Mapping[str, Any],
+        source_units: tuple[Mapping[str, Any], ...],
+        study_window_extractor: PaperStudyWindowExtractor,
+        extraction_budget: _PaperExtractionBudget,
+        attempt: int,
+        full_failure_kind: str,
+    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
+        recovered_skims: list[PaperSkim] = []
+        recovered_signals: list[_PaperSignalInput] = []
+        for position, source_unit in enumerate(source_units, start=1):
+            singleton_payload = self._payload_with_source_units(
+                payload,
+                source_units=(source_unit,),
+                suffix=f"compact-{position:02d}",
+            )
+            recovered = self._recover_single_source_through_compact_signals(
+                collection_id=collection_id,
+                document_id=document_id,
+                payload=singleton_payload,
+                study_window_extractor=study_window_extractor,
+                extraction_budget=extraction_budget,
+                attempt=attempt + 1,
+                full_failure_kind=full_failure_kind,
+            )
+            if recovered is None:
+                recovered = self._recover_single_source_through_fragments(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=singleton_payload,
+                    source_unit=source_unit,
+                    study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
+                    attempt=attempt + 1,
+                    content_split_depth=0,
+                    failure_kind=f"compact_{full_failure_kind}",
+                )
+                if recovered is None:
+                    recovered = (
+                        (
+                            self._failed_source_unit_skim(
+                                document_id=document_id,
+                                payload=singleton_payload,
+                                failure_kind="compact_unavailable",
+                            ),
+                        ),
+                        (),
+                    )
+            skims, signals = recovered
+            recovered_skims.extend(skims)
+            recovered_signals.extend(signals)
+        logger.warning(
+            "Paper skim batch recovered through source-local signals "
+            "collection_id=%s document_id=%s window_id=%s source_unit_count=%s "
+            "full_failure_kind=%s",
+            collection_id,
+            document_id,
+            payload.get("window_id"),
+            len(source_units),
+            full_failure_kind,
+        )
+        return tuple(recovered_skims), tuple(recovered_signals)
+
+    def _recover_single_source_through_compact_signals(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payload: Mapping[str, Any],
+        study_window_extractor: PaperStudyWindowExtractor,
+        extraction_budget: _PaperExtractionBudget,
+        attempt: int,
+        full_failure_kind: str,
+    ) -> (
+        tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]] | None
+    ):
+        extract_source_signals = getattr(
+            study_window_extractor,
+            "extract_source_signals",
+            None,
+        )
+        if not callable(extract_source_signals):
+            return None
+
+        final_error: Exception = RuntimeError(full_failure_kind)
+        final_failure_kind = f"compact_{full_failure_kind}"
+        final_compact_failure_kind: str | None = None
+        for compact_attempt in range(
+            1,
+            _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT + 1,
+        ):
+            if not extraction_budget.reserve(recovery=True):
+                final_failure_kind = (
+                    extraction_budget.failure_kind or "recovery_budget_exhausted"
+                )
+                final_error = RuntimeError(final_failure_kind)
+                final_compact_failure_kind = None
+                break
+            try:
+                compact = extract_source_signals(dict(payload))
+                fallback_warning = (
+                    "Paper-scope mapping could not produce valid structured output "
+                    "for one Source; retained explicit source-local signals for paper "
+                    "reconciliation."
+                )
+                compact = compact.model_copy(
+                    update={
+                        "warnings": [fallback_warning, *compact.warnings][:2],
+                    }
+                )
+                window_skim, window_signals = self._resolve_window_result(
+                    document_id=document_id,
+                    payload=payload,
+                    parsed=compact,
+                )
+                logger.warning(
+                    "Paper skim Source recovered through source-local signals "
+                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                    "compact_attempt=%s source_unit_count=1 full_failure_kind=%s "
+                    "signal_count=%s",
+                    collection_id,
+                    document_id,
+                    payload.get("window_id"),
+                    attempt,
+                    compact_attempt,
+                    full_failure_kind,
+                    len(compact.unresolved_signals),
+                )
+                return (window_skim,), window_signals
+            except Exception as compact_exc:  # noqa: BLE001
+                compact_failure_kind = self._single_source_recovery_kind(compact_exc)
+                final_error = compact_exc
+                final_compact_failure_kind = compact_failure_kind
+                final_failure_kind = (
+                    f"compact_{compact_failure_kind}"
+                    if compact_failure_kind
+                    else "compact_non_recoverable"
+                )
+                will_retry = (
+                    compact_attempt < _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT
+                    and compact_failure_kind
+                    in _SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS
+                )
+                logger.warning(
+                    "Paper skim compact Source recovery failed "
+                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                    "compact_attempt=%s compact_attempt_limit=%s failure_kind=%s "
+                    "will_retry=%s error=%s",
+                    collection_id,
+                    document_id,
+                    payload.get("window_id"),
+                    attempt,
+                    compact_attempt,
+                    _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT,
+                    compact_failure_kind or "non_recoverable",
+                    will_retry,
+                    compact_exc,
+                )
+                if will_retry:
+                    continue
+                break
+
+        source_units = tuple(
+            unit
+            for unit in payload.get("source_units") or ()
+            if isinstance(unit, Mapping)
+        )
+        if (
+            final_compact_failure_kind is not None
+            and len(source_units) == 1
+            and self._split_single_source_unit_for_retry(source_units[0])
+        ):
+            logger.warning(
+                "Paper skim compact Source recovery remains technically unreadable; "
+                "allowing bounded content fragmentation collection_id=%s "
+                "document_id=%s window_id=%s attempt=%s failure_kind=%s error=%s",
+                collection_id,
+                document_id,
+                payload.get("window_id"),
+                attempt,
+                final_compact_failure_kind,
+                final_error,
+            )
+            return None
+
+        logger.warning(
+            "Paper skim Source-unit compact recovery failed permanently "
+            "collection_id=%s document_id=%s window_id=%s attempt=%s "
+            "source_unit_count=1 error=%s failure_kind=%s",
+            collection_id,
+            document_id,
+            payload.get("window_id"),
+            attempt,
+            final_error,
+            final_failure_kind,
+        )
+        return (
+            (
+                self._failed_source_unit_skim(
+                    document_id=document_id,
+                    payload=payload,
+                    failure_kind=final_failure_kind,
+                ),
+            ),
+            (),
+        )
+
+    def _recover_single_source_through_fragments(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payload: Mapping[str, Any],
+        source_unit: Mapping[str, Any],
+        study_window_extractor: PaperStudyWindowExtractor,
+        extraction_budget: _PaperExtractionBudget,
+        attempt: int,
+        content_split_depth: int,
+        failure_kind: str,
+    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]] | None:
+        if content_split_depth >= _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH:
+            return None
+        fragments = self._split_single_source_unit_for_retry(source_unit)
+        if not fragments:
+            return None
+
+        logger.warning(
+            "Paper skim singleton failed; splitting Source content "
+            "collection_id=%s document_id=%s window_id=%s attempt=%s "
+            "content_split_depth=%s failure_kind=%s",
+            collection_id,
+            document_id,
+            payload.get("window_id"),
+            attempt,
+            content_split_depth,
+            failure_kind,
+        )
+        fragment_skims: list[PaperSkim] = []
+        fragment_signals: list[_PaperSignalInput] = []
+        for branch, fragment in zip(("left", "right"), fragments, strict=True):
+            retry_skims, retry_signals = self._extract_window_batch(
+                collection_id=collection_id,
+                document_id=document_id,
+                payload=self._payload_with_source_units(
+                    payload,
+                    source_units=(fragment,),
+                    suffix=f"content-{branch}",
+                ),
+                study_window_extractor=study_window_extractor,
+                extraction_budget=extraction_budget,
+                attempt=attempt + 1,
+                content_split_depth=content_split_depth + 1,
+            )
+            fragment_skims.extend(retry_skims)
+            fragment_signals.extend(retry_signals)
+        return (
+            self._collapse_single_source_fragment_coverage(
+                payload=payload,
+                skims=tuple(fragment_skims),
+            ),
+            tuple(fragment_signals),
+        )
 
     @staticmethod
     def _single_source_recovery_kind(error: Exception) -> str | None:

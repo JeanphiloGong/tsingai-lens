@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from domain.core import (
     Finding,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -315,3 +318,96 @@ async def test_analysis_publish_preserves_manifest_and_source_backed_results(
         OBJECTIVE_ID,
         analysis.analysis_version,
     ) == ((finding,), 1)
+
+
+async def test_objective_document_evidence_round_trips_independent_status_and_payload(
+    objective_repository,
+) -> None:
+    _, analysis = await _queue_and_claim(objective_repository)
+    started_at = datetime(2026, 8, 27, 8, 0, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 8, 27, 8, 2, tzinfo=timezone.utc)
+    running = ObjectiveDocumentEvidence.start(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        document_id="doc_a",
+        input_fingerprint="objective-doc-a-input-v1",
+        analysis_version=analysis.analysis_version,
+        extraction_version="objective-document-evidence.v1",
+        model_name="test-model",
+        started_at=started_at,
+    )
+
+    await objective_repository.write_document_evidence(running)
+
+    assert await objective_repository.read_document_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        "doc_a",
+        "objective-doc-a-input-v1",
+    ) == running
+    assert await objective_repository.read_document_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        "doc_a",
+        "another-input",
+    ) is None
+
+    succeeded = running.succeed(
+        contribution=_contribution(analysis.analysis_version, "doc_a"),
+        evidence_records=(
+            _evidence(analysis.analysis_version, "doc_a", 0.9),
+        ),
+        completed_at=completed_at,
+    )
+    await objective_repository.write_document_evidence(succeeded)
+
+    restored = await objective_repository.read_document_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        "doc_a",
+        "objective-doc-a-input-v1",
+    )
+    assert restored == succeeded
+    assert restored is not None
+    assert restored.status == "succeeded"
+    assert restored.contribution == _contribution(analysis.analysis_version, "doc_a")
+    assert restored.evidence_records == (
+        _evidence(analysis.analysis_version, "doc_a", 0.9),
+    )
+
+    failed_running = ObjectiveDocumentEvidence.start(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        document_id="doc_b",
+        input_fingerprint="objective-doc-b-input-v1",
+        analysis_version=analysis.analysis_version,
+        extraction_version="objective-document-evidence.v1",
+        model_name="test-model",
+        started_at=started_at,
+    )
+    failed = failed_running.fail(
+        contribution=PaperContribution.from_mapping(
+            {
+                "collection_id": COLLECTION_ID,
+                "objective_id": OBJECTIVE_ID,
+                "analysis_version": analysis.analysis_version,
+                "document_id": "doc_b",
+                "analysis_status": "failed",
+                "relevance": "uncertain",
+                "paper_role": "uncertain",
+                "warnings": ["Evidence extraction failed for this paper."],
+                "confidence": 0,
+            }
+        ),
+        error_code="provider_error",
+        error_message="provider unavailable",
+        completed_at=completed_at,
+    )
+    await objective_repository.write_document_evidence(failed)
+
+    assert await objective_repository.read_document_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        "doc_b",
+        "objective-doc-b-input-v1",
+    ) == failed

@@ -25,6 +25,7 @@ from infra.persistence.postgres.models.evaluation import (
 from infra.persistence.postgres.models.paper_map import PaperMapRow
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
+    ObjectiveDocumentEvidenceRecord,
     ObjectiveDiscoveryRecord,
     ObjectiveEvidenceRecord,
     ObjectiveFindingRecord,
@@ -66,6 +67,7 @@ __all__ = [
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
+    "ObjectiveDocumentEvidenceRecord",
     "ObjectiveDiscoveryRecord",
     "ObjectiveExperimentPlan",
     "ObjectiveEvidenceRecord",

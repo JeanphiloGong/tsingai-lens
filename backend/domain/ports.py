@@ -7,6 +7,7 @@ from typing import Any, Mapping, Protocol
 from domain.core.document_profile import DocumentProfile
 from domain.core.research_objective import (
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -365,6 +366,19 @@ class ObjectiveRepository(Protocol):
         error_message: str,
         expected_status: str | None = None,
     ) -> ObjectiveAnalysis: ...
+
+    async def write_document_evidence(
+        self,
+        checkpoint: ObjectiveDocumentEvidence,
+    ) -> None: ...
+
+    async def read_document_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_id: str,
+        input_fingerprint: str,
+    ) -> ObjectiveDocumentEvidence | None: ...
 
     async def publish_analysis(
         self,

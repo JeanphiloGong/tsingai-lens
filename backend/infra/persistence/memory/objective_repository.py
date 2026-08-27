@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -23,6 +24,9 @@ class MemoryObjectiveRepository:
         self._facts: dict[str, ObjectiveFactSet] = {}
         self._objectives: dict[tuple[str, str], ResearchObjective] = {}
         self._analyses: dict[tuple[str, str, int], ObjectiveAnalysis] = {}
+        self._document_evidence: dict[
+            tuple[str, str, str, str], ObjectiveDocumentEvidence
+        ] = {}
         self._contributions: dict[
             tuple[str, str, int], tuple[PaperContribution, ...]
         ] = {}
@@ -322,6 +326,24 @@ class MemoryObjectiveRepository:
         )
         self._analyses[key] = analysis
         return analysis
+
+    async def write_document_evidence(
+        self,
+        checkpoint: ObjectiveDocumentEvidence,
+    ) -> None:
+        self._require_objective(checkpoint.collection_id, checkpoint.objective_id)
+        self._document_evidence[checkpoint.key] = checkpoint
+
+    async def read_document_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_id: str,
+        input_fingerprint: str,
+    ) -> ObjectiveDocumentEvidence | None:
+        return self._document_evidence.get(
+            (collection_id, objective_id, document_id, input_fingerprint)
+        )
 
     async def publish_analysis(
         self,

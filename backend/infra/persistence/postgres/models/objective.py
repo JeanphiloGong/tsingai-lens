@@ -78,6 +78,35 @@ class ObjectiveAnalysisRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ObjectiveDocumentEvidenceRecord(Base):
+    """Private resumable Evidence inspection for one Objective and Document."""
+
+    __tablename__ = "objective_document_evidence_checkpoints"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["collection_id", "objective_id"],
+            ["research_objectives.collection_id", "research_objectives.objective_id"],
+            name="fk_objective_document_evidence_objective",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["document_id"],
+            ["documents.document_id"],
+            name="fk_objective_document_evidence_document",
+            ondelete="CASCADE",
+        ),
+    )
+
+    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ObjectivePaperContributionRecord(Base):
     __tablename__ = "objective_paper_contributions"
     __table_args__ = (
@@ -164,6 +193,7 @@ class ObjectiveFindingRecord(Base):
 
 __all__ = [
     "ObjectiveAnalysisRecord",
+    "ObjectiveDocumentEvidenceRecord",
     "ObjectiveDiscoveryRecord",
     "ObjectiveEvidenceRecord",
     "ObjectiveFindingRecord",

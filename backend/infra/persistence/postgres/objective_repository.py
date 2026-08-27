@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -22,6 +23,7 @@ from domain.core import (
 from domain.pipeline import ExecutionStats
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
+    ObjectiveDocumentEvidenceRecord,
     ObjectiveDiscoveryRecord,
     ObjectiveEvidenceRecord,
     ObjectiveFindingRecord,
@@ -412,6 +414,49 @@ class PostgresObjectiveRepository:
             )
             self._write_analysis(row, analysis)
             return analysis
+
+    async def write_document_evidence(
+        self,
+        checkpoint: ObjectiveDocumentEvidence,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory.begin() as session:
+            row = await session.get(ObjectiveDocumentEvidenceRecord, checkpoint.key)
+            if row is None:
+                session.add(
+                    ObjectiveDocumentEvidenceRecord(
+                        collection_id=checkpoint.collection_id,
+                        objective_id=checkpoint.objective_id,
+                        document_id=checkpoint.document_id,
+                        input_fingerprint=checkpoint.input_fingerprint,
+                        status=checkpoint.status,
+                        payload=checkpoint.to_record(),
+                        created_at=checkpoint.started_at or now,
+                        updated_at=now,
+                    )
+                )
+                return
+            row.status = checkpoint.status
+            row.payload = checkpoint.to_record()
+            row.updated_at = now
+
+    async def read_document_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_id: str,
+        input_fingerprint: str,
+    ) -> ObjectiveDocumentEvidence | None:
+        async with self.session_factory() as session:
+            row = await session.get(
+                ObjectiveDocumentEvidenceRecord,
+                (collection_id, objective_id, document_id, input_fingerprint),
+            )
+            return (
+                ObjectiveDocumentEvidence.from_mapping(row.payload)
+                if row is not None
+                else None
+            )
 
     async def publish_analysis(
         self,

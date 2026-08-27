@@ -94,6 +94,9 @@ OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     "succeeded": frozenset(),
     "failed": frozenset(),
 }
+OBJECTIVE_DOCUMENT_EVIDENCE_STATUSES: Final[frozenset[str]] = frozenset(
+    {"running", "succeeded", "failed"}
+)
 OBJECTIVE_EVIDENCE_STATES: Final[frozenset[str]] = frozenset(
     {"candidate", "selected", "extracted", "rejected", "failed"}
 )
@@ -2004,6 +2007,213 @@ class ObjectiveEvidence:
             "resolution_status": self.resolution_status,
             "failure_reason": self.failure_reason,
             "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ObjectiveDocumentEvidence:
+    """Reusable Evidence inspection for one Objective and prepared document."""
+
+    collection_id: str
+    objective_id: str
+    document_id: str
+    input_fingerprint: str
+    analysis_version: int
+    extraction_version: str
+    model_name: str
+    status: str
+    contribution: PaperContribution | None = None
+    evidence_records: tuple[ObjectiveEvidence, ...] = ()
+    error_code: str | None = None
+    error_message: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if not all(
+            _text(value)
+            for value in (
+                self.collection_id,
+                self.objective_id,
+                self.document_id,
+                self.input_fingerprint,
+                self.extraction_version,
+                self.model_name,
+            )
+        ):
+            raise ValueError("document Evidence checkpoint requires scoped input identity")
+        if self.analysis_version < 1:
+            raise ValueError("document Evidence checkpoint requires analysis_version")
+        if self.status not in OBJECTIVE_DOCUMENT_EVIDENCE_STATUSES:
+            raise ValueError(
+                f"unsupported document Evidence checkpoint status: {self.status}"
+            )
+        object.__setattr__(self, "evidence_records", tuple(self.evidence_records))
+        self._validate_payload()
+
+    @property
+    def key(self) -> tuple[str, str, str, str]:
+        return (
+            self.collection_id,
+            self.objective_id,
+            self.document_id,
+            self.input_fingerprint,
+        )
+
+    @classmethod
+    def start(
+        cls,
+        *,
+        collection_id: str,
+        objective_id: str,
+        document_id: str,
+        input_fingerprint: str,
+        analysis_version: int,
+        extraction_version: str,
+        model_name: str,
+        started_at: datetime | None = None,
+    ) -> "ObjectiveDocumentEvidence":
+        return cls(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            document_id=document_id,
+            input_fingerprint=input_fingerprint,
+            analysis_version=analysis_version,
+            extraction_version=extraction_version,
+            model_name=model_name,
+            status="running",
+            started_at=started_at,
+        )
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveDocumentEvidence":
+        contribution_payload = payload.get("contribution")
+        return cls(
+            collection_id=_text(payload.get("collection_id")) or "",
+            objective_id=_text(payload.get("objective_id")) or "",
+            document_id=_text(payload.get("document_id")) or "",
+            input_fingerprint=_text(payload.get("input_fingerprint")) or "",
+            analysis_version=_positive_int_or_none(payload.get("analysis_version"))
+            or 0,
+            extraction_version=_text(payload.get("extraction_version")) or "",
+            model_name=_text(payload.get("model_name")) or "",
+            status=_text(payload.get("status")) or "running",
+            contribution=(
+                PaperContribution.from_mapping(contribution_payload)
+                if isinstance(contribution_payload, Mapping)
+                else None
+            ),
+            evidence_records=tuple(
+                ObjectiveEvidence.from_mapping(item)
+                for item in payload.get("evidence_records") or ()
+                if isinstance(item, Mapping)
+            ),
+            error_code=_text(payload.get("error_code")),
+            error_message=_text(payload.get("error_message")),
+            started_at=_datetime_or_none(payload.get("started_at")),
+            completed_at=_datetime_or_none(payload.get("completed_at")),
+        )
+
+    def succeed(
+        self,
+        *,
+        contribution: PaperContribution,
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        completed_at: datetime | None = None,
+    ) -> "ObjectiveDocumentEvidence":
+        self._require_running("succeeded")
+        return replace(
+            self,
+            status="succeeded",
+            contribution=contribution,
+            evidence_records=tuple(evidence_records),
+            error_code=None,
+            error_message=None,
+            completed_at=completed_at,
+        )
+
+    def fail(
+        self,
+        *,
+        contribution: PaperContribution,
+        error_code: str,
+        error_message: str,
+        completed_at: datetime | None = None,
+    ) -> "ObjectiveDocumentEvidence":
+        self._require_running("failed")
+        return replace(
+            self,
+            status="failed",
+            contribution=contribution,
+            evidence_records=(),
+            error_code=_required_text(
+                error_code, "document Evidence failure requires error_code"
+            ),
+            error_message=_required_text(
+                error_message, "document Evidence failure requires error_message"
+            ),
+            completed_at=completed_at,
+        )
+
+    def _require_running(self, target: str) -> None:
+        if self.status != "running":
+            raise ValueError(
+                f"invalid document Evidence transition: {self.status} -> {target}"
+            )
+
+    def _validate_payload(self) -> None:
+        if self.status == "running":
+            if self.contribution is not None or self.evidence_records:
+                raise ValueError("running document Evidence cannot contain results")
+            if self.error_code is not None or self.error_message is not None:
+                raise ValueError("running document Evidence cannot contain an error")
+            return
+        if self.contribution is None:
+            raise ValueError("terminal document Evidence requires a contribution")
+        expected_prefix = (
+            self.collection_id,
+            self.objective_id,
+            self.analysis_version,
+        )
+        if self.contribution.key[:3] != expected_prefix:
+            raise ValueError("document Evidence contribution belongs to another analysis")
+        if self.contribution.document_id != self.document_id:
+            raise ValueError("document Evidence contribution belongs to another document")
+        if any(record.key[:3] != expected_prefix for record in self.evidence_records):
+            raise ValueError("checkpoint Evidence belongs to another analysis")
+        if any(record.document_id != self.document_id for record in self.evidence_records):
+            raise ValueError("checkpoint Evidence belongs to another document")
+        if self.status == "succeeded":
+            if self.contribution.analysis_status == "failed":
+                raise ValueError("succeeded document Evidence cannot have failed contribution")
+            if self.error_code is not None or self.error_message is not None:
+                raise ValueError("succeeded document Evidence cannot contain an error")
+            return
+        if self.contribution.analysis_status != "failed":
+            raise ValueError("failed document Evidence requires failed contribution")
+        if self.evidence_records:
+            raise ValueError("failed document Evidence cannot contain Evidence records")
+        if not _text(self.error_code) or not _text(self.error_message):
+            raise ValueError("failed document Evidence requires technical error details")
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "collection_id": self.collection_id,
+            "objective_id": self.objective_id,
+            "document_id": self.document_id,
+            "input_fingerprint": self.input_fingerprint,
+            "analysis_version": self.analysis_version,
+            "extraction_version": self.extraction_version,
+            "model_name": self.model_name,
+            "status": self.status,
+            "contribution": (
+                self.contribution.to_record() if self.contribution is not None else None
+            ),
+            "evidence_records": [item.to_record() for item in self.evidence_records],
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "started_at": _datetime_record(self.started_at),
+            "completed_at": _datetime_record(self.completed_at),
         }
 
 

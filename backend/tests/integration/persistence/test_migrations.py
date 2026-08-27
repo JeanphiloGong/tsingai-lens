@@ -15,7 +15,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260827_0038"
+HEAD_REVISION = "20260827_0039"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:

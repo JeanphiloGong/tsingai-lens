@@ -7,6 +7,7 @@ import pytest
 from domain.core import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PreparedDocumentInput,
@@ -434,6 +435,85 @@ def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> 
         "succeeded",
         "failed",
     }
+
+
+def test_objective_document_evidence_preserves_scientific_absence_as_success() -> None:
+    started_at = datetime(2026, 8, 27, 8, 0, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 8, 27, 8, 2, tzinfo=timezone.utc)
+    running = ObjectiveDocumentEvidence.start(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        document_id="paper-1",
+        input_fingerprint="checkpoint-input-1",
+        analysis_version=2,
+        extraction_version="objective-document-evidence.v1",
+        model_name="test-model",
+        started_at=started_at,
+    )
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 2,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "low",
+            "paper_role": "primary_experiment",
+            "confidence": 0.8,
+            "evidence_disposition": "no_routable_evidence",
+            "routed_source_count": 0,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+            "evidence_disposition_reason": (
+                "The paper was inspected and contains no Source for this Objective."
+            ),
+        }
+    )
+
+    succeeded = running.succeed(
+        contribution=contribution,
+        evidence_records=(),
+        completed_at=completed_at,
+    )
+
+    assert succeeded.status == "succeeded"
+    assert succeeded.contribution == contribution
+    assert succeeded.evidence_records == ()
+    assert succeeded.completed_at == completed_at
+    assert ObjectiveDocumentEvidence.from_mapping(succeeded.to_record()) == succeeded
+
+
+def test_objective_document_evidence_rejects_cross_document_payload() -> None:
+    running = ObjectiveDocumentEvidence.start(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        document_id="paper-1",
+        input_fingerprint="checkpoint-input-1",
+        analysis_version=2,
+        extraction_version="objective-document-evidence.v1",
+        model_name="test-model",
+    )
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 2,
+            "document_id": "paper-2",
+            "analysis_status": "failed",
+            "relevance": "uncertain",
+            "paper_role": "uncertain",
+            "warnings": ["Technical extraction failed."],
+            "confidence": 0,
+        }
+    )
+
+    with pytest.raises(ValueError, match="another document"):
+        running.fail(
+            contribution=contribution,
+            error_code="provider_error",
+            error_message="provider unavailable",
+        )
 
 
 def test_paper_contribution_uses_document_as_subordinate_identity() -> None:

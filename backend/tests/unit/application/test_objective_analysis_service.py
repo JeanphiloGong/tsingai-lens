@@ -625,6 +625,21 @@ async def test_objective_analysis_persists_real_model_prompt_and_token_usage() -
     assert analysis.stats.duration_ms is not None
 
 
+async def test_checkpoint_only_analysis_preserves_the_evidence_model_name() -> None:
+    artifacts = replace(_artifacts(1), model_name="cached-evidence-model")
+    service, _repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+
+    result = await service.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
+
+    assert result["analysis"].status == "succeeded"
+    assert result["analysis"].model_name == "cached-evidence-model"
+
+
 async def test_objective_analysis_persists_internal_diagnostics_without_public_exposure(
 ) -> None:
     service, repository, _analyzer = _service(

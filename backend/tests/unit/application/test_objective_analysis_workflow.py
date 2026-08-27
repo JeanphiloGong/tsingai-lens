@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from application.core.objectives.analysis import evidence_materialization
+from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
     StructuredEvidenceSelections,
@@ -17,10 +19,14 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
 )
+from application.core.objectives.research_objective_service import (
+    ObjectiveDocumentEvidenceArtifacts,
+)
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
+    PaperContribution,
     PaperSkim,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
@@ -94,6 +100,35 @@ def _ready_objective_facts(
                 status=PaperStudyDispositionStatus.PROMOTED,
                 objective_id=objective.objective_id,
             )
+            for study in paper_skim.studies
+            for relationship in study.relationships
+        ),
+    )
+
+
+def _ready_objective_facts_for_papers(
+    paper_skims: tuple[PaperSkim, ...],
+    objective: ResearchObjective,
+) -> ObjectiveFactSet:
+    return ObjectiveFactSet(
+        research_objectives_ready=True,
+        document_inputs=tuple(
+            PreparedDocumentInput(
+                document_id=paper_skim.document_id,
+                preparation_fingerprint=f"fingerprint-{paper_skim.document_id}",
+            )
+            for paper_skim in paper_skims
+        ),
+        research_objectives=(objective,),
+        study_dispositions=tuple(
+            PaperStudyDisposition(
+                document_id=paper_skim.document_id,
+                study_id=study.study_id,
+                relationship_id=relationship.relationship_id,
+                status=PaperStudyDispositionStatus.PROMOTED,
+                objective_id=objective.objective_id,
+            )
+            for paper_skim in paper_skims
             for study in paper_skim.studies
             for relationship in study.relationships
         ),
@@ -641,9 +676,11 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = await collection_service.create_collection("Objective stage retry")
     collection_id = collection["collection_id"]
+    extractor = _ObjectiveExtractor()
+    extractor.model = "test-model"
     service = _build_research_objective_service(
         collection_service=collection_service,
-        response_client=_ObjectiveExtractor(),
+        response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = service._response_client
     await service.source_artifact_repository.replace_document(
@@ -832,3 +869,245 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
     assert extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
+
+
+async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection = await collection_service.create_collection("Two paper retry")
+    collection_id = collection["collection_id"]
+    extractor = _ObjectiveExtractor()
+    extractor.model = "test-model"
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        response_client=extractor,
+    )
+    documents = source_documents_from_records(
+        documents=[
+            {
+                "id": document_id,
+                "title": f"Evidence paper {document_id}",
+                "text": "Laser power and relative density were studied.",
+                "metadata": {"source_filename": f"{document_id}.pdf"},
+            }
+            for document_id in ("paper-1", "paper-2")
+        ],
+        blocks=[
+            {
+                "block_id": f"block-{document_id}",
+                "document_id": document_id,
+                "block_type": "paragraph",
+                "text": "Laser power and relative density were studied.",
+                "block_order": 1,
+                "heading_path": "Results",
+            }
+            for document_id in ("paper-1", "paper-2")
+        ],
+        tables=[],
+    )
+    for document in documents:
+        await service.source_artifact_repository.replace_document(
+            collection_id, document
+        )
+    await _seed_document_profiles(service, collection_id)
+    objective = _research_objective(
+        {
+            "collection_id": collection_id,
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+            "seed_document_ids": ["paper-1", "paper-2"],
+            "source_relationship_ids": [
+                _relationship_id("paper-1", "relative density"),
+                _relationship_id("paper-2", "relative density"),
+            ],
+            "rank": 1,
+            "confidence": 0.9,
+        }
+    )
+    paper_skims = tuple(
+        _paper_skim(
+            document_id=document_id,
+            varied_factors=("laser power",),
+            outcomes=("relative density",),
+            material_scope=("Ti-6Al-4V",),
+            process_context=("LPBF",),
+            source_ref=f"block-{document_id}",
+        )
+        for document_id in ("paper-1", "paper-2")
+    )
+    for paper_skim in paper_skims:
+        await service.paper_map_repository.replace(collection_id, paper_skim)
+    await service.objective_repository.replace(
+        collection_id,
+        _ready_objective_facts_for_papers(paper_skims, objective),
+    )
+
+    synthesis_calls: list[tuple[PaperContribution, ...]] = []
+
+    class _FindingSynthesisRecorder:
+        def synthesize(self, **payload):
+            synthesis_calls.append(payload["contributions"])
+            return ()
+
+    service.finding_synthesis_service = _FindingSynthesisRecorder()
+    extraction_calls: list[str] = []
+    paper_2_failures_remaining = 1
+
+    def extract_document(**payload):
+        nonlocal paper_2_failures_remaining
+        document_id = payload["objective_inputs"]["documents"][0].document_id
+        extraction_calls.append(document_id)
+        if document_id == "paper-2" and paper_2_failures_remaining:
+            paper_2_failures_remaining -= 1
+            raise RuntimeError("provider unavailable")
+        return ObjectiveDocumentEvidenceArtifacts(
+            contribution=PaperContribution.from_mapping(
+                {
+                    "collection_id": collection_id,
+                    "objective_id": objective.objective_id,
+                    "analysis_version": payload["analysis"].analysis_version,
+                    "document_id": document_id,
+                    "analysis_status": "analyzed",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "confidence": 0.9,
+                    "evidence_disposition": "no_routable_evidence",
+                    "routed_source_count": 0,
+                    "extracted_source_count": 0,
+                    "comparable_evidence_count": 0,
+                    "failed_source_count": 0,
+                    "evidence_disposition_reason": (
+                        "No source in this paper was selected for extraction."
+                    ),
+                }
+            ),
+            evidence_records=(),
+        )
+
+    monkeypatch.setattr(
+        service,
+        "_generate_document_evidence",
+        extract_document,
+        raising=False,
+    )
+    analysis_service = ObjectiveAnalysisService(
+        objective_repository=service.objective_repository,
+        research_objective_service=service,
+    )
+    first_queued = await analysis_service.queue_analysis(
+        collection_id,
+        objective.objective_id,
+        ("paper-1", "paper-2"),
+    )
+
+    first = await analysis_service.execute_queued_analysis(
+        collection_id,
+        objective.objective_id,
+        first_queued["analysis"].analysis_version,
+    )
+
+    assert first["analysis"].status == "succeeded"
+    assert first["objective"].published_analysis_version == 1
+    assert extraction_calls == ["paper-1", "paper-2"]
+    assert [item.analysis_status for item in first["paper_contributions"]] == [
+        "analyzed",
+        "failed",
+    ]
+    assert len(service.objective_repository._document_evidence) == 2
+    assert sorted(
+        checkpoint.status
+        for checkpoint in service.objective_repository._document_evidence.values()
+    ) == ["failed", "succeeded"]
+    assert len(synthesis_calls) == 1
+
+    second_queued = await analysis_service.queue_analysis(
+        collection_id,
+        objective.objective_id,
+        ("paper-1", "paper-2"),
+    )
+
+    second = await analysis_service.execute_queued_analysis(
+        collection_id,
+        objective.objective_id,
+        second_queued["analysis"].analysis_version,
+    )
+
+    assert second["analysis"].status == "succeeded"
+    assert second["objective"].published_analysis_version == 2
+    assert extraction_calls == ["paper-1", "paper-2", "paper-2"]
+    assert all(
+        item.analysis_status == "analyzed"
+        for item in second["paper_contributions"]
+    )
+    assert all(
+        item.analysis_version == second["analysis"].analysis_version
+        for item in second["paper_contributions"]
+    )
+    assert len(synthesis_calls) == 2
+
+
+def test_document_evidence_fingerprint_covers_every_reuse_input(tmp_path) -> None:
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        response_client=_ObjectiveExtractor(),
+    )
+    objective = _research_objective(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    document_input = PreparedDocumentInput("paper-1", "preparation-1")
+
+    def fingerprint(
+        *,
+        current_objective=objective,
+        current_document_input=document_input,
+        model_name="model-a",
+        extraction_version="objective-document-evidence.v1",
+    ) -> str:
+        return service._document_evidence_input_fingerprint(
+            objective=current_objective,
+            document_input=current_document_input,
+            model_name=model_name,
+            extraction_version=extraction_version,
+        )
+
+    fingerprints = {
+        fingerprint(),
+        fingerprint(
+            current_objective=replace(
+                objective,
+                question="How does laser energy affect relative density?",
+            )
+        ),
+        fingerprint(
+            current_objective=replace(
+                objective,
+                excluded_document_ids=("paper-1",),
+            )
+        ),
+        fingerprint(
+            current_objective=replace(
+                objective,
+                source_relationship_ids=("relationship-paper-1-density",),
+            )
+        ),
+        fingerprint(
+            current_document_input=PreparedDocumentInput(
+                "paper-1", "preparation-2"
+            )
+        ),
+        fingerprint(model_name="model-b"),
+        fingerprint(extraction_version="objective-document-evidence.v2"),
+    }
+
+    assert len(fingerprints) == 7

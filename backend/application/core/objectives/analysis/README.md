@@ -138,6 +138,15 @@ failure, the analysis run fails and remains retryable. A partial technical
 failure may still publish surviving paper outcomes with explicit contribution
 warnings.
 
+The first six stages run and persist independently per Document. A checkpoint is
+reused only when Objective intent, Document preparation fingerprint, extraction
+version, and model identity still match. Scientific absence and
+non-comparability are successful inspections; provider, parsing, or unexpected
+execution errors are failed checkpoints. On retry, successful papers are reused
+and failed papers are inspected again. Only after the selected checkpoint set is
+assembled does `finding_synthesis.py` run once, followed by the existing atomic
+analysis publication.
+
 `finding_synthesis.py` owns cross-paper comparison after durable Evidence and
 paper outcomes exist. `FindingSynthesisService` deterministically selects
 comparable Evidence, constructs atomic factor/outcome result sets, balances the

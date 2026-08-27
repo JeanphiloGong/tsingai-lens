@@ -76,6 +76,7 @@ Objective + Profile + Paper Map
   -> Source-local extraction
   -> deterministic grounding
   -> within-paper experiment binding
+  -> persist a reusable document Evidence checkpoint
 ```
 
 Then across papers:
@@ -132,6 +133,15 @@ Evidence.
 A succeeded analysis may publish zero Findings when inspection completed but no
 defensible comparison survived. When all relevant papers fail technically, the
 analysis remains failed and retryable.
+
+Each document inspection is independently resumable. Its reuse fingerprint
+covers the confirmed Objective's scientific intent, the exact prepared Document,
+the extraction version, and model identity. A matching completed inspection is
+reused on a later analysis version; failed or unfinished inspection reruns.
+Cached contributions and Evidence are rebound to the current analysis version,
+then the complete selected set enters Finding synthesis once. Publication remains
+one atomic `ObjectiveAnalysis` snapshot and does not expose partial checkpoint
+state through the public API.
 
 ## Main Owners
 

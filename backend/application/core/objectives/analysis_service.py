@@ -366,6 +366,7 @@ class ObjectiveAnalysisService:
                 capture_llm_usage() as usage,
                 capture_analysis_diagnostics() as diagnostics,
             ):
+                artifacts: ObjectiveAnalysisArtifacts | None = None
                 try:
                     artifacts = (
                         await self.research_objective_service.generate_objective_analysis_artifacts(
@@ -385,7 +386,11 @@ class ObjectiveAnalysisService:
                                 (perf_counter() - usage_started_at) * 1000
                             )
                         ),
-                        model_name=usage.model_name,
+                        model_name=(
+                            usage.model_name
+                            or (artifacts.model_name if artifacts is not None else None)
+                            or claimed.model_name
+                        ),
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )

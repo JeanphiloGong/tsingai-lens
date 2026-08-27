@@ -32,6 +32,7 @@ Objective discovery
   -> ResearchObjectives
 
 ResearchObjective
+  -> per-document Objective Evidence checkpoints
   -> ObjectiveAnalysis versions
      -> PaperContributions
      -> ObjectiveEvidence
@@ -110,6 +111,25 @@ Evidence, the service verifies that every Document is still ready and still has
 the same fingerprint. A mismatch is stale input and blocks the run. This prevents
 one analysis from reading Source from a different preparation than it recorded.
 
+One private `ObjectiveDocumentEvidence` checkpoint represents inspection of one
+prepared Document for one Objective. Its identity is:
+
+```text
+collection_id + objective_id + document_id + input_fingerprint
+```
+
+The fingerprint covers the Objective scientific intent, the Document
+`preparation_fingerprint`, the Evidence extraction version, and model identity.
+Only `succeeded` checkpoints are reusable. A succeeded checkpoint contains one
+`PaperContribution` and its zero or more `ObjectiveEvidence` records; zero
+Evidence can mean a valid scientific absence. `failed` and unfinished `running`
+checkpoints are technical work and are replaced on retry.
+
+Checkpoint artifacts retain their producing analysis version internally. When
+reused, they are rebound to the new `analysis_version` before one cross-paper
+Finding synthesis. They are not published children and are never read by the
+Finding or Evidence APIs.
+
 Analysis children use the same Objective/version identity:
 
 - PaperContribution adds `document_id`.
@@ -132,6 +152,8 @@ erDiagram
     DOCUMENT ||--o| PAPER_MAP : has_current
     COLLECTION ||--o| OBJECTIVE_DISCOVERY : has_current
     COLLECTION ||--o{ RESEARCH_OBJECTIVE : frames
+    RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_DOCUMENT_EVIDENCE : inspects
+    DOCUMENT ||--o{ OBJECTIVE_DOCUMENT_EVIDENCE : supplies
     RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_ANALYSIS : retries
     OBJECTIVE_ANALYSIS ||--o{ PAPER_CONTRIBUTION : inspects
     PAPER_CONTRIBUTION ||--o{ OBJECTIVE_EVIDENCE : grounds

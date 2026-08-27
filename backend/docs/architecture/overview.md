@@ -41,8 +41,9 @@ Objective discovery
 
 ObjectiveAnalysis
   -> frozen document_id + preparation_fingerprint inputs
-  -> PaperContribution
-  -> ObjectiveEvidence
+  -> per-document Evidence checkpoints
+     -> PaperContribution
+     -> ObjectiveEvidence
   -> Finding
 ```
 
@@ -78,6 +79,13 @@ stores uploaded and extracted bytes. Local files are disposable runtime scratch.
 - Objective analysis validates every frozen fingerprint before reading Source.
   A changed or re-prepared Document makes the old analysis input stale and the
   operation fails instead of mixing versions.
+- Evidence inspection runs independently for each selected Document with a
+  process-local limit of `4`. A matching succeeded checkpoint is reused across
+  analysis retries; failed or unfinished inspection is rerun. Findings are
+  synthesized once after the selected checkpoint set is assembled.
+- Inspection that finds no routable or comparable Evidence is completed
+  scientific work and remains reusable. Provider, parsing, and execution errors
+  are technical failure and remain retryable.
 
 ## Related Docs
 

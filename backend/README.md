@@ -19,6 +19,7 @@ selected ready Documents
   -> Objective candidates
 
 confirmed Objective + selected ready Documents
+  -> reusable per-document Evidence inspection
   -> ObjectiveEvidence
   -> cross-document Findings
 ```
@@ -26,6 +27,8 @@ confirmed Objective + selected ready Documents
 A Collection groups papers. It does not own a generated snapshot. Each Document
 owns its current preparation status and current Source, Profile, and Paper Map.
 Adding or retrying one paper never rebuilds the others.
+Objective analysis likewise reuses completed inspection for unchanged papers and
+retries only papers whose inspection is missing, failed, or stale.
 
 ## Ownership Map
 

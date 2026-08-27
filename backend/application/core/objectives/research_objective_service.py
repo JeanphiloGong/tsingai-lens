@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from asyncio import to_thread
-import logging
+from asyncio import Semaphore, gather, to_thread
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
+from hashlib import sha256
+import json
+import logging
 from typing import Any, Callable
 
 from application.core.document_profiles.service import (
@@ -47,6 +50,7 @@ from application.source.collection_service import CollectionService
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -66,6 +70,9 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
+_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v1"
+_OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
+
 
 @dataclass(frozen=True)
 class ObjectiveAnalysisArtifacts:
@@ -74,6 +81,15 @@ class ObjectiveAnalysisArtifacts:
     contributions: tuple[PaperContribution, ...]
     evidence_records: tuple[ObjectiveEvidence, ...]
     findings: tuple[Finding, ...]
+    model_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ObjectiveDocumentEvidenceArtifacts:
+    """Scientific inspection result for one Objective and one document."""
+
+    contribution: PaperContribution
+    evidence_records: tuple[ObjectiveEvidence, ...]
 
 
 class ResearchObjectivesNotReadyError(RuntimeError):
@@ -273,24 +289,6 @@ class ResearchObjectiveService:
             collection_id,
             document_inputs=analysis.document_inputs,
         )
-        return await to_thread(
-            self._generate_objective_analysis_artifacts,
-            collection_id,
-            analysis,
-            active_objective,
-            objective_inputs,
-            progress_callback,
-        )
-
-    def _generate_objective_analysis_artifacts(
-        self,
-        collection_id: str,
-        analysis: ObjectiveAnalysis,
-        active_objective: ResearchObjective,
-        objective_inputs: dict[str, Any],
-        progress_callback: ProgressCallback | None,
-    ) -> ObjectiveAnalysisArtifacts:
-        objective = active_objective
         response_client = objective_inputs["response_client"]
         if self._objective_source_screener is None:
             self._objective_source_screener = ObjectiveSourceScreener(response_client)
@@ -298,7 +296,140 @@ class ResearchObjectiveService:
             self._objective_evidence_router = ObjectiveEvidenceRouter(response_client)
         if self._objective_source_extractor is None:
             self._objective_source_extractor = ObjectiveSourceExtractor(response_client)
+        model_name = str(
+            getattr(response_client, "model", None) or analysis.model_name or ""
+        ).strip()
+        if not model_name:
+            raise ValueError("Objective document Evidence requires model identity")
 
+        extraction_limit = Semaphore(_OBJECTIVE_DOCUMENT_MAX_CONCURRENCY)
+        document_count = len(analysis.document_inputs)
+
+        async def inspect_document(
+            position: int,
+            document_input: PreparedDocumentInput,
+        ) -> ObjectiveDocumentEvidenceArtifacts:
+            input_fingerprint = self._document_evidence_input_fingerprint(
+                objective=active_objective,
+                document_input=document_input,
+                model_name=model_name,
+                extraction_version=_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION,
+            )
+            checkpoint = await self.objective_repository.read_document_evidence(
+                collection_id,
+                active_objective.objective_id,
+                document_input.document_id,
+                input_fingerprint,
+            )
+            if checkpoint is not None and checkpoint.status == "succeeded":
+                return self._rebind_document_evidence(checkpoint, analysis)
+
+            running = ObjectiveDocumentEvidence.start(
+                collection_id=collection_id,
+                objective_id=active_objective.objective_id,
+                document_id=document_input.document_id,
+                input_fingerprint=input_fingerprint,
+                analysis_version=analysis.analysis_version,
+                extraction_version=_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION,
+                model_name=model_name,
+                started_at=datetime.now(timezone.utc),
+            )
+            await self.objective_repository.write_document_evidence(running)
+            document_objective_inputs = self._objective_inputs_for_document(
+                collection_id,
+                objective_inputs,
+                document_input.document_id,
+            )
+
+            document_progress_callback: ProgressCallback | None = None
+            if progress_callback is not None:
+
+                def document_progress_callback(detail: dict[str, Any]) -> None:
+                    progress_callback(
+                        {
+                            **detail,
+                            "current": position,
+                            "total": document_count,
+                            "active_document_id": document_input.document_id,
+                        }
+                    )
+
+            try:
+                async with extraction_limit:
+                    artifacts = await to_thread(
+                        self._generate_document_evidence,
+                        collection_id=collection_id,
+                        analysis=analysis,
+                        objective=active_objective,
+                        objective_inputs=document_objective_inputs,
+                        progress_callback=document_progress_callback,
+                    )
+                checkpoint = running.succeed(
+                    contribution=artifacts.contribution,
+                    evidence_records=artifacts.evidence_records,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Objective document Evidence extraction failed "
+                    "collection_id=%s objective_id=%s document_id=%s",
+                    collection_id,
+                    active_objective.objective_id,
+                    document_input.document_id,
+                )
+                checkpoint = running.fail(
+                    contribution=self._failed_document_contribution(
+                        collection_id=collection_id,
+                        objective_id=active_objective.objective_id,
+                        analysis_version=analysis.analysis_version,
+                        document_id=document_input.document_id,
+                    ),
+                    error_code="document_evidence_extraction_failed",
+                    error_message=str(exc) or exc.__class__.__name__,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            await self.objective_repository.write_document_evidence(checkpoint)
+            return self._rebind_document_evidence(checkpoint, analysis)
+
+        document_artifacts = await gather(
+            *(
+                inspect_document(position, document_input)
+                for position, document_input in enumerate(
+                    analysis.document_inputs,
+                    start=1,
+                )
+            )
+        )
+        contributions = tuple(item.contribution for item in document_artifacts)
+        evidence_records = tuple(
+            evidence
+            for item in document_artifacts
+            for evidence in item.evidence_records
+        )
+        findings = await to_thread(
+            self.finding_synthesis_service.synthesize,
+            collection_id=collection_id,
+            objective=active_objective,
+            analysis=analysis,
+            contributions=contributions,
+            evidence_records=evidence_records,
+        )
+        return ObjectiveAnalysisArtifacts(
+            contributions=contributions,
+            evidence_records=evidence_records,
+            findings=findings,
+            model_name=model_name,
+        )
+
+    def _generate_document_evidence(
+        self,
+        *,
+        collection_id: str,
+        analysis: ObjectiveAnalysis,
+        objective: ResearchObjective,
+        objective_inputs: dict[str, Any],
+        progress_callback: ProgressCallback | None,
+    ) -> ObjectiveDocumentEvidenceArtifacts:
         screened_sources = screen_sources(
             collection_id=collection_id,
             source_screener=self._objective_source_screener,
@@ -360,17 +491,136 @@ class ResearchObjectiveService:
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             figures_by_document_id=objective_inputs["figures_by_document_id"],
         )
-        findings = self.finding_synthesis_service.synthesize(
-            collection_id=collection_id,
-            objective=objective,
-            analysis=analysis,
-            contributions=contributions,
+        if len(contributions) != 1:
+            raise RuntimeError(
+                "document Evidence extraction requires one paper contribution"
+            )
+        return ObjectiveDocumentEvidenceArtifacts(
+            contribution=contributions[0],
             evidence_records=evidence_records,
         )
-        return ObjectiveAnalysisArtifacts(
-            contributions=contributions,
-            evidence_records=evidence_records,
-            findings=findings,
+
+    @staticmethod
+    def _document_evidence_input_fingerprint(
+        *,
+        objective: ResearchObjective,
+        document_input: PreparedDocumentInput,
+        model_name: str,
+        extraction_version: str,
+    ) -> str:
+        payload = {
+            "objective": {
+                "question": objective.question,
+                "material_scope": list(objective.material_scope),
+                "variables": list(objective.variables),
+                "outcomes": list(objective.outcomes),
+                "mechanisms": list(objective.mechanisms),
+                "constraints": list(objective.constraints),
+                "requested_comparator": objective.requested_comparator,
+                "source_relationship_ids": list(objective.source_relationship_ids),
+                "excluded_document_ids": list(objective.excluded_document_ids),
+            },
+            "document": document_input.to_record(),
+            "extraction_version": extraction_version,
+            "model_name": model_name,
+        }
+        return sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _objective_inputs_for_document(
+        collection_id: str,
+        objective_inputs: dict[str, Any],
+        document_id: str,
+    ) -> dict[str, Any]:
+        documents = tuple(
+            item
+            for item in objective_inputs["documents"]
+            if item.document_id == document_id
+        )
+        paper_skims = tuple(
+            item
+            for item in objective_inputs["paper_skims"]
+            if item.document_id == document_id
+        )
+        if len(documents) != 1 or len(paper_skims) != 1:
+            raise ResearchObjectivesNotReadyError(collection_id)
+        return {
+            "documents": documents,
+            "paper_skims": paper_skims,
+            "profiles_by_document_id": {
+                document_id: objective_inputs["profiles_by_document_id"][document_id]
+            },
+            "blocks_by_document_id": {
+                document_id: objective_inputs["blocks_by_document_id"][document_id]
+            },
+            "tables_by_document_id": {
+                document_id: objective_inputs["tables_by_document_id"][document_id]
+            },
+            "table_cells_by_document_id": {
+                document_id: objective_inputs["table_cells_by_document_id"][document_id]
+            },
+            "figures_by_document_id": {
+                document_id: objective_inputs["figures_by_document_id"][document_id]
+            },
+            "document_trees_by_document_id": {
+                document_id: objective_inputs["document_trees_by_document_id"][
+                    document_id
+                ]
+            },
+            "response_client": objective_inputs["response_client"],
+        }
+
+    @staticmethod
+    def _rebind_document_evidence(
+        checkpoint: ObjectiveDocumentEvidence,
+        analysis: ObjectiveAnalysis,
+    ) -> ObjectiveDocumentEvidenceArtifacts:
+        if checkpoint.contribution is None:
+            raise ValueError("terminal document Evidence lacks a contribution")
+        return ObjectiveDocumentEvidenceArtifacts(
+            contribution=replace(
+                checkpoint.contribution,
+                analysis_version=analysis.analysis_version,
+            ),
+            evidence_records=tuple(
+                replace(record, analysis_version=analysis.analysis_version)
+                for record in checkpoint.evidence_records
+            ),
+        )
+
+    @staticmethod
+    def _failed_document_contribution(
+        *,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        document_id: str,
+    ) -> PaperContribution:
+        return PaperContribution(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            document_id=document_id,
+            analysis_status="failed",
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=(
+                "Evidence extraction failed for this paper; retry the analysis.",
+            ),
+            confidence=0,
         )
 
     async def _build_objective_analysis_inputs(
@@ -454,6 +704,8 @@ class ResearchObjectiveService:
         except FileNotFoundError as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
+        # Load structural trees
+        # For every document, it loads a SourceDocumentTree
         document_trees_by_document_id = {
             document.document_id: await load_document_tree(
                 collection_id,

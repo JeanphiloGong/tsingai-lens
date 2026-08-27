@@ -19,11 +19,10 @@ from domain.core.document_profile import (
     summarize_document_profile_collection,
 )
 from domain.ports import PaperFactRepository, SourceArtifactRepository
-from domain.source import SourceDocument
+from domain.source import SourceBlock, SourceDocument, normalize_optional_text
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
-from domain.shared.record_normalization import normalize_record_value
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,7 @@ class DocumentProfileService:
         profiles = await self.read_document_profiles(collection_id)
         summary = self.summarize_document_profiles(profiles)
         items = [
-            self._serialize_profile_record(profile)
+            profile.to_record()
             for profile in profiles[offset : offset + limit]
         ]
         return {
@@ -133,8 +132,8 @@ class DocumentProfileService:
     ) -> dict[str, Any]:
         profiles = await self.read_document_profiles(collection_id)
         for profile in profiles:
-            if str(profile.document_id) == str(document_id):
-                return self._serialize_profile_record(profile)
+            if profile.document_id == document_id:
+                return profile.to_record()
         raise DocumentNotFoundError(collection_id, document_id)
 
     async def get_document_content(
@@ -153,7 +152,7 @@ class DocumentProfileService:
             (
                 record
                 for record in document_records
-                if str(record.get("paper_id") or "") == str(document_id)
+                if record["paper_id"] == document_id
             ),
             None,
         )
@@ -161,28 +160,28 @@ class DocumentProfileService:
             raise DocumentNotFoundError(collection_id, document_id)
 
         blocks_by_doc = {
-            document.document_id: [block.to_record() for block in document.blocks]
+            document.document_id: list(document.blocks)
             for document in documents
         }
-        profile = await self._find_profile_row(collection_id, document_id)
+        profile = await self._find_profile(collection_id, document_id)
         file_lookup = await self._build_collection_file_lookup(collection_id)
 
         full_text = str(row.get("text") or "").strip()
         block_payload = self._build_document_content_blocks(
             full_text=full_text,
-            blocks=blocks_by_doc.get(str(document_id), []),
+            blocks=blocks_by_doc.get(document_id, []),
         )
         if not full_text and block_payload:
             full_text = "\n\n".join(
                 block["text"] for block in block_payload if str(block.get("text") or "").strip()
             ).strip()
 
-        title = self._normalize_optional_text(profile.get("title")) if profile else None
+        title = profile.title if profile else None
         if title is None:
             source_filename = self._resolve_source_filename(row, document_id, file_lookup)
             title = self._resolve_document_title(row, document_id, source_filename, file_lookup)
         else:
-            source_filename = self._normalize_optional_text(profile.get("source_filename"))
+            source_filename = profile.source_filename
         if source_filename is None:
             source_filename = self._resolve_source_filename(row, document_id, file_lookup)
 
@@ -213,10 +212,7 @@ class DocumentProfileService:
             collection_id, build_id=build_id
         )
         if facts.document_profiles:
-            return self._normalize_profile_records(
-                facts.document_profiles,
-                collection_id,
-            )
+            return facts.document_profiles
         raise DocumentProfilesNotReadyError(collection_id)
 
     async def build_document_profiles(
@@ -234,7 +230,7 @@ class DocumentProfileService:
             raise DocumentProfilesNotReadyError(collection_id) from exc
         document_records = self._build_document_records(documents)
         blocks_by_doc = {
-            document.document_id: [block.to_record() for block in document.blocks]
+            document.document_id: list(document.blocks)
             for document in documents
         }
         file_lookup = await self._build_collection_file_lookup(collection_id)
@@ -266,21 +262,18 @@ class DocumentProfileService:
                 len(profiled.get("parsing_warnings", [])),
             )
             profiles.append(DocumentProfile.from_mapping(profiled))
-        normalized_profiles = self._normalize_profile_records(
-            profiles,
-            collection_id,
-        )
+        document_profiles = tuple(profiles)
         await self.paper_fact_repository.replace_document_profiles(
             collection_id,
             build_id,
-            normalized_profiles,
+            document_profiles,
         )
         logger.info(
             "Document profile build finished collection_id=%s profile_count=%s",
             collection_id,
-            len(normalized_profiles),
+            len(document_profiles),
         )
-        return normalized_profiles
+        return document_profiles
 
     def _get_document_profile_extractor(self) -> DocumentProfileExtractor:
         if self._document_profile_extractor is None:
@@ -341,7 +334,7 @@ class DocumentProfileService:
         collection_id: str,
         build_id: str,
         row: Mapping[str, Any],
-        blocks: list[dict[str, Any]],
+        blocks: list[SourceBlock],
         file_lookup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         document_id = str(row.get("paper_id") or row.get("document_id") or "")
@@ -439,7 +432,7 @@ class DocumentProfileService:
         title: str | None,
         source_filename: str | None,
         full_text: str,
-        blocks: list[dict[str, Any]],
+        blocks: list[SourceBlock],
     ) -> dict[str, Any]:
         return {
             "title": title,
@@ -455,7 +448,7 @@ class DocumentProfileService:
         self,
         payload: dict[str, Any],
     ) -> bool:
-        lead_text = self._normalize_optional_text(payload.get("abstract_or_lead_text"))
+        lead_text = normalize_optional_text(payload.get("abstract_or_lead_text"))
         headings = [
             str(item).strip()
             for item in payload.get("headings", [])
@@ -465,14 +458,14 @@ class DocumentProfileService:
 
     def _collect_document_profile_headings(
         self,
-        blocks: list[dict[str, Any]],
+        blocks: list[SourceBlock],
     ) -> list[str]:
         headings: list[str] = []
         seen: set[str] = set()
         for block in self._ordered_profile_blocks(blocks):
-            if str(block.get("block_type") or "") != "heading":
+            if block.block_type != "heading":
                 continue
-            heading = self._normalize_optional_text(block.get("text"))
+            heading = normalize_optional_text(block.text)
             if heading is None:
                 continue
             normalized_heading = heading.casefold()
@@ -486,15 +479,15 @@ class DocumentProfileService:
 
     def _select_document_profile_lead_text(
         self,
-        blocks: list[dict[str, Any]],
+        blocks: list[SourceBlock],
         full_text: str,
     ) -> str | None:
         ordered_blocks = self._ordered_profile_blocks(blocks)
         for block in ordered_blocks:
-            if str(block.get("block_type") or "") in {"heading", "title"}:
+            if block.block_type in {"heading", "title"}:
                 continue
-            heading_path = self._normalize_optional_text(block.get("heading_path")) or ""
-            block_text = self._normalize_optional_text(block.get("text"))
+            heading_path = block.heading_path or ""
+            block_text = normalize_optional_text(block.text)
             if block_text is None:
                 continue
             if any(marker in heading_path.casefold() for marker in _PROFILE_FRONT_MATTER_HEADINGS):
@@ -503,9 +496,9 @@ class DocumentProfileService:
         lead_chunks: list[str] = []
         total_length = 0
         for block in ordered_blocks:
-            if str(block.get("block_type") or "") in {"heading", "title"}:
+            if block.block_type in {"heading", "title"}:
                 continue
-            block_text = self._normalize_optional_text(block.get("text"))
+            block_text = normalize_optional_text(block.text)
             if block_text is None:
                 continue
             lead_chunks.append(block_text)
@@ -519,19 +512,16 @@ class DocumentProfileService:
         if lead_chunks:
             return "\n\n".join(lead_chunks)[:_PROFILE_LEAD_TEXT_LIMIT]
 
-        normalized_full_text = self._normalize_optional_text(full_text)
+        normalized_full_text = normalize_optional_text(full_text)
         if normalized_full_text is None:
             return None
         return normalized_full_text[:_PROFILE_LEAD_TEXT_LIMIT]
 
     def _ordered_profile_blocks(
         self,
-        blocks: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        return sorted(
-            (block for block in blocks if isinstance(block, dict)),
-            key=lambda item: self._safe_int(item.get("block_order"), default=0),
-        )
+        blocks: list[SourceBlock],
+    ) -> list[SourceBlock]:
+        return sorted(blocks, key=lambda block: block.block_order)
 
     def summarize_document_profiles(
         self,
@@ -540,79 +530,44 @@ class DocumentProfileService:
         summary = summarize_document_profile_collection(profiles)
         return summary.to_payload()
 
-    def _normalize_profile_records(
-        self,
-        profiles: tuple[DocumentProfile, ...] | list[DocumentProfile],
-        collection_id: str | None,
-    ) -> tuple[DocumentProfile, ...]:
-        normalized: list[DocumentProfile] = []
-        for profile in profiles:
-            payload = profile.to_record()
-            if collection_id is not None and not payload.get("collection_id"):
-                payload["collection_id"] = collection_id
-            normalized.append(DocumentProfile.from_mapping(payload))
-        return tuple(normalized)
-
-    def _serialize_profile_record(self, profile: DocumentProfile) -> dict[str, Any]:
-        return profile.to_record()
-
-    def _normalize_string_list(self, value: Any) -> list[str]:
-        normalized = normalize_record_value(value)
-        if normalized is None:
-            return []
-        if isinstance(normalized, list):
-            return [str(item) for item in normalized if str(item).strip()]
-        return [str(normalized)]
-
-    def _normalize_optional_text(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, float) and math.isnan(value):
-            return None
-        text = str(value).strip()
-        return text or None
-
-    async def _find_profile_row(
+    async def _find_profile(
         self,
         collection_id: str,
         document_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> DocumentProfile | None:
         try:
             profiles = await self.read_document_profiles(collection_id)
         except DocumentProfilesNotReadyError:
             return None
 
         for profile in profiles:
-            if str(profile.document_id) == str(document_id):
-                return profile.to_record()
+            if profile.document_id == document_id:
+                return profile
         return None
 
     def _build_document_content_blocks(
         self,
         full_text: str,
-        blocks: list[dict[str, Any]],
+        blocks: list[SourceBlock],
     ) -> list[dict[str, Any]]:
-        ordered_blocks = sorted(
-            (block for block in blocks if isinstance(block, dict)),
-            key=lambda item: self._safe_int(item.get("block_order"), default=0),
-        )
+        ordered_blocks = self._ordered_profile_blocks(blocks)
         payload: list[dict[str, Any]] = []
 
         for index, block in enumerate(ordered_blocks, start=1):
-            block_text = str(block.get("text") or "").strip()
+            block_text = block.text.strip()
             if not block_text:
                 continue
 
             payload.append(
                 {
-                    "block_id": str(block.get("block_id") or f"block_{index}"),
-                    "block_type": self._normalize_optional_text(block.get("block_type")),
-                    "heading_path": self._normalize_optional_text(block.get("heading_path")),
-                    "heading_level": self._safe_int(block.get("heading_level"), default=0),
-                    "order": self._safe_int(block.get("block_order"), default=index),
+                    "block_id": block.block_id or f"block_{index}",
+                    "block_type": block.block_type,
+                    "heading_path": block.heading_path,
+                    "heading_level": block.heading_level or 0,
+                    "order": block.block_order,
                     "text": block_text,
-                    "text_unit_ids": self._normalize_string_list(block.get("text_unit_ids")),
-                    "page": self._normalize_page(block.get("page")),
+                    "text_unit_ids": list(block.text_unit_ids),
+                    "page": self._normalize_page(block.page),
                 }
             )
 
@@ -634,30 +589,17 @@ class DocumentProfileService:
             ]
         return []
 
-    def _safe_int(self, value: Any, default: int) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
-
     def _normalize_page(self, value: Any) -> int | None:
-        number = self._finite_float(value)
-        if number is None:
-            return None
-        page = int(number)
-        return page if page > 0 and page == number else None
-
-
-    def _finite_float(self, value: Any) -> float | None:
         if value is None:
-            return None
-        if isinstance(value, float) and math.isnan(value):
             return None
         try:
             number = float(value)
         except (TypeError, ValueError):
             return None
-        return number if math.isfinite(number) else None
+        if not math.isfinite(number):
+            return None
+        page = int(number)
+        return page if page > 0 and page == number else None
 
     async def _build_collection_file_lookup(
         self, collection_id: str
@@ -670,8 +612,8 @@ class DocumentProfileService:
         stored_to_source: dict[str, str] = {}
         resolved_sources: list[str] = []
         for record in files:
-            original = self._normalize_optional_text(record.get("original_filename"))
-            stored = self._normalize_optional_text(record.get("stored_filename"))
+            original = normalize_optional_text(record.get("original_filename"))
+            stored = normalize_optional_text(record.get("stored_filename"))
             if original:
                 resolved_sources.append(original)
             if original and stored:
@@ -716,19 +658,16 @@ class DocumentProfileService:
     ) -> str | None:
         stored_to_source = file_lookup.get("stored_to_source", {})
 
-        for key in _SOURCE_FILENAME_FIELD_CANDIDATES:
+        for key in (
+            *_SOURCE_FILENAME_FIELD_CANDIDATES,
+            *_SOURCE_PATH_FIELD_CANDIDATES,
+        ):
             candidate = self._extract_row_or_metadata_value(row, key)
-            normalized = self._normalize_filename_value(candidate)
-            if normalized and normalized != document_id:
-                return stored_to_source.get(normalized, normalized)
+            filename = Path(candidate).name if candidate else None
+            if filename and filename != document_id:
+                return stored_to_source.get(filename, filename)
 
-        for key in _SOURCE_PATH_FIELD_CANDIDATES:
-            candidate = self._extract_row_or_metadata_value(row, key)
-            normalized = self._normalize_filename_value(candidate)
-            if normalized and normalized != document_id:
-                return stored_to_source.get(normalized, normalized)
-
-        title_value = self._normalize_optional_text(row.get("title"))
+        title_value = normalize_optional_text(row.get("title"))
         if title_value and title_value in stored_to_source:
             return stored_to_source[title_value]
 
@@ -739,22 +678,25 @@ class DocumentProfileService:
         values: list[str] = []
         for key in _TITLE_FIELD_CANDIDATES:
             candidate = self._extract_row_or_metadata_value(row, key)
-            normalized = self._normalize_optional_text(candidate)
-            if normalized and normalized not in seen:
-                seen.add(normalized)
-                values.append(normalized)
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                values.append(candidate)
         return values
 
-    def _extract_row_or_metadata_value(self, row: Mapping[str, Any], key: str) -> Any:
+    def _extract_row_or_metadata_value(
+        self,
+        row: Mapping[str, Any],
+        key: str,
+    ) -> str | None:
         if key in row:
             value = row.get(key)
-            normalized = self._normalize_optional_text(value)
+            normalized = normalize_optional_text(value)
             if normalized is not None:
                 return normalized
 
         metadata = self._coerce_mapping(row.get("metadata"))
         value = metadata.get(key)
-        normalized = self._normalize_optional_text(value)
+        normalized = normalize_optional_text(value)
         if normalized is not None:
             return normalized
         return None
@@ -781,9 +723,3 @@ class DocumentProfileService:
             if isinstance(parsed, dict):
                 return parsed
         return {}
-
-    def _normalize_filename_value(self, value: Any) -> str | None:
-        normalized = self._normalize_optional_text(value)
-        if normalized is None:
-            return None
-        return Path(normalized).name or None

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 import pytest
@@ -314,30 +313,6 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     assert '"attempt":1' in failure_log
     assert '"attempt":2' in failure_log
     assert "paper content" not in failure_log
-
-
-async def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):
-    profile_service = DocumentProfileService(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        source_artifact_repository=MemorySourceArtifactRepository(),
-        paper_fact_repository=MemoryPaperFactRepository(),
-    )
-
-    profiles = [
-        DocumentProfile.from_mapping(
-            {
-                "document_id": "doc-1",
-                "collection_id": "col-1",
-                "doc_type": "experimental",
-                "parsing_warnings": np.array(["condition_context_weak"]),
-                "confidence": 0.91,
-            }
-        )
-    ]
-
-    normalized = profile_service._normalize_profile_records(profiles, "col-1")
-
-    assert normalized[0].to_record()["parsing_warnings"] == ["condition_context_weak"]
 
 
 async def test_document_profile_read_does_not_build_missing_profiles(

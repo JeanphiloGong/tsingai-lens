@@ -26,6 +26,8 @@ function document(documentId: string, status: string, filename: string) {
 		updated_at: '2026-08-27T00:01:00Z',
 		parser_version: ready ? 'source-runtime.v1' : null,
 		document_analysis_version: ready ? 'paper-map.v1' : null,
+		source_fingerprint: ready ? `source-${documentId}` : null,
+		profile_fingerprint: ready ? `profile-${documentId}` : null,
 		preparation_fingerprint: ready ? `fingerprint-${documentId}` : null
 	};
 }
@@ -39,12 +41,10 @@ function preparationTask(documentId: string, status: 'queued' | 'running' | 'fai
 		mode: 'standard',
 		input_fingerprint: `input-${documentId}`,
 		status,
-		current_stage: status === 'failed' ? 'failed' : 'source_artifacts_started',
+		current_stage: status === 'failed' ? 'failed' : 'source_parsing',
 		progress_percent: status === 'running' ? 42 : 0,
 		progress_detail:
-			status === 'running'
-				? { phase: 'source_artifacts_started', message: 'Parsing this paper.' }
-				: null,
+			status === 'running' ? { phase: 'source_parsing', message: 'Parsing this paper.' } : null,
 		output_path: null,
 		errors: status === 'failed' ? ['The PDF could not be parsed.'] : [],
 		warnings: [],

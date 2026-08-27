@@ -903,6 +903,8 @@ function uploadedFile(auditState?: string | null) {
 		updated_at: now(),
 		parser_version: ready ? 'source-runtime.v1' : null,
 		document_analysis_version: ready ? 'paper-map.v1' : null,
+		source_fingerprint: ready ? 'source-doc-1' : null,
+		profile_fingerprint: ready ? 'profile-doc-1' : null,
 		preparation_fingerprint: ready ? 'fingerprint-doc-1' : null
 	};
 }

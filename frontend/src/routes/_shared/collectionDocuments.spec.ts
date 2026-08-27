@@ -25,6 +25,8 @@ describe('collection document API', () => {
 					updated_at: '2026-08-27T00:01:00Z',
 					parser_version: 'source-runtime.v2',
 					document_analysis_version: 'paper-map.v3',
+					source_fingerprint: 'source-fingerprint-doc-1',
+					profile_fingerprint: 'profile-fingerprint-doc-1',
 					preparation_fingerprint: 'fingerprint-doc-1'
 				}
 			]
@@ -38,6 +40,8 @@ describe('collection document API', () => {
 			status: 'ready',
 			parser_version: 'source-runtime.v2',
 			document_analysis_version: 'paper-map.v3',
+			source_fingerprint: 'source-fingerprint-doc-1',
+			profile_fingerprint: 'profile-fingerprint-doc-1',
 			preparation_fingerprint: 'fingerprint-doc-1'
 		});
 	});

@@ -40,6 +40,8 @@ const readyDocument = {
 	updated_at: '2026-08-27T00:01:00Z',
 	parser_version: 'source-runtime.v1',
 	document_analysis_version: 'paper-map.v1',
+	source_fingerprint: 'source-fingerprint-ready',
+	profile_fingerprint: 'profile-fingerprint-ready',
 	preparation_fingerprint: 'fingerprint-ready'
 };
 
@@ -48,6 +50,8 @@ const storedDocument = {
 	document_id: 'doc_stored',
 	original_filename: 'stored-paper.pdf',
 	status: 'stored',
+	source_fingerprint: null,
+	profile_fingerprint: null,
 	preparation_fingerprint: null
 };
 

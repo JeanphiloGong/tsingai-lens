@@ -13,6 +13,8 @@ export type CollectionDocument = {
 	updated_at: string;
 	parser_version: string | null;
 	document_analysis_version: string | null;
+	source_fingerprint: string | null;
+	profile_fingerprint: string | null;
 	preparation_fingerprint: string | null;
 };
 
@@ -44,6 +46,10 @@ function normalizeCollectionDocument(item: unknown): CollectionDocument | null {
 			typeof record.document_analysis_version === 'string'
 				? record.document_analysis_version
 				: null,
+		source_fingerprint:
+			typeof record.source_fingerprint === 'string' ? record.source_fingerprint : null,
+		profile_fingerprint:
+			typeof record.profile_fingerprint === 'string' ? record.profile_fingerprint : null,
 		preparation_fingerprint:
 			typeof record.preparation_fingerprint === 'string' ? record.preparation_fingerprint : null
 	};

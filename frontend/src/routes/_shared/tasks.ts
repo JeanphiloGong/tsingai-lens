@@ -4,15 +4,10 @@ export type TaskStatus = 'queued' | 'running' | 'completed' | 'partial_success' 
 
 export type TaskStage =
 	| 'queued'
-	| 'source_artifacts_started'
-	| 'source_artifacts_completed'
-	| 'document_profiles_started'
-	| 'document_profiles_completed'
-	| 'objective_candidates_started'
-	| 'objective_candidates_completed'
-	| 'objective_paper_skim_started'
-	| 'objective_discovery_started'
-	| 'artifacts_ready'
+	| 'source_parsing'
+	| 'document_profile'
+	| 'paper_map'
+	| 'ready'
 	| 'failed';
 
 export type TaskProgressDetail = {

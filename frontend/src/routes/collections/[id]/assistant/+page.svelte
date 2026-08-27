@@ -605,7 +605,7 @@
 				return $t('researchAgent.resource.evidence');
 			case 'objective_analysis':
 				return $t('researchAgent.resource.analysis');
-			case 'collection_build_task':
+			case 'document_preparation_task':
 				return $t('researchAgent.resource.researchProcess');
 			default:
 				return $t('researchAgent.resource.other');

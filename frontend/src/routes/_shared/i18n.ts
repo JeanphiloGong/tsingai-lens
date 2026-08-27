@@ -1962,15 +1962,10 @@ const translations: Record<Language, Translations> = {
 			stageUnknown: 'Unknown',
 			stage: {
 				queued: 'Queued',
-				source_artifacts_started: 'Source Artifacts Started',
-				source_artifacts_completed: 'Source Artifacts Completed',
-				document_profiles_started: 'Document Profiles Started',
-				document_profiles_completed: 'Document Profiles Completed',
-				objective_candidates_started: 'Objective Candidates Started',
-				objective_candidates_completed: 'Objective Candidates Completed',
-				objective_paper_skim_started: 'Scanning Papers',
-				objective_discovery_started: 'Discovering Objectives',
-				artifacts_ready: 'Artifacts Ready',
+				source_parsing: 'Parsing Sources',
+				document_profile: 'Classifying Paper',
+				paper_map: 'Mapping Research Scope',
+				ready: 'Ready',
 				failed: 'Failed'
 			},
 			progressUnit: {
@@ -4226,15 +4221,10 @@ const translations: Record<Language, Translations> = {
 			stageUnknown: '未知',
 			stage: {
 				queued: '排队中',
-				source_artifacts_started: '源产物生成中',
-				source_artifacts_completed: '源产物已完成',
-				document_profiles_started: '文档画像生成中',
-				document_profiles_completed: '文档画像已完成',
-				objective_candidates_started: '候选研究目标生成中',
-				objective_candidates_completed: '候选研究目标已生成',
-				objective_paper_skim_started: '扫描文献目标',
-				objective_discovery_started: '合并研究目标',
-				artifacts_ready: '产物已就绪',
+				source_parsing: '正在解析文献',
+				document_profile: '正在识别论文类型',
+				paper_map: '正在梳理研究范围',
+				ready: '已就绪',
 				failed: '失败'
 			},
 			progressUnit: {

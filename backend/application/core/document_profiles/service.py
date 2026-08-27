@@ -105,7 +105,7 @@ class DocumentProfileService:
         self,
         collection_id: str,
         offset: int = 0,
-        limit: int = 50,
+        limit: int = 51,
     ) -> dict[str, Any]:
         profiles = await self.read_document_profiles(collection_id)
         summary = self.summarize_document_profiles(profiles)
@@ -208,6 +208,7 @@ class DocumentProfileService:
         build_id: str | None = None,
     ) -> tuple[DocumentProfile, ...]:
         await self.collection_service.get_collection(collection_id)
+        # Profile reads never regenerate missing build artifacts.
         facts = await self.paper_fact_repository.read(
             collection_id, build_id=build_id
         )

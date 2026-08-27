@@ -201,17 +201,22 @@ class DocumentProfileService:
             "warnings": warnings,
         }
 
+    # define a method that return the document_profile
     async def read_document_profiles(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> tuple[DocumentProfile, ...]:
+        # verifies that the collection exists before reading anything.
         await self.collection_service.get_collection(collection_id)
-        # Profile reads never regenerate missing build artifacts.
+
+        # reads the already-generated PaperFactSet from persistence
         facts = await self.paper_fact_repository.read(
             collection_id, build_id=build_id
         )
+
+        # get the document_profile from the fact container
         if facts.document_profiles:
             return facts.document_profiles
         raise DocumentProfilesNotReadyError(collection_id)

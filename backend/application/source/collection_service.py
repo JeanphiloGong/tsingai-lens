@@ -201,6 +201,8 @@ class CollectionService:
         *,
         status: str,
         preparation_fingerprint: str | None = None,
+        source_fingerprint: str | None = None,
+        profile_fingerprint: str | None = None,
         parser_version: str | None = None,
         document_analysis_version: str | None = None,
     ) -> Document:
@@ -213,6 +215,16 @@ class CollectionService:
                 preparation_fingerprint
                 if preparation_fingerprint is not None
                 else current.preparation_fingerprint
+            ),
+            source_fingerprint=(
+                source_fingerprint
+                if source_fingerprint is not None
+                else current.source_fingerprint
+            ),
+            profile_fingerprint=(
+                profile_fingerprint
+                if profile_fingerprint is not None
+                else current.profile_fingerprint
             ),
             parser_version=(
                 parser_version if parser_version is not None else current.parser_version

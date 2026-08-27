@@ -72,7 +72,9 @@ stores uploaded and extracted bytes. Local files are disposable runtime scratch.
   is `10`.
 - A queued or running task is reused even if a caller asks again.
 - A completed task is reused only when its input fingerprint still matches the
-  Document bytes, parser version, and document-analysis version.
+  Document bytes and all preparation-stage versions.
+- Source and Profile fingerprints allow a retry or downstream version change to
+  resume from the latest valid stage instead of rerunning Docling.
 - Objective analysis validates every frozen fingerprint before reading Source.
   A changed or re-prepared Document makes the old analysis input stale and the
   operation fails instead of mixing versions.

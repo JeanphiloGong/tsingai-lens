@@ -18,6 +18,8 @@ class Document:
     updated_at: str | None = None
     parser_version: str | None = None
     document_analysis_version: str | None = None
+    source_fingerprint: str | None = None
+    profile_fingerprint: str | None = None
     preparation_fingerprint: str | None = None
 
     def to_record(self) -> dict[str, Any]:
@@ -34,6 +36,8 @@ class Document:
             "updated_at": self.updated_at or self.created_at,
             "parser_version": self.parser_version,
             "document_analysis_version": self.document_analysis_version,
+            "source_fingerprint": self.source_fingerprint,
+            "profile_fingerprint": self.profile_fingerprint,
             "preparation_fingerprint": self.preparation_fingerprint,
         }
 

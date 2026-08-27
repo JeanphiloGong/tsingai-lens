@@ -56,7 +56,9 @@ terminal error, and retry-appropriate status.
 At most one `document_preparation` task may be queued or running for a Document.
 Repeated requests reuse that active task. A completed task is reusable only when
 its input fingerprint still matches the current document bytes, parser version,
-and document-analysis version. Different Documents may prepare concurrently.
+Profile version, and Paper Map version. Source, Profile, and final preparation
+fingerprints are tracked separately so a downstream logic change resumes from
+the latest still-valid stage. Different Documents may prepare concurrently.
 One failed or processing Document does not block upload, preparation, Objective
 discovery, or analysis over other ready Documents.
 

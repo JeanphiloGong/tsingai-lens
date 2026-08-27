@@ -112,6 +112,38 @@ async def test_collection_repository_updates_metadata_without_losing_documents(
     assert await collection_repository.read_collection(collection.collection_id) == updated
 
 
+async def test_collection_repository_round_trips_preparation_stage_fingerprints(
+    collection_repository,
+) -> None:
+    collection = _collection("col_stage_fingerprints")
+    document = _document(collection.collection_id, "paper")
+    await collection_repository.add_collection(collection)
+    await collection_repository.add_documents(
+        collection.collection_id,
+        (document,),
+        updated_at=document.created_at,
+    )
+    prepared = replace(
+        document,
+        status="ready",
+        parser_version="source-runtime.v1",
+        document_analysis_version="document-profile.v1+paper-map.v1",
+        source_fingerprint="a" * 64,
+        profile_fingerprint="b" * 64,
+        preparation_fingerprint="c" * 64,
+        updated_at="2026-08-27T00:02:00+00:00",
+    )
+
+    assert await collection_repository.update_document(prepared) is True
+    assert (
+        await collection_repository.read_document(
+            collection.collection_id,
+            document.document_id,
+        )
+        == prepared
+    )
+
+
 async def test_collection_repository_rejects_duplicate_document_content(
     collection_repository,
 ) -> None:

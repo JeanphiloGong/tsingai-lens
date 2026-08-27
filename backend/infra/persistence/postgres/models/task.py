@@ -55,6 +55,9 @@ class Task(Base):
             postgresql_where=text(
                 "document_id IS NOT NULL AND status IN ('queued', 'running')"
             ),
+            sqlite_where=text(
+                "document_id IS NOT NULL AND status IN ('queued', 'running')"
+            ),
         ),
     )
 

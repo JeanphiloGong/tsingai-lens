@@ -18,6 +18,8 @@ upload Document
 `DocumentPreparationService` is the single owner of this sequence. It prepares
 different Documents concurrently while allowing at most one active preparation
 task for the same Document. Failure updates only that Document and task.
+Source, Profile, and final preparation fingerprints form a dependency chain, so
+a failed retry or Paper Map version change resumes from the latest valid stage.
 
 ## Files
 

@@ -32,6 +32,8 @@ class CollectionDocumentResponse(BaseModel):
     updated_at: str = Field(..., description="Last preparation-state update")
     parser_version: str | None = Field(default=None)
     document_analysis_version: str | None = Field(default=None)
+    source_fingerprint: str | None = Field(default=None)
+    profile_fingerprint: str | None = Field(default=None)
     preparation_fingerprint: str | None = Field(default=None)
 
 

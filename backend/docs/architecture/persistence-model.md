@@ -43,8 +43,8 @@ ResearchObjective
 `Collection` is identified by `collection_id` and belongs to one user. It owns
 current Document membership. A Document is identified by `document_id`; its
 filename, storage key, SHA-256, media type, status, parser version,
-document-analysis version, and current preparation fingerprint live on the
-Document record.
+document-analysis version, Source fingerprint, Profile fingerprint, and current
+preparation fingerprint live on the Document record.
 
 There is no public CollectionDocument membership object and no DocumentVersion
 aggregate. A Document is the current paper in the Collection.
@@ -55,14 +55,24 @@ Source, Profile, and Paper Map rows are keyed by `document_id` and cascade when
 that Document is deleted. Each record also stores `collection_id` to enforce and
 query ownership.
 
-The preparation fingerprint is:
+Preparation uses a dependency chain rather than one all-or-nothing cache key:
 
 ```text
-SHA-256(document SHA-256 + parser version + document-analysis version)
+Source fingerprint
+  = SHA-256(document SHA-256 + parser version)
+
+Profile fingerprint
+  = SHA-256(Source fingerprint + Profile version)
+
+Preparation fingerprint
+  = SHA-256(Profile fingerprint + Paper Map version)
 ```
 
-It identifies the exact prepared state used by discovery or analysis. It is not
-a user-visible version and does not create a snapshot hierarchy.
+Changing Paper Map logic therefore reuses Source and Profile; changing Profile
+logic reuses Source; changing document bytes or parser logic invalidates all
+dependent stages. The final preparation fingerprint identifies the exact ready
+state used by discovery or analysis. These values are not user-visible versions
+and do not create a snapshot hierarchy.
 
 ### Task
 

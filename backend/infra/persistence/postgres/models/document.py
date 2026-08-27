@@ -51,6 +51,8 @@ class Document(Base):
     document_analysis_version: Mapped[str | None] = mapped_column(
         String(128), nullable=True
     )
+    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    profile_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     preparation_fingerprint: Mapped[str | None] = mapped_column(
         String(64), nullable=True
     )

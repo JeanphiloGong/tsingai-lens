@@ -46,6 +46,8 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             "collection_id",
             "sha256",
             "status",
+            "source_fingerprint",
+            "profile_fingerprint",
             "preparation_fingerprint",
         }.issubset(
             {

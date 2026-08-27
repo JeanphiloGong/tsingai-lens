@@ -221,6 +221,16 @@ class DocumentProfileService:
             return profiles
         raise DocumentProfilesNotReadyError(collection_id)
 
+    async def read_document_profile(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> DocumentProfile | None:
+        return await self.document_profile_repository.read(
+            collection_id,
+            document_id,
+        )
+
     async def build_document_profile(
         self,
         collection_id: str,

@@ -154,6 +154,8 @@ async def test_normalized_batch_becomes_documents_directly(tmp_path) -> None:
         "updated_at",
         "parser_version",
         "document_analysis_version",
+        "source_fingerprint",
+        "profile_fingerprint",
         "preparation_fingerprint",
     }
     expected = b"Experimental Section\nMix and anneal."

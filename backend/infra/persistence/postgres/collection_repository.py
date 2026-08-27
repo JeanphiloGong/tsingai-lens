@@ -162,6 +162,8 @@ class PostgresCollectionRepository:
             row.size_bytes = record.size_bytes
             row.parser_version = record.parser_version
             row.document_analysis_version = record.document_analysis_version
+            row.source_fingerprint = record.source_fingerprint
+            row.profile_fingerprint = record.profile_fingerprint
             row.preparation_fingerprint = record.preparation_fingerprint
             row.updated_at = _datetime(record.updated_at or record.created_at)
             return True
@@ -209,6 +211,8 @@ def _document_row(
         document_order=document_order,
         parser_version=record.parser_version,
         document_analysis_version=record.document_analysis_version,
+        source_fingerprint=record.source_fingerprint,
+        profile_fingerprint=record.profile_fingerprint,
         preparation_fingerprint=record.preparation_fingerprint,
         created_at=_datetime(record.created_at),
         updated_at=_datetime(record.updated_at or record.created_at),
@@ -229,6 +233,8 @@ def _to_document(row: Document) -> DocumentAggregate:
         updated_at=_iso(row.updated_at),
         parser_version=row.parser_version,
         document_analysis_version=row.document_analysis_version,
+        source_fingerprint=row.source_fingerprint,
+        profile_fingerprint=row.profile_fingerprint,
         preparation_fingerprint=row.preparation_fingerprint,
     )
 

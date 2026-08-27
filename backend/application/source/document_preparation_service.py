@@ -53,27 +53,57 @@ DOCUMENT_ANALYSIS_VERSION = (
     f"{DOCUMENT_PROFILE_PROMPT_VERSION}+{PAPER_SKIM_PROMPT_VERSION}+"
     f"{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
 )
+PAPER_MAP_VERSION = (
+    f"{PAPER_SKIM_PROMPT_VERSION}+{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
+)
 _DEFAULT_PREPARATION_CONCURRENCY = 10
 
 SourceArtifactBuilder = Callable[..., Awaitable[list[Any]]]
 
 
-def preparation_fingerprint(
-    *,
-    sha256: str,
-    parser_version: str,
-    document_analysis_version: str,
-) -> str:
+def _stage_fingerprint(stage: str, **values: str) -> str:
     payload = json.dumps(
-        {
-            "document_sha256": str(sha256),
-            "parser_version": str(parser_version),
-            "document_analysis_version": str(document_analysis_version),
-        },
+        {"stage": stage, **values},
         sort_keys=True,
         separators=(",", ":"),
     )
     return hash_sha256(payload.encode("utf-8")).hexdigest()
+
+
+def source_fingerprint(
+    *,
+    sha256: str,
+    parser_version: str,
+) -> str:
+    return _stage_fingerprint(
+        "source",
+        document_sha256=str(sha256),
+        parser_version=str(parser_version),
+    )
+
+
+def profile_fingerprint(
+    *,
+    source_fingerprint: str,
+    profile_version: str,
+) -> str:
+    return _stage_fingerprint(
+        "profile",
+        source_fingerprint=str(source_fingerprint),
+        profile_version=str(profile_version),
+    )
+
+
+def paper_map_fingerprint(
+    *,
+    profile_fingerprint: str,
+    paper_map_version: str,
+) -> str:
+    return _stage_fingerprint(
+        "paper_map",
+        profile_fingerprint=str(profile_fingerprint),
+        paper_map_version=str(paper_map_version),
+    )
 
 
 class DocumentPreparationService:
@@ -161,7 +191,9 @@ class DocumentPreparationService:
                 collection_id,
                 document_id,
             )
-            fingerprint = self.fingerprint_for(document)
+            source_identity, profile_identity, fingerprint = self.fingerprints_for(
+                document
+            )
             await self.task_service.update_task(
                 task_id,
                 status="running",
@@ -179,22 +211,37 @@ class DocumentPreparationService:
                 status="processing",
             )
             try:
-                source_document = await self._parse_document(
+                source_document = await self.source_artifact_repository.read_document(
                     collection_id,
-                    document,
-                    mode=mode,
-                )
-                await self.source_artifact_repository.replace_document(
-                    collection_id,
-                    source_document,
-                )
-                references = SourceReferenceExtractionService().extract(
-                    (source_document,)
-                )
-                await self.source_artifact_repository.replace_document_references(
                     document_id,
-                    references,
                 )
+                if (
+                    source_document is None
+                    or document.source_fingerprint != source_identity
+                ):
+                    source_document = await self._parse_document(
+                        collection_id,
+                        document,
+                        mode=mode,
+                    )
+                    await self.source_artifact_repository.replace_document(
+                        collection_id,
+                        source_document,
+                    )
+                    references = SourceReferenceExtractionService().extract(
+                        (source_document,)
+                    )
+                    await self.source_artifact_repository.replace_document_references(
+                        document_id,
+                        references,
+                    )
+                    document = await self.collection_service.update_document_preparation(
+                        collection_id,
+                        document_id,
+                        status="processing",
+                        source_fingerprint=source_identity,
+                        parser_version=SOURCE_PARSER_VERSION,
+                    )
                 await self.task_service.update_task(
                     task_id,
                     current_stage="document_profile",
@@ -205,10 +252,20 @@ class DocumentPreparationService:
                         "message": "Classifying the paper for research triage.",
                     },
                 )
-                profile = await self.document_profile_service.build_document_profile(
-                    collection_id,
-                    document_id,
+                profile = await self.document_profile_service.read_document_profile(
+                    collection_id, document_id
                 )
+                if profile is None or document.profile_fingerprint != profile_identity:
+                    profile = await self.document_profile_service.build_document_profile(
+                        collection_id,
+                        document_id,
+                    )
+                    document = await self.collection_service.update_document_preparation(
+                        collection_id,
+                        document_id,
+                        status="processing",
+                        profile_fingerprint=profile_identity,
+                    )
                 await self.task_service.update_task(
                     task_id,
                     current_stage="paper_map",
@@ -219,27 +276,33 @@ class DocumentPreparationService:
                         "message": "Mapping the paper's research scope.",
                     },
                 )
-                response_client = self._get_response_client()
-                paper_map = await to_thread(
-                    self.paper_skim_service.build_document_paper_map,
-                    collection_id,
-                    document=source_document,
-                    profile=profile,
-                    document_tree=(
-                        await self.source_artifact_repository.read_document_tree(
-                            collection_id,
-                            document_id,
-                        )
-                    ),
-                    study_window_extractor=PaperStudyWindowExtractor(response_client),
-                    signal_reconciler=PaperSignalReconciler(response_client),
+                paper_map = await self.paper_map_repository.read(
+                    collection_id, document_id
                 )
-                await self.paper_map_repository.replace(collection_id, paper_map)
+                if paper_map is None or document.preparation_fingerprint != fingerprint:
+                    response_client = self._get_response_client()
+                    paper_map = await to_thread(
+                        self.paper_skim_service.build_document_paper_map,
+                        collection_id,
+                        document=source_document,
+                        profile=profile,
+                        document_tree=(
+                            await self.source_artifact_repository.read_document_tree(
+                                collection_id,
+                                document_id,
+                            )
+                        ),
+                        study_window_extractor=PaperStudyWindowExtractor(response_client),
+                        signal_reconciler=PaperSignalReconciler(response_client),
+                    )
+                    await self.paper_map_repository.replace(collection_id, paper_map)
                 await self.collection_service.update_document_preparation(
                     collection_id,
                     document_id,
                     status="ready",
                     preparation_fingerprint=fingerprint,
+                    source_fingerprint=source_identity,
+                    profile_fingerprint=profile_identity,
                     parser_version=SOURCE_PARSER_VERSION,
                     document_analysis_version=DOCUMENT_ANALYSIS_VERSION,
                 )
@@ -282,10 +345,25 @@ class DocumentPreparationService:
 
     @staticmethod
     def fingerprint_for(document: Document) -> str:
-        return preparation_fingerprint(
+        return DocumentPreparationService.fingerprints_for(document)[2]
+
+    @staticmethod
+    def fingerprints_for(document: Document) -> tuple[str, str, str]:
+        source_identity = source_fingerprint(
             sha256=document.sha256,
             parser_version=SOURCE_PARSER_VERSION,
-            document_analysis_version=DOCUMENT_ANALYSIS_VERSION,
+        )
+        profile_identity = profile_fingerprint(
+            source_fingerprint=source_identity,
+            profile_version=DOCUMENT_PROFILE_PROMPT_VERSION,
+        )
+        return (
+            source_identity,
+            profile_identity,
+            paper_map_fingerprint(
+                profile_fingerprint=profile_identity,
+                paper_map_version=PAPER_MAP_VERSION,
+            ),
         )
 
     async def _parse_document(
@@ -408,6 +486,9 @@ class DocumentPreparationService:
 __all__ = [
     "DOCUMENT_ANALYSIS_VERSION",
     "DocumentPreparationService",
+    "PAPER_MAP_VERSION",
     "SOURCE_PARSER_VERSION",
-    "preparation_fingerprint",
+    "paper_map_fingerprint",
+    "profile_fingerprint",
+    "source_fingerprint",
 ]

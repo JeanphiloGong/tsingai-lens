@@ -62,6 +62,7 @@ from domain.core import (
     ResearchObjective,
     is_question_shaped_objective,
 )
+from domain.core.document_profile import DocumentProfile
 from domain.ports import (
     ObjectiveRepository,
     PaperFactRepository,
@@ -139,6 +140,7 @@ class ResearchObjectiveService:
         self.paper_skim_service = paper_skim_service
         self.objective_candidate_service = objective_candidate_service
 
+    # define a main method for turning a completed collection build into candidate research objectives
     async def discover_and_replace_objective_candidates(
         self,
         collection_id: str,
@@ -146,6 +148,20 @@ class ResearchObjectiveService:
         *,
         build_id: str,
     ) -> ObjectiveFactSet:
+        """
+        Load one immutable collection build
+         -> map each paper
+         -> persist an incomplete checkpoint
+         -> aggregate relationships across papers
+         -> persist completed Objective candidates
+        Args:
+            collection_id: the collection being studied
+            build_id: exact immutable Source build to analyse
+            progress_callback: reports progress to the collection task
+        Returns:
+            ObjectiveFactSet: containing PaperSkims, candidate Objectives, and relationship dispositions.
+        """
+        # load scientific inputs
         source_inputs = await self._load_objective_source_inputs(
             collection_id,
             build_id=build_id,
@@ -442,22 +458,46 @@ class ResearchObjectiveService:
             }
         raise ResearchObjectivesNotReadyError(collection_id)
 
+    # define a helper that loads one consistent collection build and prepare the data structures required by both Objective discovery and confirmed-Objective analysis
     async def _load_objective_source_inputs(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> dict[str, Any]:
-        await self.collection_service.get_collection(collection_id)
+        """
+        Args:
+            collection_id: identifies the literature collection
+            build_id: selects one particulat parsed version of that collection
+        Returns:
+            returns a heterogeneous dictionary containing several data types
+        """
+        # load document profile
         try:
-            documents = await self._load_source_documents(
-                collection_id, build_id=build_id
-            )
-            profiles = await self.document_profile_service.read_document_profiles(
+            # Profiles answer paper-level class ification questions
+            # 1. Is this an experimental paper?
+            # 2. Is it a review?
+            # 3. Was parsing uncertain?
+            # 4. What is the profile confidence
+            profiles: tuple[DocumentProfile, ...] = await self.document_profile_service.read_document_profiles(
                 collection_id,
                 build_id=build_id,
             )
-        except (FileNotFoundError, DocumentProfilesNotReadyError) as exc:
+        except DocumentProfilesNotReadyError as exc:
+            raise ResearchObjectivesNotReadyError(collection_id) from exc
+
+        # Load parsed documents
+        try:
+            # Each SourceDocument contains the parsed paper and its Source objects:
+            # 1.blocks
+            # 2.tables
+            # 3.table rows
+            # 4.table cells
+            # 5.figures
+            documents = await self._load_source_documents(
+                collection_id, build_id=build_id
+            )
+        except FileNotFoundError as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
         document_trees_by_document_id = {

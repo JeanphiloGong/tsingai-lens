@@ -1,6 +1,6 @@
 """Domain layer exports."""
 
-from domain.source import ArtifactStatusRecord, CollectionRecord, empty_import_manifest
+from domain.source import ArtifactStatusRecord, Collection, Document
 from domain.ports import (
     BuildRepository,
     CollectionPaths,
@@ -12,8 +12,8 @@ __all__ = [
     "ArtifactStatusRecord",
     "BuildRepository",
     "CollectionPaths",
-    "CollectionRecord",
+    "Collection",
     "CollectionRepository",
     "SourceArtifactRepository",
-    "empty_import_manifest",
+    "Document",
 ]

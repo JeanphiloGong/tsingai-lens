@@ -19,9 +19,7 @@ from application.source.document_markdown_service import DocumentMarkdownService
 from controllers.core import documents as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
-    CollectionFileRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
+    Document,
     source_documents_from_records,
 )
 from infra.source.ingestion.normalized_import import (
@@ -371,7 +369,7 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     assert exc.detail["collection_id"] == record["collection_id"]
 
 
-async def test_document_source_route_streams_manifest_source_file(document_services):
+async def test_document_source_route_streams_current_collection_document(document_services):
     (
         collection_service,
         _document_profile_service,
@@ -380,7 +378,7 @@ async def test_document_source_route_streams_manifest_source_file(document_servi
     record = await collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
     payload = b"%PDF-1.4\nfixture\n"
-    await collection_service.import_normalized_batch(
+    documents = await collection_service.import_normalized_batch(
         collection_id,
         NormalizedImportBatch(
             documents=(
@@ -404,7 +402,7 @@ async def test_document_source_route_streams_manifest_source_file(document_servi
 
     response = await documents_controller.get_collection_document_source(
             collection_id,
-            "paper-1",
+            documents[0]["document_id"],
             _document_request(document_services),
         )
 
@@ -473,7 +471,7 @@ async def test_document_source_route_resolves_profile_document_id_by_source_file
     assert response.media_type == "application/pdf"
 
 
-async def test_document_source_route_returns_409_when_source_is_unavailable(
+async def test_document_source_route_returns_404_when_document_is_missing(
     document_services,
 ):
     (
@@ -491,12 +489,12 @@ async def test_document_source_route_returns_409_when_source_is_unavailable(
             )
 
     exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "document_source_unavailable"
+    assert exc.status_code == 404
+    assert exc.detail["code"] == "document_not_found"
     assert exc.detail["document_id"] == "paper-1"
 
 
-async def test_document_source_route_rejects_manifest_path_outside_collection(
+async def test_document_source_route_rejects_path_outside_collection(
     document_services,
 ):
     (
@@ -506,11 +504,8 @@ async def test_document_source_route_rejects_manifest_path_outside_collection(
     ) = document_services
     record = await collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
-    unsafe_file = CollectionFileRecord(
-        file_id="file_unsafe",
-        collection_id=collection_id,
-        object_id="obj_unsafe",
-        object_kind="source_input",
+    unsafe_document = Document(
+        document_id="paper-1",
         original_filename="paper-1.pdf",
         stored_filename="outside.pdf",
         storage_key="../outside.pdf",
@@ -520,29 +515,10 @@ async def test_document_source_route_rejects_manifest_path_outside_collection(
         size_bytes=len(b"outside"),
         created_at="2026-07-19T00:00:00+00:00",
     )
-    await collection_service.repository.add_collection_import(
-        CollectionImportRecord(
-            import_id="imp_unsafe",
-            collection_id=collection_id,
-            channel="upload",
-            adapter_name="upload",
-            adapter_version=None,
-            raw_locator="paper-1.pdf",
-            goal_context=None,
-            warnings=(),
-            ingested_at=unsafe_file.created_at,
-            documents=(
-                CollectionImportDocumentRecord(
-                    source_document_id="paper-1",
-                    origin_channel="upload",
-                    file=unsafe_file,
-                    language=None,
-                    ingest_status="normalized",
-                    text_units=(),
-                ),
-            ),
-        ),
-        updated_at=unsafe_file.created_at,
+    await collection_service.repository.add_documents(
+        collection_id,
+        (unsafe_document,),
+        updated_at=unsafe_document.created_at,
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -572,11 +548,8 @@ async def test_document_source_route_rejects_another_collections_storage_key(
     storage_key = f"{second['collection_id']}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
     collection_service.object_store.write(storage_key, payload, digest)
-    foreign_file = CollectionFileRecord(
-        file_id="file_foreign_key",
-        collection_id=first["collection_id"],
-        object_id="obj_foreign_key",
-        object_kind="source_input",
+    foreign_document = Document(
+        document_id="paper-1",
         original_filename="paper-2.pdf",
         stored_filename="paper-2.pdf",
         storage_key=storage_key,
@@ -586,29 +559,10 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         size_bytes=len(payload),
         created_at="2026-07-19T00:00:00+00:00",
     )
-    await collection_service.repository.add_collection_import(
-        CollectionImportRecord(
-            import_id="imp_foreign_key",
-            collection_id=first["collection_id"],
-            channel="upload",
-            adapter_name="upload",
-            adapter_version=None,
-            raw_locator="paper-2.pdf",
-            goal_context=None,
-            warnings=(),
-            ingested_at=foreign_file.created_at,
-            documents=(
-                CollectionImportDocumentRecord(
-                    source_document_id="paper-1",
-                    origin_channel="upload",
-                    file=foreign_file,
-                    language=None,
-                    ingest_status="normalized",
-                    text_units=(),
-                ),
-            ),
-        ),
-        updated_at=foreign_file.created_at,
+    await collection_service.repository.add_documents(
+        first["collection_id"],
+        (foreign_document,),
+        updated_at=foreign_document.created_at,
     )
 
     with pytest.raises(HTTPException) as exc_info:

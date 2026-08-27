@@ -10,10 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from domain.source import (
-    CollectionFileRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
-    CollectionRecord,
+    Collection,
+    Document,
     assemble_source_documents,
     SourceBlock,
     SourceDocument,
@@ -71,19 +69,21 @@ async def source_repositories(postgres_session_factory):
     )
     collections = PostgresCollectionRepository(sessions)
     await collections.add_collection(
-        CollectionRecord(
+        Collection(
             collection_id="col_source",
             owner_user_id="user_source",
             name="Source collection",
             description=None,
             status="idle",
-            paper_count=0,
             created_at=NOW,
             updated_at=NOW,
+            documents=(),
         )
     )
-    await collections.add_collection_import(
-        _collection_import("stored-paper.pdf"), updated_at=NOW
+    await collections.add_documents(
+        "col_source",
+        (_collection_document("stored-paper.pdf"),),
+        updated_at=NOW,
     )
     return (
         PostgresSourceArtifactRepository(sessions),
@@ -91,14 +91,11 @@ async def source_repositories(postgres_session_factory):
     )
 
 
-def _collection_import(stored_filename: str) -> CollectionImportRecord:
+def _collection_document(stored_filename: str) -> Document:
     digest = sha256(stored_filename.encode("utf-8")).hexdigest()
     suffix = digest[:12]
-    file = CollectionFileRecord(
-        file_id=f"file_{suffix}",
-        collection_id="col_source",
-        object_id=f"obj_{suffix}",
-        object_kind="source_input",
+    return Document(
+        document_id=f"doc_{suffix}",
         original_filename="paper.pdf",
         stored_filename=stored_filename,
         storage_key=f"col_source/input/{stored_filename}",
@@ -107,27 +104,6 @@ def _collection_import(stored_filename: str) -> CollectionImportRecord:
         status="stored",
         size_bytes=100,
         created_at=NOW,
-    )
-    return CollectionImportRecord(
-        import_id=f"imp_{suffix}",
-        collection_id="col_source",
-        channel="upload",
-        adapter_name="upload",
-        adapter_version=None,
-        raw_locator="paper.pdf",
-        goal_context=None,
-        warnings=(),
-        ingested_at=NOW,
-        documents=(
-            CollectionImportDocumentRecord(
-                source_document_id=f"srcdoc_{suffix}",
-                origin_channel="upload",
-                file=file,
-                language=None,
-                ingest_status="normalized",
-                text_units=(),
-            ),
-        ),
     )
 
 
@@ -620,7 +596,7 @@ async def test_source_repository_rejects_unresolved_document_and_orphan_links(
     await builds.add_task(task, build_id="build_invalid")
     document = _artifacts()[0]
     bad_document = replace(document, metadata={"source_path": "missing.pdf"})
-    with pytest.raises(ValueError, match="exactly one collection file"):
+    with pytest.raises(ValueError, match="exactly one collection document"):
         await repository.replace_collection_documents(
             "col_source",
             "build_invalid",
@@ -652,8 +628,9 @@ async def test_source_repository_rejects_cross_document_and_orphan_reference_lin
     await builds.add_task(task, build_id=build_id)
     await PostgresCollectionRepository(
         repository.session_factory
-    ).add_collection_import(
-        _collection_import("stored-other.pdf"),
+    ).add_documents(
+        "col_source",
+        (_collection_document("stored-other.pdf"),),
         updated_at=NOW,
     )
     first = _artifacts()

@@ -15,7 +15,7 @@ This node owns browser-side helpers shared across frontend routes.
 
 - `api.ts`
   Base request helpers and shared HTTP error behavior.
-- `collections.ts`, `files.ts`, `tasks.ts`
+- `collections.ts`, `collectionDocuments.ts`, `tasks.ts`
   Collection import, build, and progress contracts.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads

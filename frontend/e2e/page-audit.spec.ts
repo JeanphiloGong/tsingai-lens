@@ -553,7 +553,7 @@ async function mockApis(page: Page) {
 			return route.fulfill(json(collection(auditState)));
 		if (path === `/api/v1/collections/${collectionId}/workspace`)
 			return route.fulfill(json(workspace(auditState)));
-		if (path === `/api/v1/collections/${collectionId}/files`) {
+		if (path === `/api/v1/collections/${collectionId}/documents`) {
 			return route.fulfill(json({ count: 1, items: [uploadedFile()] }));
 		}
 		if (path === `/api/v1/collections/${collectionId}/tasks/build`) {
@@ -931,11 +931,11 @@ function workspace(auditState?: string | null) {
 
 function uploadedFile() {
 	return {
-		file_id: 'file_1',
-		collection_id: collectionId,
+		document_id: 'doc_1',
 		original_filename: 'paper-a.pdf',
 		stored_filename: 'paper-a.pdf',
-		stored_path: '/tmp/paper-a.pdf',
+		storage_key: `${collectionId}/input/paper-a.pdf`,
+		sha256: 'a'.repeat(64),
 		media_type: 'application/pdf',
 		status: 'uploaded',
 		size_bytes: 2048,

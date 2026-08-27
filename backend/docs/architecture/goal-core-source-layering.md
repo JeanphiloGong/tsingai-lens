@@ -38,8 +38,8 @@ logic attempts to define system facts directly.
 
 ## Scope
 
-This proposal covers backend-local layering, dependency direction, and
-collection handoff semantics.
+This proposal covers backend-local layering, dependency direction, and the
+collection boundary shared by those layers.
 
 It does not:
 
@@ -156,10 +156,12 @@ Boundary rules:
 - these surfaces consume or derive from Core artifacts
 - they must not redefine the primary system facts
 
-### Collections And Indexing As Handoff Seams
+### Collection As The Shared Input Boundary
 
-The collection object is the shared handoff unit between Goal Brief, Source &
-Collection Builder, and the Core.
+The `Collection` aggregate and its current `Document` members are the shared
+input between Goal Brief, Source & Collection Builder, and the Core. Goal intake
+creates an empty Collection directly. Upload and future acquisition channels
+add Documents directly; no separate handoff or import-manifest record exists.
 
 Indexing is a pipeline orchestrator, not a product-facing layer. Its role is to
 coordinate artifact build from collection inputs into Core outputs and optional
@@ -175,8 +177,9 @@ Current contract-freeze target for the five-layer model:
 - the current `coverage_assessment` field on `goals/intake` is only a coarse
   intake-side hint for collection building, not the final Goal Consumer
   coverage assessment
-- Source & Collection Builder handoff should converge on normalized import
-  units such as `documents`, `text_units`, and `source_metadata`
+- Source & Collection Builder writes current `Document` members through the
+  Collection service; parsing later derives Source text and structure during a
+  build
 - Core remains the only layer that may emit:
   `document_profiles`, paper facts, `evidence_cards`,
   `comparable_results`, `collection_comparable_results`, downstream
@@ -207,8 +210,8 @@ Readiness semantics remain Core-owned:
 
 ### Still Missing Or Blurred
 
-- Source & Collection Builder does not yet expose one explicit normalized
-  handoff seam across upload, search, crawler, and goal-seeding paths
+- search and crawler acquisition channels do not yet add `Document` members
+  through the same Collection service used by upload
 - the current `goals/intake` surface is easy to misread as the full Goal
   layer, even though it is only the briefing side
 - a true Goal Consumer / Decision Layer over Core outputs does not exist yet
@@ -246,8 +249,8 @@ Controller implications:
 1. Keep hardening the Core backbone so real collections reliably emit
    `document_profiles`, `evidence_cards`, and the comparable-result substrate
    with row projection downstream.
-2. Harden the Source & Collection Builder seam so upload, search, crawler, and
-   goal seeding converge on one collection handoff shape.
+2. Make future search and crawler channels add the same `Document` objects to
+   the Collection aggregate as upload.
 3. Keep Goal Brief / Intake intentionally thin and explicit.
 4. Add a true Goal Consumer / Decision layer over Core outputs.
 5. Keep graph semantics downstream of the Core.

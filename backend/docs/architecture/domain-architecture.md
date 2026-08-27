@@ -48,12 +48,12 @@ For Lens v1, backend code should reflect the actual business loop:
 
 ### Collections
 
-Owns collection lifecycle and file membership:
+Owns collection lifecycle and its current documents:
 
 - create collection
 - list collections
 - read collection metadata
-- upload and list files
+- upload and list documents
 - delete collection
 
 ### Indexing

@@ -119,9 +119,8 @@ describe('collections/[id]/+page.svelte', () => {
 			if (url.pathname === '/api/v1/collections/col_123/workspace') {
 				return jsonResponse(workspacePayload);
 			}
-			if (url.pathname === '/api/v1/collections/col_123/files') {
+			if (url.pathname === '/api/v1/collections/col_123/documents') {
 				return jsonResponse({
-					count: 0,
 					items: []
 				});
 			}

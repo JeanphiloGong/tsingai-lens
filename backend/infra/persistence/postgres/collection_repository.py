@@ -4,28 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.source import (
-    CollectionDocumentRecord,
-    CollectionFileRecord,
-    CollectionHandoffRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
-    CollectionRecord,
-    DocumentRecord,
-    DocumentVersionRecord,
-    collection_document_identity,
-    document_identity_for_sha256,
-)
+from domain.source import Collection as CollectionAggregate
+from domain.source import Document as CollectionDocumentData
 from infra.persistence.postgres.models.collection import (
     Collection,
     CollectionFile,
-    CollectionHandoff,
-    CollectionImport,
-    CollectionImportDocument,
     StoredObject,
 )
 from infra.persistence.postgres.models.build import CollectionBuild
@@ -78,7 +66,7 @@ class PostgresCollectionRepository:
     ) -> None:
         self.session_factory = session_factory
 
-    async def add_collection(self, record: CollectionRecord) -> None:
+    async def add_collection(self, record: CollectionAggregate) -> None:
         async with self.session_factory.begin() as session:
             session.add(
                 Collection(
@@ -96,22 +84,34 @@ class PostgresCollectionRepository:
     async def list_collections(
         self,
         owner_user_id: str | None = None,
-    ) -> tuple[CollectionRecord, ...]:
+    ) -> tuple[CollectionAggregate, ...]:
         statement = select(Collection).order_by(Collection.collection_id)
         if owner_user_id is not None:
             statement = statement.where(Collection.owner_user_id == owner_user_id)
         async with self.session_factory() as session:
-            rows = await session.scalars(statement)
-            return tuple(_to_record(row) for row in rows)
+            rows = tuple(await session.scalars(statement))
+            records: list[CollectionAggregate] = []
+            for row in rows:
+                documents = await _documents_for_collection(
+                    session,
+                    row.collection_id,
+                )
+                records.append(_to_record(row, documents))
+            return tuple(records)
 
     async def read_collection(
         self, collection_id: str
-    ) -> CollectionRecord | None:
+    ) -> CollectionAggregate | None:
         async with self.session_factory() as session:
             row = await session.get(Collection, collection_id)
-            return _to_record(row) if row is not None else None
+            if row is None:
+                return None
+            return _to_record(
+                row,
+                await _documents_for_collection(session, collection_id),
+            )
 
-    async def update_collection(self, record: CollectionRecord) -> bool:
+    async def update_collection(self, record: CollectionAggregate) -> bool:
         async with self.session_factory.begin() as session:
             row = await session.get(Collection, record.collection_id)
             if row is None:
@@ -125,84 +125,67 @@ class PostgresCollectionRepository:
             row.updated_at = _datetime(record.updated_at)
             return True
 
-    async def add_collection_import(
+    async def add_documents(
         self,
-        record: CollectionImportRecord,
+        collection_id: str,
+        documents: tuple[CollectionDocumentData, ...],
         *,
         updated_at: str,
     ) -> None:
-        if not record.documents:
-            raise ValueError("collection import must include at least one document")
-        if any(
-            document.file.collection_id != record.collection_id
-            for document in record.documents
-        ):
-            raise ValueError("collection import file belongs to another collection")
+        if not documents:
+            raise ValueError("at least one document is required")
 
         async with self.session_factory.begin() as session:
             collection = await session.get(
                 Collection,
-                record.collection_id,
+                collection_id,
                 with_for_update=True,
             )
             if collection is None:
-                raise FileNotFoundError(f"collection not found: {record.collection_id}")
+                raise FileNotFoundError(f"collection not found: {collection_id}")
+            existing_documents = await _documents_for_collection(
+                session,
+                collection_id,
+            )
+            existing_ids = {
+                document.document_id for document in existing_documents
+            }
+            existing_hashes = {document.sha256 for document in existing_documents}
+            document_ids = [document.document_id for document in documents]
+            document_hashes = [document.sha256 for document in documents]
+            if len(set(document_ids)) != len(document_ids) or any(
+                document_id in existing_ids for document_id in document_ids
+            ):
+                raise ValueError("document already exists")
+            if len(set(document_hashes)) != len(document_hashes) or any(
+                digest in existing_hashes for digest in document_hashes
+            ):
+                raise ValueError("document content already exists in collection")
             next_file_order = (
                 int(
                     await session.scalar(
                         select(
                             func.coalesce(func.max(CollectionFile.file_order), -1)
-                        ).where(CollectionFile.collection_id == record.collection_id)
+                        ).where(CollectionFile.collection_id == collection_id)
                     )
                 )
                 + 1
-            )
-            next_import_order = (
-                int(
-                    await session.scalar(
-                        select(
-                            func.coalesce(func.max(CollectionImport.import_order), -1)
-                        ).where(CollectionImport.collection_id == record.collection_id)
-                    )
-                )
-                + 1
-            )
-
-            session.add(
-                CollectionImport(
-                    import_id=record.import_id,
-                    collection_id=record.collection_id,
-                    channel=record.channel,
-                    adapter_name=record.adapter_name,
-                    adapter_version=record.adapter_version,
-                    raw_locator=record.raw_locator,
-                    goal_context=(
-                        dict(record.goal_context)
-                        if record.goal_context is not None
-                        else None
-                    ),
-                    warnings=list(record.warnings),
-                    ingested_at=_datetime(record.ingested_at),
-                    import_order=next_import_order,
-                )
             )
             object_rows: list[StoredObject] = []
             file_rows: list[CollectionFile] = []
-            document_rows: list[CollectionImportDocument] = []
-            for document_order, document in enumerate(record.documents):
-                file_record = document.file
-                document_id, document_version_id = document_identity_for_sha256(
-                    file_record.sha256
+            for document_order, document in enumerate(documents):
+                canonical_document_id, document_version_id = _content_identity(
+                    document.sha256
                 )
-                collection_document_id = collection_document_identity(
-                    record.collection_id,
-                    document_id,
+                membership_id = _membership_identity(
+                    collection_id,
+                    canonical_document_id,
                 )
-                if await session.get(Document, document_id) is None:
+                if await session.get(Document, canonical_document_id) is None:
                     session.add(
                         Document(
-                            document_id=document_id,
-                            created_at=_datetime(file_record.created_at),
+                            document_id=canonical_document_id,
+                            created_at=_datetime(document.created_at),
                         )
                     )
                 if (
@@ -212,64 +195,52 @@ class PostgresCollectionRepository:
                     session.add(
                         DocumentVersion(
                             document_version_id=document_version_id,
-                            document_id=document_id,
-                            sha256=file_record.sha256,
-                            media_type=file_record.media_type,
-                            created_at=_datetime(file_record.created_at),
+                            document_id=canonical_document_id,
+                            sha256=document.sha256,
+                            media_type=document.media_type,
+                            created_at=_datetime(document.created_at),
                         )
                     )
                 if (
                     await session.get(
-                        CollectionDocument, collection_document_id
+                        CollectionDocument, membership_id
                     )
                     is None
                 ):
                     session.add(
                         CollectionDocument(
-                            collection_document_id=collection_document_id,
-                            collection_id=record.collection_id,
-                            document_id=document_id,
+                            collection_document_id=membership_id,
+                            collection_id=collection_id,
+                            document_id=canonical_document_id,
                             document_version_id=document_version_id,
-                            created_at=_datetime(file_record.created_at),
+                            created_at=_datetime(document.created_at),
                         )
                     )
+                object_id = _object_identity(document.document_id)
                 object_rows.append(
                     StoredObject(
-                        object_id=file_record.object_id,
-                        object_kind=file_record.object_kind,
-                        storage_key=file_record.storage_key,
-                        sha256=file_record.sha256,
-                        size_bytes=file_record.size_bytes,
-                        media_type=file_record.media_type,
+                        object_id=object_id,
+                        object_kind="source_input",
+                        storage_key=document.storage_key,
+                        sha256=document.sha256,
+                        size_bytes=document.size_bytes,
+                        media_type=document.media_type,
                         document_version_id=document_version_id,
-                        created_at=_datetime(file_record.created_at),
+                        created_at=_datetime(document.created_at),
                     )
                 )
                 file_rows.append(
                     CollectionFile(
-                        file_id=file_record.file_id,
-                        collection_id=file_record.collection_id,
-                        object_id=file_record.object_id,
-                        collection_document_id=collection_document_id,
-                        original_filename=file_record.original_filename,
-                        stored_filename=file_record.stored_filename,
-                        status=file_record.status,
-                        document_id=file_record.document_id,
+                        file_id=document.document_id,
+                        collection_id=collection_id,
+                        object_id=object_id,
+                        collection_document_id=membership_id,
+                        original_filename=document.original_filename,
+                        stored_filename=document.stored_filename,
+                        status=document.status,
+                        document_id=document.document_id,
                         file_order=next_file_order + document_order,
-                        created_at=_datetime(file_record.created_at),
-                    )
-                )
-                document_rows.append(
-                    CollectionImportDocument(
-                        file_id=file_record.file_id,
-                        collection_id=record.collection_id,
-                        import_id=record.import_id,
-                        source_document_id=document.source_document_id,
-                        origin_channel=document.origin_channel,
-                        language=document.language,
-                        ingest_status=document.ingest_status,
-                        text_units=[dict(item) for item in document.text_units],
-                        document_order=document_order,
+                        created_at=_datetime(document.created_at),
                     )
                 )
 
@@ -277,158 +248,15 @@ class PostgresCollectionRepository:
             await session.flush()
             session.add_all(file_rows)
             await session.flush()
-            session.add_all(document_rows)
-
-            await session.flush()
             collection.paper_count = int(
                 await session.scalar(
-                    select(func.count(CollectionDocument.collection_document_id)).where(
-                        CollectionDocument.collection_id == record.collection_id
+                    select(func.count(CollectionFile.file_id)).where(
+                        CollectionFile.collection_id == collection_id
                     )
                 )
             )
             collection.status = "ready"
             collection.updated_at = _datetime(updated_at)
-
-    async def read_document(
-        self, document_id: str
-    ) -> DocumentRecord | None:
-        async with self.session_factory() as session:
-            row = await session.get(Document, document_id)
-            return _to_document_record(row) if row is not None else None
-
-    async def read_document_version(
-        self,
-        document_version_id: str,
-    ) -> DocumentVersionRecord | None:
-        async with self.session_factory() as session:
-            row = await session.get(DocumentVersion, document_version_id)
-            return _to_document_version_record(row) if row is not None else None
-
-    async def list_collection_documents(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionDocumentRecord, ...]:
-        statement = (
-            select(CollectionDocument)
-            .where(CollectionDocument.collection_id == collection_id)
-            .order_by(
-                CollectionDocument.created_at,
-                CollectionDocument.collection_document_id,
-            )
-        )
-        async with self.session_factory() as session:
-            rows = await session.scalars(statement)
-            return tuple(
-                _to_collection_document_record(row)
-                for row in rows
-            )
-
-    async def list_collection_files(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionFileRecord, ...]:
-        statement = (
-            select(CollectionFile, StoredObject)
-            .join(StoredObject, CollectionFile.object_id == StoredObject.object_id)
-            .where(CollectionFile.collection_id == collection_id)
-            .order_by(CollectionFile.file_order)
-        )
-        async with self.session_factory() as session:
-            rows = await session.execute(statement)
-            return tuple(
-                _to_file_record(file_row, object_row)
-                for file_row, object_row in rows
-            )
-
-    async def list_collection_imports(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionImportRecord, ...]:
-        import_statement = (
-            select(CollectionImport)
-            .where(CollectionImport.collection_id == collection_id)
-            .order_by(CollectionImport.import_order)
-        )
-        document_statement = (
-            select(CollectionImportDocument, CollectionFile, StoredObject)
-            .join(
-                CollectionFile,
-                CollectionImportDocument.file_id == CollectionFile.file_id,
-            )
-            .join(StoredObject, CollectionFile.object_id == StoredObject.object_id)
-            .where(CollectionImportDocument.collection_id == collection_id)
-            .order_by(
-                CollectionImportDocument.import_id,
-                CollectionImportDocument.document_order,
-            )
-        )
-        async with self.session_factory() as session:
-            import_rows = tuple(await session.scalars(import_statement))
-            documents_by_import: dict[
-                str,
-                list[CollectionImportDocumentRecord],
-            ] = {}
-            for document_row, file_row, object_row in await session.execute(
-                document_statement
-            ):
-                documents_by_import.setdefault(document_row.import_id, []).append(
-                    _to_import_document(document_row, file_row, object_row)
-                )
-            return tuple(
-                _to_import_record(
-                    import_row,
-                    tuple(documents_by_import.get(import_row.import_id, ())),
-                )
-                for import_row in import_rows
-            )
-
-    async def add_collection_handoff(
-        self, record: CollectionHandoffRecord
-    ) -> None:
-        async with self.session_factory.begin() as session:
-            collection = await session.get(
-                Collection,
-                record.collection_id,
-                with_for_update=True,
-            )
-            if collection is None:
-                raise FileNotFoundError(f"collection not found: {record.collection_id}")
-            next_handoff_order = (
-                int(
-                    await session.scalar(
-                        select(
-                            func.coalesce(func.max(CollectionHandoff.handoff_order), -1)
-                        ).where(CollectionHandoff.collection_id == record.collection_id)
-                    )
-                )
-                + 1
-            )
-            session.add(
-                CollectionHandoff(
-                    handoff_id=record.handoff_id,
-                    collection_id=record.collection_id,
-                    kind=record.kind,
-                    status=record.status,
-                    created_at=_datetime(record.created_at),
-                    source_channels=list(record.source_channels),
-                    goal_context=dict(record.goal_context),
-                    handoff_order=next_handoff_order,
-                )
-            )
-
-    async def list_collection_handoffs(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionHandoffRecord, ...]:
-        statement = (
-            select(CollectionHandoff)
-            .where(CollectionHandoff.collection_id == collection_id)
-            .order_by(CollectionHandoff.handoff_order)
-        )
-        async with self.session_factory() as session:
-            rows = await session.scalars(statement)
-            return tuple(_to_handoff_record(row) for row in rows)
 
     async def delete_collection(self, collection_id: str) -> bool:
         async with self.session_factory.begin() as session:
@@ -598,21 +426,6 @@ class PostgresCollectionRepository:
                 )
             )
             await session.execute(
-                delete(CollectionImportDocument).where(
-                    CollectionImportDocument.collection_id == collection_id
-                )
-            )
-            await session.execute(
-                delete(CollectionHandoff).where(
-                    CollectionHandoff.collection_id == collection_id
-                )
-            )
-            await session.execute(
-                delete(CollectionImport).where(
-                    CollectionImport.collection_id == collection_id
-                )
-            )
-            await session.execute(
                 delete(CollectionFile).where(
                     CollectionFile.collection_id == collection_id
                 )
@@ -657,57 +470,28 @@ class PostgresCollectionRepository:
             return True
 
 
-def _to_record(row: Collection) -> CollectionRecord:
-    return CollectionRecord(
+def _to_record(
+    row: Collection,
+    documents: tuple[CollectionDocumentData, ...],
+) -> CollectionAggregate:
+    return CollectionAggregate(
         collection_id=row.collection_id,
         owner_user_id=row.owner_user_id,
         name=row.name,
         description=row.description,
         status=row.status,
-        paper_count=row.paper_count,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+        documents=documents,
     )
 
 
-def _to_document_record(row: Document) -> DocumentRecord:
-    return DocumentRecord(
-        document_id=row.document_id,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _to_document_version_record(row: DocumentVersion) -> DocumentVersionRecord:
-    return DocumentVersionRecord(
-        document_version_id=row.document_version_id,
-        document_id=row.document_id,
-        sha256=row.sha256,
-        media_type=row.media_type,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _to_collection_document_record(
-    row: CollectionDocument,
-) -> CollectionDocumentRecord:
-    return CollectionDocumentRecord(
-        collection_document_id=row.collection_document_id,
-        collection_id=row.collection_id,
-        document_id=row.document_id,
-        document_version_id=row.document_version_id,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _to_file_record(
+def _to_document(
     file_row: CollectionFile,
     object_row: StoredObject,
-) -> CollectionFileRecord:
-    return CollectionFileRecord(
-        file_id=file_row.file_id,
-        collection_id=file_row.collection_id,
-        object_id=object_row.object_id,
-        object_kind=object_row.object_kind,
+) -> CollectionDocumentData:
+    return CollectionDocumentData(
+        document_id=file_row.file_id,
         original_filename=file_row.original_filename,
         stored_filename=file_row.stored_filename,
         storage_key=object_row.storage_key,
@@ -716,53 +500,44 @@ def _to_file_record(
         status=file_row.status,
         size_bytes=object_row.size_bytes,
         created_at=_iso(file_row.created_at),
-        document_id=file_row.document_id,
     )
 
 
-def _to_import_document(
-    document_row: CollectionImportDocument,
-    file_row: CollectionFile,
-    object_row: StoredObject,
-) -> CollectionImportDocumentRecord:
-    return CollectionImportDocumentRecord(
-        source_document_id=document_row.source_document_id,
-        origin_channel=document_row.origin_channel,
-        file=_to_file_record(file_row, object_row),
-        language=document_row.language,
-        ingest_status=document_row.ingest_status,
-        text_units=tuple(dict(item) for item in document_row.text_units),
+async def _documents_for_collection(
+    session: AsyncSession,
+    collection_id: str,
+) -> tuple[CollectionDocumentData, ...]:
+    rows = await session.execute(
+        select(CollectionFile, StoredObject)
+        .join(StoredObject, CollectionFile.object_id == StoredObject.object_id)
+        .where(CollectionFile.collection_id == collection_id)
+        .order_by(CollectionFile.file_order)
+    )
+    return tuple(_to_document(file_row, object_row) for file_row, object_row in rows)
+
+
+def _content_identity(sha256: str) -> tuple[str, str]:
+    digest = str(sha256).strip().lower()
+    if len(digest) != 64:
+        raise ValueError("document content hash must be a lowercase SHA-256")
+    return (
+        f"doc_{uuid5(NAMESPACE_URL, f'lens:document:{digest}').hex}",
+        f"docver_{uuid5(NAMESPACE_URL, f'lens:document-version:{digest}').hex}",
     )
 
 
-def _to_import_record(
-    row: CollectionImport,
-    documents: tuple[CollectionImportDocumentRecord, ...],
-) -> CollectionImportRecord:
-    return CollectionImportRecord(
-        import_id=row.import_id,
-        collection_id=row.collection_id,
-        channel=row.channel,
-        adapter_name=row.adapter_name,
-        adapter_version=row.adapter_version,
-        raw_locator=row.raw_locator,
-        goal_context=dict(row.goal_context) if row.goal_context is not None else None,
-        warnings=tuple(str(item) for item in row.warnings),
-        ingested_at=_iso(row.ingested_at),
-        documents=documents,
+def _membership_identity(collection_id: str, document_id: str) -> str:
+    return (
+        "coldoc_"
+        + uuid5(
+            NAMESPACE_URL,
+            f"lens:collection-document:{collection_id}:{document_id}",
+        ).hex
     )
 
 
-def _to_handoff_record(row: CollectionHandoff) -> CollectionHandoffRecord:
-    return CollectionHandoffRecord(
-        handoff_id=row.handoff_id,
-        collection_id=row.collection_id,
-        kind=row.kind,
-        status=row.status,
-        created_at=_iso(row.created_at),
-        source_channels=tuple(str(item) for item in row.source_channels),
-        goal_context=dict(row.goal_context),
-    )
+def _object_identity(document_id: str) -> str:
+    return f"obj_{uuid5(NAMESPACE_URL, f'lens:object:{document_id}').hex[:24]}"
 
 
 def _datetime(value: Any) -> datetime:

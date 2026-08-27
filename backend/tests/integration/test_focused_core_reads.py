@@ -23,10 +23,8 @@ async def test_workspace_reads_only_maintained_collection_readiness():
         return_value={
             "collection_id": COLLECTION_ID,
             "updated_at": "2026-07-20T00:00:00Z",
+            "documents": [{"document_id": "doc-1", "original_filename": "paper.pdf"}],
         }
-    )
-    collection_service.list_files = AsyncMock(
-        return_value=[{"filename": "paper.pdf"}]
     )
     task_service = Mock()
     task_service.list_tasks = AsyncMock(return_value=[])

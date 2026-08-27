@@ -47,7 +47,6 @@
       "anchor_id": "anchor_strength",
       "document_id": "doc_strength",
       "evidence_id": "evidence_strength",
-      "file_id": "file_strength",
       "finding_id": "finding_strength",
       "quote": "Result: yield strength reached 620 MPa.",
       "source_record_id": "block_result",
@@ -154,6 +153,10 @@
     "status": "pass"
   },
   "ordered_ids": {
+    "chat_messages": [
+      "message_user",
+      "message_assistant"
+    ],
     "collections": [
       "col_baseline"
     ],
@@ -168,10 +171,6 @@
     ],
     "feedback": [
       "feedback_strength"
-    ],
-    "chat_messages": [
-      "message_user",
-      "message_assistant"
     ],
     "objective_evidence": [
       "evidence_strength"
@@ -197,7 +196,9 @@
     "artifacts": 1,
     "auth_sessions": 1,
     "auth_users": 1,
-    "collection_files": 1,
+    "chat_messages": 2,
+    "chat_sessions": 1,
+    "collection_documents": 1,
     "collections": 1,
     "core_baseline_references": 1,
     "core_document_profiles": 1,
@@ -212,9 +213,6 @@
     "evaluation_runs": 1,
     "experiment_plans": 1,
     "feedback": 1,
-    "chat_messages": 2,
-    "chat_sessions": 1,
-    "import_manifests": 1,
     "objective_analyses": 1,
     "objective_evidence": 1,
     "objective_findings": 1,

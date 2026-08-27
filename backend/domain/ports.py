@@ -22,13 +22,8 @@ from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
     CollectionBuildRecord,
-    CollectionFileRecord,
-    CollectionHandoffRecord,
-    CollectionImportRecord,
-    CollectionRecord,
-    CollectionDocumentRecord,
-    DocumentRecord,
-    DocumentVersionRecord,
+    Collection,
+    Document,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -60,58 +55,26 @@ class CollectionPaths:
 
 
 class CollectionRepository(Protocol):
-    async def add_collection(self, record: CollectionRecord) -> None: ...
+    async def add_collection(self, collection: Collection) -> None: ...
 
     async def list_collections(
         self,
         owner_user_id: str | None = None,
-    ) -> tuple[CollectionRecord, ...]: ...
+    ) -> tuple[Collection, ...]: ...
 
     async def read_collection(
         self, collection_id: str
-    ) -> CollectionRecord | None: ...
+    ) -> Collection | None: ...
 
-    async def update_collection(self, record: CollectionRecord) -> bool: ...
+    async def update_collection(self, collection: Collection) -> bool: ...
 
-    async def add_collection_import(
+    async def add_documents(
         self,
-        record: CollectionImportRecord,
+        collection_id: str,
+        documents: tuple[Document, ...],
         *,
         updated_at: str,
     ) -> None: ...
-
-    async def list_collection_files(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionFileRecord, ...]: ...
-
-    async def list_collection_imports(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionImportRecord, ...]: ...
-
-    async def read_document(
-        self, document_id: str
-    ) -> DocumentRecord | None: ...
-
-    async def read_document_version(
-        self,
-        document_version_id: str,
-    ) -> DocumentVersionRecord | None: ...
-
-    async def list_collection_documents(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionDocumentRecord, ...]: ...
-
-    async def add_collection_handoff(
-        self, record: CollectionHandoffRecord
-    ) -> None: ...
-
-    async def list_collection_handoffs(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionHandoffRecord, ...]: ...
 
     async def delete_collection(self, collection_id: str) -> bool: ...
 

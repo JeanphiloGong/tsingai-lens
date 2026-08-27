@@ -27,7 +27,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260825_0036"
+HEAD_REVISION = "20260827_0037"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -43,9 +43,6 @@ EXPECTED_TABLES = {
     "collection_comparable_results",
     "collection_documents",
     "collection_files",
-    "collection_handoffs",
-    "collection_import_documents",
-    "collection_imports",
     "collections",
     "comparable_result_anchor_links",
     "comparable_result_evidence_links",

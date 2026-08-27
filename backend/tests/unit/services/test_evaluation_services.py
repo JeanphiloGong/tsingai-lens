@@ -45,11 +45,9 @@ _TEMPERATURE_STRENGTH_STUDY_ID = "study-doc-1-temperature-strength"
 class FakeCollectionService:
     def __init__(self, existing: set[str] | None = None) -> None:
         self.existing = existing or {"col-gold"}
-        self.files_by_collection = {
+        self.documents_by_collection = {
             "col-gold": [
                 {
-                    "file_id": "file-1",
-                    "source_document_id": "doc-1",
                     "document_id": "doc-1",
                     "original_filename": "paper-1.pdf",
                     "stored_filename": "paper-1.pdf",
@@ -61,30 +59,10 @@ class FakeCollectionService:
     async def get_collection(self, collection_id: str) -> dict:
         if collection_id not in self.existing:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return {"collection_id": collection_id, "name": "Gold collection"}
-
-    async def list_files(self, collection_id: str) -> list[dict]:
-        await self.get_collection(collection_id)
-        return list(self.files_by_collection.get(collection_id, []))
-
-    async def get_import_manifest(self, collection_id: str) -> dict:
-        await self.get_collection(collection_id)
         return {
-            "schema_version": 1,
             "collection_id": collection_id,
-            "handoffs": [],
-            "imports": [
-                {
-                    "documents": [
-                        {
-                            "source_document_id": "doc-1",
-                            "original_filename": "paper-1.pdf",
-                            "stored_filename": "paper-1.pdf",
-                            "storage_key": "col-gold/input/paper-1.pdf",
-                        }
-                    ]
-                }
-            ],
+            "name": "Gold collection",
+            "documents": list(self.documents_by_collection.get(collection_id, [])),
         }
 
 

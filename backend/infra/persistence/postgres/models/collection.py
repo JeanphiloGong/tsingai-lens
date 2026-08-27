@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
-
 from sqlalchemy import (
-    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
@@ -17,13 +14,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infra.persistence.postgres.base import Base
-
-
-_JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Collection(Base):
@@ -80,7 +73,6 @@ class StoredObject(Base):
         DateTime(timezone=True), nullable=False
     )
 
-
 class CollectionFile(Base):
     __tablename__ = "collection_files"
     __table_args__ = (
@@ -129,115 +121,3 @@ class CollectionFile(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-
-
-class CollectionImport(Base):
-    __tablename__ = "collection_imports"
-    __table_args__ = (
-        CheckConstraint("channel <> ''", name="channel_not_empty"),
-        CheckConstraint("adapter_name <> ''", name="adapter_name_not_empty"),
-        CheckConstraint("import_order >= 0", name="import_order_non_negative"),
-        UniqueConstraint(
-            "collection_id",
-            "import_id",
-            name="uq_collection_imports_collection_import_identity",
-        ),
-        UniqueConstraint(
-            "collection_id",
-            "import_order",
-            name="uq_collection_imports_collection_import_order",
-        ),
-    )
-
-    import_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    channel: Mapped[str] = mapped_column(String(64), nullable=False)
-    adapter_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    adapter_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    raw_locator: Mapped[str | None] = mapped_column(Text, nullable=True)
-    goal_context: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT,
-        nullable=True,
-    )
-    warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    ingested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    import_order: Mapped[int] = mapped_column(Integer, nullable=False)
-
-
-class CollectionImportDocument(Base):
-    __tablename__ = "collection_import_documents"
-    __table_args__ = (
-        CheckConstraint("document_order >= 0", name="document_order_non_negative"),
-        CheckConstraint("origin_channel <> ''", name="origin_channel_not_empty"),
-        CheckConstraint("ingest_status <> ''", name="ingest_status_not_empty"),
-        ForeignKeyConstraint(
-            ["collection_id", "file_id"],
-            ["collection_files.collection_id", "collection_files.file_id"],
-            name="fk_import_documents_collection_file",
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["collection_id", "import_id"],
-            ["collection_imports.collection_id", "collection_imports.import_id"],
-            name="fk_import_documents_collection_import",
-            ondelete="CASCADE",
-        ),
-        UniqueConstraint(
-            "import_id",
-            "source_document_id",
-            name="uq_import_documents_import_source_document",
-        ),
-        UniqueConstraint(
-            "import_id",
-            "document_order",
-            name="uq_import_documents_import_document_order",
-        ),
-    )
-
-    file_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    import_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_document_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    origin_channel: Mapped[str] = mapped_column(String(64), nullable=False)
-    language: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    ingest_status: Mapped[str] = mapped_column(String(64), nullable=False)
-    text_units: Mapped[list[dict[str, Any]]] = mapped_column(
-        _JSON_DOCUMENT,
-        nullable=False,
-    )
-    document_order: Mapped[int] = mapped_column(Integer, nullable=False)
-
-
-class CollectionHandoff(Base):
-    __tablename__ = "collection_handoffs"
-    __table_args__ = (
-        CheckConstraint("handoff_order >= 0", name="handoff_order_non_negative"),
-        CheckConstraint("kind <> ''", name="kind_not_empty"),
-        CheckConstraint("status <> ''", name="status_not_empty"),
-        UniqueConstraint(
-            "collection_id",
-            "handoff_order",
-            name="uq_collection_handoffs_collection_handoff_order",
-        ),
-    )
-
-    handoff_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    kind: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    source_channels: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    goal_context: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    handoff_order: Mapped[int] = mapped_column(Integer, nullable=False)

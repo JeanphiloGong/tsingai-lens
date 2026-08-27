@@ -17,10 +17,11 @@ async def build_source_artifacts(
     context: CollectionBuildContext,
     config: CollectionBuildPipelineConfig,
 ) -> dict[str, Any]:
-    files = await context.collection_service.list_files(context.collection_id)
-    if not files:
-        raise RuntimeError("The collection contains no files available for building")
-    context.state["file_count"] = len(files)
+    collection = await context.collection_service.get_collection(context.collection_id)
+    documents = collection["documents"]
+    if not documents:
+        raise RuntimeError("The collection contains no documents available for building")
+    context.state["document_count"] = len(documents)
 
     outputs = await context.build_source_artifacts(
         config=config.source,
@@ -44,9 +45,9 @@ async def build_source_artifacts(
     bundle = bundle_output.result
     runtime_state = getattr(bundle_output, "state", {}) or {}
     runtime_failures = runtime_state.get("source_document_failures") or []
-    files_by_stored_filename = {
+    documents_by_stored_filename = {
         Path(str(item.get("stored_filename") or "")).name: item
-        for item in files
+        for item in documents
         if str(item.get("stored_filename") or "").strip()
     }
     failed_documents: list[dict[str, Any]] = []
@@ -54,12 +55,12 @@ async def build_source_artifacts(
         if not isinstance(failure, dict):
             continue
         stored_filename = Path(str(failure.get("source_path") or "")).name
-        file_record = files_by_stored_filename.get(stored_filename, {})
+        document_record = documents_by_stored_filename.get(stored_filename, {})
         failed_documents.append(
             {
-                "file_id": file_record.get("file_id"),
+                "document_id": document_record.get("document_id"),
                 "filename": str(
-                    file_record.get("original_filename") or stored_filename
+                    document_record.get("original_filename") or stored_filename
                 ),
                 "error_code": str(
                     failure.get("error_code") or "source_parse_failed"

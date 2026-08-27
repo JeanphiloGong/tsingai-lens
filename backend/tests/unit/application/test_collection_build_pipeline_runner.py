@@ -477,8 +477,8 @@ async def test_source_node_persists_figure_metadata_and_references_before_activa
     async def replace_references(collection_id, build_id, references):  # noqa: ANN001
         calls.append(("references", collection_id, build_id, references))
 
-    async def list_files(collection_id):  # noqa: ANN001
-        return [{"collection_id": collection_id}]
+    async def get_collection(_collection_id):
+        return {"documents": [{"document_id": "doc-1"}]}
 
     context = CollectionBuildContext(
         task_id="task-1",
@@ -486,7 +486,7 @@ async def test_source_node_persists_figure_metadata_and_references_before_activa
         collection_id="col-1",
         task_service=SimpleNamespace(),
         collection_service=SimpleNamespace(
-            list_files=list_files,
+            get_collection=get_collection,
             write_figure_asset=lambda *args: (
                 f"col-1/objects/source/build-1/figures/{digest}.png"
             )
@@ -508,11 +508,11 @@ async def test_source_node_persists_figure_metadata_and_references_before_activa
     assert calls[0][3][0].figures[0].image_size_bytes == len(content)
     assert len(calls[1][3].entries) == 1
     assert len(calls[1][3].mentions) == 1
-    assert context.state["file_count"] == 1
+    assert context.state["document_count"] == 1
     assert result["figure_count"] == 1
 
 
-async def test_source_node_reports_failed_collection_file_lineage():
+async def test_source_node_reports_failed_collection_document_lineage():
     bundle = SourceArtifactBundle(
         documents=pd.DataFrame(
             [{"id": "doc-1", "title": "Valid paper", "text": "Methods."}]
@@ -543,19 +543,21 @@ async def test_source_node_reports_failed_collection_file_lineage():
             )
         ]
 
-    async def list_files(_collection_id):
-        return [
-            {
-                "file_id": "file-good",
+    async def get_collection(_collection_id):
+        return {
+            "documents": [
+                {
+                "document_id": "doc-good",
                 "stored_filename": "stored-valid.pdf",
                 "original_filename": "valid.pdf",
             },
             {
-                "file_id": "file-bad",
+                "document_id": "doc-bad",
                 "stored_filename": "stored-damaged.pdf",
                 "original_filename": "damaged.pdf",
             },
-        ]
+            ]
+        }
 
     async def replace_records(*_args):
         return None
@@ -565,7 +567,7 @@ async def test_source_node_reports_failed_collection_file_lineage():
         build_id="build-1",
         collection_id="col-1",
         task_service=SimpleNamespace(),
-        collection_service=SimpleNamespace(list_files=list_files),
+        collection_service=SimpleNamespace(get_collection=get_collection),
         artifact_registry_service=SimpleNamespace(),
         source_artifact_repository=SimpleNamespace(
             replace_collection_documents=replace_records,
@@ -582,7 +584,7 @@ async def test_source_node_reports_failed_collection_file_lineage():
     assert result["source_failed_document_count"] == 1
     assert result["source_failed_documents"] == [
         {
-            "file_id": "file-bad",
+            "document_id": "doc-bad",
             "filename": "damaged.pdf",
             "error_code": "source_pdf_parse_failed",
             "error_type": "RuntimeError",

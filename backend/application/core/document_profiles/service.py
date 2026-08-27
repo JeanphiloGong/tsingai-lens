@@ -611,13 +611,14 @@ class DocumentProfileService:
         self, collection_id: str
     ) -> dict[str, Any]:
         try:
-            files = await self.collection_service.list_files(collection_id)
+            collection = await self.collection_service.get_collection(collection_id)
+            documents = collection["documents"]
         except FileNotFoundError:
-            files = []
+            documents = []
 
         stored_to_source: dict[str, str] = {}
         resolved_sources: list[str] = []
-        for record in files:
+        for record in documents:
             original = normalize_optional_text(record.get("original_filename"))
             stored = normalize_optional_text(record.get("stored_filename"))
             if original:

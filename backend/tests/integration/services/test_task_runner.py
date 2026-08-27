@@ -220,7 +220,7 @@ async def test_build_pipeline_service_queues_one_background_collection_process(
         build_repository,
     )
     collection = await collection_service.create_collection("Agent Paper Map")
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "paper.txt",
         b"Abstract\nLaser exposure affected porosity.",
@@ -274,7 +274,7 @@ async def test_build_pipeline_service_rejects_empty_collection_before_task_creat
 
     with pytest.raises(
         ValueError,
-        match="collection contains no files available for building",
+        match="collection contains no documents available for building",
     ):
         await runner.queue_build(collection["collection_id"])
 
@@ -297,7 +297,7 @@ async def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, t
 
     collection = await collection_service.create_collection("Composite Papers")
     paths = collection_service.get_paths(collection["collection_id"])
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -366,7 +366,7 @@ async def test_build_pipeline_removes_parser_nul_before_source_persistence(
     )
     collection = await collection_service.create_collection("NUL Source Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -439,7 +439,7 @@ async def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_
 
     collection = await collection_service.create_collection("Partial PaperSkim Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -495,17 +495,19 @@ async def test_build_pipeline_service_reports_partial_source_coverage(
     )
     collection = await collection_service.create_collection("Partial Source Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "valid.txt",
         b"Experimental Section\nMix and anneal.",
     )
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "damaged.txt",
         b"unreadable source placeholder",
     )
-    files = await collection_service.list_files(collection["collection_id"])
+    files = (await collection_service.get_collection(collection["collection_id"]))[
+        "documents"
+    ]
     damaged = next(
         item for item in files if item["original_filename"] == "damaged.txt"
     )
@@ -545,8 +547,8 @@ async def test_build_pipeline_service_reports_partial_source_coverage(
     source_node = pipeline_run.node("source_artifacts")
     assert source_node.status == "succeeded"
     assert source_node.output_summary["source_failed_document_count"] == 1
-    assert source_node.output_summary["source_failed_documents"][0]["file_id"] == (
-        damaged["file_id"]
+    assert source_node.output_summary["source_failed_documents"][0]["document_id"] == (
+        damaged["document_id"]
     )
 
 
@@ -579,7 +581,7 @@ async def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch,
     assert "files_registered" not in result["pipeline_nodes"]
     assert result["pipeline_nodes"]["source_artifacts"]["status"] == "failed"
     assert (
-        "source_artifacts: The collection contains no files available for building"
+        "source_artifacts: The collection contains no documents available for building"
         in result["errors"]
     )
 
@@ -599,7 +601,7 @@ async def test_build_pipeline_service_marks_source_artifact_errors_failed(
     )
 
     collection = await collection_service.create_collection("Source Error Collection")
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"], "paper.txt", b"bad pdf"
     )
 
@@ -639,7 +641,7 @@ async def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path,
 
     collection = await collection_service.create_collection("Logging Progress Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    await collection_service.add_file(
+    await collection_service.add_document(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",

@@ -103,10 +103,10 @@ class CollectionBuildPipelineService:
         additional_context: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict:
-        await self.collection_service.get_collection(collection_id)
-        if not await self.collection_service.list_files(collection_id):
+        collection = await self.collection_service.get_collection(collection_id)
+        if not collection["documents"]:
             raise CollectionBuildPreconditionError(
-                "The collection contains no files available for building"
+                "The collection contains no documents available for building"
             )
         task = await self.task_service.create_task(
             collection_id=collection_id,

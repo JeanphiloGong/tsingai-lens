@@ -179,6 +179,7 @@ class _PaperExtractionBudget:
 class PaperSkimService:
     """Build a bounded Source-linked map of each paper's stated research scope."""
 
+    # define a method that produces one PaperSkim per document
     def build_collection_paper_skims(
         self,
         collection_id: str,
@@ -193,12 +194,25 @@ class PaperSkimService:
         signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[PaperSkim, ...]:
+        """
+        Args:
+            collection_id:  used for tracing
+            documents: contains the already parsed papers, including paragraphs, tables, row, and figures
+            profiles_by_document_id: the profile supplies the paper type, such as experimental or review
+            document_trees_by_document_id: supplies section herarchy and original source ordering
+            study_window_extractor: maps stated research scope from one bounded Source window
+            signal_reconciler: decides whether incomplete variable and outcome signals belong to the same within-paper study
+            progress_callback: is task progress reporting
+        """
         logger.info(
             "Research objective paper skim started collection_id=%s document_count=%s",
             collection_id,
             len(documents),
         )
+        # collects one final PaperSkim for each document
         paper_skims: list[PaperSkim] = []
+
+        # Papers are processed sequentially here, although windows inside one paprt may execute concurrently
         document_count = len(documents)
         for document_position, document in enumerate(documents, start=1):
             source_filename = self._resolve_source_filename(document)

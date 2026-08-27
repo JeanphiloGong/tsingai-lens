@@ -580,11 +580,11 @@ class DocumentMarkdownService:
         self, collection_id: str
     ) -> dict[str, str]:
         try:
-            file_records = await self.collection_service.list_files(collection_id)
+            collection = await self.collection_service.get_collection(collection_id)
         except FileNotFoundError:
             return {}
         filenames: dict[str, str] = {}
-        for record in file_records:
+        for record in collection["documents"]:
             original = self._normalize_text(record.get("original_filename"))
             stored = self._normalize_text(record.get("stored_filename"))
             if original and stored:

@@ -23,9 +23,6 @@ from infra.persistence.postgres.models.comparison import (
 from infra.persistence.postgres.models.collection import (
     Collection,
     CollectionFile,
-    CollectionHandoff,
-    CollectionImport,
-    CollectionImportDocument,
     StoredObject,
 )
 from infra.persistence.postgres.models.document import (
@@ -107,9 +104,6 @@ __all__ = [
     "ComparisonBuild",
     "CollectionDocument",
     "CollectionFile",
-    "CollectionHandoff",
-    "CollectionImport",
-    "CollectionImportDocument",
     "Document",
     "DocumentVersion",
     "EvaluationFailureRecord",

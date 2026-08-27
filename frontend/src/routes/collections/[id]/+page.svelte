@@ -5,10 +5,10 @@
 	import { errorMessage } from '../../_shared/api';
 	import { collections } from '../../_shared/collections';
 	import {
-		listCollectionFiles,
-		uploadCollectionFiles,
-		type CollectionFile
-	} from '../../_shared/files';
+		listCollectionDocuments,
+		uploadCollectionDocuments,
+		type CollectionDocument
+	} from '../../_shared/collectionDocuments';
 	import { t } from '../../_shared/i18n';
 	import { fetchCollectionObjectives, type ObjectiveList } from '../../_shared/researchView';
 	import {
@@ -50,16 +50,16 @@
 	let isDragging = false;
 	let uploadLoading = false;
 	let uploadError = '';
-	let uploadResult: { count: number; items: CollectionFile[] } | null = null;
+	let uploadResult: { count: number; items: CollectionDocument[] } | null = null;
 	let fileInput: HTMLInputElement | null = null;
-	let collectionFiles: CollectionFile[] = [];
+	let collectionDocuments: CollectionDocument[] = [];
 	let filesLoading = false;
 	let filesError = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: effectiveFileCount = Math.max(
 		workspace?.file_count ?? 0,
-		collectionFiles.length,
+		collectionDocuments.length,
 		uploadResult?.count ?? 0
 	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
@@ -194,11 +194,11 @@
 		if (showLoading) filesLoading = true;
 		filesError = '';
 		try {
-			const data = await listCollectionFiles(collectionId);
-			collectionFiles = data.items;
+			const data = await listCollectionDocuments(collectionId);
+			collectionDocuments = data.items;
 		} catch (err) {
 			filesError = errorMessage(err);
-			collectionFiles = [];
+			collectionDocuments = [];
 		} finally {
 			filesLoading = false;
 		}
@@ -283,7 +283,7 @@
 
 		uploadLoading = true;
 		try {
-			uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
+			uploadResult = await uploadCollectionDocuments(collectionId, selectedFiles);
 			selectedFiles = [];
 			if (fileInput) fileInput.value = '';
 			await Promise.all([loadFiles(false), loadWorkspace(false), loadObjectives()]);
@@ -339,8 +339,8 @@
 		return translated === key ? stage : translated;
 	}
 
-	function getFileLabel(file: CollectionFile) {
-		return file.original_filename || $t('documents.untitledFile');
+	function getDocumentLabel(document: CollectionDocument) {
+		return document.original_filename || $t('documents.untitledFile');
 	}
 
 	function pipelineStepLabel(step: OverviewPipelineStep) {
@@ -606,16 +606,16 @@
 						<div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
 						<ul class="result-list">
 							{#each uploadResult.items as item}
-								<li>{getFileLabel(item)}</li>
+								<li>{getDocumentLabel(item)}</li>
 							{/each}
 						</ul>
 					</div>
-				{:else if collectionFiles.length}
+				{:else if collectionDocuments.length}
 					<div class="detail-section">
 						<div class="detail-section__title">{$t('documents.listTitle')}</div>
 						<ul class="result-list">
-							{#each collectionFiles as item}
-								<li>{getFileLabel(item)}</li>
+							{#each collectionDocuments as item}
+								<li>{getDocumentLabel(item)}</li>
 							{/each}
 						</ul>
 					</div>

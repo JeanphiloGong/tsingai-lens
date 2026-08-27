@@ -19,7 +19,7 @@
 - 登录会话：`POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`
-- 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
+- 集合文档：`GET|POST /api/v1/collections/{collection_id}/documents`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
 - 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、

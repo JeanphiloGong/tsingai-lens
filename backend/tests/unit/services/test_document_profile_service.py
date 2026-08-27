@@ -141,7 +141,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
     collection_service, profile_service = _build_profile_service(tmp_path)
     collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
-    file_record = await collection_service.add_file(
+    document_record = await collection_service.add_document(
         collection_id,
         "wang_2024_battery.txt",
         b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",
@@ -151,7 +151,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
         [
             {
                 "id": "doc-1",
-                "title": file_record["stored_filename"],
+                "title": document_record["stored_filename"],
                 "text": "\n".join(
                     [
                         "Experimental Section",

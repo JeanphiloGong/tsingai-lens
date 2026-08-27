@@ -310,7 +310,7 @@ def test_collection_source_archive_downloads_selected_original_files(
         collection_id = created.json()["collection_id"]
         source_pdf = _valid_pdf_bytes()
         upload = client.post(
-            f"/api/v1/collections/{collection_id}/files",
+            f"/api/v1/collections/{collection_id}/documents",
             files={
                 "file": (
                     "failed.pdf",
@@ -319,11 +319,11 @@ def test_collection_source_archive_downloads_selected_original_files(
                 )
             },
         )
-        file_id = upload.json()["file_id"]
+        document_id = upload.json()["document_id"]
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": [file_id]},
+            json={"document_ids": [document_id]},
         )
 
         assert response.status_code == 200
@@ -331,8 +331,8 @@ def test_collection_source_archive_downloads_selected_original_files(
         assert response.headers["content-disposition"].startswith("attachment;")
         with ZipFile(BytesIO(response.content)) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["files"][0]["file_id"] == file_id
-            assert archive.read(manifest["files"][0]["archive_path"]) == source_pdf
+            assert manifest["documents"][0]["document_id"] == document_id
+            assert archive.read(manifest["documents"][0]["archive_path"]) == source_pdf
 
 
 def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
@@ -355,7 +355,7 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
         collection_id = created.json()["collection_id"]
 
         response = client.post(
-            f"/api/v1/collections/{collection_id}/files",
+            f"/api/v1/collections/{collection_id}/documents",
             files={
                 "file": (
                     "truncated.pdf",
@@ -369,9 +369,9 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
         assert response.json()["detail"] == (
             "PDF is damaged, incomplete, password-protected, or otherwise unreadable."
         )
-        files = client.get(f"/api/v1/collections/{collection_id}/files")
-        assert files.status_code == 200
-        assert files.json()["items"] == []
+        documents = client.get(f"/api/v1/collections/{collection_id}/documents")
+        assert documents.status_code == 200
+        assert documents.json()["items"] == []
 
 
 def test_collection_source_archive_is_scoped_to_authenticated_owner(
@@ -404,7 +404,7 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": ["file_private"]},
+            json={"document_ids": ["doc_private"]},
         )
 
         assert response.status_code == 404
@@ -412,11 +412,11 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
 
 
 @pytest.mark.parametrize(
-    "file_ids",
+    "document_ids",
     [
         [],
-        ["file_same", "file_same"],
-        [f"file_{index}" for index in range(101)],
+        ["doc_same", "doc_same"],
+        [f"doc_{index}" for index in range(101)],
     ],
 )
 def test_collection_source_archive_rejects_invalid_file_selection(
@@ -424,7 +424,7 @@ def test_collection_source_archive_rejects_invalid_file_selection(
     tmp_path,
     auth_session_service,
     collection_service,
-    file_ids,
+    document_ids,
 ):
     with _build_client(
         monkeypatch,
@@ -440,7 +440,7 @@ def test_collection_source_archive_rejects_invalid_file_selection(
 
         response = client.post(
             f"/api/v1/collections/{created.json()['collection_id']}/source-archives",
-            json={"file_ids": file_ids},
+            json={"document_ids": document_ids},
         )
 
         assert response.status_code == 422
@@ -467,15 +467,15 @@ def test_collection_source_archive_returns_bounded_missing_file_error(
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": ["file_missing"]},
+            json={"document_ids": ["doc_missing"]},
         )
 
         assert response.status_code == 404
         assert response.json()["detail"] == {
-            "code": "collection_source_file_not_found",
-            "message": "A requested source file does not exist in this collection.",
+            "code": "collection_source_document_not_found",
+            "message": "A requested source document does not exist in this collection.",
             "collection_id": collection_id,
-            "file_id": "file_missing",
+            "document_id": "doc_missing",
         }
 
 
@@ -499,13 +499,13 @@ def test_collection_source_archive_returns_413_for_oversized_selection(
         )
         collection_id = created.json()["collection_id"]
         upload = client.post(
-            f"/api/v1/collections/{collection_id}/files",
+            f"/api/v1/collections/{collection_id}/documents",
             files={"file": ("paper.pdf", _valid_pdf_bytes(), "application/pdf")},
         )
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": [upload.json()["file_id"]]},
+            json={"document_ids": [upload.json()["document_id"]]},
         )
 
         assert response.status_code == 413

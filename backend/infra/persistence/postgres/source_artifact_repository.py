@@ -938,7 +938,7 @@ class PostgresSourceArtifactRepository:
             unique_matches = list(dict.fromkeys(matches))
             if len(unique_matches) != 1:
                 raise ValueError(
-                    "source document must resolve to exactly one collection file: "
+                    "source document must resolve to exactly one collection document: "
                     f"{document.document_id}/{source_path}"
                 )
             result[document.document_id] = unique_matches[0]

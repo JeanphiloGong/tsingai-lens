@@ -34,10 +34,8 @@ from domain.pipeline import ExecutionTimestamps, PipelineNodeRun
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
-    CollectionFileRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
-    CollectionRecord,
+    Collection,
+    Document,
     source_documents_from_records,
     SourceReferenceEntry,
     SourceReferenceSet,
@@ -124,7 +122,7 @@ async def test_current_repositories_round_trip_the_reviewed_persistence_baseline
 
     await auth_repository.add_user(records["auth_users"][0])
     await collection_repository.add_collection(
-        CollectionRecord.from_mapping(
+        Collection.from_mapping(
             records["collections"][0],
             collection_id,
             now_iso=records["collections"][0]["created_at"],
@@ -134,51 +132,27 @@ async def test_current_repositories_round_trip_the_reviewed_persistence_baseline
     assert not (paths.collection_dir / "meta.json").exists()
     object_payload = b"Synthetic fixture content; no paper or user data."
     object_digest = sha256(object_payload).hexdigest()
-    fixture_file = records["collection_files"][0]
-    storage_key = f"{collection_id}/input/{fixture_file['stored_filename']}"
+    fixture_document = records["collection_documents"][0]
+    storage_key = fixture_document["storage_key"]
     object_store.write(
         storage_key,
         object_payload,
         object_digest,
     )
-    file_record = CollectionFileRecord(
-        file_id=fixture_file["file_id"],
-        collection_id=collection_id,
-        object_id="obj_strength",
-        object_kind="source_input",
-        original_filename=fixture_file["original_filename"],
-        stored_filename=fixture_file["stored_filename"],
+    document = Document(
+        document_id=fixture_document["document_id"],
+        original_filename=fixture_document["original_filename"],
+        stored_filename=fixture_document["stored_filename"],
         storage_key=storage_key,
         sha256=object_digest,
-        media_type=fixture_file["media_type"],
+        media_type=fixture_document["media_type"],
         status="stored",
         size_bytes=len(object_payload),
-        created_at=records["collections"][0]["created_at"],
-        document_id=fixture_file["document_id"],
+        created_at=fixture_document["created_at"],
     )
-    fixture_import = records["import_manifests"][0]["imports"][0]
-    await collection_repository.add_collection_import(
-        CollectionImportRecord(
-            import_id=fixture_import["import_id"],
-            collection_id=collection_id,
-            channel=fixture_import["source_type"],
-            adapter_name=fixture_import["source_type"],
-            adapter_version=None,
-            raw_locator=fixture_file["original_filename"],
-            goal_context=None,
-            warnings=(),
-            ingested_at=records["collections"][0]["updated_at"],
-            documents=(
-                CollectionImportDocumentRecord(
-                    source_document_id=fixture_file["document_id"],
-                    origin_channel=fixture_import["source_type"],
-                    file=file_record,
-                    language=None,
-                    ingest_status="normalized",
-                    text_units=(),
-                ),
-            ),
-        ),
+    await collection_repository.add_documents(
+        collection_id,
+        (document,),
         updated_at=records["collections"][0]["updated_at"],
     )
     task_record = TaskRecord.from_mapping(records["tasks"][0])
@@ -374,27 +348,13 @@ async def test_current_repositories_round_trip_the_reviewed_persistence_baseline
     observed_records["collections"] = [
         {key: stored_collection.get(key) for key in records["collections"][0]}
     ]
-    stored_files = await collection_repository.list_collection_files(collection_id)
-    observed_records["collection_files"] = [
+    stored_documents = stored_collection_record.documents
+    observed_records["collection_documents"] = [
         {
-            key: (
-                stored_file.size_bytes
-                if key == "byte_size"
-                else stored_file.to_record().get(key)
-            )
-            for key in records["collection_files"][index]
+            key: stored_document.to_record().get(key)
+            for key in records["collection_documents"][index]
         }
-        for index, stored_file in enumerate(stored_files)
-    ]
-    observed_records["import_manifests"] = [
-        {
-            "schema_version": 1,
-            "collection_id": collection_id,
-            "imports": [
-                item.to_record()
-                for item in await collection_repository.list_collection_imports(collection_id)
-            ],
-        }
+        for index, stored_document in enumerate(stored_documents)
     ]
     observed_records["tasks"] = [
         {

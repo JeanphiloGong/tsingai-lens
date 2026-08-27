@@ -160,7 +160,7 @@ def _create_built_collection(
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={
             "file": (
                 "paper.txt",
@@ -194,6 +194,72 @@ def test_request_id_is_generated_and_echoed(app_client):
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
+def test_collection_documents_are_the_exact_source_build_inputs(
+    app_client,
+    monkeypatch,
+):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    captured_inputs: dict[str, bytes] = {}
+
+    async def capture_source_inputs(**kwargs):  # noqa: ANN003
+        input_dir = Path(kwargs["config"].input.storage.base_dir)
+        captured_inputs.update(
+            {
+                path.name: path.read_bytes()
+                for path in sorted(input_dir.iterdir())
+                if path.is_file()
+            }
+        )
+        output_dir = Path(kwargs["config"].output.base_dir)
+        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
+
+    monkeypatch.setattr(
+        task_runner_module,
+        "build_source_artifacts",
+        capture_source_inputs,
+    )
+    create = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Two paper research scope"},
+    )
+    assert create.status_code == 200
+    collection_id = create.json()["collection_id"]
+
+    uploaded = []
+    for filename, content in (
+        ("paper-a.txt", b"Methods\nPaper A"),
+        ("paper-b.txt", b"Results\nPaper B"),
+    ):
+        response = app_client.post(
+            f"{API_V1_PREFIX}/collections/{collection_id}/documents",
+            files={"file": (filename, content, "text/plain")},
+        )
+        assert response.status_code == 200
+        uploaded.append(response.json())
+
+    collection = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}"
+    )
+    assert collection.status_code == 200
+    assert collection.json()["documents"] == uploaded
+    assert collection.json()["paper_count"] == 2
+
+    queued = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
+        json={},
+    )
+    assert queued.status_code == 200
+    assert _wait_for_task_terminal(
+        app_client,
+        queued.json()["task_id"],
+    )["status"] == "completed"
+    assert captured_inputs == {
+        uploaded[0]["stored_filename"]: b"Methods\nPaper A",
+        uploaded[1]["stored_filename"]: b"Results\nPaper B",
+    }
+
+
 def test_request_id_is_echoed_and_propagated_to_background_build(
     app_client, monkeypatch
 ):
@@ -219,7 +285,7 @@ def test_request_id_is_echoed_and_propagated_to_background_build(
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={
             "file": (
                 "paper.txt",
@@ -275,7 +341,7 @@ def test_build_task_route_schedules_async_entry_without_waiting(
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={
             "file": (
                 "paper.txt",
@@ -305,7 +371,7 @@ def test_legacy_index_task_route_is_not_registered(app_client):
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={
             "file": (
                 "paper.txt",
@@ -492,8 +558,7 @@ def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
     assert payload["coverage_assessment"]["level"] == "direct"
     assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
     assert payload["seed_collection"]["source_channels"] == ["upload"]
-    assert payload["seed_collection"]["handoff_id"].startswith("handoff_")
-    assert payload["seed_collection"]["handoff_status"] == "awaiting_source_material"
+    assert payload["seed_collection"]["seeded_document_count"] == 0
 
     workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
     assert workspace.status_code == 200
@@ -582,7 +647,7 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     collection_id = create_resp.json()["collection_id"]
 
     upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={
             "file": (
                 "paper.txt",
@@ -629,7 +694,7 @@ def test_build_task_contract_rejects_unknown_pipeline_mode(app_client):
     )
     collection_id = create_resp.json()["collection_id"]
     app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={"file": ("paper.txt", b"Paper", "text/plain")},
     )
 

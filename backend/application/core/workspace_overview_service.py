@@ -193,7 +193,7 @@ class WorkspaceService:
         recent_task_limit: int = 5,
     ) -> dict:
         collection = await self.collection_service.get_collection(collection_id)
-        files = await self.collection_service.list_files(collection_id)
+        documents = collection["documents"]
         recent_tasks = await self.task_service.list_tasks(
             collection_id=collection_id,
             limit=recent_task_limit,
@@ -207,13 +207,13 @@ class WorkspaceService:
         )
         return {
             "collection": collection,
-            "file_count": len(files),
+            "file_count": len(documents),
             "status_summary": self._build_status_summary(
-                len(files), latest_task, artifacts, document_summary
+                len(documents), latest_task, artifacts, document_summary
             ),
             "artifacts": artifacts,
             "workflow": self._build_workflow(
-                len(files), latest_task, artifacts, document_summary
+                len(documents), latest_task, artifacts, document_summary
             ),
             "document_summary": {
                 "total_documents": int(

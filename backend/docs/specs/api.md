@@ -33,14 +33,14 @@ Invalid credentials return `401`. A missing or expired session cookie also
 returns `401`; the frontend clears local auth state and returns the user to
 login.
 
-### Collections, Files, And Builds
+### Collections, Documents, And Builds
 
 - `GET /api/v1/collections`
 - `POST /api/v1/collections`
 - `GET /api/v1/collections/{collection_id}`
 - `DELETE /api/v1/collections/{collection_id}`
-- `GET /api/v1/collections/{collection_id}/files`
-- `POST /api/v1/collections/{collection_id}/files`
+- `GET /api/v1/collections/{collection_id}/documents`
+- `POST /api/v1/collections/{collection_id}/documents`
 - `POST /api/v1/collections/{collection_id}/source-archives`
 - `GET /api/v1/collections/{collection_id}/tasks`
 - `POST /api/v1/collections/{collection_id}/tasks/build`
@@ -59,7 +59,7 @@ scientific structure extraction still belongs to the collection build.
 For already-persisted inputs and other import channels, a per-document Source
 parse failure is isolated. When other documents parse successfully, the task
 returns `partial_success`; the Source pipeline node warning and output summary
-identify each excluded file by bounded `file_id`, original filename, error code,
+identify each excluded document by bounded `document_id`, original filename, error code,
 and exception class. If every input fails, the task returns `failed`.
 The task artifact registry reports only persisted Source artifacts (documents,
 blocks, figures, table rows, and table cells). Workspace document-profile and
@@ -67,13 +67,13 @@ Objective readiness is derived from their owning repositories rather than
 duplicated into the task artifact registry.
 
 The source archive request accepts between one and 100 unique collection
-`file_id` values with at most 256 MiB of persisted source bytes and returns an
+`document_id` values with at most 256 MiB of persisted source bytes and returns an
 `application/zip` attachment. The archive contains the selected original
-uploads under `sources/` plus `manifest.json` with their stable file IDs,
+uploads under `sources/` plus `manifest.json` with their stable document IDs,
 archive paths, media types, sizes, and SHA-256 digests. Selection is atomic: a
 missing, oversized, unsafe, unavailable, or integrity-failing source prevents
 the complete archive from being returned.
-An unknown selected ID returns `404 collection_source_file_not_found`.
+An unknown selected ID returns `404 collection_source_document_not_found`.
 An oversized selection returns `413 collection_source_archive_too_large`
 before any selected Source bytes are read.
 Persisted metadata whose bytes are unavailable, unsafe, or fail integrity
@@ -81,10 +81,7 @@ verification returns `409` with the corresponding bounded
 `collection_source_*` code; storage paths are never returned.
 The endpoint does not infer which papers failed. Parsing, PaperSkim, and
 Objective analysis retain ownership of their failure states. Clients select
-IDs from the collection file list or from failure lineage when that stage
-provides it; some early parsing failures do not yet expose per-file failure
-lineage. The export contract itself remains usable before a Core `document_id`
-exists.
+IDs from `Collection.documents` or from stage-specific failure lineage.
 
 The build request accepts `mode: standard | fast` and defaults to `standard`.
 The selected mode is persisted before dispatch and determines the runtime
@@ -96,7 +93,8 @@ status endpoint. This handoff is not an external or durable queue.
 
 - `POST /api/v1/goals/intake`
 
-Goal intake seeds a collection; it is not a second research-result identity.
+Goal intake creates an empty collection directly; it does not create a durable
+handoff record or a second research-result identity.
 
 ### Research Agent Chat
 

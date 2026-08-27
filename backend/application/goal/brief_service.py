@@ -4,7 +4,7 @@ from application.source.collection_service import CollectionService
 
 
 class GoalService:
-    """Minimal Goal Brief / Intake orchestration that registers collection-builder handoffs."""
+    """Minimal Goal Brief / Intake orchestration that creates a seed collection."""
 
     def __init__(
         self,
@@ -96,7 +96,7 @@ class GoalService:
             ],
             "links": [
                 f"/api/v1/collections/{collection_id}",
-                f"/api/v1/collections/{collection_id}/files",
+                f"/api/v1/collections/{collection_id}/documents",
                 f"/api/v1/collections/{collection_id}/workspace",
             ],
         }
@@ -160,20 +160,12 @@ class GoalService:
             owner_user_id=owner_user_id,
         )
         collection_id = collection["collection_id"]
-        handoff = await self.collection_service.register_goal_brief_handoff(
-            collection_id,
-            research_brief,
-            coverage_assessment,
-            source_channels=self._build_source_channels(),
-        )
         seed_collection = {
             "collection_id": collection_id,
             "name": collection["name"],
             "created": True,
             "seeded_document_count": 0,
-            "source_channels": handoff["source_channels"],
-            "handoff_id": handoff["handoff_id"],
-            "handoff_status": handoff["status"],
+            "source_channels": self._build_source_channels(),
         }
         entry_recommendation = self._build_entry_recommendation(
             collection_id,

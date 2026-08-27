@@ -43,35 +43,15 @@ from domain.source.artifacts import (
     source_documents_from_records,
     update_heading_stack,
 )
-from domain.source.collection import (
-    CollectionFileRecord,
-    CollectionHandoffRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
-    CollectionRecord,
-    empty_import_manifest,
-)
-from domain.source.document import (
-    CollectionDocumentRecord,
-    DocumentRecord,
-    DocumentVersionRecord,
-    collection_document_identity,
-    document_identity_for_sha256,
-)
+from domain.source.collection import Collection, Document
 
 __all__ = [
     "ArtifactVersionRecord",
     "ArtifactStatusRecord",
     "BuildStageRecord",
-    "CollectionFileRecord",
-    "CollectionHandoffRecord",
-    "CollectionImportDocumentRecord",
-    "CollectionImportRecord",
-    "CollectionRecord",
+    "Collection",
     "CollectionBuildRecord",
-    "CollectionDocumentRecord",
-    "DocumentRecord",
-    "DocumentVersionRecord",
+    "Document",
     "SourceBlock",
     "SourceBlockType",
     "SourceDocument",
@@ -96,9 +76,6 @@ __all__ = [
     "build_source_document_tree",
     "build_source_table_rows_from_cells",
     "build_table_caption_blocks",
-    "collection_document_identity",
-    "document_identity_for_sha256",
-    "empty_import_manifest",
     "extract_unit_hint",
     "find_nearest_caption_block",
     "first_non_null",

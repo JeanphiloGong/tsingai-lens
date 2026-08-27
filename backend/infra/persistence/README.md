@@ -72,8 +72,10 @@ plans do not derive authority from general Chat text.
 ## Other Aggregates
 
 - `PostgresCollectionRepository`
-  Owns collections, canonical documents and versions, exact collection
-  membership, stored-object metadata, import provenance, and intake handoffs.
+  Persists the application `Collection -> Document` aggregate. Its SQL adapter
+  privately maintains canonical content/version/membership rows and stored-object
+  metadata required by Source and Evidence foreign keys; those rows are not
+  separate application domain objects.
 - `PostgresBuildRepository`
   Owns tasks, collection builds, ordered stages, artifact versions, and active
   build selection.

@@ -33,7 +33,8 @@ and `domain/chat/`.
   instead of being promoted for review.
 - `brief_service.py`
   Optional goal-first collection-seeding path. It shapes a thin research brief
-  and registers a `seed_collection` handoff into Source.
+  and creates an empty `Collection` directly. Papers become `Document` members
+  only when the user uploads or imports them; Goal owns no handoff record.
 
 Future research-assistant capabilities belong in `application/chat/` and must
 consume Core artifacts without creating a parallel fact model.

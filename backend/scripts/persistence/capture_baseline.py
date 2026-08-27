@@ -20,8 +20,7 @@ from domain.evaluation import FindingCuration  # noqa: E402
 
 REQUIRED_FAMILIES = (
     "collections",
-    "collection_files",
-    "import_manifests",
+    "collection_documents",
     "tasks",
     "artifacts",
     "auth_users",
@@ -76,8 +75,8 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
     documents = {item["id"]: item for item in records["source_documents"]}
     text_units = {item["id"]: item for item in records["source_text_units"]}
     blocks = {item["block_id"]: item for item in records["source_blocks"]}
-    files_by_document = {
-        item["document_id"]: item for item in records["collection_files"]
+    collection_documents = {
+        item["document_id"]: item for item in records["collection_documents"]
     }
     anchors = {
         item["anchor_id"]: item for item in records["core_evidence_anchors"]
@@ -139,7 +138,7 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                     blocks=blocks,
                     text_units=text_units,
                     anchors=anchors,
-                    files_by_document=files_by_document,
+                    collection_documents=collection_documents,
                 )
             )
 
@@ -256,7 +255,7 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                 "endpoint": f"/api/v1/collections/{collection_id}/workspace",
                 "status_code": 200,
                 "collection_id": collection_id,
-                "file_count": len(records["collection_files"]),
+                "file_count": len(records["collection_documents"]),
                 "status_summary": collection["status"],
                 "latest_task_status": task["status"],
                 "artifacts": {
@@ -309,7 +308,7 @@ def _source_trace(
     blocks: dict[str, dict[str, Any]],
     text_units: dict[str, dict[str, Any]],
     anchors: dict[str, dict[str, Any]],
-    files_by_document: dict[str, dict[str, Any]],
+    collection_documents: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     document_id = evidence.get("document_id")
     if document_id not in documents:
@@ -322,9 +321,8 @@ def _source_trace(
     text_unit_id = text_unit_ids[0] if text_unit_ids else None
     if text_unit_id not in text_units:
         raise ValueError(f"unresolved evidence text unit: {text_unit_id}")
-    source_file = files_by_document.get(document_id)
-    if source_file is None:
-        raise ValueError(f"unresolved evidence collection file: {document_id}")
+    if document_id not in collection_documents:
+        raise ValueError(f"unresolved collection document: {document_id}")
     anchor_ids = evidence.get("anchor_ids") or []
     anchor_id = anchor_ids[0] if anchor_ids else None
     if anchor_id not in anchors:
@@ -341,7 +339,6 @@ def _source_trace(
         "source_record_id": source_record_id,
         "text_unit_id": text_unit_id,
         "document_id": document_id,
-        "file_id": source_file["file_id"],
         "quote": evidence["source_excerpt"],
     }
 

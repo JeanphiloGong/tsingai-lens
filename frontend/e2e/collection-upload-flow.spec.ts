@@ -2,12 +2,12 @@ import { expect, test, type Page } from '@playwright/test';
 
 const collectionId = 'col_upload';
 
-type UploadedFile = {
-	file_id: string;
-	collection_id: string;
+type CollectionDocument = {
+	document_id: string;
 	original_filename: string;
 	stored_filename: string;
-	stored_path: string;
+	storage_key: string;
+	sha256: string;
 	media_type: string;
 	status: string;
 	size_bytes: number;
@@ -74,8 +74,8 @@ function taskPayload(status: BuildTask['status'], progressPercent: number): Buil
 	};
 }
 
-function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask | null) {
-	const fileCount = uploadedFiles.length;
+function workspacePayload(uploadedDocuments: CollectionDocument[], activeTask: BuildTask | null) {
+	const fileCount = uploadedDocuments.length;
 	const processing = Boolean(activeTask && activeTask.status !== 'completed');
 	const ready = activeTask?.status === 'completed';
 	return {
@@ -153,7 +153,7 @@ function objectivePayload(ready: boolean) {
 }
 
 async function mockUploadApis(page: Page) {
-	const uploadedFiles: UploadedFile[] = [];
+	const uploadedDocuments: CollectionDocument[] = [];
 	let activeTask: BuildTask | null = null;
 	let taskPollCount = 0;
 
@@ -174,37 +174,37 @@ async function mockUploadApis(page: Page) {
 			return route.fulfill(json({ items: [] }));
 		}
 		if (path === '/api/v1/collections' && route.request().method() === 'POST') {
-			return route.fulfill(json(collectionPayload(uploadedFiles.length), 201));
+			return route.fulfill(json(collectionPayload(uploadedDocuments.length), 201));
 		}
 		if (path === `/api/v1/collections/${collectionId}`) {
-			return route.fulfill(json(collectionPayload(uploadedFiles.length)));
+			return route.fulfill(json(collectionPayload(uploadedDocuments.length)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/workspace`) {
-			return route.fulfill(json(workspacePayload(uploadedFiles, activeTask)));
+			return route.fulfill(json(workspacePayload(uploadedDocuments, activeTask)));
 		}
 		if (
-			path === `/api/v1/collections/${collectionId}/files` &&
+			path === `/api/v1/collections/${collectionId}/documents` &&
 			route.request().method() === 'GET'
 		) {
-			return route.fulfill(json({ count: uploadedFiles.length, items: uploadedFiles }));
+			return route.fulfill(json({ items: uploadedDocuments }));
 		}
 		if (
-			path === `/api/v1/collections/${collectionId}/files` &&
+			path === `/api/v1/collections/${collectionId}/documents` &&
 			route.request().method() === 'POST'
 		) {
-			const nextFile: UploadedFile = {
-				file_id: `file_${uploadedFiles.length + 1}`,
-				collection_id: collectionId,
+			const nextDocument: CollectionDocument = {
+				document_id: `doc_${uploadedDocuments.length + 1}`,
 				original_filename: 'lpbf-316l-study.pdf',
 				stored_filename: 'lpbf-316l-study.pdf',
-				stored_path: `/tmp/${collectionId}/lpbf-316l-study.pdf`,
+				storage_key: `${collectionId}/input/lpbf-316l-study.pdf`,
+				sha256: 'a'.repeat(64),
 				media_type: 'application/pdf',
 				status: 'uploaded',
 				size_bytes: 2048,
 				created_at: '2026-05-14T00:00:00Z'
 			};
-			uploadedFiles.push(nextFile);
-			return route.fulfill(json(nextFile, 201));
+			uploadedDocuments.push(nextDocument);
+			return route.fulfill(json(nextDocument, 201));
 		}
 		if (
 			path === `/api/v1/collections/${collectionId}/tasks/build` &&

@@ -34,12 +34,6 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    PaperSignalReconciler,
-)
-from application.core.objectives.discovery.study_window import (
-    PaperStudyWindowExtractor,
-)
 from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
     build_default_structured_response_client,
@@ -47,7 +41,6 @@ from application.core.objectives.llm.structured_response import (
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.paper_skim_service import PaperSkimService
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.source.artifact_input_service import load_document_tree
 from application.source.collection_service import CollectionService
@@ -57,15 +50,14 @@ from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
-    PaperStudyDisposition,
-    PaperStudyDispositionStatus,
+    PreparedDocumentInput,
     ResearchObjective,
     is_question_shaped_objective,
 )
 from domain.core.document_profile import DocumentProfile
 from domain.ports import (
     ObjectiveRepository,
-    PaperFactRepository,
+    PaperMapRepository,
     SourceArtifactRepository,
 )
 from domain.source import SourceDocument
@@ -108,19 +100,16 @@ class ResearchObjectiveService:
         self,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
-        paper_fact_repository: PaperFactRepository,
+        paper_map_repository: PaperMapRepository,
         objective_repository: ObjectiveRepository,
         document_profile_service: DocumentProfileService,
         finding_synthesis_service: FindingSynthesisService,
-        paper_skim_service: PaperSkimService,
         objective_candidate_service: ObjectiveCandidateService,
         response_client: StructuredResponseClient | None = None,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None,
         objective_source_screener: ObjectiveSourceScreener | None = None,
         objective_evidence_router: ObjectiveEvidenceRouter | None = None,
         objective_source_extractor: ObjectiveSourceExtractor | None = None,
-        paper_study_window_extractor: PaperStudyWindowExtractor | None = None,
-        paper_signal_reconciler: PaperSignalReconciler | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
@@ -129,96 +118,66 @@ class ResearchObjectiveService:
         self._objective_source_screener = objective_source_screener
         self._objective_evidence_router = objective_evidence_router
         self._objective_source_extractor = objective_source_extractor
-        self._paper_study_window_extractor = paper_study_window_extractor
-        self._paper_signal_reconciler = paper_signal_reconciler
         self._paper_facts_extractor = paper_facts_extractor
-        self.paper_fact_repository = paper_fact_repository
+        self.paper_map_repository = paper_map_repository
         self.objective_repository = objective_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
         self.finding_synthesis_service = finding_synthesis_service
-        self.paper_skim_service = paper_skim_service
         self.objective_candidate_service = objective_candidate_service
 
     # define a main method for turning a completed collection build into candidate research objectives
     async def discover_and_replace_objective_candidates(
         self,
         collection_id: str,
+        document_ids: tuple[str, ...],
         progress_callback: ProgressCallback | None = None,
-        *,
-        build_id: str,
     ) -> ObjectiveFactSet:
         """
-        Load one immutable collection build
-         -> map each paper
-         -> persist an incomplete checkpoint
+        Load selected prepared papers
+         -> read each current Paper Map
          -> aggregate relationships across papers
          -> persist completed Objective candidates
         Args:
             collection_id: the collection being studied
-            build_id: exact immutable Source build to analyse
+            document_ids: exact ready document scope to inspect
             progress_callback: reports progress to the collection task
         Returns:
-            ObjectiveFactSet: containing PaperSkims, candidate Objectives, and relationship dispositions.
+            ObjectiveFactSet: selected inputs, candidate Objectives, and relationship dispositions.
         """
-        # load scientific inputs
-        source_inputs = await self._load_objective_source_inputs(
+        document_inputs = await self.resolve_prepared_document_inputs(
             collection_id,
-            build_id=build_id,
+            document_ids,
         )
-        documents = source_inputs["documents"]
-        response_client = source_inputs["response_client"]
-        if self._paper_study_window_extractor is None:
-            self._paper_study_window_extractor = PaperStudyWindowExtractor(
-                response_client
-            )
-        if self._paper_signal_reconciler is None:
-            self._paper_signal_reconciler = PaperSignalReconciler(response_client)
+        paper_skims = await self.paper_map_repository.list_collection(
+            collection_id,
+            document_ids,
+        )
+        maps_by_document_id = {item.document_id: item for item in paper_skims}
+        missing_maps = [
+            document_id
+            for document_id in document_ids
+            if document_id not in maps_by_document_id
+        ]
+        if missing_maps:
+            raise ResearchObjectivesNotReadyError(collection_id)
+        paper_skims = tuple(
+            maps_by_document_id[document_id] for document_id in document_ids
+        )
         if self._axis_equivalence_classifier is None:
             self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
-                response_client
+                self._get_response_client()
             )
-        paper_skims = await to_thread(
-            self.paper_skim_service.build_collection_paper_skims,
-            collection_id,
-            documents=documents,
-            profiles_by_document_id=source_inputs["profiles_by_document_id"],
-            document_trees_by_document_id=source_inputs[
-                "document_trees_by_document_id"
-            ],
-            study_window_extractor=self._paper_study_window_extractor,
-            signal_reconciler=self._paper_signal_reconciler,
-            progress_callback=progress_callback,
-        )
-        await self.objective_repository.replace(
-            collection_id,
-            build_id,
-            ObjectiveFactSet(
-                research_objectives_ready=False,
-                paper_skims=paper_skims,
-                study_dispositions=tuple(
-                    PaperStudyDisposition(
-                        document_id=skim.document_id,
-                        study_id=study.study_id,
-                        relationship_id=relationship.relationship_id,
-                        status=PaperStudyDispositionStatus.PENDING,
-                    )
-                    for skim in paper_skims
-                    for study in skim.studies
-                    for relationship in study.relationships
-                ),
-            ),
-        )
         candidate_facts = await to_thread(
             self.objective_candidate_service.discover_candidate_facts,
             collection_id,
             paper_skims=paper_skims,
+            document_inputs=document_inputs,
             axis_equivalence_classifier=self._axis_equivalence_classifier,
             progress_callback=progress_callback,
         )
         await self.objective_repository.replace(
             collection_id,
-            build_id,
             candidate_facts,
         )
         research_objectives = candidate_facts.research_objectives
@@ -312,7 +271,7 @@ class ResearchObjectiveService:
             raise ValueError("analysis is not the active objective version")
         objective_inputs = await self._build_objective_analysis_inputs(
             collection_id,
-            build_id=analysis.source_build_id,
+            document_inputs=analysis.document_inputs,
         )
         return await to_thread(
             self._generate_objective_analysis_artifacts,
@@ -331,29 +290,7 @@ class ResearchObjectiveService:
         objective_inputs: dict[str, Any],
         progress_callback: ProgressCallback | None,
     ) -> ObjectiveAnalysisArtifacts:
-        source_objective = (
-            active_objective
-            if active_objective.origin == "chat_assisted"
-            and active_objective.source_build_id == analysis.source_build_id
-            else next(
-                (
-                    item
-                    for item in objective_inputs["research_objectives"]
-                    if item.objective_id == analysis.objective_id
-                ),
-                None,
-            )
-        )
-        if source_objective is None:
-            raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
-        objective = replace(
-            source_objective,
-            confirmation_status=active_objective.confirmation_status,
-            active_analysis_version=active_objective.active_analysis_version,
-            published_analysis_version=active_objective.published_analysis_version,
-            created_at=active_objective.created_at,
-            updated_at=active_objective.updated_at,
-        )
+        objective = active_objective
         response_client = objective_inputs["response_client"]
         if self._objective_source_screener is None:
             self._objective_source_screener = ObjectiveSourceScreener(response_client)
@@ -440,38 +377,50 @@ class ResearchObjectiveService:
         self,
         collection_id: str,
         *,
-        build_id: str,
+        document_inputs: tuple[PreparedDocumentInput, ...],
     ) -> dict[str, Any]:
         source_inputs = await self._load_objective_source_inputs(
             collection_id,
-            build_id=build_id,
+            document_inputs=document_inputs,
         )
-        facts = await self.objective_repository.read(
+        document_ids = tuple(item.document_id for item in document_inputs)
+        paper_skims = await self.paper_map_repository.list_collection(
             collection_id,
-            build_id=build_id,
+            document_ids,
         )
-        if facts.research_objectives_ready and facts.paper_skims:
-            return {
-                **source_inputs,
-                "paper_skims": facts.paper_skims,
-                "research_objectives": facts.research_objectives,
-            }
-        raise ResearchObjectivesNotReadyError(collection_id)
+        maps_by_document_id = {item.document_id: item for item in paper_skims}
+        if any(document_id not in maps_by_document_id for document_id in document_ids):
+            raise ResearchObjectivesNotReadyError(collection_id)
+        return {
+            **source_inputs,
+            "paper_skims": tuple(
+                maps_by_document_id[document_id] for document_id in document_ids
+            ),
+        }
 
-    # define a helper that loads one consistent collection build and prepare the data structures required by both Objective discovery and confirmed-Objective analysis
+    # Define a helper that loads one exact prepared-document selection and
+    # prepares the data structures shared by Objective discovery and analysis.
     async def _load_objective_source_inputs(
         self,
         collection_id: str,
         *,
-        build_id: str | None = None,
+        document_inputs: tuple[PreparedDocumentInput, ...],
     ) -> dict[str, Any]:
         """
         Args:
             collection_id: identifies the literature collection
-            build_id: selects one particulat parsed version of that collection
+            document_inputs: exact prepared document states selected for this work
         Returns:
             returns a heterogeneous dictionary containing several data types
         """
+        current_inputs = await self.resolve_prepared_document_inputs(
+            collection_id,
+            tuple(item.document_id for item in document_inputs),
+        )
+        if current_inputs != document_inputs:
+            raise ValueError(
+                "prepared document input is stale; select the current document state"
+            )
         # load document profile
         try:
             # Profiles answer paper-level class ification questions
@@ -481,10 +430,14 @@ class ResearchObjectiveService:
             # 4. What is the profile confidence
             profiles: tuple[DocumentProfile, ...] = await self.document_profile_service.read_document_profiles(
                 collection_id,
-                build_id=build_id,
+                tuple(item.document_id for item in document_inputs),
             )
         except DocumentProfilesNotReadyError as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
+        if {profile.document_id for profile in profiles} != {
+            item.document_id for item in document_inputs
+        }:
+            raise ResearchObjectivesNotReadyError(collection_id)
 
         # Load parsed documents
         try:
@@ -495,7 +448,8 @@ class ResearchObjectiveService:
             # 4.table cells
             # 5.figures
             documents = await self._load_source_documents(
-                collection_id, build_id=build_id
+                collection_id,
+                document_inputs=document_inputs,
             )
         except FileNotFoundError as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
@@ -505,7 +459,6 @@ class ResearchObjectiveService:
                 collection_id,
                 document.document_id,
                 self.source_artifact_repository,
-                build_id=build_id,
             )
             for document in documents
         }
@@ -544,21 +497,44 @@ class ResearchObjectiveService:
         self,
         collection_id: str,
         *,
-        build_id: str | None = None,
+        document_inputs: tuple[PreparedDocumentInput, ...],
     ) -> tuple[SourceDocument, ...]:
-        documents = (
-            await self.source_artifact_repository.read_collection_documents(
+        documents: list[SourceDocument] = []
+        for item in document_inputs:
+            document = await self.source_artifact_repository.read_document(
                 collection_id,
-                build_id=build_id,
+                item.document_id,
             )
-            if build_id is not None
-            else await self.source_artifact_repository.read_collection_documents(
-                collection_id
-            )
-        )
-        if not documents:
+            if document is not None:
+                documents.append(document)
+        if len(documents) != len(document_inputs):
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return documents
+        return tuple(documents)
+
+    async def resolve_prepared_document_inputs(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[PreparedDocumentInput, ...]:
+        if not document_ids:
+            raise ValueError("Objective discovery requires at least one document")
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("Objective discovery document IDs must be unique")
+        inputs: list[PreparedDocumentInput] = []
+        for document_id in document_ids:
+            document = await self.collection_service.get_document(
+                collection_id,
+                document_id,
+            )
+            if document.status != "ready" or not document.preparation_fingerprint:
+                raise ResearchObjectivesNotReadyError(collection_id)
+            inputs.append(
+                PreparedDocumentInput(
+                    document_id=document_id,
+                    preparation_fingerprint=document.preparation_fingerprint,
+                )
+            )
+        return tuple(inputs)
 
 
     def _append_unique_axis(

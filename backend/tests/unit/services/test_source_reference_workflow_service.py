@@ -9,7 +9,7 @@ from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from infra.persistence.memory import MemorySourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -17,6 +17,11 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+async def _store_source_documents(repository, collection_id, documents) -> None:
+    for document in documents:
+        await repository.replace_document(collection_id, document)
 
 
 async def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
@@ -54,10 +59,9 @@ async def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
             ),
         ),
     )
-    await repository.replace_collection_documents("col_refs", "build_test", artifacts)
-    await repository.replace_collection_references(
-        "col_refs",
-        "build_test",
+    await _store_source_documents(repository, "col_refs", artifacts)
+    await repository.replace_document_references(
+        "doc-1",
         SourceReferenceExtractionService().extract(artifacts),
     )
     service = SourceReferenceWorkflowService(

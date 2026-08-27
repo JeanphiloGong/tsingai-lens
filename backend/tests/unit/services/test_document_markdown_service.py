@@ -12,7 +12,7 @@ from application.source.document_markdown_service import (
     SourceDocumentNotFoundError,
 )
 from domain.source import source_documents_from_records
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from infra.persistence.memory import MemorySourceArtifactRepository
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
@@ -36,13 +36,18 @@ def _build_markdown_service(tmp_path):
     )
 
 
+async def _store_source_documents(repository, collection_id, documents) -> None:
+    for document in documents:
+        await repository.replace_document(collection_id, document)
+
+
 async def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = await collection_service.create_collection("Markdown Collection")
     collection_id = collection["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -230,9 +235,9 @@ async def test_document_markdown_service_projects_figure_images(tmp_path):
         asset_sha256,
     )
     scratch_asset.unlink()
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -282,9 +287,9 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_file_is
     )
     collection_id = collection["collection_id"]
     missing_sha256 = sha256(b"missing").hexdigest()
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -322,9 +327,9 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_is_miss
         "Figure Caption Collection"
     )
     collection_id = collection["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -354,9 +359,9 @@ async def test_document_markdown_service_falls_back_to_document_text(tmp_path):
         "Markdown Fallback Collection"
     )
     collection_id = collection["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -380,9 +385,9 @@ async def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
         "Garbled Markdown Collection"
     )
     collection_id = collection["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -449,9 +454,9 @@ async def test_document_markdown_service_keeps_readable_block_with_replacement_g
         "Readable Glyph Collection"
     )
     collection_id = collection["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -526,9 +531,9 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
             ),
         ),
     )
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -581,9 +586,9 @@ async def test_document_markdown_service_reports_missing_document(tmp_path):
         "Markdown Missing Document"
     )
     collection_id = collection["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-2", "title": "Other Paper", "text": "Text"}]
         ),

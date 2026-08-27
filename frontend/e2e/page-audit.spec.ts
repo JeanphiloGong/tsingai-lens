@@ -17,11 +17,14 @@ const routes = [
 	['/', 'Lens Workbench'],
 	['/docs', 'Using Lens'],
 	['/system', 'System'],
-	[`/collections/${collectionId}`, 'Collection is ready'],
+	[`/collections/${collectionId}`, 'Prepare and select papers'],
 	[`/collections/${collectionId}/documents`, 'Papers'],
 	[`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`, 'Paper A'],
 	[`/collections/${collectionId}/objectives`, '研究目标'],
-	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Findings'],
+	[
+		`/collections/${collectionId}/objectives/${objectiveId}`,
+		'How does heat treatment affect LPBF 316L tensile strength?'
+	],
 	[`/collections/${collectionId}/comparisons`, 'Cross-paper findings'],
 	[`/collections/${collectionId}/graph`, 'Objective evidence map'],
 	[`/collections/${collectionId}/assistant`, 'Research Agent']
@@ -261,7 +264,9 @@ test.describe('page interaction audit', () => {
 		}
 	});
 
-	test('unprocessed collections lock direct research route access', async ({ page }) => {
+	test('stored documents keep research routes readable but unavailable for analysis scope', async ({
+		page
+	}) => {
 		const objectiveRequests: string[] = [];
 		page.on('request', (request) => {
 			const url = new URL(request.url());
@@ -272,15 +277,9 @@ test.describe('page interaction audit', () => {
 
 		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
 
-		await expect(page.getByRole('heading', { name: 'Processing required' })).toBeVisible();
-		await expect(
-			page.getByText('Process this collection before opening research objectives')
-		).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
-			'href',
-			`/collections/${collectionId}`
-		);
-		expect(objectiveRequests).toEqual([]);
+		await expect(page.getByRole('heading', { name: '研究目标' })).toBeVisible();
+		await expect(page.getByText('还没有准备完成的论文，请先返回集合概览准备论文。')).toBeVisible();
+		expect(objectiveRequests).toEqual([`/api/v1/collections/${collectionId}/objectives`]);
 	});
 
 	test('unprocessed collections still allow Research Agent conversation', async ({ page }) => {
@@ -551,13 +550,11 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}`)
 			return route.fulfill(json(collection(auditState)));
-		if (path === `/api/v1/collections/${collectionId}/workspace`)
-			return route.fulfill(json(workspace(auditState)));
 		if (path === `/api/v1/collections/${collectionId}/documents`) {
-			return route.fulfill(json({ count: 1, items: [uploadedFile()] }));
+			return route.fulfill(json({ count: 1, items: [uploadedFile(auditState)] }));
 		}
-		if (path === `/api/v1/collections/${collectionId}/tasks/build`) {
-			return route.fulfill(json(task()));
+		if (path === `/api/v1/collections/${collectionId}/tasks`) {
+			return route.fulfill(json({ collection_id: collectionId, count: 0, items: [] }));
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/profiles`) {
 			return route.fulfill(json(documentProfiles()));
@@ -576,6 +573,9 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
 			return route.fulfill(json(objectives()));
+		}
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/analysis`) {
+			return route.fulfill(json(objectiveView()));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
 			return route.fulfill(json(objectiveView()));
@@ -882,54 +882,14 @@ function collection(auditState?: string | null) {
 		description: 'Interaction audit fixture',
 		status: auditState === 'uploaded' ? 'uploaded' : 'ready',
 		paper_count: 2,
+		documents: [uploadedFile(auditState)],
 		created_at: now(),
 		updated_at: now()
 	};
 }
 
-function workspace(auditState?: string | null) {
-	const unprocessed = auditState === 'uploaded';
-	return {
-		collection: collection(auditState),
-		file_count: 2,
-		status_summary: unprocessed ? 'ready_to_process' : 'ready',
-		workflow: unprocessed
-			? {
-					documents: { status: 'not_started', detail: 'Document profiling is pending.' },
-					objectives: { status: 'not_started', detail: 'Objective discovery is pending.' }
-				}
-			: {
-					documents: { status: 'ready', detail: 'Document profiles are available.' },
-					objectives: { status: 'ready', detail: 'Objective discovery is complete.' }
-				},
-		document_summary: {
-			total_documents: 2,
-			by_doc_type: { experimental: 2, review: 0, mixed: 0, uncertain: 0 }
-		},
-		warnings: [],
-		artifacts: {
-			source_documents_ready: !unprocessed,
-			document_profiles_ready: !unprocessed,
-			objective_candidates_ready: !unprocessed,
-			updated_at: now()
-		},
-		latest_task: null,
-		recent_tasks: [],
-		capabilities: {
-			can_view_documents: !unprocessed,
-			can_view_objectives: !unprocessed,
-			can_view_comparisons: !unprocessed
-		},
-		links: {
-			workspace: `/collections/${collectionId}`,
-			documents: `/collections/${collectionId}/documents`,
-			objectives: `/collections/${collectionId}/objectives`,
-			comparisons: `/collections/${collectionId}/comparisons`
-		}
-	};
-}
-
-function uploadedFile() {
+function uploadedFile(auditState?: string | null) {
+	const ready = auditState !== 'uploaded';
 	return {
 		document_id: 'doc_1',
 		original_filename: 'paper-a.pdf',
@@ -937,27 +897,13 @@ function uploadedFile() {
 		storage_key: `${collectionId}/input/paper-a.pdf`,
 		sha256: 'a'.repeat(64),
 		media_type: 'application/pdf',
-		status: 'uploaded',
+		status: ready ? 'ready' : 'stored',
 		size_bytes: 2048,
-		created_at: now()
-	};
-}
-
-function task() {
-	return {
-		task_id: 'task_1',
-		collection_id: collectionId,
-		task_type: 'build_collection',
-		status: 'queued',
-		current_stage: 'queued',
-		progress_percent: 5,
-		output_path: null,
-		errors: [],
-		warnings: [],
 		created_at: now(),
 		updated_at: now(),
-		started_at: null,
-		finished_at: null
+		parser_version: ready ? 'source-runtime.v1' : null,
+		document_analysis_version: ready ? 'paper-map.v1' : null,
+		preparation_fingerprint: ready ? 'fingerprint-doc-1' : null
 	};
 }
 
@@ -1100,7 +1046,7 @@ function objectiveAnalysis() {
 		collection_id: collectionId,
 		objective_id: objectiveId,
 		analysis_version: 1,
-		source_build_id: 'build-1',
+		document_inputs: [{ document_id: documentId, preparation_fingerprint: 'fingerprint-doc-1' }],
 		pipeline_version: 'objective-analysis.v2',
 		model_name: 'model-1',
 		prompt_versions: {},

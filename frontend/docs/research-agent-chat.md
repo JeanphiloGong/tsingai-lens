@@ -30,11 +30,14 @@ fact store.
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
 - Core owns Research Objectives, Evidence, Findings, and Analysis.
-- Collection build tasks remain the single runtime authority for research
-  preparation progress. Chat reads that state; it does not persist another
+- Current Documents and their preparation tasks remain the runtime authority for
+  paper preparation progress. Chat reads that state; it does not persist another
   workflow.
 - PaperSkim relationships may support an Objective proposal but are labeled as
   proposal context, never Evidence.
+- Preparing papers and starting Objective analysis are separate approved writes.
+  Preparation targets exact Documents; analysis targets an exact non-empty set
+  of ready Documents.
 - A created Objective remains an unconfirmed candidate. Confirmation and
   analysis stay in the Objective workspace.
 - General Agent prose cannot be saved as an Experiment Plan. New plans are
@@ -91,6 +94,7 @@ answer. The result panel shows:
 - a bounded human-readable summary;
 - structured Objective drafts when present;
 - the observable research stages and active paper when process status is read;
+- per-paper stored, processing, ready, and failed states;
 - warnings and scientific absence;
 - links to canonical collection, Objective, Finding, or Evidence records.
 
@@ -104,9 +108,9 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 
 ### Write approval
 
-For `create_objective_candidate`, the page renders the exact persisted
-arguments and exposes explicit Reject and Approve actions. While approval is
-pending:
+For `start_research_process`, `create_objective_candidate`, and
+`start_objective_analysis`, the page renders the exact persisted arguments and
+exposes explicit Reject and Approve actions. While approval is pending:
 
 - the message composer is disabled;
 - refresh restores the pending decision from the server;
@@ -147,7 +151,7 @@ The focused browser suite covers:
 1. greeting with no capability;
 2. collection read with structured result, warning, resource link, and final
    answer;
-3. canonical research-process status with user-visible scientific stages;
+3. canonical per-paper preparation status with user-visible stages;
 4. Objective draft proposal without a Core write;
 5. pending write with exact arguments and blocked composer;
 6. rejection with no Objective;

@@ -49,7 +49,6 @@ from domain.core.evidence_backbone import (
     StructureFeature,
     TestCondition,
 )
-from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     EVIDENCE_RESULT_DIRECTIONS,
@@ -81,6 +80,7 @@ from domain.core.research_objective import (
     PaperStudyRelationship,
     PaperStudySignal,
     PaperStudySourceRef,
+    PreparedDocumentInput,
     ResearchObjective,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
@@ -121,7 +121,6 @@ __all__ = [
     "ComparisonRowProjector",
     "ComparisonSemanticRecords",
     "ContextBinding",
-    "PaperFactSet",
     "DocumentProfile",
     "DocumentProfileSummary",
     "EVIDENCE_ATTRIBUTION_SCOPES",
@@ -165,6 +164,7 @@ __all__ = [
     "PaperStudyRelationship",
     "PaperStudySignal",
     "PaperStudySourceRef",
+    "PreparedDocumentInput",
     "PairwiseComparisonRelation",
     "ResearchObjective",
     "ReviewKnowledgeItem",

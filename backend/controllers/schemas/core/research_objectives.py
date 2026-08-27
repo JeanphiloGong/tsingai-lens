@@ -48,7 +48,6 @@ class ObjectiveSummaryResponse(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     origin: ObjectiveOrigin = "system_discovered"
-    source_build_id: str | None = None
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
 
@@ -86,11 +85,30 @@ class ExecutionStatsResponse(BaseModel):
     prompt_versions: dict[str, str] = Field(default_factory=dict)
 
 
+class PreparedDocumentInputResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    preparation_fingerprint: str
+
+
+class DocumentSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class ObjectiveDiscoveryResponse(BaseModel):
+    collection_id: str
+    document_inputs: list[PreparedDocumentInputResponse]
+    objectives: list[RankedObjectiveSummaryResponse]
+
+
 class ObjectiveAnalysisStateResponse(BaseModel):
     collection_id: str
     objective_id: str
     analysis_version: int
-    source_build_id: str
+    document_inputs: list[PreparedDocumentInputResponse]
     pipeline_version: str
     model_name: str | None = None
     prompt_versions: dict[str, str] = Field(default_factory=dict)

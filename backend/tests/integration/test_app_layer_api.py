@@ -1,396 +1,214 @@
 from __future__ import annotations
 
-import asyncio
-import sys
-import threading
-import time
-from pathlib import Path
-from types import SimpleNamespace
-
-import pandas as pd
-
-if "devtools" not in sys.modules:
-    sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
+from hashlib import sha256
 
 import pytest
-from infra.persistence.memory import MemoryBuildRepository
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.source_evidence import (
-    build_blocks,
-    build_table_cells,
-    build_table_rows,
+from fastapi.testclient import TestClient
+
+from application.source.task_service import TaskService
+from infra.persistence.memory import (
+    MemoryDocumentProfileRepository,
+    MemoryObjectiveRepository,
+    MemoryPaperMapRepository,
+    MemorySourceArtifactRepository,
+    MemoryTaskRepository,
 )
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.objective_repository import MemoryObjectiveRepository
-from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
+from tests.support.chat_repository import MemoryChatRepository
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
-from tests.support.chat_repository import MemoryChatRepository
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from tests.support.objective_review_repository import (
+    InMemoryObjectiveReviewRepository,
+)
 
-try:
-    from fastapi.testclient import TestClient
-
-    FASTAPI_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    FASTAPI_AVAILABLE = False
-
-if not FASTAPI_AVAILABLE:  # pragma: no cover
-    pytest.skip("fastapi not installed", allow_module_level=True)
 
 API_V1_PREFIX = "/api/v1"
 
 
-class DummyWorkflowOutput:
-    def __init__(
+class _ImmediateDocumentPreparationService:
+    """Complete the HTTP boundary test without invoking parser or LLM providers."""
+
+    def __init__(self, collection_service, task_service) -> None:  # noqa: ANN001
+        self.collection_service = collection_service
+        self.task_service = task_service
+
+    async def queue_document(
         self,
-        workflow: str = "build",
-        errors: list[str] | None = None,
-        result=None,  # noqa: ANN001
-    ):
-        self.workflow = workflow
-        self.errors = errors
-        self.result = result
-
-
-def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) -> dict:  # noqa: ANN001
-    deadline = time.monotonic() + timeout_s
-    last_body: dict | None = None
-    while time.monotonic() < deadline:
-        response = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
-        assert response.status_code == 200
-        last_body = response.json()
-        if last_body["status"] in {"completed", "partial_success", "failed"}:
-            return last_body
-        time.sleep(0.02)
-    raise AssertionError(f"task {task_id} did not finish before timeout: {last_body}")
-
-
-def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
-    return SimpleNamespace(
-        output=SimpleNamespace(base_dir=str(output_dir)),
-        input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
-        root_dir=str(output_dir.parent),
-    )
-
-
-def _write_source_artifact_outputs(
-    output_dir: Path,
-) -> SourceArtifactBundle:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "paper-1",
-                "title": "Composite Paper",
-                "metadata": {"source_path": "paper.txt"},
-                "text": "\n".join(
-                    [
-                        "Experimental Section",
-                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                        "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
-                        "Characterization",
-                        "XRD and SEM were used to characterize the powders.",
-                        "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
-                    ]
-                ),
-            }
-        ]
-    )
-    text_units = pd.DataFrame(
-        [
-            {
-                "id": "tu-1",
-                "text": "The precursor powders were mixed in ethanol and stirred for 2 h.",
-                "document_ids": ["paper-1"],
+        collection_id: str,
+        document_id: str,
+        *,
+        mode: str,
+        request_id: str | None,
+    ) -> dict:
+        del request_id
+        document = await self.collection_service.get_document(
+            collection_id,
+            document_id,
+        )
+        fingerprint = sha256(
+            f"{document.sha256}:test-parser:test-analysis".encode("utf-8")
+        ).hexdigest()
+        task, created = await self.task_service.get_or_create_document_task(
+            collection_id=collection_id,
+            document_id=document_id,
+            task_type="document_preparation",
+            input_fingerprint=fingerprint,
+            mode=mode,
+        )
+        if not created:
+            return task
+        await self.collection_service.update_document_preparation(
+            collection_id,
+            document_id,
+            status="ready",
+            preparation_fingerprint=fingerprint,
+            parser_version="test-parser",
+            document_analysis_version="test-analysis",
+        )
+        return await self.task_service.finish_task(
+            task["task_id"],
+            status="completed",
+            current_stage="ready",
+            progress_percent=100,
+            progress_detail={
+                "phase": "ready",
+                "unit": "document",
+                "message": "The document is ready.",
             },
-            {
-                "id": "tu-2",
-                "text": "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
-                "document_ids": ["paper-1"],
-            },
-            {
-                "id": "tu-3",
-                "text": "Flexural strength at 25 C increased to 97 MPa relative to the untreated baseline.",
-                "document_ids": ["paper-1"],
-            },
-        ]
+        )
+
+
+@pytest.fixture()
+def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
+    monkeypatch.setattr("config.DATA_DIR", tmp_path)
+    monkeypatch.setattr("main.DATA_DIR", tmp_path)
+
+    from main import create_app
+
+    task_service = TaskService(MemoryTaskRepository())
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+            task_service=task_service,
+            source_artifact_repository=MemorySourceArtifactRepository(),
+            document_profile_repository=MemoryDocumentProfileRepository(),
+            paper_map_repository=MemoryPaperMapRepository(),
+            objective_repository=MemoryObjectiveRepository(),
+            finding_review_repository=InMemoryObjectiveReviewRepository(),
+            experiment_plan_repository=InMemoryExperimentPlanRepository(),
+            chat_repository=MemoryChatRepository(),
+        )
+    ) as client:
+        client.app.state.document_preparation_service = (
+            _ImmediateDocumentPreparationService(collection_service, task_service)
+        )
+        login = client.post(
+            f"{API_V1_PREFIX}/auth/login",
+            json={"email": "admin@example.com", "password": "admin-password"},
+        )
+        assert login.status_code == 200
+        yield client
+
+
+def _create_collection(app_client, name: str = "Ti-6Al-4V papers") -> str:  # noqa: ANN001
+    response = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": name},
     )
-    blocks = build_blocks(documents, text_units)
-    tables = pd.DataFrame(
-        [
-            {
-                "table_id": "tbl-1",
-                "document_id": "paper-1",
-                "table_order": 0,
-                "caption_text": "Processing summary",
-                "caption_block_id": None,
-                "page": None,
-                "heading_path": ["Experimental Section"],
-                "row_count": 1,
-                "col_count": 2,
-                "column_headers": ["condition", "result"],
-                "table_markdown": "| condition | result |\n| --- | --- |\n| annealed | 97 MPa |",
-                "table_text": "condition: annealed; result: 97 MPa",
-                "metadata": {},
-            }
-        ]
-    )
-    table_rows = build_table_rows(documents, text_units)
-    table_cells = build_table_cells(documents, text_units)
-    return SourceArtifactBundle(
-        documents=documents,
-        text_units=text_units,
-        blocks=blocks,
-        figures=pd.DataFrame(),
-        tables=tables,
-        table_rows=table_rows,
-        table_cells=table_cells,
-        figure_assets={},
-    )
+    assert response.status_code == 200
+    return response.json()["collection_id"]
 
 
-
-def _create_built_collection(
-    app_client, name: str = "Composite Set"
-) -> tuple[str, str]:  # noqa: ANN001
-    create_resp = app_client.post(f"{API_V1_PREFIX}/collections", json={"name": name})
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
+def _upload(app_client, collection_id: str, filename: str, content: bytes) -> dict:  # noqa: ANN001
+    response = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-        files={
-            "file": (
-                "paper.txt",
-                b"Experimental Section\nMix and anneal.",
-                "text/plain",
-            )
-        },
+        files={"file": (filename, content, "text/plain")},
     )
-    assert upload_resp.status_code == 200
-
-    task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={}
-    )
-    assert task_resp.status_code == 200
-    task_id = task_resp.json()["task_id"]
-    final_task = _wait_for_task_terminal(app_client, task_id)
-    assert final_task["status"] == "completed"
-    active_build = app_client.portal.call(
-        app_client.app.state.task_service.repository.read_active_build,
-        collection_id,
-    )
-    assert active_build is not None
-    app_client.app.state.paper_fact_repository.activate(active_build.build_id)
-    return collection_id, task_id
+    assert response.status_code == 200
+    return response.json()
 
 
-def test_request_id_is_generated_and_echoed(app_client):
+def test_request_id_is_generated_and_echoed(app_client) -> None:
     response = app_client.get(f"{API_V1_PREFIX}/collections")
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
-def test_collection_documents_are_the_exact_source_build_inputs(
+def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_work(
     app_client,
-    monkeypatch,
-):
-    import application.pipeline.collection_build.service as task_runner_module
+) -> None:
+    collection_id = _create_collection(app_client)
+    first = _upload(app_client, collection_id, "paper-a.txt", b"Methods\nPaper A")
+    second = _upload(app_client, collection_id, "paper-b.txt", b"Results\nPaper B")
 
-    captured_inputs: dict[str, bytes] = {}
-
-    async def capture_source_inputs(**kwargs):  # noqa: ANN003
-        input_dir = Path(kwargs["config"].input.storage.base_dir)
-        captured_inputs.update(
-            {
-                path.name: path.read_bytes()
-                for path in sorted(input_dir.iterdir())
-                if path.is_file()
-            }
-        )
-        output_dir = Path(kwargs["config"].output.base_dir)
-        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
-
-    monkeypatch.setattr(
-        task_runner_module,
-        "build_source_artifacts",
-        capture_source_inputs,
+    prepared = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{first['document_id']}/preparation",
+        json={"mode": "standard"},
     )
-    create = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Two paper research scope"},
-    )
-    assert create.status_code == 200
-    collection_id = create.json()["collection_id"]
+    assert prepared.status_code == 200
+    assert prepared.json()["status"] == "completed"
+    assert prepared.json()["document_id"] == first["document_id"]
 
-    uploaded = []
-    for filename, content in (
-        ("paper-a.txt", b"Methods\nPaper A"),
-        ("paper-b.txt", b"Results\nPaper B"),
-    ):
-        response = app_client.post(
-            f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-            files={"file": (filename, content, "text/plain")},
-        )
-        assert response.status_code == 200
-        uploaded.append(response.json())
-
-    collection = app_client.get(
+    after_first_preparation = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}"
-    )
-    assert collection.status_code == 200
-    assert collection.json()["documents"] == uploaded
-    assert collection.json()["paper_count"] == 2
-
-    queued = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
-        json={},
-    )
-    assert queued.status_code == 200
-    assert _wait_for_task_terminal(
-        app_client,
-        queued.json()["task_id"],
-    )["status"] == "completed"
-    assert captured_inputs == {
-        uploaded[0]["stored_filename"]: b"Methods\nPaper A",
-        uploaded[1]["stored_filename"]: b"Results\nPaper B",
+    ).json()
+    by_id = {
+        item["document_id"]: item
+        for item in after_first_preparation["documents"]
     }
+    assert by_id[first["document_id"]]["status"] == "ready"
+    assert by_id[first["document_id"]]["preparation_fingerprint"]
+    assert by_id[second["document_id"]]["status"] == "stored"
+
+    third = _upload(app_client, collection_id, "paper-c.txt", b"Discussion\nPaper C")
+    after_addition = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}"
+    ).json()
+    by_id = {item["document_id"]: item for item in after_addition["documents"]}
+    assert after_addition["paper_count"] == 3
+    assert by_id[first["document_id"]]["status"] == "ready"
+    assert by_id[second["document_id"]]["status"] == "stored"
+    assert by_id[third["document_id"]]["status"] == "stored"
+
+    repeated = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{first['document_id']}/preparation",
+        json={"mode": "standard"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["task_id"] == prepared.json()["task_id"]
+
+    task_list = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks"
+    )
+    assert task_list.status_code == 200
+    assert task_list.json()["count"] == 1
+    assert task_list.json()["items"][0]["task_type"] == "document_preparation"
 
 
-def test_request_id_is_echoed_and_propagated_to_background_build(
-    app_client, monkeypatch
-):
-    import application.pipeline.collection_build.service as task_runner_module
-    from utils.logger import REQUEST_ID_HEADER, get_request_id, get_user_id
+def test_document_preparation_rejects_unknown_mode(app_client) -> None:
+    collection_id = _create_collection(app_client, "Invalid preparation mode")
+    document = _upload(app_client, collection_id, "paper.txt", b"Paper")
 
-    captured: dict[str, str | None] = {}
-
-    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
-        captured["bound_request_id"] = get_request_id()
-        captured["bound_user_id"] = get_user_id()
-        output_dir = Path(kwargs["config"].output.base_dir)
-        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
-
-    monkeypatch.setattr(
-        task_runner_module, "build_source_artifacts", fake_build_source_artifacts
+    response = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{document['document_id']}/preparation",
+        json={"mode": "unknown"},
     )
 
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections", json={"name": "Request ID Set"}
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-        files={
-            "file": (
-                "paper.txt",
-                b"Experimental Section\nMix and anneal.",
-                "text/plain",
-            )
-        },
-    )
-    assert upload_resp.status_code == 200
-
-    request_id = "client-request-123"
-    task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
-        json={},
-        headers={REQUEST_ID_HEADER: request_id},
-    )
-
-    assert task_resp.status_code == 200
-    assert task_resp.headers[REQUEST_ID_HEADER] == request_id
-    final_task = _wait_for_task_terminal(app_client, task_resp.json()["task_id"])
-    assert final_task["status"] == "completed"
-    assert captured["bound_request_id"] == request_id
-    assert captured["bound_user_id"] == next(
-        iter(app_client.app.state.auth_session_service.repository.users)
-    )
-
-
-def test_build_task_route_schedules_async_entry_without_waiting(
-    app_client, monkeypatch
-):
-    captured: dict[str, object] = {}
-    started = threading.Event()
-    finished = threading.Event()
-
-    async def fake_run_task(*args, **kwargs):  # noqa: ANN002, ANN003
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        started.set()
-        await asyncio.sleep(0.2)
-        finished.set()
-        return {"task_id": args[0], "collection_id": args[1], "status": "queued"}
-
-    monkeypatch.setattr(
-        app_client.app.state.build_pipeline_service,
-        "run_task",
-        fake_run_task,
-    )
-
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections", json={"name": "Blocking Entry Set"}
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-        files={
-            "file": (
-                "paper.txt",
-                b"Experimental Section\nMix and anneal.",
-                "text/plain",
-            )
-        },
-    )
-    assert upload_resp.status_code == 200
-
-    task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={}
-    )
-
-    assert task_resp.status_code == 200
-    assert started.wait(timeout=2)
-    assert captured["args"][1] == collection_id
-    assert not finished.is_set()
-    assert finished.wait(timeout=2)
-
-
-def test_legacy_index_task_route_is_not_registered(app_client):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections", json={"name": "Legacy Route"}
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-        files={
-            "file": (
-                "paper.txt",
-                b"Experimental Section\nMix and anneal.",
-                "text/plain",
-            )
-        },
-    )
-    assert upload_resp.status_code == 200
-
-    task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/index", json={}
-    )
-    assert task_resp.status_code == 404
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize(
     "retired_path",
     (
+        "/collections/{collection_id}/tasks/build",
+        "/collections/{collection_id}/tasks/index",
         "/comparable-results",
         "/collections/{collection_id}/research-view",
         "/collections/{collection_id}/materials",
@@ -398,82 +216,30 @@ def test_legacy_index_task_route_is_not_registered(app_client):
         "/collections/{collection_id}/evidence/cards",
         "/collections/{collection_id}/graph",
         "/collections/{collection_id}/graphml",
-        "/collections/{collection_id}/documents/doc-1/comparison-semantics",
     ),
 )
-def test_retired_collection_projection_routes_are_not_registered(
+def test_retired_build_and_projection_routes_are_not_registered(
     app_client,
     retired_path,
-):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Maintained Objective Flow"},
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    response = app_client.get(
-        f"{API_V1_PREFIX}{retired_path.format(collection_id=collection_id)}"
+) -> None:
+    collection_id = _create_collection(app_client, "Current routes only")
+    path = retired_path.format(collection_id=collection_id)
+    response = (
+        app_client.post(f"{API_V1_PREFIX}{path}", json={})
+        if "/tasks/" in path
+        else app_client.get(f"{API_V1_PREFIX}{path}")
     )
 
     assert response.status_code == 404
 
 
-
-@pytest.fixture()
-def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
-    import application.pipeline.collection_build.service as task_runner_module
-    from application.source.task_service import TaskService
-
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
-    monkeypatch.setattr("config.DATA_DIR", tmp_path)
-    from main import create_app
-
-    monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    build_repository = MemoryBuildRepository()
-    task_service = TaskService(build_repository)
-    source_artifact_repository = MemorySourceArtifactRepository()
-    paper_fact_repository = MemoryPaperFactRepository()
-    objective_repository = MemoryObjectiveRepository()
-    finding_review_repository = InMemoryObjectiveReviewRepository()
-    experiment_plan_repository = InMemoryExperimentPlanRepository()
-
-    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
-        output_dir = Path(kwargs["config"].output.base_dir)
-        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
-
-    monkeypatch.setattr(
-        task_runner_module, "build_source_artifacts", fake_build_source_artifacts
-    )
-    with TestClient(
-        create_app(
-            auth_session_service=auth_session_service,
-            collection_service=collection_service,
-            task_service=task_service,
-            source_artifact_repository=source_artifact_repository,
-            paper_fact_repository=paper_fact_repository,
-            objective_repository=objective_repository,
-            finding_review_repository=finding_review_repository,
-            experiment_plan_repository=experiment_plan_repository,
-            chat_repository=MemoryChatRepository(),
-        )
-    ) as client:
-        login_response = client.post(
-            f"{API_V1_PREFIX}/auth/login",
-            json={"email": "admin@example.com", "password": "admin-password"},
-        )
-        assert login_response.status_code == 200
-        yield client
-
-
-def test_objective_experiment_plan_routes_are_registered(app_client):
+def test_objective_experiment_plan_routes_are_registered(app_client) -> None:
     openapi = app_client.get("/api/openapi.json")
     assert openapi.status_code == 200
     paths = openapi.json()["paths"]
     plan_list_path = (
-        f"{API_V1_PREFIX}/collections/{{collection_id}}/objectives/{{objective_id}}/"
-        "experiment-plans"
+        f"{API_V1_PREFIX}/collections/{{collection_id}}/objectives/"
+        "{objective_id}/experiment-plans"
     )
     plan_detail_path = f"{plan_list_path}/{{plan_id}}"
 
@@ -482,225 +248,34 @@ def test_objective_experiment_plan_routes_are_registered(app_client):
     assert "patch" in paths[plan_detail_path]
 
 
-def test_collection_task_flow(app_client):
-    collection_id, task_id = _create_built_collection(app_client)
-
-    task_status = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}")
-    assert task_status.status_code == 200
-    assert task_status.json()["task_type"] == "build"
-    assert task_status.json()["status"] == "completed"
-    assert task_status.json()["current_stage"] == "artifacts_ready"
-
-    collection_tasks = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks"
-    )
-    assert collection_tasks.status_code == 200
-    tasks_body = collection_tasks.json()
-    assert tasks_body["collection_id"] == collection_id
-    assert tasks_body["count"] >= 1
-    assert tasks_body["items"][0]["task_id"] == task_id
-    assert tasks_body["items"][0]["task_type"] == "build"
-
-    completed_tasks = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks",
-        params={"status": "completed", "limit": 5, "offset": 0},
-    )
-    assert completed_tasks.status_code == 200
-    assert completed_tasks.json()["count"] >= 1
-
-    artifacts = app_client.get(f"{API_V1_PREFIX}/tasks/{task_id}/artifacts")
-    assert artifacts.status_code == 200
-    body = artifacts.json()
-    assert body["documents_generated"] is True
-    assert body["documents_ready"] is True
-    assert body["blocks_generated"] is True
-    assert body["blocks_ready"] is True
-    assert body["figures_generated"] is True
-    assert body["figures_ready"] is False
-    assert body["table_rows_generated"] is True
-    assert body["table_rows_ready"] is False
-    assert body["table_cells_generated"] is True
-    assert body["table_cells_ready"] is False
-
-    profiles = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/profiles"
-    )
-    assert profiles.status_code == 200
-    profiles_body = profiles.json()
-    assert profiles_body["count"] == 1
-    assert profiles_body["items"][0]["title"] == "Composite Paper"
-    assert profiles_body["items"][0]["source_filename"] == "paper.txt"
-    assert profiles_body["items"][0]["doc_type"] == "experimental"
-
-    document_id = profiles_body["items"][0]["document_id"]
-    profile = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/{document_id}/profile"
-    )
-    assert profile.status_code == 200
-    assert profile.json()["document_id"] == document_id
-
-
-def test_goal_intake_creates_collection_and_converges_on_workspace(app_client):
+def test_goal_intake_creates_a_collection_with_no_documents(app_client) -> None:
     response = app_client.post(
         f"{API_V1_PREFIX}/goals/intake",
         json={
-            "material_system": "Li metal",
-            "target_property": "cycling stability",
+            "material_system": "Ti-6Al-4V",
+            "target_property": "tensile strength",
             "intent": "compare",
-            "constraints": {"electrolyte": "carbonate"},
+            "constraints": {"process": "LPBF"},
         },
     )
 
     assert response.status_code == 200
-    payload = response.json()
-    collection_id = payload["seed_collection"]["collection_id"]
-
-    assert payload["coverage_assessment"]["level"] == "direct"
-    assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
-    assert payload["seed_collection"]["source_channels"] == ["upload"]
-    assert payload["seed_collection"]["seeded_document_count"] == 0
-
-    workspace = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}/workspace")
-    assert workspace.status_code == 200
-    workspace_body = workspace.json()
-    assert workspace_body["collection"]["collection_id"] == collection_id
-    assert workspace_body["file_count"] == 0
-    assert workspace_body["status_summary"] == "empty"
+    collection_id = response.json()["seed_collection"]["collection_id"]
+    collection = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
+    assert collection.status_code == 200
+    assert collection.json()["collection_id"] == collection_id
+    assert collection.json()["documents"] == []
+    assert collection.json()["paper_count"] == 0
 
 
+def test_delete_collection_removes_current_documents(app_client) -> None:
+    collection_id = _create_collection(app_client, "Delete current documents")
+    _upload(app_client, collection_id, "paper.txt", b"Paper")
 
-def test_delete_collection_removes_app_layer_collection(app_client):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections", json={"name": "Delete Me"}
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
+    deleted = app_client.delete(f"{API_V1_PREFIX}/collections/{collection_id}")
 
-    get_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
-    assert get_resp.status_code == 200
-
-    delete_resp = app_client.delete(f"{API_V1_PREFIX}/collections/{collection_id}")
-    assert delete_resp.status_code == 200
-    assert delete_resp.json()["collection_id"] == collection_id
-
-    missing_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
-    assert missing_resp.status_code == 404
-
-    list_resp = app_client.get(f"{API_V1_PREFIX}/collections")
-    assert list_resp.status_code == 200
-    assert all(
-        item["collection_id"] != collection_id for item in list_resp.json()["items"]
-    )
-
-
-def test_collection_contract_hides_default_method_and_ignores_legacy_payload(
-    app_client,
-):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={
-            "name": "Compat Collection",
-            "description": "legacy client payload",
-            "default_method": "fast",
-        },
-    )
-    assert create_resp.status_code == 200
-    create_body = create_resp.json()
-    collection_id = create_body["collection_id"]
-    assert "default_method" not in create_body
-
-    get_resp = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
-    assert get_resp.status_code == 200
-    assert "default_method" not in get_resp.json()
-
-    list_resp = app_client.get(f"{API_V1_PREFIX}/collections")
-    assert list_resp.status_code == 200
-    created_item = next(
-        item
-        for item in list_resp.json()["items"]
-        if item["collection_id"] == collection_id
-    )
-    assert "default_method" not in created_item
-
-
-def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatch):
-    import application.pipeline.collection_build.service as task_runner_module
-
-    captured: dict[str, object] = {}
-
-    async def capturing_build_source_artifacts(**kwargs):  # noqa: ANN003
-        captured.update(kwargs)
-        output_dir = Path(kwargs["config"].output.base_dir)
-        return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
-
-    monkeypatch.setattr(
-        task_runner_module,
-        "build_source_artifacts",
-        capturing_build_source_artifacts,
-    )
-
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Legacy Task Contract"},
-    )
-    assert create_resp.status_code == 200
-    collection_id = create_resp.json()["collection_id"]
-
-    upload_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-        files={
-            "file": (
-                "paper.txt",
-                b"Experimental Section\nMix and anneal.",
-                "text/plain",
-            )
-        },
-    )
-    assert upload_resp.status_code == 200
-
-    task_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
-        json={
-            "mode": "fast",
-            "method": "fast",
-            "is_update_run": True,
-            "verbose": True,
-            "additional_context": {"caller": "legacy-frontend"},
-        },
-    )
-    assert task_resp.status_code == 200
-
-    task_id = task_resp.json()["task_id"]
-    task_status = _wait_for_task_terminal(app_client, task_id)
-    assert task_status["task_type"] == "build"
-    assert task_status["status"] == "completed"
-
-    assert captured["method"] == task_runner_module.IndexingMethod.Fast
-    build = app_client.portal.call(
-        app_client.app.state.task_service.repository.read_build,
-        task_id,
-    )
-    assert build is not None
-    assert build.mode == "fast"
-    assert "is_update_run" not in captured
-    assert captured["verbose"] is True
-    assert captured["additional_context"] == {"caller": "legacy-frontend"}
-
-
-def test_build_task_contract_rejects_unknown_pipeline_mode(app_client):
-    create_resp = app_client.post(
-        f"{API_V1_PREFIX}/collections",
-        json={"name": "Invalid Pipeline Mode"},
-    )
-    collection_id = create_resp.json()["collection_id"]
-    app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
-        files={"file": ("paper.txt", b"Paper", "text/plain")},
-    )
-
-    response = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
-        json={"mode": "unknown"},
-    )
-
-    assert response.status_code == 422
+    assert deleted.status_code == 200
+    assert deleted.json()["collection_id"] == collection_id
+    assert app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}"
+    ).status_code == 404

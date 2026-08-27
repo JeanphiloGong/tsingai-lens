@@ -91,13 +91,13 @@ class GoalService:
             "reason": reason,
             "next_actions": [
                 "Upload papers or connect a source adapter into the seeded collection.",
-                "Run indexing to generate document profiles, evidence cards, and comparison rows.",
-                "Open the workspace and review readiness, warnings, and next-step links.",
+                "Prepare each paper to generate its Source, profile, and paper map.",
+                "Select ready papers to discover candidate research objectives.",
             ],
             "links": [
                 f"/api/v1/collections/{collection_id}",
                 f"/api/v1/collections/{collection_id}/documents",
-                f"/api/v1/collections/{collection_id}/workspace",
+                f"/api/v1/collections/{collection_id}/objectives",
             ],
         }
 

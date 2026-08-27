@@ -18,7 +18,7 @@ from domain.core.document_profile import (
     DocumentProfile,
     summarize_document_profile_collection,
 )
-from domain.ports import PaperFactRepository, SourceArtifactRepository
+from domain.ports import DocumentProfileRepository, SourceArtifactRepository
 from domain.source import SourceBlock, SourceDocument, normalize_optional_text
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
@@ -87,18 +87,18 @@ class DocumentNotFoundError(FileNotFoundError):
 
 
 class DocumentProfileService:
-    """Generate and serve collection-scoped document profile artifacts."""
+    """Generate and serve each document's current profile."""
 
     def __init__(
         self,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
-        paper_fact_repository: PaperFactRepository,
+        document_profile_repository: DocumentProfileRepository,
         document_profile_extractor: DocumentProfileExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._document_profile_extractor = document_profile_extractor
-        self.paper_fact_repository = paper_fact_repository
+        self.document_profile_repository = document_profile_repository
         self.source_artifact_repository = source_artifact_repository
 
     async def list_document_profiles(
@@ -205,81 +205,62 @@ class DocumentProfileService:
     async def read_document_profiles(
         self,
         collection_id: str,
-        *,
-        build_id: str | None = None,
+        document_ids: tuple[str, ...] | None = None,
     ) -> tuple[DocumentProfile, ...]:
         # verifies that the collection exists before reading anything.
         await self.collection_service.get_collection(collection_id)
 
-        # reads the already-generated PaperFactSet from persistence
-        facts = await self.paper_fact_repository.read(
-            collection_id, build_id=build_id
+        # reads the already-generated document profiles from persistence
+        profiles = await self.document_profile_repository.list_collection(
+            collection_id,
+            document_ids,
         )
 
-        # get the document_profile from the fact container
-        if facts.document_profiles:
-            return facts.document_profiles
+        # get the document_profile from the document-owned store
+        if profiles:
+            return profiles
         raise DocumentProfilesNotReadyError(collection_id)
 
-    async def build_document_profiles(
+    async def build_document_profile(
         self,
         collection_id: str,
-        *,
-        build_id: str,
-    ) -> tuple[DocumentProfile, ...]:
+        document_id: str,
+    ) -> DocumentProfile:
         await self.collection_service.get_collection(collection_id)
-        try:
-            documents = await self._load_source_documents(
-                collection_id, build_id=build_id
+        document = await self.source_artifact_repository.read_document(
+            collection_id,
+            document_id,
+        )
+        if document is None:
+            exc = FileNotFoundError(
+                f"source artifacts not ready: {collection_id}/{document_id}"
             )
-        except FileNotFoundError as exc:
             raise DocumentProfilesNotReadyError(collection_id) from exc
-        document_records = self._build_document_records(documents)
-        blocks_by_doc = {
-            document.document_id: list(document.blocks)
-            for document in documents
-        }
+        row = self._build_document_records((document,))[0]
         file_lookup = await self._build_collection_file_lookup(collection_id)
         logger.info(
-            "Document profile build started collection_id=%s document_count=%s block_count=%s",
+            "Document profile build started collection_id=%s document_id=%s block_count=%s",
             collection_id,
-            len(document_records),
-            sum(len(document.blocks) for document in documents),
+            document_id,
+            len(document.blocks),
         )
-
-        profiles: list[DocumentProfile] = []
-        for row in document_records:
-            document_id = str(row.get("paper_id") or row.get("document_id") or "")
-            document_blocks = blocks_by_doc.get(document_id, [])
-            profiled = await to_thread(
-                self._profile_document_row,
-                collection_id=collection_id,
-                build_id=build_id,
-                row=row,
-                blocks=document_blocks,
-                file_lookup=file_lookup,
-            )
-            logger.info(
-                "Document profile extracted collection_id=%s document_id=%s doc_type=%s block_count=%s warning_count=%s",
-                collection_id,
-                document_id,
-                profiled.get("doc_type"),
-                len(document_blocks),
-                len(profiled.get("parsing_warnings", [])),
-            )
-            profiles.append(DocumentProfile.from_mapping(profiled))
-        document_profiles = tuple(profiles)
-        await self.paper_fact_repository.replace_document_profiles(
-            collection_id,
-            build_id,
-            document_profiles,
+        profiled = await to_thread(
+            self._profile_document_row,
+            collection_id=collection_id,
+            row=row,
+            blocks=list(document.blocks),
+            file_lookup=file_lookup,
         )
+        profile = DocumentProfile.from_mapping(profiled)
+        await self.document_profile_repository.replace(profile)
         logger.info(
-            "Document profile build finished collection_id=%s profile_count=%s",
+            "Document profile build finished collection_id=%s document_id=%s doc_type=%s warning_count=%s",
             collection_id,
-            len(document_profiles),
+            document_id,
+            profile.doc_type,
+            len(profile.parsing_warnings),
         )
-        return document_profiles
+        return profile
 
     def _get_document_profile_extractor(self) -> DocumentProfileExtractor:
         if self._document_profile_extractor is None:
@@ -289,18 +270,9 @@ class DocumentProfileService:
     async def _load_source_documents(
         self,
         collection_id: str,
-        *,
-        build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]:
-        documents = (
-            await self.source_artifact_repository.read_collection_documents(
-                collection_id,
-                build_id=build_id,
-            )
-            if build_id is not None
-            else await self.source_artifact_repository.read_collection_documents(
-                collection_id
-            )
+        documents = await self.source_artifact_repository.read_collection_documents(
+            collection_id
         )
         if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
@@ -338,7 +310,6 @@ class DocumentProfileService:
     def _profile_document_row(
         self,
         collection_id: str,
-        build_id: str,
         row: Mapping[str, Any],
         blocks: list[SourceBlock],
         file_lookup: dict[str, Any] | None = None,
@@ -395,9 +366,8 @@ class DocumentProfileService:
             }
             logger.warning(
                 "Document profile classification unavailable; preserving document "
-                "as uncertain collection_id=%s build_id=%s document_id=%s trace=%s",
+                "as uncertain collection_id=%s document_id=%s trace=%s",
                 collection_id,
-                build_id,
                 document_id,
                 json.dumps(
                     diagnostic,

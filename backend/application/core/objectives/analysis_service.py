@@ -72,10 +72,15 @@ class ObjectiveAnalysisService:
         self,
         collection_id: str,
         objective_id: str,
+        document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         """Confirm, queue, and asynchronously dispatch one canonical analysis."""
 
-        payload = await self.queue_analysis(collection_id, objective_id)
+        payload = await self.queue_analysis(
+            collection_id,
+            objective_id,
+            document_ids,
+        )
         analysis = payload.get("analysis")
         if analysis is None or analysis.status != "queued":
             return payload
@@ -111,10 +116,22 @@ class ObjectiveAnalysisService:
         task.add_done_callback(self._log_unexpected_analysis_failure)
         return payload
 
-    async def queue_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
+    async def queue_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_ids: tuple[str, ...],
+    ) -> dict[str, Any]:
+        document_inputs = (
+            await self.research_objective_service.resolve_prepared_document_inputs(
+                collection_id,
+                document_ids,
+            )
+        )
         objective, analysis = await self.objective_repository.queue_analysis(
             collection_id,
             objective_id,
+            document_inputs=document_inputs,
             pipeline_version=_PIPELINE_VERSION,
             model_name=None,
             prompt_versions={},
@@ -269,7 +286,8 @@ class ObjectiveAnalysisService:
         )
         profiles = await (
             self.research_objective_service.document_profile_service.read_document_profiles(
-                collection_id, build_id=analysis.source_build_id
+                collection_id,
+                tuple(item.document_id for item in analysis.document_inputs),
             )
         )
         return build_objective_evidence_map(

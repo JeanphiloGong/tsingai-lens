@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
-)
-from application.pipeline.collection_build.service import (
-    CollectionBuildPreconditionError,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
 class StartResearchProcessArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class StartResearchProcessCapability:
@@ -41,10 +40,10 @@ class StartResearchProcessCapability:
         self,
         *,
         collection_service: Any,
-        collection_build_pipeline_service: Any,
+        document_preparation_service: Any,
     ) -> None:
         self.collection_service = collection_service
-        self.collection_build_pipeline_service = collection_build_pipeline_service
+        self.document_preparation_service = document_preparation_service
 
     async def execute(
         self,
@@ -55,7 +54,8 @@ class StartResearchProcessCapability:
             context.collection_id,
             context.user_id,
         )
-        if collection.get("paper_count") == 0:
+        documents = tuple(collection.get("documents") or ())
+        if not documents:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status="failed",
@@ -64,38 +64,62 @@ class StartResearchProcessCapability:
                     "Upload at least one paper before starting literature analysis."
                 ),
             )
-        try:
-            task = await self.collection_build_pipeline_service.queue_build(
-                context.collection_id,
-                mode="standard",
+        available_ids = {
+            str(document.get("document_id") or "") for document in documents
+        }
+        selected_ids = tuple(
+            dict.fromkeys(
+                str(document_id).strip()
+                for document_id in _arguments.document_ids
+                if str(document_id).strip()
             )
-        except CollectionBuildPreconditionError:
+        ) or tuple(
+            str(document.get("document_id") or "") for document in documents
+        )
+        missing_ids = [
+            document_id
+            for document_id in selected_ids
+            if document_id not in available_ids
+        ]
+        if missing_ids:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status="failed",
-                error_code="collection_has_no_papers",
+                error_code="document_not_found",
                 error_message=(
-                    "Upload at least one paper before starting literature analysis."
+                    "The selected document is not part of this collection: "
+                    + ", ".join(missing_ids)
                 ),
             )
-        task_id = str(task["task_id"])
+        queued_tasks = []
+        for document_id in selected_ids:
+            queued_tasks.append(
+                await self.document_preparation_service.queue_document(
+                    context.collection_id,
+                    document_id,
+                    mode="standard",
+                )
+            )
+        tasks = tuple(queued_tasks)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="queued",
             data={
                 "collection_id": context.collection_id,
-                "task_id": task_id,
-                "status": str(task.get("status") or "queued"),
-                "mode": str(task.get("mode") or "standard"),
-                "research_scope": "paper_map_and_objective_candidates",
+                "document_ids": list(selected_ids),
+                "tasks": tasks,
+                "mode": "standard",
+                "research_scope": "document_preparation",
+                "objective_discovery_started": False,
                 "objective_analysis_started": False,
             },
-            resource_refs=(
+            resource_refs=tuple(
                 ChatResourceRef(
-                    resource_type="collection_build_task",
-                    resource_id=task_id,
+                    resource_type="document_preparation_task",
+                    resource_id=str(task["task_id"]),
                     href=f"/collections/{context.collection_id}",
-                ),
+                )
+                for task in tasks
             ),
         )
 

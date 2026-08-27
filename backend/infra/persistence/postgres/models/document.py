@@ -1,15 +1,17 @@
-"""Canonical document identity and collection membership models."""
+"""Current documents owned directly by one collection."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
-    ForeignKeyConstraint,
+    Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,75 +21,41 @@ from infra.persistence.postgres.base import Base
 
 class Document(Base):
     __tablename__ = "documents"
-
-    document_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class DocumentVersion(Base):
-    __tablename__ = "document_versions"
     __table_args__ = (
         CheckConstraint("length(sha256) = 64", name="sha256_length"),
         CheckConstraint("sha256 = lower(sha256)", name="sha256_lowercase"),
+        CheckConstraint("size_bytes >= 0", name="size_bytes_non_negative"),
+        CheckConstraint("document_order >= 0", name="document_order_non_negative"),
+        UniqueConstraint("collection_id", "sha256", name="uq_documents_collection_content"),
         UniqueConstraint(
-            "document_id",
-            "document_version_id",
-            name="uq_document_versions_document_version_identity",
+            "collection_id", "document_order", name="uq_documents_collection_order"
         ),
     )
 
-    document_version_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    document_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("documents.document_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    media_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class CollectionDocument(Base):
-    __tablename__ = "collection_documents"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["document_id", "document_version_id"],
-            ["document_versions.document_id", "document_versions.document_version_id"],
-            name="fk_collection_documents_document_version",
-            ondelete="RESTRICT",
-        ),
-        UniqueConstraint(
-            "collection_id",
-            "document_id",
-            name="uq_collection_documents_collection_document",
-        ),
-        UniqueConstraint(
-            "collection_id",
-            "collection_document_id",
-            name="uq_collection_documents_collection_membership_identity",
-        ),
-        UniqueConstraint(
-            "collection_id",
-            "collection_document_id",
-            "document_version_id",
-            name="uq_collection_documents_membership_version",
-        ),
-    )
-
-    collection_document_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     collection_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("collections.collection_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    document_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    document_version_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    media_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    document_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    parser_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    document_analysis_version: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
     )
+    preparation_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+__all__ = ["Document"]

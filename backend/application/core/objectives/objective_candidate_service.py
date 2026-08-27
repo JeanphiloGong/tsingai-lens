@@ -22,6 +22,7 @@ from domain.core import (
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
     PaperStudyRelationship,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 
@@ -111,6 +112,7 @@ class ObjectiveCandidateService:
         collection_id: str,
         *,
         paper_skims: tuple[PaperSkim, ...],
+        document_inputs: tuple[PreparedDocumentInput, ...],
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
         progress_callback: ProgressCallback | None = None,
     ) -> ObjectiveFactSet:
@@ -223,7 +225,7 @@ class ObjectiveCandidateService:
         } == set(relationship_inventory)
         facts = ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=paper_skims,
+            document_inputs=document_inputs,
             research_objectives=research_objectives,
             study_dispositions=dispositions,
         )

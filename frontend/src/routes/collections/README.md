@@ -1,11 +1,12 @@
 # Collection Routes
 
-This node owns the collection workspace route family.
+This node owns the Collection route family.
 
 ## Primary Routes
 
 - `collections/[id]/+page.svelte`
-  Collection readiness, files, tasks, warnings, and next action.
+  Current papers, independent preparation/retry, ready-paper selection,
+  Objective discovery, warnings, and upload.
 - `collections/[id]/objectives/+page.svelte`
   Candidate and confirmed research Objectives plus analysis progress/retry.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
@@ -22,13 +23,12 @@ This node owns the collection workspace route family.
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
   write approval.
-  Its research-process capability projects the same persisted build task used
-  by the workspace into user-visible scientific stages; Chat does not own a
-  second progress model or expose model reasoning and retry internals.
-  The Agent may also propose starting that canonical collection process. The
-  exact action requires user approval, returns a queued task linked to the
-  collection workspace, and does not confirm an Objective or start deep
-  Objective analysis.
+  Its research-process capability projects the same current Documents and
+  persisted per-paper preparation tasks used by the Collection page; Chat does
+  not own a second progress model or expose model reasoning and retry internals.
+  The Agent may propose preparing exact papers. The action requires approval,
+  returns their queued or reused tasks, and does not discover or confirm an
+  Objective or start deep Objective analysis.
   For a researcher-authored question, the Agent can preview a bounded paper
   scope without claiming that mapped relationships or review citations are
   Evidence. Creating the untested Objective candidate requires approval, and
@@ -57,6 +57,9 @@ Research Objective
 
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
+Before that command, the user selects exact ready papers. The request sends those
+`document_ids`; processing and failed papers cannot be selected and do not block
+ready papers. Retry reuses the failed analysis version's frozen paper IDs.
 The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;
@@ -98,13 +101,13 @@ mechanisms link to their exact supporting Evidence.
 
 ## Product Boundary
 
-The collection comparison workspace is a read-only overview of published
+The collection comparison page is a read-only overview of published
 Objective Findings. It does not rebuild conclusions from legacy comparison
 rows, Evidence cards, material projections, or collection-wide graph
 projections. The Objective Evidence Map is a read-only view of those same
-published records, not another aggregate or analysis path. The Objective
-workspace owns the single confirmation-and-analysis command; the Finding
-workspace owns expert review; the document reader owns Source verification.
+published records, not another aggregate or analysis path. The Objective page
+owns the single confirmation-and-analysis command; the Finding page owns expert
+review; the document reader owns Source verification.
 The Research Agent and experiment plans may consume published Findings, but
 they do not introduce a second conclusion identity.
 

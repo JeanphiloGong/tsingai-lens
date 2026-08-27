@@ -1,35 +1,16 @@
 """PostgreSQL ORM model registry."""
 
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
-from infra.persistence.postgres.models.build import (
-    ArtifactVersion,
-    BuildStage,
-    CollectionActiveBuild,
-    CollectionBuild,
-    Task,
-)
+from infra.persistence.postgres.models.task import Task, TaskStage
 from infra.persistence.postgres.models.chat import (
     ChatMessageRow,
     ChatSessionRow,
     ChatToolCallRow,
     ChatToolResultRow,
 )
-from infra.persistence.postgres.models.comparison import (
-    CollectionComparableResultRecord,
-    ComparableResultRecord,
-    ComparisonBuild,
-    PairwiseComparisonRelationRecord,
-)
-from infra.persistence.postgres.models.collection import (
-    Collection,
-    CollectionFile,
-    StoredObject,
-)
-from infra.persistence.postgres.models.document import (
-    CollectionDocument,
-    Document,
-    DocumentVersion,
-)
+from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.document_profile import DocumentProfileRow
 from infra.persistence.postgres.models.evaluation import (
     EvaluationFailureRecord,
     EvaluationGoldItemRecord,
@@ -41,34 +22,13 @@ from infra.persistence.postgres.models.evaluation import (
     FindingCurationRecord,
     FindingFeedbackRecord,
 )
-from infra.persistence.postgres.models.paper_fact import (
-    PaperFactBaselineReference,
-    PaperFactBuild,
-    PaperFactCharacterizationObservation,
-    PaperFactDocumentProfile,
-    PaperFactEvidenceAnchor,
-    PaperFactMeasurementResult,
-    PaperFactMethod,
-    PaperFactSampleVariant,
-    PaperFactStructureFeature,
-    PaperFactTestCondition,
-)
+from infra.persistence.postgres.models.paper_map import PaperMapRow
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
-    ObjectiveAuthoredCandidateRecord,
-    ObjectiveBuild,
+    ObjectiveDiscoveryRecord,
     ObjectiveEvidenceRecord,
-    ObjectiveFindingContextRecord,
-    ObjectiveFindingPaperContributionRecord,
     ObjectiveFindingRecord,
-    ObjectiveFindingRelationRecord,
     ObjectivePaperContributionRecord,
-    ObjectivePaperSourceUnitCoverage,
-    ObjectivePaperSkim,
-    ObjectivePaperStudy,
-    ObjectivePaperStudyDisposition,
-    ObjectivePaperStudyRelationship,
-    ObjectivePaperStudySignal,
     ObjectiveResearchRecord,
 )
 from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlan
@@ -85,27 +45,17 @@ from infra.persistence.postgres.models.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
-    SourceTextUnitDocument,
 )
 __all__ = [
-    "ArtifactVersion",
     "AuthSession",
     "AuthUser",
-    "BuildStage",
     "ChatMessageRow",
     "ChatSessionRow",
     "ChatToolCallRow",
     "ChatToolResultRow",
     "Collection",
-    "CollectionActiveBuild",
-    "CollectionComparableResultRecord",
-    "CollectionBuild",
-    "ComparableResultRecord",
-    "ComparisonBuild",
-    "CollectionDocument",
-    "CollectionFile",
     "Document",
-    "DocumentVersion",
+    "DocumentProfileRow",
     "EvaluationFailureRecord",
     "EvaluationGoldItemRecord",
     "EvaluationGoldSetRecord",
@@ -116,34 +66,13 @@ __all__ = [
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
-    "ObjectiveAuthoredCandidateRecord",
-    "ObjectiveBuild",
+    "ObjectiveDiscoveryRecord",
     "ObjectiveExperimentPlan",
     "ObjectiveEvidenceRecord",
-    "ObjectiveFindingContextRecord",
-    "ObjectiveFindingPaperContributionRecord",
     "ObjectiveFindingRecord",
-    "ObjectiveFindingRelationRecord",
     "ObjectivePaperContributionRecord",
-    "ObjectivePaperSourceUnitCoverage",
-    "ObjectivePaperSkim",
-    "ObjectivePaperStudy",
-    "ObjectivePaperStudyDisposition",
-    "ObjectivePaperStudyRelationship",
-    "ObjectivePaperStudySignal",
     "ObjectiveResearchRecord",
-    "PairwiseComparisonRelationRecord",
-    "PaperFactBaselineReference",
-    "PaperFactBuild",
-    "PaperFactCharacterizationObservation",
-    "PaperFactDocumentProfile",
-    "PaperFactEvidenceAnchor",
-    "PaperFactMeasurementResult",
-    "PaperFactMethod",
-    "PaperFactSampleVariant",
-    "PaperFactStructureFeature",
-    "PaperFactTestCondition",
-    "StoredObject",
+    "PaperMapRow",
     "SourceBlock",
     "SourceBlockTextUnit",
     "SourceDocument",
@@ -156,6 +85,6 @@ __all__ = [
     "SourceTableCell",
     "SourceTableRow",
     "SourceTextUnit",
-    "SourceTextUnitDocument",
     "Task",
+    "TaskStage",
 ]

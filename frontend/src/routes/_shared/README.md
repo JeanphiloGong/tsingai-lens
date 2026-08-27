@@ -6,8 +6,8 @@ This node owns browser-side helpers shared across frontend routes.
 
 - keep requests on the same-origin `/api/*` and `/api/v1/*` contract;
 - centralize authentication expiry and API error handling;
-- expose typed clients for collection, Source, Objective/Finding,
-  assistant, and workspace resources;
+- expose typed clients for Collection, Document preparation, Source,
+  Objective/Finding, and Assistant resources;
 - keep formatting, translations, and task-state shaping out
   of route components.
 
@@ -16,12 +16,15 @@ This node owns browser-side helpers shared across frontend routes.
 - `api.ts`
   Base request helpers and shared HTTP error behavior.
 - `collections.ts`, `collectionDocuments.ts`, `tasks.ts`
-  Collection import, build, and progress contracts.
+  Collection upload, current Document, independent preparation, and task
+  progress contracts.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated
   versioned Evidence. Its analysis command atomically confirms candidate
-  Objectives and queues analysis through the same endpoint. It also reads the
+  Objectives and queues analysis over exact selected ready `document_ids`
+  through the same endpoint. Objective discovery also receives exact selected
+  ready IDs. It also reads the
   deterministic Evidence Map for one Objective's published analysis; that read
   model does not create a second research identity. Feedback, curation, and
   dataset export use only

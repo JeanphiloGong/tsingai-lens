@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -16,6 +15,10 @@ class Document:
     status: str
     size_bytes: int
     created_at: str
+    updated_at: str | None = None
+    parser_version: str | None = None
+    document_analysis_version: str | None = None
+    preparation_fingerprint: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -28,6 +31,10 @@ class Document:
             "status": self.status,
             "size_bytes": self.size_bytes,
             "created_at": self.created_at,
+            "updated_at": self.updated_at or self.created_at,
+            "parser_version": self.parser_version,
+            "document_analysis_version": self.document_analysis_version,
+            "preparation_fingerprint": self.preparation_fingerprint,
         }
 
 
@@ -57,44 +64,13 @@ class Collection:
         now_iso: str,
     ) -> "Collection":
         return cls(
-            collection_id=str(collection_id),
-            owner_user_id=_normalize_optional_text(owner_user_id) or "local-user",
-            name=str(name),
-            description=_normalize_optional_text(description),
+            collection_id=collection_id,
+            owner_user_id=owner_user_id,
+            name=name,
+            description=description,
             status="idle",
-            created_at=str(now_iso),
-            updated_at=str(now_iso),
-        )
-
-    @classmethod
-    def from_mapping(
-        cls,
-        payload: Mapping[str, Any] | None,
-        collection_id: str,
-        *,
-        now_iso: str,
-    ) -> "Collection":
-        source = dict(payload or {})
-        resolved_collection_id = _normalize_optional_text(
-            source.get("collection_id") or source.get("id")
-        ) or str(collection_id)
-        created_at = _normalize_optional_text(source.get("created_at")) or str(now_iso)
-        updated_at = _normalize_optional_text(source.get("updated_at")) or created_at
-        return cls(
-            collection_id=resolved_collection_id,
-            owner_user_id=(
-                _normalize_optional_text(source.get("owner_user_id")) or "local-user"
-            ),
-            name=_normalize_optional_text(source.get("name")) or resolved_collection_id,
-            description=_normalize_optional_text(source.get("description")),
-            status=_normalize_optional_text(source.get("status")) or "idle",
-            created_at=created_at,
-            updated_at=updated_at,
-            documents=tuple(
-                item
-                for item in source.get("documents") or ()
-                if isinstance(item, Document)
-            ),
+            created_at=now_iso,
+            updated_at=now_iso,
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -109,15 +85,5 @@ class Collection:
             "updated_at": self.updated_at,
             "documents": [document.to_record() for document in self.documents],
         }
-
-
-def _normalize_optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    text = str(value).strip()
-    return text or None
-
 
 __all__ = ["Collection", "Document"]

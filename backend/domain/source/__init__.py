@@ -1,12 +1,7 @@
 """Source-domain records and status semantics."""
 
 from domain.source.artifact_status import ArtifactStatusRecord
-from domain.source.build import (
-    ArtifactVersionRecord,
-    BuildStageRecord,
-    CollectionBuildRecord,
-    TaskRecord,
-)
+from domain.source.task import TaskRecord, TaskStageRecord
 from domain.source.artifacts import (
     SourceBlock,
     SourceBlockType,
@@ -46,11 +41,8 @@ from domain.source.artifacts import (
 from domain.source.collection import Collection, Document
 
 __all__ = [
-    "ArtifactVersionRecord",
     "ArtifactStatusRecord",
-    "BuildStageRecord",
     "Collection",
-    "CollectionBuildRecord",
     "Document",
     "SourceBlock",
     "SourceBlockType",
@@ -70,6 +62,7 @@ __all__ = [
     "SourceTableRow",
     "SourceTextUnit",
     "TaskRecord",
+    "TaskStageRecord",
     "assemble_source_documents",
     "build_figure_caption_blocks",
     "build_heading_blocks",

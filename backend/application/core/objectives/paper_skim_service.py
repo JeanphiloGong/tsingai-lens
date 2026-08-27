@@ -180,6 +180,27 @@ class PaperSkimService:
     """Build a bounded Source-linked map of each paper's stated research scope."""
 
     # define a method that produces one PaperSkim per document
+    def build_document_paper_map(
+        self,
+        collection_id: str,
+        *,
+        document: SourceDocument,
+        profile: Any,
+        document_tree: SourceDocumentTree | None,
+        study_window_extractor: PaperStudyWindowExtractor,
+        signal_reconciler: PaperSignalReconciler,
+        progress_callback: ProgressCallback | None = None,
+    ) -> PaperSkim:
+        return self.build_collection_paper_skims(
+            collection_id,
+            documents=(document,),
+            profiles_by_document_id={document.document_id: profile},
+            document_trees_by_document_id={document.document_id: document_tree},
+            study_window_extractor=study_window_extractor,
+            signal_reconciler=signal_reconciler,
+            progress_callback=progress_callback,
+        )[0]
+
     def build_collection_paper_skims(
         self,
         collection_id: str,

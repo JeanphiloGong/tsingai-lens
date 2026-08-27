@@ -20,7 +20,8 @@
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文档：`GET|POST /api/v1/collections/{collection_id}/documents`
-- 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
+- 单篇文档准备：`POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation`
+- 从明确选择的已就绪文档发现目标：`POST /api/v1/collections/{collection_id}/objective-discovery`
 - 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、
@@ -30,11 +31,13 @@
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`、
   `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 
-  其中 `POST .../analysis` 是唯一的确认并分析命令：候选 Objective 会在同一事务中
-  固化为 `confirmed` 并进入排队状态；已确认 Objective 则直接创建或复用分析版本。
+  其中 Objective discovery 和 `POST .../analysis` 都必须发送明确的
+  `document_ids`。`POST .../analysis` 是唯一的确认并分析命令：候选 Objective
+  会在同一事务中固化为 `confirmed`，并冻结所选文档的
+  `document_id + preparation_fingerprint` 后进入排队状态；已确认 Objective
+  则直接创建或复用分析版本。
 
-- 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
-- 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
+- 查询文档准备任务：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`
 - 文档与 Source 核验：`GET /api/v1/collections/{collection_id}/documents/profiles`、
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`、
@@ -49,9 +52,11 @@
 - 不再允许浏览器手工设置 Base URL
 - 遗留调试入口已从浏览器产品流程中退役
 - `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
-- collection workspace 与首页统一把任务启动视为 `build`，不再向浏览器公开旧的 `/tasks/index` 合同
-- task artifact registry 只报告 Source 构建产物；文档画像和 Objective
-  readiness 由 workspace 从各自领域仓储读取
+- Collection 只组织当前文档；Source、DocumentProfile、Paper Map 和就绪状态
+  都属于单篇 Document。上传新文档或重试失败文档不会重新处理其他文档
+- 同一 Document 同时最多一个准备任务，不同 Document 可以并发准备；上传在准备期间保持可用
+- Objective discovery 和 analysis 只使用用户明确勾选的已就绪文档；处理中或失败文档
+  不会阻塞已就绪子集的研究工作
 - `/collections/{collection_id}/objectives` 和
   `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
   工作区入口；确认、分析、Findings 复核、数据集、Assistant focus 和实验方案都使用同一个
@@ -77,11 +82,11 @@ Source -> Document` 回溯关系。页面只调用 Objective 的 `evidence-map` 
   `research-view` 以及调试页
   `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
   新 Evidence Map 不兼容或恢复这些旧合同；产品入口统一收敛到 collection
-  workspace 和 `/api/docs`
+  collection route family 和 `/api/docs`
 
 ## 验收重点
 
 - Network 面板中的产品请求只出现 `/api/v1/*` 与 `/api/*`
-- 首页、集合工作区、文件上传、任务轮询、Objective、Published Findings、
+- 首页、集合文档、文件上传、单篇任务轮询、明确文档选择、Objective、Published Findings、
   ObjectiveEvidence 与 Source 核验都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`

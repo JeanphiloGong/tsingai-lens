@@ -33,7 +33,7 @@ Invalid credentials return `401`. A missing or expired session cookie also
 returns `401`; the frontend clears local auth state and returns the user to
 login.
 
-### Collections, Documents, And Builds
+### Collections, Documents, And Preparation
 
 - `GET /api/v1/collections`
 - `POST /api/v1/collections`
@@ -41,30 +41,31 @@ login.
 - `DELETE /api/v1/collections/{collection_id}`
 - `GET /api/v1/collections/{collection_id}/documents`
 - `POST /api/v1/collections/{collection_id}/documents`
+- `POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation`
 - `POST /api/v1/collections/{collection_id}/source-archives`
 - `GET /api/v1/collections/{collection_id}/tasks`
-- `POST /api/v1/collections/{collection_id}/tasks/build`
 - `GET /api/v1/tasks/{task_id}`
-- `GET /api/v1/tasks/{task_id}/artifacts`
-- `GET /api/v1/collections/{collection_id}/workspace`
 
-Collection build parses Source, creates document profiles and reusable paper
-facts, and discovers Objective candidates. It does not run confirmed Objective
-deep analysis. Task responses expose current stage, progress, terminal error,
-and retry-appropriate status; a failed task is never presented as a new task.
+A Collection groups current Documents. Each Document independently owns its
+preparation status, current Source structure, current DocumentProfile, and
+current Paper Map. The preparation command queues only the named Document; it
+does not prepare other Collection members or discover Objectives. Task
+responses expose `document_id`, input fingerprint, current stage, progress,
+terminal error, and retry-appropriate status.
+
+At most one `document_preparation` task may be queued or running for a Document.
+Repeated requests reuse that active task. A completed task is reusable only when
+its input fingerprint still matches the current document bytes, parser version,
+and document-analysis version. Different Documents may prepare concurrently.
+One failed or processing Document does not block upload, preparation, Objective
+discovery, or analysis over other ready Documents.
+
 PDF uploads are opened with the Source PDF engine before persistence. A damaged,
 incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
 not added to the collection. This check establishes parser readability only;
-scientific structure extraction still belongs to the collection build.
-For already-persisted inputs and other import channels, a per-document Source
-parse failure is isolated. When other documents parse successfully, the task
-returns `partial_success`; the Source pipeline node warning and output summary
-identify each excluded document by bounded `document_id`, original filename, error code,
-and exception class. If every input fails, the task returns `failed`.
-The task artifact registry reports only persisted Source artifacts (documents,
-blocks, figures, table rows, and table cells). Workspace document-profile and
-Objective readiness is derived from their owning repositories rather than
-duplicated into the task artifact registry.
+scientific structure extraction happens during that Document's preparation.
+A later parser, profile, or Paper Map failure sets only that Document and task to
+`failed`. The failure stays technical; it does not claim scientific absence.
 
 The source archive request accepts between one and 100 unique collection
 `document_id` values with at most 256 MiB of persisted source bytes and returns an
@@ -79,15 +80,15 @@ before any selected Source bytes are read.
 Persisted metadata whose bytes are unavailable, unsafe, or fail integrity
 verification returns `409` with the corresponding bounded
 `collection_source_*` code; storage paths are never returned.
-The endpoint does not infer which papers failed. Parsing, PaperSkim, and
+The endpoint does not infer which papers failed. Parsing, Paper Map, and
 Objective analysis retain ownership of their failure states. Clients select
 IDs from `Collection.documents` or from stage-specific failure lineage.
 
-The build request accepts `mode: standard | fast` and defaults to `standard`.
-The selected mode is persisted before dispatch and determines the runtime
-dependency graph for that task. The request starts a process-local asyncio task
-and returns immediately; clients read persisted task state through the task
-status endpoint. This handoff is not an external or durable queue.
+The preparation request accepts `mode: standard | fast` and defaults to
+`standard`. It starts a process-local asyncio task and returns immediately;
+clients read persisted state through `GET /api/v1/tasks/{task_id}`. A
+process-local semaphore defaults to 10 concurrent document preparations. This
+handoff and admission limit are not an external durable queue.
 
 ### Goal Intake
 
@@ -135,20 +136,18 @@ approve or reject the exact pending action before starting another turn.
 The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
-- `inspect_research_process` reads the latest canonical collection build and
-  projects paper-content preparation, paper type and research-role assessment,
-  material/variable/result identification, and candidate research-question
-  synthesis. A successful read may report a failed or partial process; the
-  result exposes observable progress and warnings, never model chain-of-thought,
+- `inspect_research_process` reads each current Document and its latest
+  preparation task. It reports stored, processing, ready, and failed papers plus
+  observable stages and warnings. It never exposes model chain-of-thought,
   prompt repair, or retry internals;
 - `start_research_process` is a `write` capability. After exact-argument
-  approval, it submits the same standard collection build used by the workspace
-  and returns a queued collection-build task immediately. That process prepares
-  paper content, classifies each paper, builds lightweight Paper Map context,
-  and synthesizes Objective candidates. It does not confirm an Objective, run
-  Objective-specific Evidence extraction, or publish a Finding. A collection
-  with no uploaded papers returns the stable
-  `collection_has_no_papers` tool failure before any task is created;
+  approval, it queues independent preparation for the supplied `document_ids`,
+  or for all current Documents when the list is empty. It returns the per-paper
+  task records immediately. Preparation parses paper content, classifies paper
+  type and role, and creates a lightweight Paper Map; it does not discover or
+  confirm an Objective, run Objective-specific Evidence extraction, or publish
+  a Finding. Unknown IDs fail before any task is created. A Collection with no
+  uploaded papers returns `collection_has_no_papers`;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
@@ -170,7 +169,8 @@ The production Research Agent currently exposes these automatic capabilities:
   and full counts are bounded independently;
 - `start_objective_analysis` is a `write` capability. A separate exact-argument
   approval confirms the chosen candidate and calls the same canonical
-  `ObjectiveAnalysisService.start_analysis()` used by the HTTP route. It
+  `ObjectiveAnalysisService.start_analysis()` used by the HTTP route with the
+  exact approved ready `document_ids`. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
@@ -206,54 +206,61 @@ can be inspected.
 
 ### Research Objectives
 
+- `POST /api/v1/collections/{collection_id}/objective-discovery`
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
+
+Discovery accepts `{"document_ids": [...]}` with one to 100 unique current
+Documents. Every selected Document must be `ready` with a preparation
+fingerprint. The command freezes the resolved `(document_id,
+preparation_fingerprint)` values, reads their current Profiles and Paper Maps,
+and replaces the current generated candidates. It does not silently include all
+Collection papers and does not prepare papers.
 
 `ResearchObjective` is the only business aggregate root. Its identity is
 `(collection_id, objective_id)`. The analysis-state and command responses
 contain:
 
 - question and material/process/property/comparison scope;
-- included and excluded document IDs;
+- seed and excluded document IDs as proposal scope, not Evidence;
 - `confirmation_status`: `candidate | confirmed`;
 - `active_analysis_version` and `published_analysis_version`;
-- `origin`: `system_discovered | chat_assisted`, plus the immutable
-  `source_build_id` and Chat creator provenance for an assisted candidate;
+- `origin`: `system_discovered | chat_assisted`, plus Chat creator provenance
+  for an assisted candidate;
 - ordered `source_relationship_ids` linking the Objective to paper-study
   relationships;
 - `active_analysis`, `published_analysis`, analysis-level
   `paper_contributions`, and warnings.
 
-The Objective list places active generated candidates in persisted
-collection-build rank, followed by durable Chat-assisted candidates in creation
-order. Assisted candidates remain visible across later collection rebuilds and
-retain the Source build inspected when the user approved them. The list supports
+The Objective list places current generated candidates in persisted rank,
+followed by durable Chat-assisted candidates in creation order. The list supports
 `offset` and optional `limit`. When `limit` is omitted, the response contains
 every Objective from `offset` onward so lower-ranked candidates remain visible
 without client pagination. An explicit `limit` applies ordinary pagination. The
 response contains `total`, `offset`, and the applied `limit` (`null` when
 omitted), and each Objective contains its one-based `rank`. Rank is for
-researcher prioritization. Ranking does not remove extracted paper studies,
-relationships, dispositions, unresolved signals, or Source-unit coverage from
-the persisted Objective build.
+researcher prioritization. Paper Maps and Source remain owned by their Documents
+rather than embedded in Objective list responses.
 
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
-`analysis_version`. It contains immutable Source/pipeline/model/prompt lineage,
+`analysis_version`. It contains immutable selected `document_inputs`,
+pipeline/model/prompt lineage,
 `queued | running | succeeded | failed` status, phase, document progress,
 current document, terminal error, timestamps, and provider-reported execution
 `stats`. Statistics include duration, request counts and provider-reported token
 usage grouped by response model, plus the prompt versions used by the analysis.
-`total_document_count` is fixed when the analysis is queued from all Source
-documents in its build; it does not reuse the Objective's seed-document count.
-Seed documents remain available through the Objective scope, while
-`processed_document_count` advances through the fixed candidate-paper scope.
+`total_document_count` is fixed from the exact selected `document_ids` supplied
+to the analysis command. Seed documents remain proposal context, while
+`processed_document_count` advances through the frozen analysis inputs.
 `unreported_request_count` identifies calls that failed without provider usage
 or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens
 from prompt or response text.
 
-`POST .../analysis` expresses researcher approval of the Objective definition.
+`POST .../analysis` accepts the same required `{"document_ids": [...]}` shape
+as discovery and expresses researcher approval of both the Objective definition
+and the selected ready-paper analysis scope.
 For a candidate, it atomically changes `confirmation_status` to `confirmed` and
 creates the next analysis version with `queued` status. For an already confirmed
 Objective, it creates or reuses the active analysis normally. The command returns
@@ -281,11 +288,12 @@ and the Research Agent capability. This keeps confirmation, version allocation,
 the process-local concurrency limit, dispatch-failure persistence, retry, and
 published-state semantics identical for both consumers.
 
-Objective document scope and current-analysis projection are build-scoped. A
-rebuild may preserve a confirmed Objective identity and all historical analysis
-rows, but an analysis from an older Source build is not exposed as active or
-published for the rebuilt Objective. It remains readable only by its explicit
-historical `analysis_version`.
+Every version stores ordered `document_inputs` containing `document_id` and
+`preparation_fingerprint`. Execution checks these fingerprints against the
+current ready Documents before reading Source. If a Document was re-prepared or
+is no longer ready, analysis fails explicitly instead of mixing preparation
+states. A retry sends the failed version's frozen Document IDs so the researcher
+can reproduce the same scope after restoring readiness.
 
 `ObjectiveAnalysisResponse.paper_contributions` reports framing, routing,
 extraction, and comparability for each paper in the published analysis version.

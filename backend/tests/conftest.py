@@ -62,18 +62,12 @@ def _patch_domain_model_extractors(monkeypatch):
         service as document_profile_service,
     )
     from application.core.objectives import research_objective_service
-    from application.core.paper_facts import service as paper_facts_service
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
     monkeypatch.setattr(
         document_profile_service,
         "build_default_document_profile_extractor",
-        lambda: fake,
-    )
-    monkeypatch.setattr(
-        paper_facts_service,
-        "build_default_paper_facts_extractor",
         lambda: fake,
     )
     monkeypatch.setattr(

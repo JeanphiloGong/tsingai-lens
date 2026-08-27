@@ -1,75 +1,72 @@
 # TsingAI-Lens Backend
 
-FastAPI backend for collection ingestion, indexing orchestration, workspace
-assembly, Objective analysis, published Finding review, Source verification,
-and the browser-facing API contract.
+FastAPI backend for document ingestion, document-level research preparation,
+selected-paper Objective discovery, evidence-backed Objective analysis, and
+published Finding review.
 
-## Module Purpose
+## Current Research Flow
 
-The backend owns collection-oriented ingestion, indexing orchestration,
-workspace state, Source artifact generation, Objective/Finding retrieval, and
-the browser-facing API contract.
+```text
+Collection
+  -> current Documents
 
-This file is the backend module entry page. Formal backend source-of-truth docs
-live in `backend/docs/`. Narrower ownership seams use local `README.md` files
-next to code.
+Document
+  -> SourceDocument
+  -> DocumentProfile
+  -> PaperMap
+
+selected ready Documents
+  -> Objective candidates
+
+confirmed Objective + selected ready Documents
+  -> ObjectiveEvidence
+  -> cross-document Findings
+```
+
+A Collection groups papers. It does not own a generated snapshot. Each Document
+owns its current preparation status and current Source, Profile, and Paper Map.
+Adding or retrying one paper never rebuilds the others.
 
 ## Ownership Map
 
-- `controllers/`
-  Current HTTP route surface grouped as `goal/`, `source/`, `core/`, and
-  `derived/`.
-- `application/`
-  Use-case orchestration layer grouped as `goal/`, `source/`, `core/`, and
-  `derived/`.
-- `domain/`
-  Domain models and port definitions.
-- `infra/`
-  Persistence, Source runtime, ingestion, and other infrastructure adapters.
-- `docs/`
-  Backend-owned architecture, spec, plan, and runbook docs.
-- `tests/`
-  Backend test entry and boundary layout.
+- `controllers/`: HTTP routes and response schemas.
+- `application/source/`: Collection lifecycle, upload, per-document preparation,
+  task state, and Source reads.
+- `application/core/`: Document profiling, Paper Map creation, Objective
+  discovery, Evidence extraction, and Finding synthesis.
+- `application/chat/`: Research Agent trajectory and approved capability calls.
+- `domain/`: Domain records, invariants, and repository ports.
+- `infra/`: PostgreSQL, object storage, Source parsing, and model clients.
+- `docs/`: Backend architecture, API, and operations authorities.
 
 ## Public HTTP Contract
 
 - Business APIs: `/api/v1/*`
-- Docs/OpenAPI: `/api/*`
-  - `/api/docs`
-  - `/api/redoc`
-  - `/api/openapi.json`
+- OpenAPI: `/api/openapi.json`
+- Swagger UI: `/api/docs`
+- ReDoc: `/api/redoc`
+
+The main preparation and research commands are:
+
+```text
+POST /api/v1/collections/{collection_id}/documents
+POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation
+POST /api/v1/collections/{collection_id}/objective-discovery
+POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis
+```
+
+Objective discovery and analysis both require an explicit non-empty
+`document_ids` selection. Every selected Document must be ready.
 
 ## Formal Backend Docs
 
-Start here:
-
-- [`docs/README.md`](docs/README.md)
-  Backend docs index with the local reading order
-- [`docs/specs/api.md`](docs/specs/api.md)
-  Authoritative backend API contract for frontend integration
-- [`docs/architecture/overview.md`](docs/architecture/overview.md)
-  Backend architecture overview and ownership seams
-
-Operations:
-
-- [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md)
-  Local development and operations runbook
-- [`application/pipeline/README.md`](application/pipeline/README.md)
-  Pipeline runtime, execution modes, and run-state model
-- [`application/pipeline/collection_build/README.md`](application/pipeline/collection_build/README.md)
-  Collection build graph and node order
-
-Proposed work and migration sequencing are tracked in GitHub issues and pull
-requests rather than in a parallel backend plan-doc tree.
-
-## Code-Owned Entry Pages
-
-- [`docs/specs/api.md`](docs/specs/api.md)
-  Public HTTP contract reference
-- [`application/README.md`](application/README.md)
-- [`controllers/`](controllers/)
-- [`infra/persistence/README.md`](infra/persistence/README.md)
-- [`tests/README.md`](tests/README.md)
+- [`docs/README.md`](docs/README.md): backend reading order.
+- [`docs/specs/api.md`](docs/specs/api.md): public API contract.
+- [`docs/architecture/overview.md`](docs/architecture/overview.md): ownership and
+  runtime flow.
+- [`docs/architecture/persistence-model.md`](docs/architecture/persistence-model.md):
+  current identities and storage rules.
+- [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md): local operation.
 
 ## Local Development
 
@@ -81,6 +78,7 @@ uv sync
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
+export DOCUMENT_PREPARATION_MAX_CONCURRENCY=10
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
 export LENS_DATABASE_URL='postgresql+psycopg://lens:<password>@localhost:5432/lens-postgres-dev'
 
@@ -89,23 +87,5 @@ alembic current --check-heads
 uvicorn main:app --reload --port 8010
 ```
 
-## Notes
-
-- The current Lens v1 backbone order is
-  `Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`.
-- Collection-facing `/api/v1/*` surfaces are currently hosted through
-  `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
-  `controllers/goal/*`.
-- `backend/docs/specs/api.md` is the authoritative backend contract for
-  frontend integration.
-- PostgreSQL is required for maintained structured runtime state. Alembic is
-  the only schema authority; backend startup does not create tables.
-- Run backend tests with `uv run pytest` or `./.venv/bin/python -m pytest` so
-  the backend-local FastAPI/test dependencies are available during verification.
-- `CORE_EXTRACTION_MAX_CONCURRENCY` is an optional Core extraction tuning knob;
-  when unset, the backend uses `4`.
-- The active backend cleanup direction is to keep the
-  `goal / source / core / derived` split explicit in `controllers/`,
-  `application/`, and `infra/`, and keep Source runtime under `infra/source/*`.
-- Use `python3 ../scripts/check_docs_governance.py` when changing governed docs
-  or node-local module entry pages.
+PostgreSQL is the maintained structured-state authority. Alembic is the only
+schema authority. Do not add a runtime schema fallback or compatibility read.

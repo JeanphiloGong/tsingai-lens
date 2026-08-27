@@ -9,6 +9,7 @@ from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
+    PreparedDocumentInput,
     PaperContribution,
     PaperSourceUnitCoverage,
     PaperSourceUnitCoverageStatus,
@@ -156,14 +157,22 @@ def _objective(**overrides) -> ResearchObjective:
 
 
 def _analysis(**overrides) -> ObjectiveAnalysis:
+    total_document_count = int(overrides.get("total_document_count", 2))
     payload = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
-        "source_build_id": "build-1",
+        "document_inputs": tuple(
+            PreparedDocumentInput(
+                f"paper-{position}",
+                f"fingerprint-{position}",
+            )
+            for position in range(1, total_document_count + 1)
+        ),
         "pipeline_version": "objective-analysis.v1",
         "model_name": "model-1",
         "prompt_versions": {"evidence": "v1", "finding": "v1"},
+        "total_document_count": 2,
     }
     payload.update(overrides)
     return ObjectiveAnalysis(**payload)
@@ -337,6 +346,50 @@ def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
     assert succeeded.processed_document_count == 6
     assert succeeded.current_document_id is None
     assert succeeded.error_message is None
+
+
+def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
+    document_inputs = (
+        PreparedDocumentInput("paper-1", "fingerprint-1"),
+        PreparedDocumentInput("paper-2", "fingerprint-2"),
+    )
+
+    analysis = ObjectiveAnalysis(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_inputs=document_inputs,
+        pipeline_version="objective-analysis.v1",
+        model_name="test-model",
+        prompt_versions={},
+        total_document_count=2,
+    )
+
+    assert analysis.document_inputs == document_inputs
+    assert analysis.to_record()["document_inputs"] == [
+        {
+            "document_id": "paper-1",
+            "preparation_fingerprint": "fingerprint-1",
+        },
+        {
+            "document_id": "paper-2",
+            "preparation_fingerprint": "fingerprint-2",
+        },
+    ]
+
+
+def test_objective_analysis_rejects_document_count_that_differs_from_manifest() -> None:
+    with pytest.raises(ValueError, match="document input count"):
+        ObjectiveAnalysis(
+            collection_id="collection-1",
+            objective_id="objective-1",
+            analysis_version=1,
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            pipeline_version="objective-analysis.v1",
+            model_name=None,
+            prompt_versions={},
+            total_document_count=2,
+        )
 
 
 def test_objective_analysis_failure_is_terminal_and_retry_is_new_version() -> None:
@@ -964,18 +1017,14 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
         tensile_study.relationships[0].relationship_id
         != hardness_study.relationships[0].relationship_id
     )
-    ObjectiveFactSet(
-        paper_skims=(
-            PaperSkim.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "studies": [
-                        tensile_study.to_record(),
-                        hardness_study.to_record(),
-                    ],
-                }
-            ),
-        ),
+    PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "studies": [
+                tensile_study.to_record(),
+                hardness_study.to_record(),
+            ],
+        }
     )
 
 
@@ -1089,7 +1138,7 @@ def test_ready_objective_fact_set_requires_every_relationship_exactly_once() -> 
     with pytest.raises(ValueError, match="pending"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1114,7 +1163,7 @@ def test_ready_objective_fact_set_rejects_duplicate_relationship_accounting() ->
     with pytest.raises(ValueError, match="duplicate|exactly once|more than once"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             study_dispositions=(rejected, rejected),
         )
 
@@ -1124,10 +1173,10 @@ def test_ready_objective_fact_set_rejects_unknown_relationship_disposition() -> 
         "paper-1", relationships=[(["laser power"], "density")]
     )
 
-    with pytest.raises(ValueError, match="unknown|dangling"):
+    with pytest.raises(ValueError, match="unselected"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1167,7 +1216,10 @@ def test_ready_objective_fact_set_rejects_cross_document_objective_lineage() -> 
     with pytest.raises(ValueError):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(
+                PreparedDocumentInput("paper-1", "fingerprint-1"),
+                PreparedDocumentInput("paper-2", "fingerprint-2"),
+            ),
             research_objectives=(objective,),
             study_dispositions=(
                 _study_disposition(
@@ -1212,7 +1264,7 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
 
     facts = ObjectiveFactSet(
         research_objectives_ready=True,
-        paper_skims=(skim,),
+        document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
         research_objectives=(density_objective, strength_objective),
         study_dispositions=(
             _study_disposition(

@@ -4,6 +4,7 @@ import { requestJson } from './api';
 import {
 	createFindingCuration,
 	createFindingFeedback,
+	discoverCollectionObjectives,
 	fetchCollectionObjectives,
 	fetchFindingCurations,
 	fetchFindingFeedback,
@@ -43,7 +44,7 @@ const analysis = {
 	collection_id: 'col_123',
 	objective_id: 'obj_1',
 	analysis_version: 1,
-	source_build_id: 'build-1',
+	document_inputs: [{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' }],
 	pipeline_version: 'objective-analysis.v2',
 	model_name: 'model-1',
 	prompt_versions: {},
@@ -119,15 +120,30 @@ describe('objective Finding API', () => {
 			warnings: []
 		});
 
-		await runObjectiveAnalysis('col_123', 'obj_1');
+		await runObjectiveAnalysis('col_123', 'obj_1', ['paper-1']);
 		const result = await fetchObjectiveAnalysis('col_123', 'obj_1');
 
 		expect(request).toHaveBeenNthCalledWith(1, '/collections/col_123/objectives/obj_1/analysis', {
-			method: 'POST'
+			method: 'POST',
+			body: JSON.stringify({ document_ids: ['paper-1'] })
 		});
 		expect(request).toHaveBeenNthCalledWith(2, '/collections/col_123/objectives/obj_1/analysis');
 		expect(result.objective.confirmation_status).toBe('confirmed');
 		expect(result.active_analysis?.status).toBe('succeeded');
+		expect(result.active_analysis?.document_inputs).toEqual([
+			{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' }
+		]);
+	});
+
+	it('discovers objectives from the exact ready document selection', async () => {
+		request.mockResolvedValue({ collection_id: 'col_123', document_inputs: [], objectives: [] });
+
+		await discoverCollectionObjectives('col_123', ['paper-1', 'paper-3']);
+
+		expect(request).toHaveBeenCalledWith('/collections/col_123/objective-discovery', {
+			method: 'POST',
+			body: JSON.stringify({ document_ids: ['paper-1', 'paper-3'] })
+		});
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {

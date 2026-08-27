@@ -115,9 +115,7 @@ def test_objective_benchmark_generates_canonical_prediction_report(
         collection_id,
         source_output_dir,
         output_path,
-        fact_source,
     ):
-        assert fact_source == "objective_first"
         output_path.write_text('{"papers": []}', encoding="utf-8")
         return output_path
 

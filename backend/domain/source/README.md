@@ -26,9 +26,10 @@ keeps every data row in Source order.
 blocks, tables, table rows, table cells, and figures. `text_unit_ids` is derived
 from the owned text units rather than stored as a second source of truth.
 
-Collection records own membership and import provenance. A collection build
-passes a tuple of `SourceDocument` aggregates to the Source repository; there
-is no separate collection-wide artifact aggregate in the domain.
+Collection records own current Document membership. Document preparation passes
+one `SourceDocument` aggregate to the Source repository, where it replaces that
+Document's current parsed structure. There is no collection-wide artifact
+aggregate or Source build identity in the domain.
 
 `SourceDocumentTree` is a per-document projection over one `SourceDocument`.
 It groups headings, paragraphs, tables, figures, captions, and reference-list
@@ -51,9 +52,9 @@ cropping, Docling objects, or storage implementations. Those details belong to
 Infrastructure code parses inputs and persists artifacts. Parser runtimes may
 use flat tables as an interchange format, but they must assemble those rows
 into `SourceDocument` aggregates at the application boundary. Assembly rejects
-duplicate documents and artifacts whose owning document is missing. SQLite and
-PostgreSQL repositories may normalize aggregates into separate tables; storage
-layout details are not the Source business model.
+duplicate documents and artifacts whose owning document is missing. PostgreSQL
+may normalize aggregates into separate tables; storage layout details are not
+the Source business model. Memory repositories exist only for isolated tests.
 
 ## Related Infrastructure
 

@@ -32,6 +32,23 @@ class MemoryCollectionRepository:
     async def read_collection(self, collection_id: str) -> Collection | None:
         return self._collections.get(collection_id)
 
+    async def read_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> Document | None:
+        collection = self._collections.get(collection_id)
+        if collection is None:
+            return None
+        return next(
+            (
+                document
+                for document in collection.documents
+                if document.document_id == document_id
+            ),
+            None,
+        )
+
     async def update_collection(self, collection: Collection) -> bool:
         if collection.collection_id not in self._collections:
             return False
@@ -60,10 +77,30 @@ class MemoryCollectionRepository:
 
         self._collections[collection_id] = replace(
             collection,
-            status="ready",
+            status="uploaded",
             updated_at=updated_at,
             documents=collection.documents + documents,
         )
+
+    async def update_document(self, document: Document) -> bool:
+        for collection_id, collection in self._collections.items():
+            if not any(
+                current.document_id == document.document_id
+                for current in collection.documents
+            ):
+                continue
+            self._collections[collection_id] = replace(
+                collection,
+                documents=tuple(
+                    document
+                    if current.document_id == document.document_id
+                    else current
+                    for current in collection.documents
+                ),
+                updated_at=document.updated_at or collection.updated_at,
+            )
+            return True
+        return False
 
     async def delete_collection(self, collection_id: str) -> bool:
         return self._collections.pop(collection_id, None) is not None

@@ -25,41 +25,11 @@ async function mockComparisonApis(page: Page) {
 					collection_id: collectionId,
 					name: 'Objective-first comparison fixture',
 					status: 'ready',
-					paper_count: 2
-				})
-			);
-		}
-		if (path === `/api/v1/collections/${collectionId}/workspace`) {
-			return route.fulfill(
-				json({
-					collection: { collection_id: collectionId, name: 'Objective-first comparison fixture' },
-					file_count: 2,
-					status_summary: 'ready',
-					workflow: {
-						documents: { status: 'ready', detail: 'Document profiles are available.' },
-						objectives: { status: 'ready', detail: 'Objective discovery is complete.' }
-					},
-					document_summary: { total_documents: 2, by_doc_type: { experimental: 2 } },
-					warnings: [],
-					artifacts: {
-						source_documents_ready: true,
-						document_profiles_ready: true,
-						objective_candidates_ready: true,
-						updated_at: '2026-08-20T00:00:00Z'
-					},
-					latest_task: null,
-					recent_tasks: [],
-					capabilities: {
-						can_view_documents: true,
-						can_view_objectives: true,
-						can_view_comparisons: true
-					},
-					links: {
-						workspace: `/collections/${collectionId}`,
-						documents: `/collections/${collectionId}/documents`,
-						objectives: `/collections/${collectionId}/objectives`,
-						comparisons: `/collections/${collectionId}/comparisons`
-					}
+					paper_count: 2,
+					documents: [
+						{ document_id: 'doc_1', status: 'ready' },
+						{ document_id: 'doc_2', status: 'ready' }
+					]
 				})
 			);
 		}

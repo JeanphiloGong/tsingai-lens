@@ -34,9 +34,9 @@ class PreviewResearchScopeCapability:
         input_model=PreviewResearchScopeArguments,
     )
 
-    def __init__(self, *, collection_service: Any, objective_repository: Any) -> None:
+    def __init__(self, *, collection_service: Any, paper_map_repository: Any) -> None:
         self.collection_service = collection_service
-        self.objective_repository = objective_repository
+        self.paper_map_repository = paper_map_repository
 
     async def execute(
         self,
@@ -47,8 +47,10 @@ class PreviewResearchScopeCapability:
             context.collection_id,
             context.user_id,
         )
-        facts = await self.objective_repository.read(context.collection_id)
-        if not facts.paper_skims:
+        paper_maps = await self.paper_map_repository.list_collection(
+            context.collection_id
+        )
+        if not paper_maps:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status="failed",
@@ -62,7 +64,7 @@ class PreviewResearchScopeCapability:
         likely_relevant: list[dict[str, Any]] = []
         needs_inspection: list[dict[str, Any]] = []
         confidently_out_of_scope: list[dict[str, Any]] = []
-        for skim in facts.paper_skims:
+        for skim in paper_maps:
             classification, reason, basis = self._classify(skim, arguments)
             record = {
                 "document_id": skim.document_id,
@@ -105,7 +107,7 @@ class PreviewResearchScopeCapability:
             )
             for record in returned_records
         )
-        omitted_count = len(facts.paper_skims) - len(returned_records)
+        omitted_count = len(paper_maps) - len(returned_records)
 
         review_required_ids = [item["document_id"] for item in needs_inspection]
         warning_items: list[str] = []

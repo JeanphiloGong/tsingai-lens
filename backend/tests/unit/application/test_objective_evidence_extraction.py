@@ -31,7 +31,7 @@ from application.core.objectives.analysis.source_screening import (
     StructuredPaperFrameBatch,
 )
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
-from domain.core import ObjectiveAnalysis, PaperSkim
+from domain.core import ObjectiveAnalysis, PaperSkim, PreparedDocumentInput
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from httpx import Request, Response
 from openai import BadRequestError
@@ -1926,7 +1926,8 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-test",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name="test-model",
         prompt_versions={},
@@ -4265,7 +4266,8 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},

@@ -184,10 +184,24 @@
 
 	async function startAnalysis() {
 		if (!analysis || actionRunning || isProcessing) return;
+		const documentIds = (
+			analysis.active_analysis?.document_inputs.length
+				? analysis.active_analysis.document_inputs
+				: analysis.published_analysis?.document_inputs.length
+					? analysis.published_analysis.document_inputs
+					: analysis.objective.seed_document_ids.map((document_id) => ({
+							document_id,
+							preparation_fingerprint: ''
+						}))
+		).map((item) => item.document_id);
+		if (!documentIds.length) {
+			actionError = '请先从研究目标列表选择已准备的论文。';
+			return;
+		}
 		actionRunning = true;
 		actionError = '';
 		try {
-			analysis = await runObjectiveAnalysis(collectionId, objectiveId);
+			analysis = await runObjectiveAnalysis(collectionId, objectiveId, documentIds);
 			schedulePoll();
 		} catch (err) {
 			actionError = errorMessage(err);

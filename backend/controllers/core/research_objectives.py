@@ -9,14 +9,42 @@ from application.core.objectives.analysis_service import (
 from controllers.schemas.core.research_objectives import (
     FindingDetailResponse,
     FindingListResponse,
+    DocumentSelectionRequest,
     ObjectiveAnalysisResponse,
     ObjectiveEvidenceListResponse,
     ObjectiveEvidenceMapResponse,
+    ObjectiveDiscoveryResponse,
     PaginatedObjectiveListResponse,
 )
 
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
+
+
+@router.post(
+    "/{collection_id}/objective-discovery",
+    response_model=ObjectiveDiscoveryResponse,
+    summary="Discover research objectives from selected ready documents",
+)
+async def discover_collection_objectives(
+    collection_id: str,
+    payload: DocumentSelectionRequest,
+    request: Request,
+) -> ObjectiveDiscoveryResponse:
+    try:
+        facts = await request.app.state.research_objective_service.discover_and_replace_objective_candidates(
+            collection_id,
+            tuple(payload.document_ids),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ObjectiveDiscoveryResponse(
+        collection_id=collection_id,
+        document_inputs=[item.to_record() for item in facts.document_inputs],
+        objectives=[item.to_record() for item in facts.research_objectives],
+    )
 
 
 @router.get(
@@ -60,6 +88,7 @@ async def list_collection_objectives(
 async def start_collection_objective_analysis(
     collection_id: str,
     objective_id: str,
+    payload: DocumentSelectionRequest,
     request: Request,
 ) -> ObjectiveAnalysisResponse:
     service = request.app.state.objective_analysis_service
@@ -67,6 +96,7 @@ async def start_collection_objective_analysis(
         payload = await service.start_analysis(
             collection_id,
             objective_id,
+            tuple(payload.document_ids),
         )
     except FileNotFoundError as exc:
         raise _objective_not_found(collection_id, objective_id, exc) from exc

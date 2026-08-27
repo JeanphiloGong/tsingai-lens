@@ -79,9 +79,16 @@ class ProposeObjectiveDraftsCapability:
         input_model=ProposeObjectiveDraftsArguments,
     )
 
-    def __init__(self, *, collection_service: Any, objective_repository: Any) -> None:
+    def __init__(
+        self,
+        *,
+        collection_service: Any,
+        objective_repository: Any,
+        paper_map_repository: Any,
+    ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
+        self.paper_map_repository = paper_map_repository
 
     async def execute(
         self,
@@ -92,7 +99,9 @@ class ProposeObjectiveDraftsCapability:
             context.collection_id,
             context.user_id,
         )
-        facts = await self.objective_repository.read(context.collection_id)
+        paper_maps = await self.paper_map_repository.list_collection(
+            context.collection_id
+        )
         existing = await self.objective_repository.list_objectives(
             context.collection_id
         )
@@ -100,7 +109,7 @@ class ProposeObjectiveDraftsCapability:
         refs: list[ChatResourceRef] = []
         unsupported_count = 0
         for position, draft in enumerate(arguments.drafts):
-            support_ids = self._supporting_documents(draft, facts.paper_skims)
+            support_ids = self._supporting_documents(draft, paper_maps)
             similar_ids = self._similar_objectives(draft, existing)
             if not support_ids:
                 unsupported_count += 1

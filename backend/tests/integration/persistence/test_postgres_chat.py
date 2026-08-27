@@ -10,7 +10,7 @@ from domain.chat import (
     ToolCallStatus,
     ToolRisk,
 )
-from domain.source import CollectionRecord
+from domain.source import Collection
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.collection_repository import (
@@ -32,15 +32,12 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "created_at": "2026-08-19T00:00:00+00:00",
     }
     await PostgresAuthRepository(postgres_session_factory).add_user(user)
-    collection = CollectionRecord(
+    collection = Collection.create(
         collection_id="col-chat",
         owner_user_id=user["user_id"],
         name="Agent collection",
         description=None,
-        status="idle",
-        paper_count=0,
-        created_at="2026-08-19T00:00:00+00:00",
-        updated_at="2026-08-19T00:00:00+00:00",
+        now_iso="2026-08-19T00:00:00+00:00",
     )
     await PostgresCollectionRepository(postgres_session_factory).add_collection(
         collection

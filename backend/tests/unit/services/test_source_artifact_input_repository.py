@@ -35,7 +35,6 @@ class _SourceRepository:
     async def read_collection_documents(
         self,
         collection_id: str,
-        build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]:
         return self.documents
 
@@ -43,7 +42,6 @@ class _SourceRepository:
         self,
         collection_id: str,
         document_id: str,
-        build_id: str | None = None,
     ):
         document = next(
             item for item in self.documents if item.document_id == document_id

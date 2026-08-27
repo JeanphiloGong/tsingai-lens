@@ -93,7 +93,7 @@ function analysisState(status: string, version = 1, overrides: Record<string, un
 		collection_id: 'col_123',
 		objective_id: 'obj_1',
 		analysis_version: version,
-		source_build_id: 'build-1',
+		document_inputs: [{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' }],
 		pipeline_version: 'objective-analysis.v2',
 		model_name: 'model-1',
 		prompt_versions: {},

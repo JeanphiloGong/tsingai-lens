@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from domain.source import Collection, Document
-from infra.persistence.memory import MemoryBuildRepository, MemoryCollectionRepository
+from infra.persistence.memory import MemoryCollectionRepository
 
 
 pytestmark = pytest.mark.anyio
@@ -55,7 +55,7 @@ async def test_memory_collection_repository_round_trips_current_aggregate() -> N
     stored = await repository.read_collection(collection.collection_id)
     assert stored == replace(
         collection,
-        status="ready",
+        status="uploaded",
         updated_at=document.created_at,
         documents=(document,),
     )
@@ -94,10 +94,3 @@ async def test_memory_collection_delete_removes_aggregate() -> None:
     assert await repository.delete_collection(collection.collection_id) is True
     assert await repository.read_collection(collection.collection_id) is None
     assert await repository.delete_collection(collection.collection_id) is False
-
-
-async def test_memory_build_repository_is_directly_injected_for_isolated_tests() -> None:
-    repository = MemoryBuildRepository()
-
-    assert await repository.list_tasks() == ()
-    assert await repository.read_active_build("col_demo") is None

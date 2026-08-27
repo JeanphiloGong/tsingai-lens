@@ -13,19 +13,16 @@ from application.evaluation.finding_feedback_service import (
 )
 from domain.core import (
     Finding,
-    MeasurementResult,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
     PaperSkim,
     PaperStudyDisposition,
+    PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.core.paper_fact import PaperFactSet
 from domain.evaluation import FindingCuration, FindingFeedback
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.objective_repository import MemoryObjectiveRepository
-from tests.support.comparison_repository import MemoryComparisonRepository
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 
 pytestmark = pytest.mark.anyio
@@ -40,6 +37,10 @@ _TEMPERATURE_STRENGTH_RELATIONSHIP_ID = (
     "relationship-doc-1-temperature-strength"
 )
 _TEMPERATURE_STRENGTH_STUDY_ID = "study-doc-1-temperature-strength"
+_DOC_1_INPUT = PreparedDocumentInput(
+    document_id="doc-1",
+    preparation_fingerprint="fingerprint-doc-1",
+)
 
 
 class FakeCollectionService:
@@ -300,10 +301,9 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
     )
     await repository.replace(
         "col-gold",
-        "build_test",
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
                 PaperStudyDisposition.from_mapping(
@@ -321,6 +321,7 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
     _, analysis = await repository.queue_analysis(
         "col-gold",
         "obj-1",
+        document_inputs=(_DOC_1_INPUT,),
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={},
@@ -446,9 +447,7 @@ def _prediction_snapshot_service(
     return (
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
-            paper_fact_repository=MemoryPaperFactRepository(),
             objective_repository=objective_repository,
-            comparison_repository=MemoryComparisonRepository(),
             evaluation_repository=evaluation_repository,
         ),
         evaluation_repository,
@@ -546,7 +545,7 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
         "col-gold",
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
                 PaperStudyDisposition.from_mapping(

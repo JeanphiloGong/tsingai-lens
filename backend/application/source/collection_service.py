@@ -90,7 +90,7 @@ class CollectionService:
     def write_figure_asset(
         self,
         collection_id: str,
-        build_id: str,
+        document_id: str,
         asset_path: str,
         payload: bytes,
         expected_sha256: str,
@@ -98,7 +98,7 @@ class CollectionService:
         suffix = PurePosixPath(str(asset_path)).suffix.lower()
         storage_key = self._figure_storage_key(
             collection_id,
-            build_id,
+            document_id,
             expected_sha256,
             suffix,
         )
@@ -181,6 +181,53 @@ class CollectionService:
         if record["owner_user_id"] != owner_user_id:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
+
+    async def get_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> Document:
+        record = await self.repository.read_document(collection_id, document_id)
+        if record is None:
+            raise FileNotFoundError(
+                f"document not found: {collection_id}/{document_id}"
+            )
+        return record
+
+    async def update_document_preparation(
+        self,
+        collection_id: str,
+        document_id: str,
+        *,
+        status: str,
+        preparation_fingerprint: str | None = None,
+        parser_version: str | None = None,
+        document_analysis_version: str | None = None,
+    ) -> Document:
+        current = await self.get_document(collection_id, document_id)
+        updated = replace(
+            current,
+            status=str(status),
+            updated_at=_now_iso(),
+            preparation_fingerprint=(
+                preparation_fingerprint
+                if preparation_fingerprint is not None
+                else current.preparation_fingerprint
+            ),
+            parser_version=(
+                parser_version if parser_version is not None else current.parser_version
+            ),
+            document_analysis_version=(
+                document_analysis_version
+                if document_analysis_version is not None
+                else current.document_analysis_version
+            ),
+        )
+        if not await self.repository.update_document(updated):
+            raise FileNotFoundError(
+                f"document not found: {collection_id}/{document_id}"
+            )
+        return updated
 
     async def update_collection(self, collection_id: str, **fields) -> dict:
         current = await self.repository.read_collection(collection_id)
@@ -464,6 +511,7 @@ class CollectionService:
                         status="stored",
                         size_bytes=len(payload),
                         created_at=_now_iso(),
+                        updated_at=_now_iso(),
                     )
                 )
             await self.repository.add_documents(
@@ -511,25 +559,25 @@ class CollectionService:
     @staticmethod
     def _figure_storage_key(
         collection_id: str,
-        build_id: str,
+        document_id: str,
         sha256: str,
         suffix: str,
     ) -> str:
         collection_key = str(collection_id).strip()
-        build_key = str(build_id).strip()
+        document_key = str(document_id).strip()
         digest = str(sha256).strip()
         extension = str(suffix).strip().lower()
         if (
             not collection_key
-            or not build_key
-            or any(character in collection_key + build_key for character in "/\\")
+            or not document_key
+            or any(character in collection_key + document_key for character in "/\\")
             or not extension.startswith(".")
             or not extension[1:].isalnum()
             or len(extension) > 10
         ):
             raise ValueError("invalid figure storage key")
         return (
-            f"{collection_key}/objects/source/{build_key}/figures/{digest}{extension}"
+            f"{collection_key}/objects/source/{document_key}/figures/{digest}{extension}"
         )
 
     def _group_text_units(

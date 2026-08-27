@@ -11,7 +11,7 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from domain.core import PaperSkim, ResearchObjective
+from domain.core import PaperSkim, PreparedDocumentInput, ResearchObjective
 
 
 class _GroupingExtractor:
@@ -32,6 +32,18 @@ class _GroupingExtractor:
                 for pair in payload.get("axis_pairs", ())
             ]
         )
+
+
+def _document_inputs(
+    paper_skims: tuple[PaperSkim, ...],
+) -> tuple[PreparedDocumentInput, ...]:
+    return tuple(
+        PreparedDocumentInput(
+            document_id=paper_skim.document_id,
+            preparation_fingerprint=f"fingerprint-{paper_skim.document_id}",
+        )
+        for paper_skim in paper_skims
+    )
 
 
 def test_relationship_groups_preserve_complete_study_relationship_records():
@@ -162,6 +174,7 @@ def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -193,6 +206,7 @@ def test_missing_material_does_not_inherit_an_ambiguous_multi_material_scope():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -222,6 +236,7 @@ def test_missing_confidence_does_not_erase_supported_objective_confidence():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -248,6 +263,7 @@ def test_all_missing_confidence_remains_zero_with_an_explicit_reason():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -275,6 +291,7 @@ def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -305,6 +322,7 @@ def test_microstructure_theme_group_is_rejected_until_an_observation_is_specific
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -333,6 +351,7 @@ def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -402,6 +421,7 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=RejectingAxisExtractor(),
     )
 
@@ -430,6 +450,7 @@ def test_tial6v4_notation_does_not_fragment_ti_6al_4v_objective_scope():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-ti64-notation",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -635,6 +656,7 @@ def test_shared_thermal_processing_theme_creates_one_bounded_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-ti64-thermal-processing",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=DistinctAxisClassifier(),
     )
 
@@ -703,6 +725,7 @@ def test_shared_topic_objective_preserves_different_joint_interventions():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-ti64-cooling",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=CoolingTopicClassifier(),
     )
 
@@ -760,6 +783,7 @@ def test_hip_theme_relations_create_a_bounded_multi_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-ti64-hip-topic",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=HipTopicClassifier(),
     )
 
@@ -811,6 +835,7 @@ def test_laser_exposure_theme_does_not_claim_precise_axis_equivalence():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-316l-topic-only",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=LaserExposureTopicClassifier(),
     )
 
@@ -872,6 +897,7 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-316l-joint-factor",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=LaserFactorClassifier(),
     )
 
@@ -981,6 +1007,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
     ObjectiveCandidateService().discover_candidate_facts(
         "collection-accounting",
         paper_skims=(skim,),
+        document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1048,6 +1075,7 @@ def test_shared_parent_theme_keeps_each_papers_complete_intervention():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-local-topic-bridges",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=LocalTopicClassifier(),
     )
 
@@ -1138,6 +1166,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-orientation",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=ContextAwareClassifier(),
     )
 
@@ -1172,28 +1201,30 @@ def test_topic_only_pairs_are_classified_once_without_affecting_objectives():
             )
 
     classifier = TopicClassifier()
+    skims = (
+        _paper_skim(
+            document_id="paper-build",
+            relationship_id="relationship-build",
+            factors=("build orientation",),
+            outcome="ultimate tensile strength",
+        ),
+        _paper_skim(
+            document_id="paper-laser",
+            relationship_id="relationship-laser",
+            factors=("tensile orientation",),
+            outcome="ultimate tensile strength",
+        ),
+        _paper_skim(
+            document_id="paper-sample",
+            relationship_id="relationship-sample",
+            factors=("sample orientation",),
+            outcome="ultimate tensile strength",
+        ),
+    )
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-confirm-topic",
-        paper_skims=(
-            _paper_skim(
-                document_id="paper-build",
-                relationship_id="relationship-build",
-                factors=("build orientation",),
-                outcome="ultimate tensile strength",
-            ),
-            _paper_skim(
-                document_id="paper-laser",
-                relationship_id="relationship-laser",
-                factors=("tensile orientation",),
-                outcome="ultimate tensile strength",
-            ),
-            _paper_skim(
-                document_id="paper-sample",
-                relationship_id="relationship-sample",
-                factors=("sample orientation",),
-                outcome="ultimate tensile strength",
-            ),
-        ),
+        paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=classifier,
     )
 
@@ -1265,6 +1296,7 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-focused-outcome",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=RelatedOutcomeClassifier(),
     )
 
@@ -1310,6 +1342,7 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-outcome-alias",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=classifier,
     )
 
@@ -1344,24 +1377,26 @@ def test_property_aliases_are_not_repeated_in_the_objective_outcomes():
                 ]
             )
 
+    skims = (
+        _paper_skim(
+            document_id="paper-ductility",
+            relationship_id="relationship-ductility",
+            factors=("heat treatment temperature",),
+            outcome="ductility",
+            material_scope=("Ti-6Al-4V",),
+        ),
+        _paper_skim(
+            document_id="paper-elongation",
+            relationship_id="relationship-elongation",
+            factors=("heat treatment temperature",),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
+        ),
+    )
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-ductility-alias",
-        paper_skims=(
-            _paper_skim(
-                document_id="paper-ductility",
-                relationship_id="relationship-ductility",
-                factors=("heat treatment temperature",),
-                outcome="ductility",
-                material_scope=("Ti-6Al-4V",),
-            ),
-            _paper_skim(
-                document_id="paper-elongation",
-                relationship_id="relationship-elongation",
-                factors=("heat treatment temperature",),
-                outcome="elongation",
-                material_scope=("Ti-6Al-4V",),
-            ),
-        ),
+        paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=RejectModelAliases(),
     )
 
@@ -1394,6 +1429,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
+        document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1430,6 +1466,7 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1457,6 +1494,7 @@ def test_candidate_build_derives_objective_identity_and_lineage_from_relationshi
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1494,6 +1532,7 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1501,8 +1540,8 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
     objective = facts.research_objectives[0]
     assert "context alpha" not in objective.constraints
     assert "context beta" not in objective.constraints
-    assert facts.paper_skims[0].studies[0].process_context == ("context alpha",)
-    assert facts.paper_skims[1].studies[0].process_context == ("context beta",)
+    assert skims[0].studies[0].process_context == ("context alpha",)
+    assert skims[1].studies[0].process_context == ("context beta",)
     assert {
         relationship_id
         for objective in facts.research_objectives
@@ -1526,6 +1565,7 @@ def test_compatible_relationship_group_builds_one_cross_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1556,10 +1596,11 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
+        document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=extractor,
     )
 
-    assert facts.paper_skims == (skim,)
+    assert facts.document_inputs == _document_inputs((skim,))
     assert facts.research_objectives == ()
     assert len(facts.study_dispositions) == 1
     disposition = facts.study_dispositions[0]
@@ -1578,6 +1619,7 @@ def test_uncertain_claim_scope_cannot_seed_a_precise_candidate():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
+        document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -1630,6 +1672,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=IncompleteAxisPlanExtractor(),
     )
 
@@ -1695,11 +1738,12 @@ def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=extractor,
     )
 
     assert facts.research_objectives == ()
-    assert facts.paper_skims == skims
+    assert facts.document_inputs == _document_inputs(skims)
     assert len(facts.study_dispositions) == 2
     assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
 
@@ -1746,6 +1790,7 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=extractor,
     )
 
@@ -1768,8 +1813,8 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
         "relationship-long-form",
         "relationship-short-form",
     }
-    assert facts.paper_skims == skims
-    assert facts.paper_skims[1].studies[0].material_scope == ("SS316L",)
+    assert facts.document_inputs == _document_inputs(skims)
+    assert skims[1].studies[0].material_scope == ("SS316L",)
 
 
 def test_objective_constraints_omit_the_relationship_axes():
@@ -1785,6 +1830,7 @@ def test_objective_constraints_omit_the_relationship_axes():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
+        document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
@@ -2031,6 +2077,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
     ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
+        document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=extractor,
     )
 
@@ -2106,6 +2153,7 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
     facts = service.discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
+        document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=FuzzyAliasExtractor(),
     )
 

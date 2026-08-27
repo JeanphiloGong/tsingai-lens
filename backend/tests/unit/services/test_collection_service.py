@@ -71,7 +71,7 @@ async def test_collection_contains_its_uploaded_documents(tmp_path) -> None:
 
     assert current["documents"] == [first, second]
     assert current["paper_count"] == 2
-    assert current["status"] == "ready"
+    assert current["status"] == "uploaded"
 
 
 async def test_collection_update_preserves_documents(tmp_path) -> None:
@@ -151,6 +151,10 @@ async def test_normalized_batch_becomes_documents_directly(tmp_path) -> None:
         "status",
         "size_bytes",
         "created_at",
+        "updated_at",
+        "parser_version",
+        "document_analysis_version",
+        "preparation_fingerprint",
     }
     expected = b"Experimental Section\nMix and anneal."
     assert service.object_store.read(

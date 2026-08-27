@@ -6,10 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class CollectionCreateRequest(BaseModel):
     """Request payload to create a logical paper collection."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
-    name: str = Field(..., description="Collection name")
+    name: str = Field(..., min_length=1, description="Collection name")
     description: str | None = Field(default=None, description="Collection description")
+
+    @field_validator("description")
+    @classmethod
+    def empty_description_is_none(cls, value: str | None) -> str | None:
+        return value or None
 
 
 class CollectionDocumentResponse(BaseModel):
@@ -24,6 +29,10 @@ class CollectionDocumentResponse(BaseModel):
     status: str = Field(..., description="Document status")
     size_bytes: int = Field(default=0, description="Document size in bytes")
     created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last preparation-state update")
+    parser_version: str | None = Field(default=None)
+    document_analysis_version: str | None = Field(default=None)
+    preparation_fingerprint: str | None = Field(default=None)
 
 
 class CollectionResponse(BaseModel):

@@ -892,6 +892,37 @@ class PaperSkim:
 
 
 @dataclass(frozen=True)
+class PreparedDocumentInput:
+    """Exact prepared document state consumed by one research operation."""
+
+    document_id: str
+    preparation_fingerprint: str
+
+    def __post_init__(self) -> None:
+        if not _text(self.document_id):
+            raise ValueError("prepared document input requires document_id")
+        if not _text(self.preparation_fingerprint):
+            raise ValueError(
+                "prepared document input requires preparation_fingerprint"
+            )
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PreparedDocumentInput":
+        return cls(
+            document_id=_text(payload.get("document_id")) or "",
+            preparation_fingerprint=(
+                _text(payload.get("preparation_fingerprint")) or ""
+            ),
+        )
+
+    def to_record(self) -> dict[str, str]:
+        return {
+            "document_id": self.document_id,
+            "preparation_fingerprint": self.preparation_fingerprint,
+        }
+
+
+@dataclass(frozen=True)
 class ResearchObjective:
     collection_id: str
     objective_id: str
@@ -914,7 +945,6 @@ class ResearchObjective:
     created_at: datetime | None = None
     updated_at: datetime | None = None
     origin: str = "system_discovered"
-    source_build_id: str | None = None
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
 
@@ -1050,7 +1080,6 @@ class ResearchObjective:
                 OBJECTIVE_ORIGINS,
                 "system_discovered",
             ),
-            source_build_id=_text(payload.get("source_build_id")),
             created_by_user_id=_text(payload.get("created_by_user_id")),
             created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
         )
@@ -1109,7 +1138,6 @@ class ResearchObjective:
             "created_at": _datetime_record(self.created_at),
             "updated_at": _datetime_record(self.updated_at),
             "origin": self.origin,
-            "source_build_id": self.source_build_id,
             "created_by_user_id": self.created_by_user_id,
             "created_by_tool_call_id": self.created_by_tool_call_id,
         }
@@ -1120,7 +1148,7 @@ class ObjectiveAnalysis:
     collection_id: str
     objective_id: str
     analysis_version: int
-    source_build_id: str
+    document_inputs: tuple[PreparedDocumentInput, ...]
     pipeline_version: str
     model_name: str | None
     prompt_versions: dict[str, str]
@@ -1143,8 +1171,12 @@ class ObjectiveAnalysis:
             raise ValueError("objective analysis requires collection and objective IDs")
         if self.analysis_version < 1:
             raise ValueError("analysis_version must be a positive integer")
-        if not _text(self.source_build_id):
-            raise ValueError("objective analysis requires source_build_id")
+        object.__setattr__(self, "document_inputs", tuple(self.document_inputs))
+        document_ids = [item.document_id for item in self.document_inputs]
+        if not document_ids:
+            raise ValueError("objective analysis requires prepared document inputs")
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("objective analysis document inputs must be unique")
         if not _text(self.pipeline_version):
             raise ValueError("objective analysis requires pipeline_version")
         if self.status not in OBJECTIVE_ANALYSIS_STATUSES:
@@ -1153,6 +1185,8 @@ class ObjectiveAnalysis:
             raise ValueError("analysis document counts cannot be negative")
         if self.processed_document_count > self.total_document_count:
             raise ValueError("processed document count exceeds total")
+        if self.total_document_count != len(self.document_inputs):
+            raise ValueError("analysis document input count must match total")
         if self.status == "failed" and not _text(self.error_message):
             raise ValueError("failed objective analysis requires error_message")
         if self.status == "succeeded" and self.error_message is not None:
@@ -1166,6 +1200,44 @@ class ObjectiveAnalysis:
     @property
     def key(self) -> tuple[str, str, int]:
         return (self.collection_id, self.objective_id, self.analysis_version)
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveAnalysis":
+        return cls(
+            collection_id=_text(payload.get("collection_id")) or "",
+            objective_id=_text(payload.get("objective_id")) or "",
+            analysis_version=int(payload.get("analysis_version") or 0),
+            document_inputs=tuple(
+                PreparedDocumentInput.from_mapping(item)
+                for item in payload.get("document_inputs") or ()
+                if isinstance(item, Mapping)
+            ),
+            pipeline_version=_text(payload.get("pipeline_version")) or "",
+            model_name=_text(payload.get("model_name")),
+            prompt_versions={
+                str(key): str(value)
+                for key, value in dict(payload.get("prompt_versions") or {}).items()
+            },
+            stats=ExecutionStats.from_mapping(payload.get("stats")),
+            status=_text(payload.get("status")) or "queued",
+            phase=_text(payload.get("phase")) or "queued",
+            processed_document_count=int(
+                payload.get("processed_document_count") or 0
+            ),
+            total_document_count=int(payload.get("total_document_count") or 0),
+            current_document_id=_text(payload.get("current_document_id")),
+            progress_message=_text(payload.get("progress_message")),
+            error_code=_text(payload.get("error_code")),
+            error_message=_text(payload.get("error_message")),
+            created_at=_datetime_or_none(payload.get("created_at")),
+            started_at=_datetime_or_none(payload.get("started_at")),
+            completed_at=_datetime_or_none(payload.get("completed_at")),
+            diagnostics=tuple(
+                dict(item)
+                for item in payload.get("diagnostics") or ()
+                if isinstance(item, Mapping)
+            ),
+        )
 
     def start(self, *, started_at: datetime | None = None) -> "ObjectiveAnalysis":
         return self._transition(
@@ -1242,7 +1314,7 @@ class ObjectiveAnalysis:
             "collection_id": self.collection_id,
             "objective_id": self.objective_id,
             "analysis_version": self.analysis_version,
-            "source_build_id": self.source_build_id,
+            "document_inputs": [item.to_record() for item in self.document_inputs],
             "pipeline_version": self.pipeline_version,
             "model_name": self.model_name,
             "prompt_versions": dict(self.prompt_versions),
@@ -1937,15 +2009,15 @@ class ObjectiveEvidence:
 
 @dataclass(frozen=True)
 class ObjectiveFactSet:
-    """Collection-build output containing candidate Objective definitions only."""
+    """Current candidate Objective discovery result for selected documents."""
 
     research_objectives_ready: bool = False
-    paper_skims: tuple[PaperSkim, ...] = ()
+    document_inputs: tuple[PreparedDocumentInput, ...] = ()
     research_objectives: tuple[ResearchObjective, ...] = ()
     study_dispositions: tuple[PaperStudyDisposition, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "paper_skims", tuple(self.paper_skims))
+        object.__setattr__(self, "document_inputs", tuple(self.document_inputs))
         object.__setattr__(
             self,
             "research_objectives",
@@ -1956,19 +2028,13 @@ class ObjectiveFactSet:
             "study_dispositions",
             tuple(self.study_dispositions),
         )
-        relationships_by_key = {
-            (skim.document_id, study.study_id, relationship.relationship_id): relationship
-            for skim in self.paper_skims
-            for study in skim.studies
-            for relationship in study.relationships
+        document_ids = [item.document_id for item in self.document_inputs]
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("objective discovery document inputs must be unique")
+        relationship_keys = {
+            (item.document_id, item.study_id, item.relationship_id)
+            for item in self.study_dispositions
         }
-        relationship_keys = set(relationships_by_key)
-        if len(relationships_by_key) != sum(
-            len(study.relationships)
-            for skim in self.paper_skims
-            for study in skim.studies
-        ):
-            raise ValueError("paper study relationship identities must be unique")
         relationship_ids = {
             relationship_id
             for _document_id, _study_id, relationship_id in relationship_keys
@@ -1981,9 +2047,10 @@ class ObjectiveFactSet:
         ]
         if len(disposition_keys) != len(set(disposition_keys)):
             raise ValueError("paper study relationship was accounted for more than once")
-        unknown = set(disposition_keys) - relationship_keys
-        if unknown:
-            raise ValueError("study disposition references an unknown relationship")
+        input_document_ids = set(document_ids)
+        disposition_document_ids = {item.document_id for item in self.study_dispositions}
+        if disposition_document_ids - input_document_ids:
+            raise ValueError("study disposition belongs to an unselected document")
         if not self.research_objectives_ready:
             if any(
                 item.status is not PaperStudyDispositionStatus.PENDING
@@ -1991,8 +2058,6 @@ class ObjectiveFactSet:
             ):
                 raise ValueError("an unready objective fact set can only be pending")
             return
-        if set(disposition_keys) != relationship_keys:
-            raise ValueError("ready objective facts must account for every relationship")
         if any(
             item.status is PaperStudyDispositionStatus.PENDING
             for item in self.study_dispositions

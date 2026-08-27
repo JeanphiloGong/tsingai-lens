@@ -16,19 +16,18 @@ from domain.pipeline import (
 )
 
 
-def test_pipeline_run_tracks_execution_separately_from_output_build() -> None:
+def test_pipeline_run_tracks_document_preparation_execution() -> None:
     run = PipelineRun.create(
-        pipeline_name="collection_build",
+        pipeline_name="document_preparation",
         mode="standard",
         run_id="task_1",
-        scope_type="collection",
-        scope_id="col_1",
+        scope_type="document",
+        scope_id="doc_1",
         node_dependencies={
             "source_artifacts": (),
             "document_profiles": ("source_artifacts",),
         },
         created_at="2026-08-11T01:00:00+00:00",
-        output_build_id="build_1",
     ).start("2026-08-11T01:00:01+00:00")
 
     source = run.node("source_artifacts").start(
@@ -62,7 +61,6 @@ def test_pipeline_run_tracks_execution_separately_from_output_build() -> None:
     )
 
     assert run.run_id == "task_1"
-    assert run.output_build_id == "build_1"
     assert run.errors == (
         "document_profiles: profile extraction failed",
     )
@@ -115,11 +113,11 @@ def test_execution_stats_aggregate_usage_by_model() -> None:
 
 def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
     payload = {
-        "pipeline_name": "collection_build",
+        "pipeline_name": "document_preparation",
         "mode": "standard",
         "run_id": "task_1",
-        "scope_type": "collection",
-        "scope_id": "col_1",
+        "scope_type": "document",
+        "scope_id": "doc_1",
         "status": "running",
         "nodes": {
             "source_artifacts": {
@@ -156,7 +154,6 @@ def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
             "started_at": "2026-08-11T01:00:01+00:00",
             "finished_at": None,
         },
-        "output_build_id": "build_1",
     }
 
     assert PipelineRun.from_mapping(payload).to_record() == payload
@@ -191,14 +188,13 @@ def test_execution_timestamps_reject_finish_before_start() -> None:
 
 def test_pipeline_run_rejects_invalid_dependency_graphs() -> None:
     run = PipelineRun.create(
-        pipeline_name="collection_build",
+        pipeline_name="document_preparation",
         mode="standard",
         run_id="task_1",
-        scope_type="collection",
-        scope_id="col_1",
+        scope_type="document",
+        scope_id="doc_1",
         node_dependencies={"source_artifacts": ()},
         created_at="2026-08-11T01:00:00+00:00",
-        output_build_id="build_1",
     )
 
     with pytest.raises(ValueError, match="dependencies are not part"):
@@ -212,11 +208,11 @@ def test_pipeline_run_rejects_invalid_dependency_graphs() -> None:
 
     with pytest.raises(ValueError, match="contain a cycle"):
         PipelineRun.create(
-            pipeline_name="collection_build",
+            pipeline_name="document_preparation",
             mode="standard",
             run_id="task_2",
-            scope_type="collection",
-            scope_id="col_1",
+            scope_type="document",
+            scope_id="doc_1",
             node_dependencies={"first": ("second",), "second": ("first",)},
             created_at="2026-08-11T01:00:00+00:00",
         )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,6 +24,7 @@ from domain.core import (
     PaperSkim,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
@@ -33,7 +33,7 @@ from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
 )
-from tests.support.objective_repository import MemoryObjectiveRepository
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
 )
@@ -73,44 +73,18 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
         raise RuntimeError("frame model failed")
 
 
-class _ActiveBuildScopeObjectiveRepository(MemoryObjectiveRepository):
-    """Mirror production's global lifecycle plus active-build support scope."""
-
-    async def read_objective(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ResearchObjective | None:
-        lifecycle = await super().read_objective(collection_id, objective_id)
-        if lifecycle is None:
-            return None
-        snapshot = next(
-            (
-                objective
-                for objective in (await self.read(collection_id)).research_objectives
-                if objective.objective_id == objective_id
-            ),
-            None,
-        )
-        if snapshot is None:
-            return lifecycle
-        return replace(
-            snapshot,
-            confirmation_status=lifecycle.confirmation_status,
-            active_analysis_version=lifecycle.active_analysis_version,
-            published_analysis_version=lifecycle.published_analysis_version,
-            created_at=lifecycle.created_at,
-            updated_at=lifecycle.updated_at,
-        )
-
-
 def _ready_objective_facts(
     paper_skim: PaperSkim,
     objective: ResearchObjective,
 ) -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
-        paper_skims=(paper_skim,),
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id=paper_skim.document_id,
+                preparation_fingerprint=f"fingerprint-{paper_skim.document_id}",
+            ),
+        ),
         research_objectives=(objective,),
         study_dispositions=tuple(
             PaperStudyDisposition(
@@ -178,22 +152,6 @@ def _paper_skim(
     )
 
 
-async def test_memory_objective_repository_requires_explicit_activation():
-    repository = MemoryObjectiveRepository()
-    active = ObjectiveFactSet(research_objectives_ready=True)
-    pending = ObjectiveFactSet()
-
-    await repository.replace("col-1", "build_test", active)
-    await repository.replace("col-1", "build_pending", pending)
-
-    assert await repository.read("col-1") == active
-    assert await repository.read("col-1", build_id="build_pending") == pending
-
-    repository.activate("build_pending")
-
-    assert await repository.read("col-1") == pending
-
-
 async def test_memory_objective_repository_records_analysis_execution_stats():
     objective = _research_objective(
         {
@@ -215,6 +173,12 @@ async def test_memory_objective_repository_records_analysis_execution_stats():
     _, analysis = await repository.queue_analysis(
         "col-1",
         objective.objective_id,
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-1",
+                preparation_fingerprint="fingerprint-paper-1",
+            ),
+        ),
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -265,7 +229,8 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
         collection_id="col-1",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name="test-model",
         prompt_versions={},
@@ -469,7 +434,8 @@ async def test_objective_contribution_reports_only_final_degraded_source_outcome
         collection_id="col-1",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name="test-model",
         prompt_versions={},
@@ -591,9 +557,8 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_document(
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -617,7 +582,7 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
                 }
             ],
             tables=[],
-        ),
+        )[0],
     )
     await _seed_document_profiles(service, collection_id)
     objective = _research_objective(
@@ -646,9 +611,9 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         process_context=("LPBF",),
         source_ref="b1",
     )
+    await service.paper_map_repository.replace(collection_id, paper_skim)
     await service.objective_repository.replace(
         collection_id,
-        "build_test",
         _ready_objective_facts(paper_skim, objective),
     )
     analysis = await _queue_running_analysis(
@@ -681,9 +646,8 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         response_client=_ObjectiveExtractor(),
     )
     service.finding_synthesis_service.assertion_judge = service._response_client
-    await service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_document(
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -714,7 +678,7 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
                     ],
                 }
             ],
-        ),
+        )[0],
     )
     await _seed_document_profiles(service, collection_id)
     objective = _research_objective(
@@ -743,9 +707,9 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         process_context=("LPBF", "heat treatment"),
         source_ref="b1",
     )
+    await service.paper_map_repository.replace(collection_id, paper_skim)
     await service.objective_repository.replace(
         collection_id,
-        "build_test",
         _ready_objective_facts(paper_skim, objective),
     )
     analysis = await _queue_running_analysis(
@@ -785,9 +749,8 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_document(
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -819,7 +782,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
                     ],
                 }
             ],
-        ),
+        )[0],
     )
     await _seed_document_profiles(service, collection_id)
     objective = _research_objective(
@@ -848,17 +811,17 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
         process_context=("LPBF", "heat treatment"),
         source_ref="b1",
     )
+    await service.paper_map_repository.replace(collection_id, paper_skim)
     await service.objective_repository.replace(
         collection_id,
-        "build_test",
         _ready_objective_facts(paper_skim, objective),
     )
-    active_facts = await service.objective_repository.read(collection_id)
     analysis = await _queue_running_analysis(
         service,
         collection_id,
         objective.objective_id,
     )
+    active_facts = await service.objective_repository.read(collection_id)
 
     artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
@@ -869,116 +832,3 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
     assert extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
-
-
-async def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
-    tmp_path,
-):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    collection_id = (
-        await collection_service.create_collection("Build snapshot analysis")
-    )["collection_id"]
-    extractor = _ObjectiveExtractor()
-    repository = _ActiveBuildScopeObjectiveRepository()
-    service = _build_research_objective_service(
-        collection_service=collection_service,
-        response_client=extractor,
-        objective_repository=repository,
-    )
-    service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_collection_documents(
-        collection_id,
-        "build_test",
-        source_documents_from_records(
-            documents=[
-                {
-                    "id": "paper-1",
-                    "title": "Queued source paper",
-                    "text": "Heat treatment changed corrosion current.",
-                }
-            ],
-            blocks=[
-                {
-                    "block_id": "paper-1-results",
-                    "document_id": "paper-1",
-                    "block_type": "paragraph",
-                    "text": "Heat treatment changed corrosion current.",
-                    "block_order": 1,
-                    "heading_path": "Results",
-                }
-            ],
-            tables=[],
-        ),
-    )
-    await _seed_document_profiles(service, collection_id)
-    queued_objective = _research_objective(
-        {
-            "collection_id": collection_id,
-            "objective_id": "obj_corrosion",
-            "question": "How does heat treatment affect corrosion current?",
-            "variables": ["heat treatment"],
-            "outcomes": ["corrosion current"],
-            "seed_document_ids": ["paper-1"],
-            "source_relationship_ids": [
-                _relationship_id("paper-1", "corrosion current")
-            ],
-            "rank": 1,
-        }
-    )
-    queued_skim = _paper_skim(
-        document_id="paper-1",
-        varied_factors=("heat treatment",),
-        outcomes=("corrosion current",),
-        material_scope=("316L",),
-        process_context=("LPBF",),
-        source_ref="paper-1-results",
-    )
-    await repository.replace(
-        collection_id,
-        "build_test",
-        _ready_objective_facts(queued_skim, queued_objective),
-    )
-    analysis = await _queue_running_analysis(
-        service,
-        collection_id,
-        queued_objective.objective_id,
-    )
-
-    rebuilt_objective = _research_objective(
-        {
-            **queued_objective.to_record(),
-            "seed_document_ids": ["paper-2"],
-            "source_relationship_ids": [
-                _relationship_id("paper-2", "corrosion current")
-            ],
-            "confirmation_status": "candidate",
-            "active_analysis_version": None,
-            "rank": 1,
-        }
-    )
-    rebuilt_skim = _paper_skim(
-        document_id="paper-2",
-        varied_factors=("heat treatment",),
-        outcomes=("corrosion current",),
-        material_scope=("316L",),
-        process_context=("LPBF",),
-        source_ref="paper-2-results",
-    )
-    await repository.replace(
-        collection_id,
-        "build_rebuilt",
-        _ready_objective_facts(rebuilt_skim, rebuilt_objective),
-    )
-    repository.activate("build_rebuilt")
-
-    await service.generate_objective_analysis_artifacts(collection_id, analysis)
-
-    frame_payload = extractor.frame_payloads[0]
-    assert "seed_document_ids" not in frame_payload["objective"]
-    assert "source_relationship_ids" not in frame_payload["objective"]
-    assert frame_payload["paper_prior"]["studies"][0]["relationships"] == [
-        {
-            "varied_factors": ["heat treatment"],
-            "outcome": "corrosion current",
-        }
-    ]

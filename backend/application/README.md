@@ -23,16 +23,17 @@ Inside it, business responsibilities are now grouped as:
 - [`goal/README.md`](goal/README.md)
   Goal Brief intake and research-intent shaping
 - [`source/README.md`](source/README.md)
-  Collection lifecycle, build-task records, Source artifact loading, and artifact readiness
+  Collection lifecycle, current Document membership, per-document preparation,
+  Source loading, and task state
 - [`pipeline/README.md`](pipeline/README.md)
-  Application workflow orchestration such as collection build sequencing
+  Shared observable pipeline records; workflow ordering stays in owning services
 - [`core/README.md`](core/README.md)
-  Research-fact backbone generation and workspace overview assembly
+  Document profiles, Paper Maps, Objectives, Evidence, and Findings
 - [`evaluation/README.md`](evaluation/README.md)
   Collection-bound Core/Goal quality evaluation over existing artifacts,
   gold answers, prediction snapshots, summary scores, and failure records
 - [`derived/README.md`](derived/README.md)
-  Graph views derived from Core artifacts
+  Retired parallel projection boundary
 
 ## Related Docs
 

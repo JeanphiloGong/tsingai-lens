@@ -18,6 +18,10 @@ from application.chat import (
 from application.chat.capabilities import GetCollectionContextCapability
 from application.chat.session_service import ChatSessionService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from infra.persistence.memory import (
+    MemoryDocumentProfileRepository,
+    MemoryPaperMapRepository,
+)
 from main import create_app
 from tests.support.chat_repository import MemoryChatRepository
 
@@ -148,7 +152,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         collection_service=collection_service,
         task_service=SimpleNamespace(repository=object()),
         source_artifact_repository=object(),
-        paper_fact_repository=object(),
+        document_profile_repository=MemoryDocumentProfileRepository(),
+        paper_map_repository=MemoryPaperMapRepository(),
         objective_repository=objective_repository,
         finding_review_repository=object(),
         experiment_plan_repository=object(),

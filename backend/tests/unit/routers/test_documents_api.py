@@ -27,9 +27,11 @@ from infra.source.ingestion.normalized_import import (
     NormalizedImportDocument,
     NormalizedImportSourceMetadata,
 )
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.objective_repository import MemoryObjectiveRepository
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from infra.persistence.memory import (
+    MemoryDocumentProfileRepository,
+    MemorySourceArtifactRepository,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -44,22 +46,25 @@ async def _store_document_profiles(
     collection_id: str,
     profiles: list[dict],
 ) -> None:
-    await document_profile_service.paper_fact_repository.replace_document_profiles(
-        collection_id,
-        "build_test",
-        tuple(DocumentProfile.from_mapping(row) for row in profiles),
-    )
+    for row in profiles:
+        await document_profile_service.document_profile_repository.replace(
+            DocumentProfile.from_mapping(row)
+        )
+
+
+async def _store_source_documents(repository, collection_id, documents) -> None:
+    for document in documents:
+        await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
 def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = MemorySourceArtifactRepository()
-    paper_fact_repository = MemoryPaperFactRepository()
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
-        paper_fact_repository=paper_fact_repository,
+        document_profile_repository=MemoryDocumentProfileRepository(),
     )
     document_markdown_service = DocumentMarkdownService(
         collection_service,
@@ -214,9 +219,9 @@ async def test_document_content_route_uses_stable_block_locator(
         name="Document Locator Collection"
     )
     collection_id = record["collection_id"]
-    await document_profile_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        document_profile_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -287,9 +292,9 @@ async def test_document_markdown_route_returns_markdown_projection(document_serv
         name="Markdown Route Collection"
     )
     collection_id = record["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -593,9 +598,9 @@ async def test_document_figure_image_route_streams_extracted_asset(document_serv
         content,
         asset_sha256,
     )
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -638,9 +643,9 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
         name="Cross Document Figure Collection"
     )
     collection_id = record["collection_id"]
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
@@ -688,9 +693,9 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
     collection_id = record["collection_id"]
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -738,9 +743,9 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
         content,
         digest,
     )
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         first["collection_id"],
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -796,9 +801,9 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
         collection_service.object_store.delete(storage_key)
     else:
         (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
-    await markdown_service.source_artifact_repository.replace_collection_documents(
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
         collection_id,
-        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[

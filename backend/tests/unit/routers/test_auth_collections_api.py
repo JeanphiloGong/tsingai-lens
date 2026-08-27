@@ -33,18 +33,20 @@ def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
     from tests.support.experiment_plan_repository import (
         InMemoryExperimentPlanRepository,
     )
-    from tests.support.objective_repository import MemoryObjectiveRepository
+    from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
     from tests.support.objective_review_repository import (
         InMemoryObjectiveReviewRepository,
     )
-    from tests.support.paper_fact_repository import MemoryPaperFactRepository
-    from tests.support.source_artifact_repository import (
+    from infra.persistence.memory import (
+        MemoryDocumentProfileRepository,
+        MemoryPaperMapRepository,
         MemorySourceArtifactRepository,
     )
 
     return {
         "source_artifact_repository": MemorySourceArtifactRepository(),
-        "paper_fact_repository": MemoryPaperFactRepository(),
+        "document_profile_repository": MemoryDocumentProfileRepository(),
+        "paper_map_repository": MemoryPaperMapRepository(),
         "objective_repository": MemoryObjectiveRepository(),
         "finding_review_repository": InMemoryObjectiveReviewRepository(),
         "experiment_plan_repository": InMemoryExperimentPlanRepository(),
@@ -60,7 +62,7 @@ def _build_client(
     collection_service,
 ) -> Iterator[TestClient]:
     from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryBuildRepository
+    from infra.persistence.memory import MemoryTaskRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -72,7 +74,7 @@ def _build_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryBuildRepository()),
+            task_service=TaskService(MemoryTaskRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -145,7 +147,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
     collection_service,
 ) -> None:
     from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryBuildRepository
+    from infra.persistence.memory import MemoryTaskRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
@@ -155,20 +157,19 @@ def test_app_lifespan_composes_one_shared_collection_service(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryBuildRepository()),
+            task_service=TaskService(MemoryTaskRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
         state = client.app.state
         collection_service = state.collection_service
         collection_consumers = (
-            state.build_pipeline_service,
+            state.document_preparation_service,
             state.document_markdown_service,
             state.document_profile_service,
             state.goal_service,
             state.chat_session_service,
             state.research_objective_service,
-            state.workspace_service,
             state.objective_analysis_service.research_objective_service,
         )
 

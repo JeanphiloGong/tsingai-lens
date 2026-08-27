@@ -3,776 +3,542 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../_shared/api';
-	import { collections } from '../../_shared/collections';
 	import {
 		listCollectionDocuments,
 		uploadCollectionDocuments,
 		type CollectionDocument
 	} from '../../_shared/collectionDocuments';
 	import { t } from '../../_shared/i18n';
-	import { fetchCollectionObjectives, type ObjectiveList } from '../../_shared/researchView';
 	import {
-		createBuildTask,
+		discoverCollectionObjectives,
+		fetchCollectionObjectives,
+		type ObjectiveList
+	} from '../../_shared/researchView';
+	import {
 		getTask,
 		isTaskActive,
-		type Task,
-		type TaskProgressDetail
+		listCollectionTasks,
+		prepareCollectionDocument,
+		type Task
 	} from '../../_shared/tasks';
-	import {
-		buildOverviewPipelineSteps,
-		fetchWorkspaceOverview,
-		getOverviewReadinessState,
-		getWorkspaceSurfaceState,
-		type OverviewPipelineStatus,
-		type OverviewPipelineStep,
-		type OverviewReadinessState,
-		type WorkspaceOverview,
-		type WorkspaceSurfaceKey,
-		type WorkspaceSurfaceState
-	} from '../../_shared/workspace';
 
-	type PaperMixRow = {
-		key: 'review' | 'experimental' | 'mixed' | 'uncertain' | 'benchmark';
-		label: string;
-		count: number;
-	};
-
-	let workspace: WorkspaceOverview | null = null;
+	let documents: CollectionDocument[] = [];
+	let tasks: Task[] = [];
 	let objectiveList: ObjectiveList | null = null;
-	let objectivesLoaded = false;
+	let selectedDocumentIds: string[] = [];
+	let selectedFiles: File[] = [];
 	let loading = false;
+	let uploadLoading = false;
+	let preparationLoading = false;
+	let discoveryLoading = false;
 	let error = '';
-	let actionStatus = '';
+	let notice = '';
 	let loadedCollectionId = '';
+	let fileInput: HTMLInputElement | null = null;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
-	let selectedFiles: File[] = [];
-	let isDragging = false;
-	let uploadLoading = false;
-	let uploadError = '';
-	let uploadResult: { count: number; items: CollectionDocument[] } | null = null;
-	let fileInput: HTMLInputElement | null = null;
-	let collectionDocuments: CollectionDocument[] = [];
-	let filesLoading = false;
-	let filesError = '';
-
-	$: collectionId = $page.params.id ?? '';
-	$: effectiveFileCount = Math.max(
-		workspace?.file_count ?? 0,
-		collectionDocuments.length,
-		uploadResult?.count ?? 0
+	let collectionId = '';
+	$: readyDocuments = documents.filter((document) => document.status === 'ready');
+	$: pendingDocuments = documents.filter((document) =>
+		['stored', 'uploaded', 'failed'].includes(document.status)
 	);
-	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
-	$: readinessState = getOverviewReadinessState(stateWorkspace);
-	$: noObjectiveCandidates =
-		readinessState === 'ready' && objectivesLoaded && (objectiveList?.objectives.length ?? 0) === 0;
-	$: hasActiveTask = isTaskActive(stateWorkspace?.latest_task);
-	$: uploadControlsDisabled = uploadLoading || hasActiveTask;
-	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
-	$: paperCount = Math.max(
-		stateWorkspace?.document_summary.total_documents ?? 0,
-		effectiveFileCount
-	);
-	$: statusChecklistItems = [
-		{
-			label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
-			done: stepStatus(pipelineSteps, 'upload') === 'completed'
-		},
-		{
-			label: $t('overview.cards.currentStatus.parsed'),
-			done: stepStatus(pipelineSteps, 'documents') === 'completed'
-		},
-		{
-			label: $t('overview.cards.currentStatus.objectives'),
-			done: stepStatus(pipelineSteps, 'objectives') === 'completed'
-		}
-	];
-	$: showUploadPanel =
-		readinessState === 'empty' ||
-		readinessState === 'ready_to_process' ||
-		selectedFiles.length > 0 ||
-		Boolean(uploadError || uploadResult);
-	$: nextStepItems = buildNextStepItems(readinessState);
-	$: trustCardTitle = buildTrustCardTitle(readinessState);
-	$: trustCardBody = buildTrustCardBody(readinessState);
-	$: if (collectionId && collectionId !== loadedCollectionId) {
-		loadedCollectionId = collectionId;
-		clearPoll();
-		objectiveList = null;
-		objectivesLoaded = false;
-		void Promise.all([loadWorkspace(), loadFiles(), loadObjectives()]);
-	}
+	$: processingDocuments = documents.filter((document) => document.status === 'processing');
+	$: selectedReadyCount = selectedDocumentIds.filter((documentId) =>
+		readyDocuments.some((document) => document.document_id === documentId)
+	).length;
+	const unsubscribePage = page.subscribe((currentPage) => {
+		const nextCollectionId = currentPage.params.id ?? '';
+		if (!nextCollectionId || nextCollectionId === loadedCollectionId) return;
+		collectionId = nextCollectionId;
+		loadedCollectionId = nextCollectionId;
+		selectedDocumentIds = [];
+		void refreshAll();
+	});
 
 	onDestroy(() => {
+		unsubscribePage();
 		clearPoll();
 	});
 
 	function clearPoll() {
-		if (pollTimer) {
-			clearTimeout(pollTimer);
-			pollTimer = null;
-		}
+		if (pollTimer) clearTimeout(pollTimer);
+		pollTimer = null;
 	}
 
-	function schedulePoll(taskId: string) {
+	function schedulePoll() {
 		clearPoll();
-		pollTimer = setTimeout(() => {
-			void refreshTask(taskId);
-		}, 2500);
+		if (!tasks.some(isTaskActive)) return;
+		pollTimer = setTimeout(() => void pollTasks(), 2500);
 	}
 
-	function mergeTask(task: Task) {
-		if (!workspace) return;
-		const recent = [
-			task,
-			...workspace.recent_tasks.filter((item) => item.task_id !== task.task_id)
-		].slice(0, 5);
-		workspace = {
-			...workspace,
-			latest_task: task,
-			recent_tasks: recent
-		};
-	}
-
-	async function refreshTask(taskId: string) {
-		const task = await getTask(taskId);
-		mergeTask(task);
-
-		if (isTaskActive(task)) {
-			schedulePoll(task.task_id);
-		} else {
-			clearPoll();
-			await Promise.all([loadWorkspace(false), loadFiles(false), loadObjectives()]);
-			uploadResult = null;
-			actionStatus =
-				task.status === 'failed' || task.status === 'partial_success'
-					? task.errors[0] || $t('overview.actions.viewErrors')
-					: $t('documents.indexDone');
-		}
-	}
-
-	async function loadWorkspace(showLoading = true) {
-		error = '';
-		if (showLoading) loading = true;
+	async function pollTasks() {
+		const active = tasks.filter(isTaskActive);
+		if (!active.length) return;
 		try {
-			const nextWorkspace = await fetchWorkspaceOverview(collectionId);
-			workspace = nextWorkspace;
-			const workspaceReadiness = getOverviewReadinessState(nextWorkspace);
-			collections.update((items) => [
-				{
-					...nextWorkspace.collection,
-					status: workspaceReadiness,
-					updated_at: nextWorkspace.latest_task?.updated_at || nextWorkspace.collection.updated_at
-				},
-				...items.filter((item) => item.id !== nextWorkspace.collection.id)
-			]);
-			const latestTask = workspace.latest_task;
-			if (latestTask && isTaskActive(latestTask)) {
-				schedulePoll(latestTask.task_id);
-			} else {
-				clearPoll();
-			}
+			const refreshed = await Promise.all(active.map((task) => getTask(task.task_id)));
+			const refreshedById = new Map(refreshed.map((task) => [task.task_id, task]));
+			tasks = tasks.map((task) => refreshedById.get(task.task_id) ?? task);
+			await loadDocuments();
 		} catch (err) {
 			error = errorMessage(err);
-			workspace = null;
+		}
+		schedulePoll();
+	}
+
+	async function refreshAll() {
+		loading = true;
+		error = '';
+		try {
+			await Promise.all([loadDocuments(), loadTasks(), loadObjectives()]);
+		} catch (err) {
+			error = errorMessage(err);
 		} finally {
 			loading = false;
+			schedulePoll();
 		}
+	}
+
+	async function loadDocuments() {
+		const response = await listCollectionDocuments(collectionId);
+		documents = response.items;
+		const readyIds = new Set(
+			documents.filter((item) => item.status === 'ready').map((item) => item.document_id)
+		);
+		selectedDocumentIds = selectedDocumentIds.filter((documentId) => readyIds.has(documentId));
+	}
+
+	async function loadTasks() {
+		tasks = (await listCollectionTasks(collectionId, { limit: 100 })).items;
 	}
 
 	async function loadObjectives() {
 		try {
 			objectiveList = await fetchCollectionObjectives(collectionId);
-			objectivesLoaded = true;
 		} catch {
 			objectiveList = null;
-			objectivesLoaded = false;
 		}
 	}
 
-	async function loadFiles(showLoading = true) {
-		if (showLoading) filesLoading = true;
-		filesError = '';
+	function taskFor(documentId: string) {
+		return tasks.find((task) => task.document_id === documentId) ?? null;
+	}
+
+	function toggleDocument(documentId: string) {
+		selectedDocumentIds = selectedDocumentIds.includes(documentId)
+			? selectedDocumentIds.filter((item) => item !== documentId)
+			: [...selectedDocumentIds, documentId];
+	}
+
+	function toggleAllReady() {
+		selectedDocumentIds =
+			selectedReadyCount === readyDocuments.length
+				? []
+				: readyDocuments.map((document) => document.document_id);
+	}
+
+	async function prepareDocuments(targets: CollectionDocument[]) {
+		if (!targets.length || preparationLoading) return;
+		preparationLoading = true;
+		error = '';
+		notice = '';
 		try {
-			const data = await listCollectionDocuments(collectionId);
-			collectionDocuments = data.items;
-		} catch (err) {
-			filesError = errorMessage(err);
-			collectionDocuments = [];
-		} finally {
-			filesLoading = false;
-		}
-	}
-
-	async function refreshAll() {
-		await Promise.all([loadWorkspace(), loadFiles(), loadObjectives()]);
-	}
-
-	function browseFiles() {
-		if (uploadControlsDisabled) return;
-		fileInput?.click();
-	}
-
-	function handleFiles(fileList: FileList | null) {
-		selectedFiles = fileList ? Array.from(fileList) : [];
-		uploadError = '';
-	}
-
-	function handleDrop(event: DragEvent) {
-		event.preventDefault();
-		if (uploadControlsDisabled) return;
-		isDragging = false;
-		handleFiles(event.dataTransfer?.files ?? null);
-	}
-
-	function handleDragOver(event: DragEvent) {
-		event.preventDefault();
-		isDragging = true;
-	}
-
-	function handleDragLeave(event: DragEvent) {
-		event.preventDefault();
-		isDragging = false;
-	}
-
-	function handleDropzoneKeydown(event: KeyboardEvent) {
-		if (uploadControlsDisabled) return;
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			browseFiles();
-		}
-	}
-
-	async function startBuildRun() {
-		if (!effectiveFileCount) {
-			actionStatus = $t('overview.indexNoFiles');
-			return;
-		}
-
-		actionStatus = '';
-		if (hasActiveTask) {
-			actionStatus = $t('documents.indexing');
-			return;
-		}
-
-		try {
-			const task = await createBuildTask(collectionId);
-			mergeTask(task);
-			collections.update((items) =>
-				items.map((item) =>
-					item.id === collectionId
-						? { ...item, status: 'processing', updated_at: task.updated_at || item.updated_at }
-						: item
-				)
+			const queued = await Promise.all(
+				targets.map((document) => prepareCollectionDocument(collectionId, document.document_id))
 			);
-			actionStatus = $t('documents.indexing');
-			schedulePoll(task.task_id);
+			const queuedIds = new Set(queued.map((task) => task.task_id));
+			tasks = [...queued, ...tasks.filter((task) => !queuedIds.has(task.task_id))];
+			await loadDocuments();
+			notice = $t('overview.currentModel.preparationQueued', { count: queued.length });
+			schedulePoll();
 		} catch (err) {
-			actionStatus = errorMessage(err);
+			error = errorMessage(err);
+		} finally {
+			preparationLoading = false;
 		}
 	}
 
-	async function submitUpload() {
-		uploadError = '';
-		uploadResult = null;
-
-		if (!selectedFiles.length) {
-			uploadError = $t('documents.errorNoFiles');
-			return;
-		}
-
-		uploadLoading = true;
+	async function discoverObjectives() {
+		if (!selectedReadyCount || discoveryLoading) return;
+		discoveryLoading = true;
+		error = '';
+		notice = '';
 		try {
-			uploadResult = await uploadCollectionDocuments(collectionId, selectedFiles);
+			const result = await discoverCollectionObjectives(collectionId, selectedDocumentIds);
+			await loadObjectives();
+			notice = $t('overview.currentModel.discoveryComplete', { count: result.objectives.length });
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			discoveryLoading = false;
+		}
+	}
+
+	async function upload() {
+		if (!selectedFiles.length || uploadLoading) return;
+		uploadLoading = true;
+		error = '';
+		notice = '';
+		try {
+			const result = await uploadCollectionDocuments(collectionId, selectedFiles);
 			selectedFiles = [];
 			if (fileInput) fileInput.value = '';
-			await Promise.all([loadFiles(false), loadWorkspace(false), loadObjectives()]);
-			actionStatus = $t('documents.uploadDone');
+			await loadDocuments();
+			notice = $t('overview.currentModel.uploadComplete', { count: result.count });
 		} catch (err) {
-			uploadError = errorMessage(err);
+			error = errorMessage(err);
 		} finally {
 			uploadLoading = false;
 		}
 	}
 
-	function formatPercent(value?: number | null) {
-		if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
-		return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
-	}
-
-	function formatProgressDetail(detail?: TaskProgressDetail | null) {
-		if (!detail) return '';
-		if (
-			typeof detail.current === 'number' &&
-			Number.isFinite(detail.current) &&
-			typeof detail.total === 'number' &&
-			Number.isFinite(detail.total) &&
-			detail.total > 0
-		) {
-			const unit = detail.unit ? ` ${formatProgressUnit(detail.unit)}` : '';
-			return `${Math.max(0, Math.round(detail.current))} / ${Math.round(detail.total)}${unit}`;
-		}
-		return detail.message ?? '';
-	}
-
-	function formatProgressUnit(unit: string) {
-		const key = `tasks.progressUnit.${unit}`;
+	function documentStatus(document: CollectionDocument) {
+		const key = `overview.currentModel.status.${document.status}`;
 		const translated = $t(key);
-		return translated === key ? unit : translated;
+		return translated === key ? document.status : translated;
 	}
 
-	function taskStageMessage(task: Task) {
-		return task.progress_detail?.message || formatTaskStage(task.current_stage);
+	function taskProgress(document: CollectionDocument) {
+		const task = taskFor(document.document_id);
+		if (!task || !isTaskActive(task)) return '';
+		return task.progress_detail?.message || `${task.progress_percent}%`;
 	}
 
-	function formatTaskStatus(status?: string | null) {
-		if (!status) return $t('tasks.statusUnknown');
-		const key = `tasks.status.${status}`;
-		const translated = $t(key);
-		return translated === key ? status : translated;
-	}
-
-	function formatTaskStage(stage?: string | null) {
-		if (!stage) return $t('tasks.stageUnknown');
-		const key = `tasks.stage.${stage}`;
-		const translated = $t(key);
-		return translated === key ? stage : translated;
-	}
-
-	function getDocumentLabel(document: CollectionDocument) {
-		return document.original_filename || $t('documents.untitledFile');
-	}
-
-	function pipelineStepLabel(step: OverviewPipelineStep) {
-		return $t(`overview.pipeline.steps.${step.key}`);
-	}
-
-	function pipelineStatusLabel(status: OverviewPipelineStatus) {
-		return $t(`overview.pipeline.statuses.${status}`);
-	}
-
-	function readinessTitle(state: OverviewReadinessState, hasNoObjectiveCandidates: boolean) {
-		if (hasNoObjectiveCandidates) return $t('overview.readiness.noObjectives.title');
-		return $t(`overview.readiness.${state}.title`);
-	}
-
-	function readinessBody(state: OverviewReadinessState, hasNoObjectiveCandidates: boolean) {
-		if (hasNoObjectiveCandidates) return $t('overview.readiness.noObjectives.body');
-		return $t(`overview.readiness.${state}.body`, { count: paperCount });
-	}
-
-	function readyPrimaryHref() {
-		return resolve('/collections/[id]/objectives', { id: collectionId });
-	}
-
-	function readyPrimaryLabel() {
-		return $t('overview.actions.enterObjectives');
-	}
-
-	function surfaceStatus(surface: WorkspaceSurfaceKey): WorkspaceSurfaceState {
-		return getWorkspaceSurfaceState(stateWorkspace, surface);
-	}
-
-	function surfaceLabel(surface: WorkspaceSurfaceKey) {
-		return $t(`overview.surfaceStates.${surfaceStatus(surface)}`);
-	}
-
-	function surfaceTone(surface: WorkspaceSurfaceKey) {
-		const status = surfaceStatus(surface);
-		if (status === 'ready') return 'ready';
-		if (status === 'processing') return 'processing';
-		if (status === 'failed') return 'failed';
-		return 'pending';
-	}
-
-	function stepStatus(steps: OverviewPipelineStep[], key: OverviewPipelineStep['key']) {
-		return steps.find((step) => step.key === key)?.status ?? 'pending';
-	}
-
-	function paperMixRows(): PaperMixRow[] {
-		const counts = stateWorkspace?.document_summary.doc_type_counts ?? {
-			experimental: 0,
-			review: 0,
-			mixed: 0,
-			uncertain: 0
-		};
-		return [
-			{ key: 'review', label: $t('overview.docTypeReview'), count: counts.review },
-			{
-				key: 'experimental',
-				label: $t('overview.docTypeExperimental'),
-				count: counts.experimental
-			},
-			{ key: 'mixed', label: $t('overview.docTypeMixed'), count: counts.mixed },
-			{ key: 'uncertain', label: $t('overview.docTypeUncertain'), count: counts.uncertain },
-			{ key: 'benchmark', label: $t('overview.docTypeBenchmark'), count: 0 }
-		];
-	}
-
-	function paperMixMax() {
-		return Math.max(1, ...paperMixRows().map((row) => row.count));
-	}
-
-	function isReviewDominant() {
-		const rows = paperMixRows();
-		const review = rows.find((row) => row.key === 'review')?.count ?? 0;
-		return paperCount > 0 && review >= Math.max(1, paperCount / 2);
-	}
-
-	function buildNextStepItems(state: OverviewReadinessState) {
-		if (state === 'empty') {
-			return [
-				$t('overview.cards.next.emptyUpload'),
-				$t('overview.cards.next.emptyDescribe'),
-				$t('overview.cards.next.emptyStart')
-			];
-		}
-		if (state === 'processing' || state === 'ready_to_process') {
-			if (state === 'ready_to_process') {
-				return [
-					$t('overview.actions.startProcessing'),
-					$t('overview.cards.next.emptyUpload'),
-					$t('overview.cards.next.processingLogs')
-				];
-			}
-			return [
-				$t('overview.cards.next.processingWait'),
-				$t('overview.cards.next.processingLogs'),
-				$t('overview.cards.next.processingRefresh')
-			];
-		}
-		if (state === 'failed') {
-			return [
-				$t('overview.cards.next.failedErrors'),
-				$t('overview.cards.next.failedRetry'),
-				$t('overview.cards.next.failedEvidence')
-			];
-		}
-		return [
-			$t('overview.cards.next.readyTypes'),
-			$t('overview.cards.next.readyEvidence'),
-			$t('overview.cards.next.readyCompare')
-		];
-	}
-
-	function buildTrustCardTitle(state: OverviewReadinessState) {
-		if (state === 'ready_to_process') return $t('overview.cards.trust.readyToProcessTitle');
-		if (state === 'processing') return $t('overview.cards.trust.processingTitle');
-		if (state === 'failed') return $t('overview.cards.trust.failedTitle');
-		return $t('overview.cards.trust.title');
-	}
-
-	function buildTrustCardBody(state: OverviewReadinessState) {
-		if (state === 'ready_to_process') return $t('overview.cards.trust.readyToProcessBody');
-		if (state === 'processing') return $t('overview.cards.trust.processingBody');
-		if (state === 'failed') return $t('overview.cards.trust.failedBody');
-		return $t('overview.cards.trust.body');
-	}
-
-	function actionStatusTone(value: string) {
-		return value.startsWith('4') || value.startsWith('5') ? 'status--error' : '';
+	function formatSize(size: number) {
+		if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 	}
 </script>
 
-<svelte:head>
-	<title>{$t('overview.title')}</title>
-</svelte:head>
+<svelte:head><title>{$t('overview.title')}</title></svelte:head>
 
-{#if loading}
-	<section class="card fade-up">
-		<div class="status" role="status" aria-live="polite">{$t('overview.loading')}</div>
+<section class="workspace-page fade-up">
+	<header class="workspace-heading">
+		<div>
+			<h2>{$t('overview.currentModel.title')}</h2>
+			<p>{$t('overview.currentModel.lead')}</p>
+		</div>
+		<button class="btn btn--ghost" type="button" on:click={refreshAll} disabled={loading}>
+			{$t('overview.actions.refreshStatus')}
+		</button>
+	</header>
+
+	{#if error}<p class="state state--error" role="alert">{error}</p>{/if}
+	{#if notice}<p class="state" role="status" aria-live="polite">{notice}</p>{/if}
+
+	<div class="scope-summary" aria-label={$t('overview.currentModel.summaryLabel')}>
+		<div><strong>{documents.length}</strong><span>{$t('overview.currentModel.total')}</span></div>
+		<div>
+			<strong>{readyDocuments.length}</strong><span>{$t('overview.currentModel.ready')}</span>
+		</div>
+		<div>
+			<strong>{processingDocuments.length}</strong><span
+				>{$t('overview.currentModel.processing')}</span
+			>
+		</div>
+		<div>
+			<strong>{selectedReadyCount}</strong><span>{$t('overview.currentModel.selected')}</span>
+		</div>
+	</div>
+
+	<section class="action-band" aria-labelledby="collection-action-title">
+		<div>
+			<h3 id="collection-action-title">{$t('overview.currentModel.actionsTitle')}</h3>
+			<p>{$t('overview.currentModel.actionsLead')}</p>
+		</div>
+		<div class="actions">
+			<input
+				class="file-input"
+				bind:this={fileInput}
+				type="file"
+				multiple
+				aria-label={$t('overview.actions.uploadDocuments')}
+				on:change={(event) =>
+					(selectedFiles = Array.from((event.currentTarget as HTMLInputElement).files ?? []))}
+			/>
+			<button class="btn btn--ghost" type="button" on:click={() => fileInput?.click()}>
+				{$t('overview.actions.uploadDocuments')}
+			</button>
+			{#if selectedFiles.length}
+				<button class="btn btn--primary" type="button" on:click={upload} disabled={uploadLoading}>
+					{uploadLoading
+						? $t('documents.uploading')
+						: $t('overview.currentModel.uploadSelected', { count: selectedFiles.length })}
+				</button>
+			{/if}
+			<button
+				class="btn btn--ghost"
+				type="button"
+				disabled={!pendingDocuments.length || preparationLoading}
+				on:click={() => prepareDocuments(pendingDocuments)}
+			>
+				{$t('overview.currentModel.preparePending', { count: pendingDocuments.length })}
+			</button>
+			<button
+				class="btn btn--primary"
+				type="button"
+				disabled={!selectedReadyCount || discoveryLoading}
+				on:click={discoverObjectives}
+			>
+				{discoveryLoading
+					? $t('overview.currentModel.discovering')
+					: $t('overview.currentModel.discover', { count: selectedReadyCount })}
+			</button>
+		</div>
 	</section>
-{:else if error}
-	<section class="card fade-up">
-		<div class="status status--error" role="alert">{error}</div>
-	</section>
-{:else if stateWorkspace}
-	<section class="overview-stack fade-up">
-		<article class={`readiness-card readiness-card--${readinessState}`}>
-			<div class="readiness-card__icon" aria-hidden="true">
-				<span></span>
-			</div>
-			<div class="readiness-card__body">
-				<h2>{readinessTitle(readinessState, noObjectiveCandidates)}</h2>
-				<p>{readinessBody(readinessState, noObjectiveCandidates)}</p>
-			</div>
-			<div class="readiness-card__actions">
-				{#if readinessState === 'ready'}
-					<a class="btn btn--primary" href={readyPrimaryHref()}>
-						{readyPrimaryLabel()}
-						<span aria-hidden="true">-&gt;</span>
-					</a>
-					<button class="btn btn--ghost" type="button" on:click={refreshAll}>
-						{$t('overview.actions.refreshStatus')}
-					</button>
-				{:else if readinessState === 'processing'}
-					<a class="btn btn--primary" href="#pipeline">{$t('overview.actions.viewProgress')}</a>
-					<button class="btn btn--ghost" type="button" on:click={refreshAll}>
-						{$t('overview.actions.refreshStatus')}
-					</button>
-				{:else if readinessState === 'ready_to_process'}
-					<button class="btn btn--primary" type="button" on:click={startBuildRun}>
-						{$t('overview.actions.startProcessing')}
-					</button>
-					<button class="btn btn--ghost" type="button" on:click={browseFiles}>
-						{$t('overview.actions.uploadDocuments')}
-					</button>
-				{:else if readinessState === 'failed'}
-					<a class="btn btn--primary" href="#status-card">{$t('overview.actions.viewErrors')}</a>
-					<button class="btn btn--ghost" type="button" on:click={startBuildRun}>
-						{$t('overview.actions.retryProcessing')}
-					</button>
-				{:else}
-					<button
-						class="btn btn--primary"
-						type="button"
-						disabled={uploadLoading}
-						on:click={browseFiles}
-					>
-						{$t('overview.actions.uploadDocuments')}
-					</button>
-					<a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>
-				{/if}
-			</div>
-		</article>
 
-		{#if actionStatus}
-			<div class={`status ${actionStatusTone(actionStatus)}`} role="status">{actionStatus}</div>
-		{/if}
-		{#if showUploadPanel}
-			<section id="upload" class="overview-card overview-upload-card">
-				<div>
-					<h2>{$t('overview.uploadFormTitle')}</h2>
-					<p>{$t('overview.uploadFormLead')}</p>
-				</div>
-				<div
-					class={`dropzone ${isDragging ? 'dropzone--active' : ''} ${uploadControlsDisabled ? 'dropzone--disabled' : ''}`}
-					on:drop={handleDrop}
-					on:dragover={handleDragOver}
-					on:dragleave={handleDragLeave}
-					on:click={browseFiles}
-					on:keydown={handleDropzoneKeydown}
-					role="button"
-					tabindex="0"
-					aria-disabled={uploadControlsDisabled}
-				>
-					<input
-						class="dropzone-input"
-						bind:this={fileInput}
-						type="file"
-						multiple
-						disabled={uploadControlsDisabled}
-						on:change={(event) => handleFiles((event.currentTarget as HTMLInputElement).files)}
-					/>
-					<div class="dropzone-title">{$t('documents.dropHint')}</div>
-					<div class="dropzone-sub">{$t('documents.browse')}</div>
-					{#if selectedFiles.length}
-						<div class="dropzone-files">
-							{$t('documents.selectedCount', { count: selectedFiles.length })}
-						</div>
-					{/if}
-				</div>
-				<div class="table-actions">
-					<button
-						class="btn btn--primary"
-						type="button"
-						on:click={submitUpload}
-						disabled={uploadControlsDisabled || !selectedFiles.length}
-					>
-						{uploadLoading ? $t('documents.uploading') : $t('documents.upload')}
-					</button>
-					{#if effectiveFileCount > 0}
-						<button
-							class="btn btn--ghost"
-							type="button"
-							disabled={hasActiveTask}
-							on:click={startBuildRun}
-						>
-							{readinessState === 'failed'
-								? $t('overview.actions.retryProcessing')
-								: $t('overview.actions.startProcessing')}
-						</button>
-					{/if}
-				</div>
-				{#if uploadError}
-					<div class="status status--error" role="alert">{uploadError}</div>
-				{/if}
-				{#if filesLoading}
-					<div class="status" role="status">{$t('documents.listLoading')}</div>
-				{:else if filesError}
-					<div class="status status--error" role="alert">{filesError}</div>
-				{:else if uploadResult}
-					<div class="detail-section">
-						<div class="detail-section__title">{$t('documents.uploadResultTitle')}</div>
-						<ul class="result-list">
-							{#each uploadResult.items as item}
-								<li>{getDocumentLabel(item)}</li>
-							{/each}
-						</ul>
-					</div>
-				{:else if collectionDocuments.length}
-					<div class="detail-section">
-						<div class="detail-section__title">{$t('documents.listTitle')}</div>
-						<ul class="result-list">
-							{#each collectionDocuments as item}
-								<li>{getDocumentLabel(item)}</li>
-							{/each}
-						</ul>
-					</div>
-				{/if}
-			</section>
-		{/if}
-
-		<section id="pipeline" class="overview-card pipeline-card">
-			<div class="overview-card__header">
-				<h2>{$t('overview.pipeline.title')}</h2>
+	<section class="document-scope" aria-labelledby="document-scope-title">
+		<header>
+			<div>
+				<h3 id="document-scope-title">{$t('overview.currentModel.documentsTitle')}</h3>
+				<p>{$t('overview.currentModel.documentsLead')}</p>
 			</div>
-			<ol class="pipeline-steps">
-				{#each pipelineSteps as step}
-					<li class={`pipeline-step pipeline-step--${step.status}`}>
-						<div class="pipeline-step__marker" aria-hidden="true"><span></span></div>
-						<div class="pipeline-step__content">
-							<div class="pipeline-step__title">{pipelineStepLabel(step)}</div>
-							<div class="pipeline-step__status">{pipelineStatusLabel(step.status)}</div>
+			<label class="select-all">
+				<input
+					type="checkbox"
+					checked={readyDocuments.length > 0 && selectedReadyCount === readyDocuments.length}
+					disabled={!readyDocuments.length}
+					on:change={toggleAllReady}
+				/>
+				{$t('overview.currentModel.selectAllReady')}
+			</label>
+		</header>
+
+		{#if loading}
+			<p class="state" aria-busy="true">{$t('overview.loading')}</p>
+		{:else if !documents.length}
+			<p class="state">{$t('overview.currentModel.empty')}</p>
+		{:else}
+			<div class="document-list">
+				{#each documents as document (document.document_id)}
+					<div class="document-row">
+						<label class="document-select" aria-label={$t('overview.currentModel.selectDocument')}>
+							<input
+								type="checkbox"
+								checked={selectedDocumentIds.includes(document.document_id)}
+								disabled={document.status !== 'ready'}
+								aria-label={`${$t('overview.currentModel.selectDocument')}: ${document.original_filename}`}
+								on:change={() => toggleDocument(document.document_id)}
+							/>
+						</label>
+						<div class="document-identity">
+							<strong>{document.original_filename}</strong>
+							<span>{formatSize(document.size_bytes)}</span>
 						</div>
-					</li>
+						<div class="document-state">
+							<span class={`status-mark status-mark--${document.status}`}>
+								{documentStatus(document)}
+							</span>
+							{#if taskProgress(document)}<small>{taskProgress(document)}</small>{/if}
+							{#if taskFor(document.document_id)?.errors[0]}
+								<small class="failure">{taskFor(document.document_id)?.errors[0]}</small>
+							{/if}
+						</div>
+						<div class="row-actions">
+							{#if ['stored', 'uploaded', 'failed'].includes(document.status)}
+								<button
+									class="btn btn--ghost btn--small"
+									type="button"
+									disabled={preparationLoading}
+									on:click={() => prepareDocuments([document])}
+								>
+									{$t(
+										document.status === 'failed'
+											? 'overview.currentModel.retry'
+											: 'overview.currentModel.prepare'
+									)}
+								</button>
+							{:else if document.status === 'ready'}
+								<a
+									class="btn btn--ghost btn--small"
+									href={resolve('/collections/[id]/documents/[document_id]', {
+										id: collectionId,
+										document_id: document.document_id
+									})}
+								>
+									{$t('research.documents.openPaper')}
+								</a>
+							{/if}
+						</div>
+					</div>
 				{/each}
-			</ol>
-		</section>
-
-		<section class="overview-card-grid">
-			<article id="status-card" class="overview-card overview-info-card">
-				<h3>{$t('overview.cards.currentStatus.title')}</h3>
-				<ul class="check-list">
-					{#each statusChecklistItems as item}
-						<li class:complete={item.done}>
-							<span aria-hidden="true"></span>
-							{item.label}
-						</li>
-					{/each}
-				</ul>
-				<a class="btn btn--ghost btn--small card-action" href="#pipeline">
-					{$t('overview.cards.currentStatus.logs')}
-				</a>
-				{#if stateWorkspace.latest_task}
-					<div class="task-mini">
-						<div>
-							<span>{$t('overview.statusLatestTask')}</span>
-							<strong>{formatTaskStatus(stateWorkspace.latest_task.status)}</strong>
-						</div>
-						<div>
-							<span>{$t('overview.statusStage')}</span>
-							<strong>{taskStageMessage(stateWorkspace.latest_task)}</strong>
-						</div>
-						{#if formatProgressDetail(stateWorkspace.latest_task.progress_detail)}
-							<div>
-								<span>{$t('overview.statusSubProgress')}</span>
-								<strong>{formatProgressDetail(stateWorkspace.latest_task.progress_detail)}</strong>
-							</div>
-						{/if}
-						<div>
-							<span>{$t('overview.statusStageName')}</span>
-							<strong>{formatTaskStage(stateWorkspace.latest_task.current_stage)}</strong>
-						</div>
-						<div>
-							<span>{$t('overview.statusProgress')}</span>
-							<strong>{formatPercent(stateWorkspace.latest_task.progress_percent)}</strong>
-						</div>
-					</div>
-					{#if stateWorkspace.latest_task.errors.length}
-						<div class="status status--error" role="alert">
-							{stateWorkspace.latest_task.errors.join(' | ')}
-						</div>
-					{/if}
-				{/if}
-			</article>
-
-			<article class="overview-card overview-info-card">
-				<h3>{trustCardTitle}</h3>
-				<p>{trustCardBody}</p>
-				<div class="trust-chip-row">
-					<span class={`trust-chip trust-chip--${surfaceTone('documents')}`}>
-						{$t('overview.cards.trust.documents')}: {surfaceLabel('documents')}
-					</span>
-					<span
-						class={`trust-chip ${objectivesLoaded ? 'trust-chip--ready' : 'trust-chip--pending'}`}
-					>
-						{$t('collection.tabs.objectives')}: {objectivesLoaded
-							? $t('overview.surfaceStates.ready')
-							: $t('overview.surfaceStates.processing')}
-					</span>
-				</div>
-				<div class="split-actions">
-					{#if readinessState === 'ready'}
-						<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
-							{$t('overview.actions.enterObjectives')}
-						</a>
-					{:else if readinessState === 'processing'}
-						<a class="btn btn--primary btn--small" href="#pipeline">
-							{$t('overview.actions.viewProgress')}
-						</a>
-						<button class="btn btn--ghost btn--small" type="button" on:click={refreshAll}>
-							{$t('overview.actions.refreshStatus')}
-						</button>
-					{:else if readinessState === 'ready_to_process'}
-						<button class="btn btn--primary btn--small" type="button" on:click={startBuildRun}>
-							{$t('overview.actions.startProcessing')}
-						</button>
-						<button
-							class="btn btn--ghost btn--small"
-							type="button"
-							disabled={uploadControlsDisabled}
-							on:click={browseFiles}
-						>
-							{$t('overview.actions.uploadDocuments')}
-						</button>
-					{:else if readinessState === 'failed'}
-						<a class="btn btn--ghost btn--small" href="#status-card">
-							{$t('overview.actions.viewErrors')}
-						</a>
-						<button class="btn btn--primary btn--small" type="button" on:click={startBuildRun}>
-							{$t('overview.actions.retryProcessing')}
-						</button>
-					{/if}
-				</div>
-			</article>
-
-			<article class="overview-card overview-info-card">
-				<h3>{$t('overview.cards.paperMix.title')}</h3>
-				<p>{$t('overview.cards.paperMix.body')}</p>
-				<div class="paper-mix">
-					{#each paperMixRows() as row}
-						<div class="paper-mix__row">
-							<span>{row.label}</span>
-							<div class="paper-mix__bar" aria-hidden="true">
-								<span style={`width: ${(row.count / paperMixMax()) * 100}%`}></span>
-							</div>
-							<strong>{row.count}</strong>
-						</div>
-					{/each}
-				</div>
-				{#if isReviewDominant()}
-					<p class="overview-hint">{$t('overview.cards.paperMix.reviewHint')}</p>
-				{/if}
-				<a class="btn btn--ghost btn--small card-action" href={stateWorkspace.links.documents}>
-					{$t('overview.actions.viewDocumentList')}
-				</a>
-			</article>
-
-			<article class="overview-card overview-info-card">
-				<h3>{$t('overview.cards.next.title')}</h3>
-				<ul class="next-list">
-					{#each nextStepItems as item}
-						<li>{item}</li>
-					{/each}
-				</ul>
-				<a class="guide-link" href="/docs">
-					{$t('overview.cards.next.guide')}
-					<span aria-hidden="true">-&gt;</span>
-				</a>
-			</article>
-		</section>
-
-		<div class="overview-footer-note">{$t('overview.footerNote')}</div>
+			</div>
+		{/if}
 	</section>
-{/if}
+
+	{#if objectiveList?.objectives.length}
+		<footer class="objective-link">
+			<span
+				>{$t('overview.currentModel.objectiveCount', {
+					count: objectiveList.objectives.length
+				})}</span
+			>
+			<a
+				class="btn btn--ghost"
+				href={resolve('/collections/[id]/objectives', { id: collectionId })}
+			>
+				{$t('overview.actions.enterObjectives')}
+			</a>
+		</footer>
+	{/if}
+</section>
+
+<style>
+	.workspace-page {
+		width: min(1120px, 100%);
+		margin: 0 auto;
+		display: grid;
+		gap: 22px;
+	}
+	.workspace-heading,
+	.document-scope > header,
+	.objective-link {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 20px;
+	}
+	h2,
+	h3,
+	p {
+		margin: 0;
+	}
+	.workspace-heading p,
+	.action-band p,
+	.document-scope header p {
+		margin-top: 5px;
+		color: var(--text-secondary);
+		line-height: 1.5;
+	}
+	.state {
+		margin: 0;
+		padding: 12px 0;
+		color: var(--text-secondary);
+	}
+	.state--error,
+	.failure {
+		color: var(--danger-text, #b42318);
+	}
+	.scope-summary {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		border-block: 1px solid var(--border-default);
+	}
+	.scope-summary div {
+		display: grid;
+		gap: 2px;
+		padding: 14px 18px;
+		border-right: 1px solid var(--border-default);
+	}
+	.scope-summary div:last-child {
+		border-right: 0;
+	}
+	.scope-summary strong {
+		font-size: 20px;
+	}
+	.scope-summary span {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+	.action-band {
+		display: grid;
+		gap: 14px;
+		padding-bottom: 20px;
+		border-bottom: 1px solid var(--border-default);
+	}
+	.actions,
+	.row-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.file-input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+	}
+	.document-scope {
+		display: grid;
+		gap: 12px;
+	}
+	.select-all,
+	.document-select {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+		color: var(--text-secondary);
+	}
+	.document-list {
+		display: grid;
+		border-top: 1px solid var(--border-default);
+	}
+	.document-row {
+		display: grid;
+		grid-template-columns: 28px minmax(0, 1fr) minmax(180px, 0.7fr) auto;
+		align-items: center;
+		gap: 14px;
+		min-height: 72px;
+		padding: 12px 4px;
+		border-bottom: 1px solid var(--border-default);
+	}
+	.document-identity,
+	.document-state {
+		min-width: 0;
+		display: grid;
+		gap: 4px;
+	}
+	.document-identity strong {
+		overflow-wrap: anywhere;
+	}
+	.document-identity span,
+	.document-state small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		overflow-wrap: anywhere;
+	}
+	.status-mark {
+		width: fit-content;
+		border: 1px solid var(--border-default);
+		padding: 3px 7px;
+		font-size: 12px;
+	}
+	.status-mark--ready {
+		border-color: #3a7d5d;
+		color: #256346;
+	}
+	.status-mark--processing {
+		border-color: #917427;
+		color: #725b1d;
+	}
+	.status-mark--failed {
+		border-color: var(--danger-text, #b42318);
+		color: var(--danger-text, #b42318);
+	}
+	.objective-link {
+		align-items: center;
+		padding-top: 6px;
+	}
+	@media (max-width: 760px) {
+		.workspace-heading,
+		.document-scope > header,
+		.objective-link {
+			flex-direction: column;
+		}
+		.scope-summary {
+			grid-template-columns: 1fr 1fr;
+		}
+		.scope-summary div:nth-child(2) {
+			border-right: 0;
+		}
+		.document-row {
+			grid-template-columns: 28px minmax(0, 1fr);
+			align-items: start;
+		}
+		.document-state,
+		.row-actions {
+			grid-column: 2;
+		}
+	}
+</style>

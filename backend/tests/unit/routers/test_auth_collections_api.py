@@ -183,6 +183,47 @@ def test_app_lifespan_composes_one_shared_collection_service(
         }
 
 
+def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+) -> None:
+    from application.core.objectives.analysis_service import ObjectiveAnalysisService
+    from application.source.document_preparation_service import (
+        DocumentPreparationService,
+    )
+    from application.source.task_service import TaskService
+    from infra.persistence.memory import MemoryTaskRepository
+    from main import create_app
+
+    preparation_recovery = AsyncMock(return_value=0)
+    analysis_recovery = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        DocumentPreparationService,
+        "recover_interrupted_tasks",
+        preparation_recovery,
+    )
+    monkeypatch.setattr(
+        ObjectiveAnalysisService,
+        "recover_interrupted_analyses",
+        analysis_recovery,
+    )
+    monkeypatch.setattr("config.DATA_DIR", tmp_path)
+    monkeypatch.setattr("main.DATA_DIR", tmp_path)
+
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+            task_service=TaskService(MemoryTaskRepository()),
+            **_app_repository_dependencies(auth_session_service),
+        )
+    ):
+        preparation_recovery.assert_awaited_once_with()
+        analysis_recovery.assert_awaited_once_with()
+
+
 def test_collections_api_requires_login(
     monkeypatch,
     tmp_path,

@@ -406,6 +406,8 @@ def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
         runtime = await build_application_runtime(overrides)
         try:
             install_application_runtime(application, runtime)
+            await runtime.document_preparation_service.recover_interrupted_tasks()
+            await runtime.objective_analysis_service.recover_interrupted_analyses()
             yield
         finally:
             await runtime.close()

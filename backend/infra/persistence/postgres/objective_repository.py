@@ -415,6 +415,28 @@ class PostgresObjectiveRepository:
             self._write_analysis(row, analysis)
             return analysis
 
+    async def interrupt_active_analyses(self) -> int:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory.begin() as session:
+            rows = tuple(
+                await session.scalars(
+                    select(ObjectiveAnalysisRecord)
+                    .where(ObjectiveAnalysisRecord.status.in_(("queued", "running")))
+                    .with_for_update()
+                )
+            )
+            for row in rows:
+                analysis = self._analysis_from_row(row).fail(
+                    error_code="analysis_interrupted",
+                    error_message=(
+                        "Objective analysis was interrupted by a backend restart. "
+                        "Retry the analysis."
+                    ),
+                    completed_at=now,
+                )
+                self._write_analysis(row, analysis)
+            return len(rows)
+
     async def write_document_evidence(
         self,
         checkpoint: ObjectiveDocumentEvidence,

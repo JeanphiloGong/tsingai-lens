@@ -327,6 +327,21 @@ class FakeObjectiveRepository:
     async def read_published_analysis(self, collection_id, objective_id):
         return self.analyses.get(self.objective.published_analysis_version)
 
+    async def interrupt_active_analyses(self):
+        interrupted = 0
+        for version, analysis in tuple(self.analyses.items()):
+            if analysis.status not in {"queued", "running"}:
+                continue
+            self.analyses[version] = analysis.fail(
+                error_code="analysis_interrupted",
+                error_message=(
+                    "Objective analysis was interrupted by a backend restart. "
+                    "Retry the analysis."
+                ),
+            )
+            interrupted += 1
+        return interrupted
+
     async def list_findings(
         self, collection_id, objective_id, analysis_version, **_kwargs
     ):
@@ -575,6 +590,42 @@ async def test_start_analysis_enforces_the_service_concurrency_limit(
 
     assert second_started.is_set()
     assert maximum_active_count == 1
+
+
+async def test_restart_projects_unpublished_interrupted_analysis_as_not_started() -> None:
+    service, repository, _ = _service()
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    repository.analyses[1] = repository.analyses[1].start()
+
+    recovered = await service.recover_interrupted_analyses()
+    state = await service.get_analysis_state("collection-1", "objective-1")
+
+    assert recovered == 1
+    assert repository.analyses[1].status == "failed"
+    assert repository.analyses[1].error_code == "analysis_interrupted"
+    assert state["analysis"] is None
+    assert state["published_analysis"] is None
+
+
+async def test_restart_preserves_published_results_and_retry_uses_next_version() -> None:
+    service, repository, _ = _service(repository=FakeObjectiveRepository(published=True))
+    _, interrupted = await repository.queue_analysis(
+        "collection-1",
+        "objective-1",
+        document_inputs=_DOCUMENT_INPUTS,
+    )
+    repository.analyses[interrupted.analysis_version] = interrupted.start()
+
+    recovered = await service.recover_interrupted_analyses()
+    state = await service.get_analysis_state("collection-1", "objective-1")
+    retry = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+
+    assert recovered == 1
+    assert state["analysis"] is None
+    assert state["published_analysis"].analysis_version == 1
+    assert state["findings"] == (_finding(1),)
+    assert retry["analysis"].analysis_version == 3
+    assert retry["analysis"].status == "queued"
 
 
 async def test_objective_analysis_aggregates_persisted_contribution_warnings() -> None:

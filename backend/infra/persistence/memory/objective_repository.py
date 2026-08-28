@@ -327,6 +327,22 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         return analysis
 
+    async def interrupt_active_analyses(self) -> int:
+        interrupted_count = 0
+        for key, analysis in tuple(self._analyses.items()):
+            if analysis.status not in {"queued", "running"}:
+                continue
+            self._analyses[key] = analysis.fail(
+                error_code="analysis_interrupted",
+                error_message=(
+                    "Objective analysis was interrupted by a backend restart. "
+                    "Retry the analysis."
+                ),
+                completed_at=datetime.now(timezone.utc),
+            )
+            interrupted_count += 1
+        return interrupted_count
+
     async def write_document_evidence(
         self,
         checkpoint: ObjectiveDocumentEvidence,

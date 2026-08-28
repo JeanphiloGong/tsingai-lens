@@ -144,6 +144,52 @@ class DocumentPreparationService:
         self._semaphore = Semaphore(resolved_concurrency)
         self._active_tasks: set[Task[dict[str, Any]]] = set()
 
+    async def recover_interrupted_tasks(self) -> int:
+        """Make persisted work without a live worker retryable after restart."""
+
+        active_tasks = [
+            *await self.task_service.list_tasks(status="queued"),
+            *await self.task_service.list_tasks(status="running"),
+        ]
+        interrupted_count = 0
+        for task in active_tasks:
+            if task.get("task_type") != "document_preparation":
+                continue
+            document_id = task.get("document_id")
+            if not document_id:
+                continue
+            await self.task_service.finish_task(
+                task["task_id"],
+                status="interrupted",
+                current_stage="interrupted",
+                progress_percent=task.get("progress_percent", 0),
+                errors=[
+                    *task.get("errors", ()),
+                    "Document preparation was interrupted by a backend restart.",
+                ],
+            )
+            try:
+                document = await self.collection_service.get_document(
+                    task["collection_id"],
+                    document_id,
+                )
+            except FileNotFoundError:
+                interrupted_count += 1
+                continue
+            if document.status == "processing":
+                await self.collection_service.update_document_preparation(
+                    task["collection_id"],
+                    document_id,
+                    status="stored",
+                )
+            interrupted_count += 1
+        if interrupted_count:
+            logger.warning(
+                "Recovered interrupted document preparation tasks count=%s",
+                interrupted_count,
+            )
+        return interrupted_count
+
     async def queue_document(
         self,
         collection_id: str,

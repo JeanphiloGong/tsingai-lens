@@ -279,6 +279,51 @@ async def test_active_analysis_reuses_only_the_same_document_manifest(
         )
 
 
+@pytest.mark.parametrize("claim_before_restart", [False, True])
+async def test_restart_interrupts_active_analysis_and_allows_next_version(
+    objective_repository,
+    claim_before_restart: bool,
+) -> None:
+    _, active = await objective_repository.queue_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        document_inputs=_document_inputs(),
+        pipeline_version="objective-analysis.v1",
+        model_name="test-model",
+        prompt_versions={"finding": "v1"},
+    )
+    if claim_before_restart:
+        claimed = await objective_repository.claim_analysis(
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            active.analysis_version,
+        )
+        assert claimed is not None
+        assert claimed.status == "running"
+
+    interrupted_count = await objective_repository.interrupt_active_analyses()
+    interrupted = await objective_repository.read_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        active.analysis_version,
+    )
+    _, retry = await objective_repository.queue_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        document_inputs=_document_inputs(),
+        pipeline_version="objective-analysis.v1",
+        model_name="test-model",
+        prompt_versions={"finding": "v1"},
+    )
+
+    assert interrupted_count == 1
+    assert interrupted is not None
+    assert interrupted.status == "failed"
+    assert interrupted.error_code == "analysis_interrupted"
+    assert retry.analysis_version == active.analysis_version + 1
+    assert retry.status == "queued"
+
+
 async def test_analysis_publish_preserves_manifest_and_source_backed_results(
     objective_repository,
 ) -> None:

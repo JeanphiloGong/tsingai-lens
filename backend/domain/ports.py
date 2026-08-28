@@ -367,6 +367,8 @@ class ObjectiveRepository(Protocol):
         expected_status: str | None = None,
     ) -> ObjectiveAnalysis: ...
 
+    async def interrupt_active_analyses(self) -> int: ...
+
     async def write_document_evidence(
         self,
         checkpoint: ObjectiveDocumentEvidence,

@@ -68,6 +68,17 @@ class ObjectiveAnalysisService:
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
 
+    async def recover_interrupted_analyses(self) -> int:
+        interrupted_count = (
+            await self.objective_repository.interrupt_active_analyses()
+        )
+        if interrupted_count:
+            logger.warning(
+                "Recovered interrupted Objective analyses count=%s",
+                interrupted_count,
+            )
+        return interrupted_count
+
     async def start_analysis(
         self,
         collection_id: str,
@@ -481,6 +492,8 @@ class ObjectiveAnalysisService:
             collection_id,
             objective.objective_id,
         )
+        if active is not None and active.error_code == "analysis_interrupted":
+            active = None
         findings = ()
         paper_contributions = ()
         warnings: list[str] = []

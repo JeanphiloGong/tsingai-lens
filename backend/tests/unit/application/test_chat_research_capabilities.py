@@ -473,6 +473,42 @@ async def test_research_process_reports_not_started_without_faking_progress() ->
     }
 
 
+async def test_research_process_treats_interrupted_preparation_as_not_started() -> None:
+    capability = InspectResearchProcessCapability(
+        collection_service=_CollectionService(),
+        task_service=_TaskService(
+            [
+                {
+                    "task_id": "task-interrupted",
+                    "document_id": "paper-1",
+                    "status": "interrupted",
+                    "current_stage": "interrupted",
+                    "progress_percent": 68,
+                    "warnings": [],
+                    "errors": [
+                        "Document preparation was interrupted by a backend restart."
+                    ],
+                }
+            ]
+        ),
+    )
+
+    result = await capability.execute(_context(), capability.spec.input_model())
+
+    process = result.data["process"]
+    assert process["status"] == "not_started"
+    assert process["counts"] == {
+        "stored": 2,
+        "processing": 0,
+        "ready": 0,
+        "failed": 0,
+    }
+    assert [document["status"] for document in process["documents"]] == [
+        "stored",
+        "stored",
+    ]
+
+
 async def test_agent_starts_research_process_only_after_exact_user_approval() -> None:
     preparation_service = _DocumentPreparationService()
     capability = StartResearchProcessCapability(

@@ -18,7 +18,9 @@ from domain.source import Document, SourceDocument
 from infra.persistence.memory import (
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
+    MemoryTaskRepository,
 )
+from application.source.task_service import TaskService
 
 
 pytestmark = pytest.mark.anyio
@@ -80,6 +82,84 @@ def test_document_preparation_fingerprints_invalidate_only_dependent_stages():
 def test_document_preparation_versions_include_compact_paper_map_recovery() -> None:
     assert PAPER_SOURCE_SIGNAL_PROMPT_VERSION in PAPER_MAP_VERSION
     assert PAPER_SOURCE_SIGNAL_PROMPT_VERSION in DOCUMENT_ANALYSIS_VERSION
+
+
+async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts() -> None:
+    collection_id = "col_restart"
+    document_id = "doc_restart"
+    original = Document(
+        document_id=document_id,
+        original_filename="paper.pdf",
+        stored_filename="paper.pdf",
+        storage_key="col_restart/inputs/paper.pdf",
+        sha256="b" * 64,
+        media_type="application/pdf",
+        status="processing",
+        size_bytes=100,
+        created_at="2026-08-28T01:00:00+00:00",
+        source_fingerprint="source-current",
+        profile_fingerprint="profile-current",
+        preparation_fingerprint="paper-map-current",
+        parser_version="source-runtime.v1",
+    )
+
+    class CollectionService:
+        def __init__(self) -> None:
+            self.document = original
+
+        async def get_document(self, owner: str, selected: str) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            return self.document
+
+        async def update_document_preparation(
+            self,
+            owner: str,
+            selected: str,
+            **fields,
+        ) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            self.document = replace(self.document, **fields)
+            return self.document
+
+    task_service = TaskService(MemoryTaskRepository())
+    task, created = await task_service.get_or_create_document_task(
+        collection_id=collection_id,
+        document_id=document_id,
+        task_type="document_preparation",
+        input_fingerprint="old-preparation-input",
+    )
+    assert created is True
+    await task_service.update_task(task["task_id"], status="running")
+    collection_service = CollectionService()
+    service = DocumentPreparationService(
+        collection_service=collection_service,
+        task_service=task_service,
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        document_profile_service=object(),
+        paper_map_repository=MemoryPaperMapRepository(),
+        paper_map_service=object(),
+        max_concurrency=1,
+    )
+
+    recovered = await service.recover_interrupted_tasks()
+
+    interrupted = await task_service.get_task(task["task_id"])
+    assert recovered == 1
+    assert interrupted["status"] == "interrupted"
+    assert interrupted["current_stage"] == "interrupted"
+    assert interrupted["finished_at"] is not None
+    assert collection_service.document == replace(original, status="stored")
+
+    replacement, replacement_created = (
+        await task_service.get_or_create_document_task(
+            collection_id=collection_id,
+            document_id=document_id,
+            task_type="document_preparation",
+            input_fingerprint="old-preparation-input",
+        )
+    )
+    assert replacement_created is True
+    assert replacement["task_id"] != task["task_id"]
 
 
 async def test_paper_map_change_reuses_current_source_and_profile() -> None:

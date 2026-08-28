@@ -33,7 +33,7 @@ from application.core.objectives.research_objective_service import (
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from domain.core import (
     ObjectiveFactSet,
-    PaperSkim,
+    PaperResearchMap,
     PaperStudyDisposition,
     PreparedDocumentInput,
     ResearchObjective,
@@ -70,8 +70,8 @@ def _objective(
     )
 
 
-def _skim() -> PaperSkim:
-    return PaperSkim.from_mapping(
+def _skim() -> PaperResearchMap:
+    return PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "doc_role": "experimental",
@@ -193,14 +193,14 @@ class _DocumentPreparationService:
 
 
 class _PaperMapRepository:
-    def __init__(self, paper_maps: tuple[PaperSkim, ...] = (_skim(),)) -> None:
+    def __init__(self, paper_maps: tuple[PaperResearchMap, ...] = (_skim(),)) -> None:
         self.paper_maps = paper_maps
 
     async def list_collection(
         self,
         collection_id: str,
         document_ids: tuple[str, ...] | None = None,
-    ) -> tuple[PaperSkim, ...]:
+    ) -> tuple[PaperResearchMap, ...]:
         assert collection_id == "col-1"
         selected = set(document_ids) if document_ids is not None else None
         return tuple(
@@ -769,7 +769,7 @@ async def test_missing_published_results_is_a_successful_scientific_absence() ->
     assert "No selected Objective has a published analysis." in result.warnings
 
 
-async def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -> None:
+async def test_objective_drafts_are_transient_and_paper_map_is_not_evidence() -> None:
     capability = ProposeObjectiveDraftsCapability(
         collection_service=_CollectionService(),
         objective_repository=_ObjectiveRepository((_objective("objective-existing"),)),
@@ -874,10 +874,10 @@ async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candi
 
 
 async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -> None:
-    relevant = PaperSkim.from_mapping(
+    relevant = PaperResearchMap.from_mapping(
         {**_skim().to_record(), "map_status": "sufficient"}
     )
-    insufficient = PaperSkim.from_mapping(
+    insufficient = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-2",
             "doc_role": "experimental",
@@ -886,7 +886,7 @@ async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -
             "map_limitations": ["The outcome was not visible in high-level Sources."],
         }
     )
-    unrelated = PaperSkim.from_mapping(
+    unrelated = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-3",
             "doc_role": "experimental",
@@ -976,7 +976,7 @@ async def test_scope_preview_maps_energy_input_to_precise_laser_interventions() 
 
 
 async def test_scope_preview_does_not_exclude_a_same_material_paper_for_an_umbrella_variable_miss() -> None:
-    same_material_unmatched = PaperSkim.from_mapping(
+    same_material_unmatched = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-unmatched",
             "doc_role": "experimental",
@@ -1034,7 +1034,7 @@ async def test_scope_preview_does_not_exclude_a_same_material_paper_for_an_umbre
 
 
 async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence() -> None:
-    review = PaperSkim.from_mapping(
+    review = PaperResearchMap.from_mapping(
         {
             "document_id": "review-1",
             "doc_role": "review",
@@ -1274,7 +1274,7 @@ async def test_agent_inspects_the_canonical_objective_analysis_state_read_only()
 
 
 async def test_researcher_question_follows_scope_two_approvals_and_canonical_analysis() -> None:
-    insufficient = PaperSkim.from_mapping(
+    insufficient = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-2",
             "doc_role": "experimental",
@@ -1285,7 +1285,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
     )
     paper_map_repository = _PaperMapRepository(
         (
-            PaperSkim.from_mapping(
+            PaperResearchMap.from_mapping(
                 {**_skim().to_record(), "map_status": "sufficient"}
             ),
             insufficient,

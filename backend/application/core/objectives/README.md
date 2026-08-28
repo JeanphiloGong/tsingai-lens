@@ -14,19 +14,21 @@ Findings.
 
 ## Document-Level Paper Map
 
-`PaperSkimService.build_document_paper_map()` receives one prepared
+`PaperResearchMapService.build_document_paper_map()` receives one prepared
 `SourceDocument`, its `DocumentProfile`, and its document tree. It:
 
 1. selects bounded overview, abstract, conclusion, table, and figure Sources;
-2. asks `PaperStudyWindowExtractor` for paper role, study relationships, review
-   synthesis, gaps, and citation leads;
-3. consolidates the window outputs into one `PaperSkim`/Paper Map;
+2. asks `PaperResearchMapExtractor` for paper role, material and process themes,
+   variable-to-outcome research axes, review synthesis, gaps, and citation leads;
+3. consolidates the window outputs into one `PaperResearchMap`/Paper Map;
 4. expands once when a missing scientific scope element requires more reading;
 5. reconciles unresolved signals without inventing Source facts;
 6. records map status and limitations.
 
 This is lightweight preparation for scope decisions. It does not reconstruct
-every experiment or create ObjectiveEvidence.
+experiments or create `ObjectiveEvidence`. Its contract cannot represent sample
+context, test context, comparators, fixed conditions, parameter levels, or
+measurements.
 
 ## Candidate Discovery
 
@@ -44,9 +46,9 @@ POST objective-discovery {document_ids}
 are rejected. Discovery never falls back to all Collection papers.
 
 Candidate formation identifies shared scientific themes while preserving each
-paper's specific variables, conditions, and outcomes. It must not force unlike
-materials, states, methods, or broad outcome families into a directly comparable
-question.
+paper's stated variables, outcomes, material scope, process theme, and Source
+lineage. It must not infer experiment conditions or force unlike materials,
+states, methods, or broad outcome families into a directly comparable question.
 
 ## Analysis Command
 
@@ -70,7 +72,7 @@ input stale instead of silently changing the analysis.
 For each selected paper:
 
 ```text
-Objective + Profile + Paper Map
+Objective + Profile + Paper Map navigation prior
   -> paper framing
   -> Source routing
   -> Source-local extraction
@@ -93,7 +95,9 @@ PaperContributions + grounded ObjectiveEvidence
 
 Framing decides whether the paper should be inspected for this Objective and
 what material, variables, outcomes, and methods matter. Relevance is an
-inspection decision, not Evidence.
+inspection decision, not Evidence. The Paper Map may prioritize Sources and
+report preliminary coverage gaps, but it cannot supply any scientific field to
+Evidence.
 
 ### Routing
 
@@ -120,7 +124,9 @@ The extraction disposition distinguishes:
 Methods, Results, tables, and captions may describe different parts of one real
 experiment. Binding joins them only when sample, process, varied conditions,
 controls, measurement method, and outcome are supportable. Jointly changed
-variables remain a joint effect.
+variables remain a joint effect. Missing context stays missing unless another
+Source inspected for the confirmed Objective supports it; Paper Map values are
+never used to fill an experiment draft.
 
 ### Cross-paper synthesis
 

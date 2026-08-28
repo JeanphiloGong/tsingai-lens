@@ -15,9 +15,11 @@ SourceDocument
 ```
 
 `document_profiles/service.py` classifies the paper for research triage.
-`objectives/paper_skim_service.py` creates one bounded Paper Map that describes
-paper role, studies, relationships, review synthesis, gaps, and unresolved
-signals. These are navigation and proposal inputs, not proven Evidence.
+`objectives/paper_skim_service.py` creates one bounded `PaperResearchMap` that
+describes paper role, material and process themes, variable-to-outcome research
+axes, review synthesis, gaps, Source lineage, and uncertainty. It cannot
+represent samples, tests, comparators, fixed conditions, parameter levels, or
+measurements. The map is a navigation and proposal input, not proven Evidence.
 
 ## Objective Discovery
 
@@ -36,7 +38,7 @@ their `(document_id, preparation_fingerprint)` inputs.
 ```text
 confirmed Objective + explicit ready document_ids
   -> freeze PreparedDocumentInput values
-  -> frame each paper
+  -> frame each paper, using its map only as a navigation prior
   -> route likely Sources
   -> extract and ground Source-local facts
   -> reconstruct within-paper experiments
@@ -47,7 +49,8 @@ confirmed Objective + explicit ready document_ids
 Analysis checks that every frozen fingerprint still equals the current prepared
 Document before work begins. It records excluded, failed, descriptive, and
 non-comparable papers instead of turning technical success into scientific
-support.
+support. Source-local facts inspected after Objective confirmation are the only
+inputs allowed to reconstruct experiment context or create Evidence.
 
 ## Owners
 

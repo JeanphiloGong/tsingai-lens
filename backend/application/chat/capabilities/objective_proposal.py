@@ -72,8 +72,8 @@ class ProposeObjectiveDraftsCapability:
         description=(
             "Record one to three focused transient Research Objective drafts for user "
             "review. Each draft must have one specific outcome. The result may report "
-            "PaperSkim proposal context, but it is not Evidence and does not create a "
-            "Core Objective."
+            "PaperResearchMap proposal context, but it is not Evidence and does not "
+            "create a Core Objective."
         ),
         risk=ToolRisk.DRAFT,
         input_model=ProposeObjectiveDraftsArguments,
@@ -135,8 +135,8 @@ class ProposeObjectiveDraftsCapability:
             )
         warnings = (
             (
-                f"{unsupported_count} drafts have no matching PaperSkim relationship "
-                "context; they remain unverified proposals.",
+                f"{unsupported_count} drafts have no matching PaperResearchMap "
+                "relationship context; they remain unverified proposals.",
             )
             if unsupported_count
             else ()
@@ -154,9 +154,12 @@ class ProposeObjectiveDraftsCapability:
         )
 
     @staticmethod
-    def _supporting_documents(draft: ObjectiveDraftInput, paper_skims: tuple) -> tuple[str, ...]:
+    def _supporting_documents(
+        draft: ObjectiveDraftInput,
+        paper_maps: tuple,
+    ) -> tuple[str, ...]:
         document_ids: list[str] = []
-        for skim in paper_skims:
+        for paper_map in paper_maps:
             if any(
                 ProposeObjectiveDraftsCapability._relationship_supports(
                     draft,
@@ -164,10 +167,10 @@ class ProposeObjectiveDraftsCapability:
                     relationship.varied_factors,
                     relationship.outcome,
                 )
-                for study in skim.studies
+                for study in paper_map.studies
                 for relationship in study.relationships
             ):
-                document_ids.append(skim.document_id)
+                document_ids.append(paper_map.document_id)
         return tuple(dict.fromkeys(document_ids))
 
     @staticmethod

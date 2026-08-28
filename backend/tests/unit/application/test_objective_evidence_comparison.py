@@ -866,7 +866,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition():
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
-        paper_skims=(),
+        paper_maps=(),
         frames=frames,
         routes=routes,
         evidence_records=evidence_records,
@@ -3193,7 +3193,6 @@ def test_paper_reconstruction_merges_duplicate_reports_of_one_scientific_fact():
                 },
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 
@@ -3244,7 +3243,6 @@ def test_paper_reconstruction_does_not_bridge_conflicting_context_with_unknown()
                 {},
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 
@@ -3278,7 +3276,6 @@ def test_paper_reconstruction_requires_one_context_to_enrich_the_other():
                 },
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 
@@ -3305,7 +3302,6 @@ def test_paper_reconstruction_preserves_distinct_reported_values():
                 result_value="10",
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 

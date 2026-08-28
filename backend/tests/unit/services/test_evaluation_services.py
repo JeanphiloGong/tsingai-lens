@@ -16,7 +16,7 @@ from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
-    PaperSkim,
+    PaperResearchMap,
     PaperStudyDisposition,
     PreparedDocumentInput,
     ResearchObjective,
@@ -266,7 +266,7 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
             "rank": 1,
         }
     )
-    skim = PaperSkim.from_mapping(
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "doc-1",
             "doc_role": "experimental",
@@ -508,7 +508,7 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
             "rank": 1,
         }
     )
-    skim = PaperSkim.from_mapping(
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "doc-1",
             "doc_role": "experimental",

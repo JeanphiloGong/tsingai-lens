@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.core import PaperSkim
+from domain.core import PaperResearchMap
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.paper_map import PaperMapRow
 
@@ -14,7 +14,7 @@ class PostgresPaperMapRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
 
-    async def replace(self, collection_id: str, paper_map: PaperSkim) -> None:
+    async def replace(self, collection_id: str, paper_map: PaperResearchMap) -> None:
         async with self.session_factory.begin() as session:
             document = await session.get(Document, paper_map.document_id)
             if document is None or document.collection_id != collection_id:
@@ -38,18 +38,18 @@ class PostgresPaperMapRepository:
         self,
         collection_id: str,
         document_id: str,
-    ) -> PaperSkim | None:
+    ) -> PaperResearchMap | None:
         async with self.session_factory() as session:
             row = await session.get(PaperMapRow, document_id)
             if row is None or row.collection_id != collection_id:
                 return None
-            return PaperSkim.from_mapping(row.payload)
+            return PaperResearchMap.from_mapping(row.payload)
 
     async def list_collection(
         self,
         collection_id: str,
         document_ids: tuple[str, ...] | None = None,
-    ) -> tuple[PaperSkim, ...]:
+    ) -> tuple[PaperResearchMap, ...]:
         if document_ids == ():
             return ()
         async with self.session_factory() as session:
@@ -59,7 +59,7 @@ class PostgresPaperMapRepository:
             if document_ids is not None:
                 statement = statement.where(PaperMapRow.document_id.in_(document_ids))
             rows = await session.scalars(statement.order_by(PaperMapRow.document_id))
-            return tuple(PaperSkim.from_mapping(row.payload) for row in rows)
+            return tuple(PaperResearchMap.from_mapping(row.payload) for row in rows)
 
 
 __all__ = ["PostgresPaperMapRepository"]

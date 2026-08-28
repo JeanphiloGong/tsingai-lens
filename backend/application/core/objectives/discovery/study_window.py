@@ -20,15 +20,15 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 
-PAPER_SKIM_PROMPT_VERSION = "paper_map.v2"
+PAPER_RESEARCH_MAP_PROMPT_VERSION = "paper_map.v2"
 PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v1"
-PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
-PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
+PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT = 12_288
+PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT = 12
 PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT = 4
-PAPER_SKIM_WARNING_LIMIT = (2, 240)
-PAPER_SKIM_STUDY_LIMIT = 4
-PAPER_SKIM_RELATIONSHIP_LIMIT = 6
-PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 8
+PAPER_RESEARCH_MAP_WARNING_LIMIT = (2, 240)
+PAPER_RESEARCH_MAP_SCOPE_LIMIT = 4
+PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT = 6
+PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT = 8
 
 _STUDY_CONTEXT_LIMIT = 12
 _STUDY_CONTEXT_VALUE_CHARS = 160
@@ -89,17 +89,17 @@ def _normalize_warnings(value: object) -> object:
     if not isinstance(value, list):
         return value
     normalized: list[object] = []
-    for item in value[: PAPER_SKIM_WARNING_LIMIT[0]]:
+    for item in value[: PAPER_RESEARCH_MAP_WARNING_LIMIT[0]]:
         if not isinstance(item, str):
             normalized.append(item)
             continue
         text = item.strip()
         if text:
-            normalized.append(text[: PAPER_SKIM_WARNING_LIMIT[1]])
+            normalized.append(text[: PAPER_RESEARCH_MAP_WARNING_LIMIT[1]])
     return normalized
 
 
-class _PaperSkimResponse(BaseModel):
+class _PaperResearchMapResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     @field_validator("confidence", mode="before", check_fields=False)
@@ -110,14 +110,14 @@ class _PaperSkimResponse(BaseModel):
         return cls.model_fields["confidence"].get_default(call_default_factory=True)
 
 
-class StructuredPaperStudyRelationship(_PaperSkimResponse):
+class StructuredPaperResearchRelationship(_PaperResearchMapResponse):
     varied_factors: list[
         Annotated[str, Field(max_length=80)]
     ] = Field(min_length=1, max_length=_VARIED_FACTOR_LIMIT)
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
     source_unit_ids: list[
         Annotated[str, Field(min_length=1, max_length=160)]
-    ] = Field(min_length=1, max_length=PAPER_SKIM_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1, max_length=PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT)
     confidence: float = 0.0
 
     @field_validator("varied_factors", "source_unit_ids", mode="before")
@@ -126,7 +126,7 @@ class StructuredPaperStudyRelationship(_PaperSkimResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_unit_ids(self) -> StructuredPaperStudyRelationship:
+    def _validate_source_unit_ids(self) -> StructuredPaperResearchRelationship:
         normalized = [value.strip() for value in self.source_unit_ids]
         if any(not value for value in normalized):
             raise ValueError("paper relationship source-unit ids cannot be empty")
@@ -135,7 +135,7 @@ class StructuredPaperStudyRelationship(_PaperSkimResponse):
         return self
 
 
-class StructuredPaperStudy(_PaperSkimResponse):
+class StructuredPaperResearchScope(_PaperResearchMapResponse):
     experiment_label: str | None = Field(default=None, max_length=120)
     design_type: Literal[
         "experimental",
@@ -152,32 +152,19 @@ class StructuredPaperStudy(_PaperSkimResponse):
     ] = "uncertain"
     material_scope: list[
         Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=8)
+    ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
     process_context: list[
         Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
-    sample_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
-    test_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
-    comparator: str | None = Field(default=None, max_length=160)
-    fixed_conditions: list[
-        Annotated[str, Field(max_length=120)]
-    ] = Field(default_factory=list, max_length=12)
-    relationships: list[StructuredPaperStudyRelationship] = Field(
+    ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
+    relationships: list[StructuredPaperResearchRelationship] = Field(
         min_length=1,
-        max_length=PAPER_SKIM_RELATIONSHIP_LIMIT,
+        max_length=PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     )
     confidence: float = 0.0
 
     @field_validator(
         "material_scope",
         "process_context",
-        "sample_context",
-        "test_context",
-        "fixed_conditions",
         "relationships",
         mode="before",
     )
@@ -231,15 +218,11 @@ class StructuredPaperStudy(_PaperSkimResponse):
             else None,
             normalized_values(self.material_scope),
             normalized_values(self.process_context),
-            normalized_values(self.sample_context),
-            normalized_values(self.test_context),
-            self.comparator.strip().casefold() if self.comparator else None,
-            normalized_values(self.fixed_conditions),
             relationships,
         )
 
 
-class StructuredPaperStudySignal(_PaperSkimResponse):
+class StructuredPaperResearchSignal(_PaperResearchMapResponse):
     signal_type: Literal["variable", "outcome"]
     label: Annotated[str, Field(min_length=1, max_length=80)]
     experiment_label: str | None = Field(default=None, max_length=120)
@@ -258,31 +241,18 @@ class StructuredPaperStudySignal(_PaperSkimResponse):
     ] = "uncertain"
     material_scope: list[
         Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=8)
+    ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
     process_context: list[
         Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
-    sample_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
-    test_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
-    comparator: str | None = Field(default=None, max_length=160)
-    fixed_conditions: list[
-        Annotated[str, Field(max_length=120)]
-    ] = Field(default_factory=list, max_length=12)
+    ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
     source_unit_ids: list[
         Annotated[str, Field(min_length=1, max_length=160)]
-    ] = Field(min_length=1, max_length=PAPER_SKIM_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1, max_length=PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT)
     confidence: float = 0.0
 
     @field_validator(
         "material_scope",
         "process_context",
-        "sample_context",
-        "test_context",
-        "fixed_conditions",
         "source_unit_ids",
         mode="before",
     )
@@ -291,7 +261,7 @@ class StructuredPaperStudySignal(_PaperSkimResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_unit_ids(self) -> StructuredPaperStudySignal:
+    def _validate_source_unit_ids(self) -> StructuredPaperResearchSignal:
         normalized = [value.strip() for value in self.source_unit_ids]
         if any(not value for value in normalized):
             raise ValueError("paper signal source-unit ids cannot be empty")
@@ -300,7 +270,7 @@ class StructuredPaperStudySignal(_PaperSkimResponse):
         return self
 
 
-class StructuredPaperMapRelationship(_PaperSkimResponse):
+class StructuredPaperMapRelationship(_PaperResearchMapResponse):
     """One compact factor-to-outcome axis used only during paper mapping."""
 
     varied_factors: list[
@@ -327,7 +297,7 @@ class StructuredPaperMapRelationship(_PaperSkimResponse):
         return self
 
 
-class StructuredPaperMapStudy(_PaperSkimResponse):
+class StructuredPaperMapStudy(_PaperResearchMapResponse):
     """Paper-owned scope without experiment reconstruction fields."""
 
     experiment_label: str | None = Field(default=None, max_length=120)
@@ -366,7 +336,7 @@ class StructuredPaperMapStudy(_PaperSkimResponse):
         return _normalize_list(value)
 
 
-class StructuredPaperMapSignal(_PaperSkimResponse):
+class StructuredPaperMapSignal(_PaperResearchMapResponse):
     """One incomplete paper-owned variable or outcome axis."""
 
     signal_type: Literal["variable", "outcome"]
@@ -415,7 +385,7 @@ class StructuredPaperMapSignal(_PaperSkimResponse):
         return self
 
 
-class StructuredExperimentalPaperMap(_PaperSkimResponse):
+class StructuredExperimentalPaperMap(_PaperResearchMapResponse):
     """Compact high-level scope contract for non-review papers."""
 
     doc_role: Literal["experimental", "modeling", "mixed", "uncertain"] = "uncertain"
@@ -431,13 +401,13 @@ class StructuredExperimentalPaperMap(_PaperSkimResponse):
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[
-        Annotated[str, Field(max_length=PAPER_SKIM_WARNING_LIMIT[1])]
-    ] = Field(default_factory=list, max_length=PAPER_SKIM_WARNING_LIMIT[0])
+        Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
+    ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
 
     @model_validator(mode="before")
     @classmethod
     def _downgrade_unresolved_relationships(cls, value: object) -> object:
-        return StructuredPaperSkim._downgrade_unresolved_relationships(value)
+        return StructuredPaperResearchMap._downgrade_unresolved_relationships(value)
 
     @field_validator("studies", "unresolved_signals", mode="before")
     @classmethod
@@ -464,7 +434,7 @@ class StructuredExperimentalPaperMap(_PaperSkimResponse):
         return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
 
 
-class StructuredPaperSourceSignal(_PaperSkimResponse):
+class StructuredPaperSourceSignal(_PaperResearchMapResponse):
     """One explicit scientific axis from one Source, before relationship assembly."""
 
     signal_type: Literal["variable", "outcome"]
@@ -489,24 +459,11 @@ class StructuredPaperSourceSignal(_PaperSkimResponse):
     process_context: list[
         Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
     ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
-    sample_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
-    test_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
-    comparator: str | None = Field(default=None, max_length=160)
-    fixed_conditions: list[
-        Annotated[str, Field(max_length=120)]
-    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
     confidence: float = 0.0
 
     @field_validator(
         "material_scope",
         "process_context",
-        "sample_context",
-        "test_context",
-        "fixed_conditions",
         mode="before",
     )
     @classmethod
@@ -535,14 +492,10 @@ class StructuredPaperSourceSignal(_PaperSkimResponse):
             self.claim_scope,
             normalized_values(self.material_scope),
             normalized_values(self.process_context),
-            normalized_values(self.sample_context),
-            normalized_values(self.test_context),
-            self.comparator.strip().casefold() if self.comparator else None,
-            normalized_values(self.fixed_conditions),
         )
 
 
-class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
+class StructuredPaperSourceSignalScreen(_PaperResearchMapResponse):
     """Bounded source-local signals used when paper-scope mapping fails."""
 
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
@@ -556,8 +509,8 @@ class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[
-        Annotated[str, Field(max_length=PAPER_SKIM_WARNING_LIMIT[1])]
-    ] = Field(default_factory=list, max_length=PAPER_SKIM_WARNING_LIMIT[0])
+        Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
+    ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
 
     @model_validator(mode="before")
     @classmethod
@@ -589,7 +542,7 @@ class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
         updated = dict(value)
         updated["signals"] = signals
         updated["warnings"] = [warning, *existing_warnings][
-            : PAPER_SKIM_WARNING_LIMIT[0]
+            : PAPER_RESEARCH_MAP_WARNING_LIMIT[0]
         ]
         if raw_signals and not signals:
             updated["output_saturated"] = True
@@ -623,7 +576,7 @@ class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
         return self
 
 
-class StructuredReviewKnowledgeItem(_PaperSkimResponse):
+class StructuredReviewKnowledgeItem(_PaperResearchMapResponse):
     """One bounded, Source-linked review-author statement or citation lead."""
 
     content: Annotated[str, Field(min_length=1, max_length=240)]
@@ -668,7 +621,7 @@ class StructuredReviewKnowledgeItem(_PaperSkimResponse):
         return self
 
 
-class StructuredReviewSynthesisMap(_PaperSkimResponse):
+class StructuredReviewSynthesisMap(_PaperResearchMapResponse):
     synthesis_claims: list[StructuredReviewKnowledgeItem] = Field(
         default_factory=list,
         max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
@@ -698,7 +651,7 @@ class StructuredReviewSynthesisMap(_PaperSkimResponse):
         return _normalize_list(value)
 
 
-class StructuredReviewPaperMap(_PaperSkimResponse):
+class StructuredReviewPaperMap(_PaperResearchMapResponse):
     """Review-author knowledge without duplicate study or signal output."""
 
     doc_role: Literal["review"] = "review"
@@ -709,8 +662,8 @@ class StructuredReviewPaperMap(_PaperSkimResponse):
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[
-        Annotated[str, Field(max_length=PAPER_SKIM_WARNING_LIMIT[1])]
-    ] = Field(default_factory=list, max_length=PAPER_SKIM_WARNING_LIMIT[0])
+        Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
+    ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
 
     @field_validator("warnings", mode="before")
     @classmethod
@@ -723,17 +676,17 @@ class StructuredReviewPaperMap(_PaperSkimResponse):
         return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
 
 
-class StructuredPaperSkim(_PaperSkimResponse):
+class StructuredPaperResearchMap(_PaperResearchMapResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
-    studies: list[StructuredPaperStudy] = Field(
+    studies: list[StructuredPaperResearchScope] = Field(
         default_factory=list,
-        max_length=PAPER_SKIM_STUDY_LIMIT,
+        max_length=PAPER_RESEARCH_MAP_SCOPE_LIMIT,
     )
-    unresolved_signals: list[StructuredPaperStudySignal] = Field(
+    unresolved_signals: list[StructuredPaperResearchSignal] = Field(
         default_factory=list,
-        max_length=PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT,
+        max_length=PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
     )
     review_synthesis: StructuredReviewSynthesisMap = Field(
         default_factory=StructuredReviewSynthesisMap
@@ -742,8 +695,8 @@ class StructuredPaperSkim(_PaperSkimResponse):
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[
-        Annotated[str, Field(max_length=PAPER_SKIM_WARNING_LIMIT[1])]
-    ] = Field(default_factory=list, max_length=PAPER_SKIM_WARNING_LIMIT[0])
+        Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
+    ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
 
     @model_validator(mode="before")
     @classmethod
@@ -817,10 +770,6 @@ class StructuredPaperSkim(_PaperSkimResponse):
                     "claim_scope",
                     "material_scope",
                     "process_context",
-                    "sample_context",
-                    "test_context",
-                    "comparator",
-                    "fixed_conditions",
                 ):
                     if field_name in study:
                         signal[field_name] = study[field_name]
@@ -864,14 +813,14 @@ class StructuredPaperSkim(_PaperSkimResponse):
         return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
 
     @model_validator(mode="after")
-    def _validate_study_identities(self) -> StructuredPaperSkim:
+    def _validate_study_identities(self) -> StructuredPaperResearchMap:
         study_identities = [study.identity_key() for study in self.studies]
         if len(study_identities) != len(set(study_identities)):
             raise ValueError("studies contain duplicate study identities")
         return self
 
 
-def _review_synthesis_only(response: StructuredPaperSkim) -> StructuredPaperSkim:
+def _review_synthesis_only(response: StructuredPaperResearchMap) -> StructuredPaperResearchMap:
     """Keep only scientific synthesis owned by a review's authors."""
 
     return response.model_copy(
@@ -901,11 +850,11 @@ def _paper_map_response_model(
     return StructuredExperimentalPaperMap
 
 
-def _paper_map_to_skim(
+def _paper_map_response(
     response: StructuredExperimentalPaperMap | StructuredReviewPaperMap,
-) -> StructuredPaperSkim:
+) -> StructuredPaperResearchMap:
     if isinstance(response, StructuredExperimentalPaperMap):
-        return StructuredPaperSkim.model_validate(response.model_dump())
+        return StructuredPaperResearchMap.model_validate(response.model_dump())
 
     studies: list[dict[str, Any]] = []
     unresolved_signals: list[dict[str, Any]] = []
@@ -970,13 +919,13 @@ def _paper_map_to_skim(
                     }
                 )
 
-    derived_saturated = len(unresolved_signals) > PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT
-    return StructuredPaperSkim.model_validate(
+    derived_saturated = len(unresolved_signals) > PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT
+    return StructuredPaperResearchMap.model_validate(
         {
             "doc_role": "review",
             "studies": studies,
             "unresolved_signals": unresolved_signals[
-                :PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT
+                :PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT
             ],
             "review_synthesis": response.review_synthesis.model_dump(),
             "output_saturated": response.output_saturated or derived_saturated,
@@ -1068,7 +1017,7 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     return _REVIEW_SYSTEM_PROMPT, user_prompt
 
 
-def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     document_profile = payload.get("document_profile")
     if isinstance(document_profile, Mapping) and (
         str(document_profile.get("doc_type") or "").strip() == "review"
@@ -1296,14 +1245,14 @@ def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]
     return _SOURCE_SIGNAL_SYSTEM_PROMPT, user_prompt
 
 
-class PaperStudyWindowExtractor:
+class PaperResearchMapExtractor:
     """Map supported paper scope from one bounded high-level Source window."""
 
     def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
-        system_prompt, user_prompt = build_paper_skim_prompt(payload)
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+        system_prompt, user_prompt = build_paper_research_map_prompt(payload)
         allowed_source_unit_ids = [
             str(source_unit.get("source_unit_id") or "").strip()
             for source_unit in payload.get("source_units") or ()
@@ -1353,8 +1302,8 @@ class PaperStudyWindowExtractor:
                 response,
                 (StructuredExperimentalPaperMap, StructuredReviewPaperMap),
             ):
-                raise TypeError("unexpected paper skim response type")
-            skim = _paper_map_to_skim(response)
+                raise TypeError("unexpected paper research map response type")
+            paper_map = _paper_map_response(response)
             source_keys = {
                 str(source_unit.get("source_unit_id") or "").strip(): (
                     str(source_unit.get("source_kind") or "").strip(),
@@ -1365,18 +1314,18 @@ class PaperStudyWindowExtractor:
                 and str(source_unit.get("source_unit_id") or "").strip()
             }
             study_identities = [
-                study.identity_key(source_keys) for study in skim.studies
+                study.identity_key(source_keys) for study in paper_map.studies
             ]
             if len(study_identities) != len(set(study_identities)):
                 raise ValueError("studies contain duplicate study identities")
             referenced_source_unit_ids = {
                 source_unit_id.strip()
-                for study in skim.studies
+                for study in paper_map.studies
                 for relationship in study.relationships
                 for source_unit_id in relationship.source_unit_ids
             } | {
                 source_unit_id.strip()
-                for signal in skim.unresolved_signals
+                for signal in paper_map.unresolved_signals
                 for source_unit_id in signal.source_unit_ids
             } | {
                 source_unit_id.strip()
@@ -1386,7 +1335,7 @@ class PaperStudyWindowExtractor:
                     "evidence_gaps",
                     "citation_leads",
                 )
-                for item in getattr(skim.review_synthesis, field_name)
+                for item in getattr(paper_map.review_synthesis, field_name)
                 for source_unit_id in item.source_unit_ids
             }
             unknown_source_unit_ids = sorted(
@@ -1394,10 +1343,10 @@ class PaperStudyWindowExtractor:
             )
             if unknown_source_unit_ids:
                 raise ValueError(
-                    "paper skim references unknown Source-unit ids: "
+                    "paper research map references unknown Source-unit ids: "
                     f"{unknown_source_unit_ids}"
                 )
-            return skim
+            return paper_map
 
         def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
@@ -1417,17 +1366,17 @@ class PaperStudyWindowExtractor:
                 json_text_parser=parse_json_text_with_contract,
                 parsed_validator=validate_output_contract,
                 fail_on_output_saturation=True,
-                task_type="paper_skim",
-                prompt_version=PAPER_SKIM_PROMPT_VERSION,
+                task_type="paper_map",
+                prompt_version=PAPER_RESEARCH_MAP_PROMPT_VERSION,
             )
         except StructuredOutputSaturatedError:
-            self._log_saturation_trace(payload, contract="paper_skim")
+            self._log_saturation_trace(payload, contract="paper_map")
             raise
-        if not isinstance(response, StructuredPaperSkim):
-            raise TypeError("unexpected paper skim response type")
+        if not isinstance(response, StructuredPaperResearchMap):
+            raise TypeError("unexpected paper research map response type")
         return response
 
-    def extract_source_signals(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract_source_signals(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
         source_units = [
             unit
             for unit in payload.get("source_units") or ()
@@ -1461,7 +1410,7 @@ class PaperStudyWindowExtractor:
                 "Paper source signal output omitted visible scientific axes"
             )
 
-        return StructuredPaperSkim.model_validate(
+        return StructuredPaperResearchMap.model_validate(
             {
                 "doc_role": response.doc_role,
                 "unresolved_signals": [
@@ -1513,7 +1462,7 @@ class PaperStudyWindowExtractor:
                 }
             )
         logger.warning(
-            "Paper skim saturation trace contract=%s window_id=%s "
+            "Paper research map saturation trace contract=%s window_id=%s "
             "source_unit_ids=%s input_chars=%s attempts=%s",
             contract,
             payload.get("window_id"),
@@ -1533,7 +1482,7 @@ class PaperStudyWindowExtractor:
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         """Count the complete repair-capable prompt before model execution."""
 
-        system_prompt, user_prompt = build_paper_skim_prompt(payload)
+        system_prompt, user_prompt = build_paper_research_map_prompt(payload)
         return self.response_client.estimate_prompt_tokens(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1542,17 +1491,17 @@ class PaperStudyWindowExtractor:
 
 
 __all__ = [
-    "PAPER_SKIM_PROMPT_TOKEN_LIMIT",
-    "PAPER_SKIM_SOURCE_UNIT_LIMIT",
+    "PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT",
+    "PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT",
     "PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT",
     "PAPER_SOURCE_SIGNAL_PROMPT_VERSION",
-    "PaperStudyWindowExtractor",
-    "StructuredPaperSkim",
+    "PaperResearchMapExtractor",
+    "StructuredPaperResearchMap",
     "StructuredPaperSourceSignal",
     "StructuredPaperSourceSignalScreen",
-    "StructuredPaperStudy",
-    "StructuredPaperStudyRelationship",
-    "StructuredPaperStudySignal",
-    "build_paper_skim_prompt",
+    "StructuredPaperResearchScope",
+    "StructuredPaperResearchRelationship",
+    "StructuredPaperResearchSignal",
+    "build_paper_research_map_prompt",
     "build_paper_source_signal_prompt",
 ]

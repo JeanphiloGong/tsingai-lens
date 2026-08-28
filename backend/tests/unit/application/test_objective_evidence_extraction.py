@@ -31,7 +31,7 @@ from application.core.objectives.analysis.source_screening import (
     StructuredPaperFrameBatch,
 )
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
-from domain.core import ObjectiveAnalysis, PaperSkim, PreparedDocumentInput
+from domain.core import ObjectiveAnalysis, PaperResearchMap, PreparedDocumentInput
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from httpx import Request, Response
 from openai import BadRequestError
@@ -547,7 +547,7 @@ def test_objective_paper_frame_payload_keeps_all_tree_sections_with_stable_ids()
     payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
-        paper_skim=None,
+        paper_map=None,
         document=SimpleNamespace(
             document_id="paper-p006",
             title="Mapping the roles of scan strategy and build orientation",
@@ -618,7 +618,7 @@ def test_objective_paper_frame_payload_gives_unsectioned_chunks_unique_ids():
                 "outcomes": ["relative density"],
             }
         ),
-        paper_skim=None,
+        paper_map=None,
         document=SimpleNamespace(document_id="paper-1", title="Density"),
         profile=None,
         blocks=[],
@@ -697,7 +697,7 @@ def test_objective_paper_frame_payload_keeps_root_text_beside_sections():
                 "outcomes": ["relative density"],
             }
         ),
-        paper_skim=None,
+        paper_map=None,
         document=SimpleNamespace(document_id="paper-1", title="Density"),
         profile=None,
         blocks=[],
@@ -752,7 +752,7 @@ def test_objective_paper_frame_payload_keeps_all_tables_for_model_classification
     payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
-        paper_skim=None,
+        paper_map=None,
         document=SimpleNamespace(
             document_id="paper-p006",
             title="Mapping the roles of scan strategy and build orientation",
@@ -876,7 +876,7 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks():
                 (),
             ),
         ),
-        paper_skim=None,
+        paper_map=None,
     )
 
     assert frame.relevant_tables == ("table-late-result",)
@@ -913,7 +913,7 @@ def test_objective_paper_frame_aggregation_rejects_missing_source_disposition():
                     (),
                 ),
             ),
-            paper_skim=None,
+            paper_map=None,
         )
 
 
@@ -928,7 +928,7 @@ def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior():
             "source_relationship_ids": ["relationship-density"],
         }
     )
-    paper_skim = PaperSkim.from_mapping(
+    paper_map = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "doc_role": "experimental",
@@ -985,7 +985,7 @@ def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior():
     payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
-        paper_skim=paper_skim,
+        paper_map=paper_map,
         document=SimpleNamespace(document_id="paper-1", title="Density study"),
         profile=None,
         blocks=[],
@@ -1001,14 +1001,10 @@ def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior():
             {
                 "experiment_label": "LPBF density experiment",
                 "design_type": "experimental",
-                "claim_scope": "current_work",
-                "material_scope": ["316L stainless steel"],
-                "process_context": ["LPBF"],
-                "sample_context": [],
-                "test_context": [],
-                "comparator": None,
-                "fixed_conditions": [],
-                "relationships": [
+                    "claim_scope": "current_work",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": ["LPBF"],
+                    "relationships": [
                     {
                         "varied_factors": ["laser power"],
                         "outcome": "relative density",
@@ -1065,7 +1061,7 @@ def test_objective_paper_framing_batches_every_stable_source_once():
         collection_id="col-test",
         source_screener=extractor,
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -1136,7 +1132,7 @@ def test_objective_paper_framing_honors_configured_concurrency(
             collection_id="col-test",
             source_screener=extractor,
             objectives=(objective,),
-            paper_skims=(),
+            paper_maps=(),
             documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
             profiles_by_document_id={},
             blocks_by_document_id={},
@@ -1194,7 +1190,7 @@ def test_objective_paper_framing_shares_concurrency_across_papers(
             collection_id="col-test",
             source_screener=extractor,
             objectives=(objective,),
-            paper_skims=(),
+            paper_maps=(),
             documents=documents,
             profiles_by_document_id={},
             blocks_by_document_id={},
@@ -1236,7 +1232,7 @@ def test_objective_paper_framing_progress_counts_completed_papers() -> None:
         collection_id="col-test",
         source_screener=_BoundedFrameExtractor(max_source_units=1),
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=documents,
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -1370,7 +1366,7 @@ def test_objective_paper_framing_preserves_siblings_when_one_batch_fails():
         collection_id="col-test",
         source_screener=extractor,
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -1417,7 +1413,7 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
         collection_id="col-test",
         source_screener=extractor,
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -1461,7 +1457,7 @@ def test_objective_paper_framing_skips_explicitly_excluded_document():
         collection_id="col-test",
         source_screener=extractor,
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -1495,7 +1491,7 @@ def test_objective_paper_framing_does_not_send_over_budget_singleton():
         collection_id="col-test",
         source_screener=extractor,
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -1958,7 +1954,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
-        paper_skims=(),
+        paper_maps=(),
         frames=(frame,),
         routes=routes,
         evidence_records=evidence_records,
@@ -3314,7 +3310,7 @@ def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevan
         collection_id="col-test",
         source_screener=extractor,
         objectives=(objective,),
-        paper_skims=(),
+        paper_maps=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Background"),),
         profiles_by_document_id={},
         blocks_by_document_id={},
@@ -4543,53 +4539,11 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
     }
 
 
-def test_research_objective_service_enriches_only_source_linked_material_context(
-):
-    objective = _research_objective(
-        {
-            "objective_id": "obj-density",
-            "question": "How does energy density affect relative density?",
-            "material_scope": ["316L stainless steel"],
-            "variables": ["energy density"],
-            "outcomes": ["relative density"],
-        }
-    )
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": "study-paper-1-density",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": ["316L stainless steel"],
-                    "process_context": ["selective laser melting"],
-                    "relationships": [
-                        {
-                            "relationship_id": "relationship-paper-1-density",
-                            "varied_factors": ["energy density"],
-                            "outcome": "relative density",
-                            "source_refs": [
-                                {
-                                    "source_kind": "table",
-                                    "source_ref": "table-1",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
-    )
+def test_paper_reconstruction_does_not_fill_context_from_preliminary_scope() -> None:
     evidence = ExtractedEvidenceDraft.from_mapping(
         {
             "evidence_id": "density-result",
-            "objective_id": objective.objective_id,
+            "objective_id": "obj-density",
             "document_id": "paper-1",
             "source_kind": "table",
             "source_ref": "table-1",
@@ -4632,119 +4586,20 @@ def test_research_objective_service_enriches_only_source_linked_material_context
         }
     )
 
-    enriched = paper_experiment._enrich_objective_scope_context(
-        (evidence,),
-        paper_skims=(paper_skim,),
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-1",
+        source_facts=(evidence,),
+        objectives=(),
     )[0]
 
-    assert enriched.scientific_context.to_record() == {
-        "material": [
-            {"name": "material", "value": "316L stainless steel", "unit": None}
-        ],
+    assert reconstructed.scientific_context.to_record() == {
+        "material": [],
         "sample": [],
         "process": [
             {"name": "hatch space", "value": 0.1, "unit": "mm"},
         ],
         "test": [],
     }
-
-
-def test_research_objective_service_does_not_copy_another_study_context():
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": "study-other-source",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": ["unrelated reference material"],
-                    "process_context": ["unrelated treatment"],
-                    "relationships": [
-                        {
-                            "relationship_id": "relationship-other-source",
-                            "varied_factors": ["heat treatment"],
-                            "outcome": "hardness",
-                            "source_refs": [
-                                {
-                                    "source_kind": "table",
-                                    "source_ref": "table-other",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
-    )
-    evidence = ExtractedEvidenceDraft.from_mapping(
-        {
-            "evidence_id": "density-result",
-            "objective_id": "obj-density",
-            "document_id": "paper-1",
-            "source_kind": "table",
-            "source_ref": "table-density",
-            "evidence_role": "direct_result",
-            "reported_result": {
-                "outcome": "relative density",
-                "value": 99.2,
-                "unit": "%",
-                "direction": "unknown",
-                "result_text": "Relative density was 99.2%.",
-            },
-            "attribution_scope": "descriptive_only",
-            "source_refs": [
-                {"source_kind": "table", "source_ref": "table-density"}
-            ],
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
-    )
-
-    enriched = paper_experiment._enrich_objective_scope_context(
-        (evidence,),
-        paper_skims=(paper_skim,),
-    )[0]
-
-    assert enriched.scientific_context.material == ()
-    assert enriched.scientific_context.process == ()
-
-
-def test_research_objective_service_does_not_invent_material_without_document_skim(
-):
-    evidence = ExtractedEvidenceDraft.from_mapping(
-        {
-            "evidence_id": "density-result",
-            "objective_id": "obj-density",
-            "document_id": "paper-1",
-            "source_kind": "table",
-            "source_ref": "table-1",
-            "evidence_role": "direct_result",
-            "changed_variables": [
-                {"name": "energy density", "target_value": 150}
-            ],
-            "reported_result": {
-                "outcome": "relative density",
-                "direction": "increase",
-                "result_text": "Relative density increased.",
-            },
-            "attribution_scope": "association_only",
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
-    )
-
-    enriched = paper_experiment._enrich_objective_scope_context(
-        (evidence,),
-        paper_skims=(),
-    )[0]
-
-    assert enriched.scientific_context.material == ()
 
 
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(

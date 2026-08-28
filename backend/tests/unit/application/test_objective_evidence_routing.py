@@ -13,7 +13,7 @@ from application.core.objectives.analysis.evidence_routing import (
     SourceSelectionHint,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from domain.core import PaperSkim
+from domain.core import PaperResearchMap
 from domain.source import SourceDocumentNode, SourceDocumentTree
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
@@ -101,7 +101,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
             "stainless steel."
         ),
     }
-    paper_skim = PaperSkim.from_mapping(
+    paper_map = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-scanning-review",
             "doc_role": "review",
@@ -112,7 +112,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
     )
     frame = source_screening._aggregate_objective_paper_frame_batches(
         objective_id=objective.objective_id,
-        document_id=paper_skim.document_id,
+        document_id=paper_map.document_id,
         source_units=(source_unit,),
         batch_results=(
             (
@@ -129,7 +129,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
                 (),
             ),
         ),
-        paper_skim=paper_skim,
+        paper_map=paper_map,
     )
     assert frame.paper_role == "review"
     review_block = SimpleNamespace(

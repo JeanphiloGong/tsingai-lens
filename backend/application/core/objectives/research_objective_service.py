@@ -165,11 +165,11 @@ class ResearchObjectiveService:
             collection_id,
             document_ids,
         )
-        paper_skims = await self.paper_map_repository.list_collection(
+        paper_maps = await self.paper_map_repository.list_collection(
             collection_id,
             document_ids,
         )
-        maps_by_document_id = {item.document_id: item for item in paper_skims}
+        maps_by_document_id = {item.document_id: item for item in paper_maps}
         missing_maps = [
             document_id
             for document_id in document_ids
@@ -177,7 +177,7 @@ class ResearchObjectiveService:
         ]
         if missing_maps:
             raise ResearchObjectivesNotReadyError(collection_id)
-        paper_skims = tuple(
+        paper_maps = tuple(
             maps_by_document_id[document_id] for document_id in document_ids
         )
         if self._axis_equivalence_classifier is None:
@@ -187,7 +187,7 @@ class ResearchObjectiveService:
         candidate_facts = await to_thread(
             self.objective_candidate_service.discover_candidate_facts,
             collection_id,
-            paper_skims=paper_skims,
+            paper_maps=paper_maps,
             document_inputs=document_inputs,
             axis_equivalence_classifier=self._axis_equivalence_classifier,
             progress_callback=progress_callback,
@@ -198,9 +198,9 @@ class ResearchObjectiveService:
         )
         research_objectives = candidate_facts.research_objectives
         logger.info(
-            "Research objective candidates finished collection_id=%s paper_skim_count=%s objective_count=%s",
+            "Research objective candidates finished collection_id=%s paper_map_count=%s objective_count=%s",
             collection_id,
-            len(paper_skims),
+            len(paper_maps),
             len(research_objectives),
         )
         return candidate_facts
@@ -434,7 +434,7 @@ class ResearchObjectiveService:
             collection_id=collection_id,
             source_screener=self._objective_source_screener,
             objectives=(objective,),
-            paper_skims=objective_inputs["paper_skims"],
+            paper_maps=objective_inputs["paper_maps"],
             documents=objective_inputs["documents"],
             profiles_by_document_id=objective_inputs["profiles_by_document_id"],
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
@@ -476,7 +476,6 @@ class ResearchObjectiveService:
         paper_evidence_drafts = reconstruct_paper_experiments(
             collection_id=collection_id,
             source_facts=validated_source_facts,
-            paper_skims=objective_inputs["paper_skims"],
             objectives=(objective,),
         )
         evidence_records, contributions = materialize_evidence(
@@ -484,7 +483,7 @@ class ResearchObjectiveService:
             analysis=analysis,
             objective=objective,
             drafts=paper_evidence_drafts,
-            paper_skims=objective_inputs["paper_skims"],
+            paper_maps=objective_inputs["paper_maps"],
             frames=screened_sources,
             routes=source_inspection_routes,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
@@ -544,16 +543,16 @@ class ResearchObjectiveService:
             for item in objective_inputs["documents"]
             if item.document_id == document_id
         )
-        paper_skims = tuple(
+        paper_maps = tuple(
             item
-            for item in objective_inputs["paper_skims"]
+            for item in objective_inputs["paper_maps"]
             if item.document_id == document_id
         )
-        if len(documents) != 1 or len(paper_skims) != 1:
+        if len(documents) != 1 or len(paper_maps) != 1:
             raise ResearchObjectivesNotReadyError(collection_id)
         return {
             "documents": documents,
-            "paper_skims": paper_skims,
+            "paper_maps": paper_maps,
             "profiles_by_document_id": {
                 document_id: objective_inputs["profiles_by_document_id"][document_id]
             },
@@ -634,16 +633,16 @@ class ResearchObjectiveService:
             document_inputs=document_inputs,
         )
         document_ids = tuple(item.document_id for item in document_inputs)
-        paper_skims = await self.paper_map_repository.list_collection(
+        paper_maps = await self.paper_map_repository.list_collection(
             collection_id,
             document_ids,
         )
-        maps_by_document_id = {item.document_id: item for item in paper_skims}
+        maps_by_document_id = {item.document_id: item for item in paper_maps}
         if any(document_id not in maps_by_document_id for document_id in document_ids):
             raise ResearchObjectivesNotReadyError(collection_id)
         return {
             **source_inputs,
-            "paper_skims": tuple(
+            "paper_maps": tuple(
                 maps_by_document_id[document_id] for document_id in document_ids
             ),
         }

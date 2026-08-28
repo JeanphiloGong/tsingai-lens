@@ -14,7 +14,7 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    only synthesis explicitly authored by the review; individually cited
    experiments remain leads back to primary literature. The backend binds
    Source identity.
-2. `paper_skim_service.py` in the parent package selects how a researcher skims
+2. `paper_skim_service.py` in the parent package selects how a researcher reads
    before choosing a question: bounded abstract, conclusion or summary,
    overview, and table/figure caption Sources. Detailed Methods, Results text,
    and table rows do not enter this pre-Objective stage. The service groups the
@@ -38,8 +38,8 @@ single-Source contracts in `study_window.py` have different responsibilities:
 the former maps explicitly linked paper-scope axes, while the latter screens
 only explicit variable and outcome signals. Neither reconstructs samples,
 controls, fixed conditions, test settings, or measurement values. Review
-PaperSkim retains only review-author synthesis; individually cited studies are
-primary-literature navigation leads and do not become PaperSkim studies or
+`PaperResearchMap` retains only review-author synthesis; individually cited
+studies are primary-literature navigation leads and do not become map scopes or
 signals.
 `llm/structured_response.py` provides only the shared provider, structured JSON,
 trace, usage, and token-counting mechanics.
@@ -47,9 +47,9 @@ trace, usage, and token-counting mechanics.
 Source selection, batching, recursive failed-batch subdivision, stable Source
 identity, selected-Source coverage, scope consolidation, and persistence remain
 outside these model contracts. A valid model response is therefore an input to
-discovery, not proof that a collection Objective or durable Evidence exists. The backend
-also enforces paper ownership: a primary research paper may retain supported
-`current_work`, while a review retains only `synthesis`. Explicit numbered
-citations, named prior authors, generic background, and ambiguous ownership are
-discarded from review discovery and require inspection of the primary Source
+discovery, not proof that a collection Objective or durable Evidence exists.
+The backend also enforces paper ownership: a primary research paper may retain
+supported `current_work`, while a review retains only `synthesis`. Explicit
+numbered citations, named prior authors, generic background, and ambiguous
+ownership are discarded from review discovery and require inspection of the primary Source
 before they can support an experiment relationship.

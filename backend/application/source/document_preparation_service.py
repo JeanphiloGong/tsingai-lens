@@ -20,14 +20,14 @@ from application.core.objectives.discovery.signal_reconciliation import (
     PaperSignalReconciler,
 )
 from application.core.objectives.discovery.study_window import (
-    PAPER_SKIM_PROMPT_VERSION,
-    PaperStudyWindowExtractor,
+    PAPER_RESEARCH_MAP_PROMPT_VERSION,
+    PaperResearchMapExtractor,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
     build_default_structured_response_client,
 )
-from application.core.objectives.paper_skim_service import PaperSkimService
+from application.core.objectives.paper_skim_service import PaperResearchMapService
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
@@ -50,11 +50,11 @@ logger = logging.getLogger(__name__)
 
 SOURCE_PARSER_VERSION = "source-runtime.v1"
 DOCUMENT_ANALYSIS_VERSION = (
-    f"{DOCUMENT_PROFILE_PROMPT_VERSION}+{PAPER_SKIM_PROMPT_VERSION}+"
+    f"{DOCUMENT_PROFILE_PROMPT_VERSION}+{PAPER_RESEARCH_MAP_PROMPT_VERSION}+"
     f"{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
 )
 PAPER_MAP_VERSION = (
-    f"{PAPER_SKIM_PROMPT_VERSION}+{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
+    f"{PAPER_RESEARCH_MAP_PROMPT_VERSION}+{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
 )
 _DEFAULT_PREPARATION_CONCURRENCY = 10
 
@@ -117,7 +117,7 @@ class DocumentPreparationService:
         source_artifact_repository: SourceArtifactRepository,
         document_profile_service: DocumentProfileService,
         paper_map_repository: PaperMapRepository,
-        paper_skim_service: PaperSkimService,
+        paper_map_service: PaperResearchMapService,
         response_client: StructuredResponseClient | None = None,
         source_artifact_builder: SourceArtifactBuilder | None = None,
         max_concurrency: int | None = None,
@@ -127,7 +127,7 @@ class DocumentPreparationService:
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
         self.paper_map_repository = paper_map_repository
-        self.paper_skim_service = paper_skim_service
+        self.paper_map_service = paper_map_service
         self._response_client = response_client
         self._source_artifact_builder = source_artifact_builder
         resolved_concurrency = max_concurrency or int(
@@ -282,7 +282,7 @@ class DocumentPreparationService:
                 if paper_map is None or document.preparation_fingerprint != fingerprint:
                     response_client = self._get_response_client()
                     paper_map = await to_thread(
-                        self.paper_skim_service.build_document_paper_map,
+                        self.paper_map_service.build_document_paper_map,
                         collection_id,
                         document=source_document,
                         profile=profile,
@@ -292,7 +292,7 @@ class DocumentPreparationService:
                                 document_id,
                             )
                         ),
-                        study_window_extractor=PaperStudyWindowExtractor(response_client),
+                        paper_map_extractor=PaperResearchMapExtractor(response_client),
                         signal_reconciler=PaperSignalReconciler(response_client),
                     )
                     await self.paper_map_repository.replace(collection_id, paper_map)

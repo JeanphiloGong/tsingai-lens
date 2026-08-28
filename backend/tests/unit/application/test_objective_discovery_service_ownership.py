@@ -1,14 +1,14 @@
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.paper_skim_service import PaperSkimService
+from application.core.objectives.paper_skim_service import PaperResearchMapService
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
 
 
 def test_objective_discovery_stages_have_direct_owners() -> None:
-    assert "build_collection_paper_skims" in PaperSkimService.__dict__
+    assert "build_collection_paper_maps" in PaperResearchMapService.__dict__
     assert "discover_candidate_facts" in ObjectiveCandidateService.__dict__
 
     assert "_build_objective_candidate_inputs" not in ResearchObjectiveService.__dict__

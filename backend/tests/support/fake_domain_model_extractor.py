@@ -28,7 +28,7 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import (
     StructuredExperimentalPaperMap,
-    StructuredPaperSkim,
+    StructuredPaperResearchMap,
     StructuredReviewPaperMap,
 )
 from application.core.paper_facts.schemas import (
@@ -48,7 +48,7 @@ from application.core.paper_facts.schemas import (
     TextWindowResultClaimPayload,
     TextWindowVariantMentionPayload,
 )
-from tests.support.objective_extractor import paper_skim_study_outputs
+from tests.support.objective_extractor import paper_research_map_scope_outputs
 
 _PROPERTY_HINTS = (
     ("yield strength", "yield_strength"),
@@ -156,7 +156,7 @@ class FakeDomainModelExtractor:
                 evidence_density="low",
                 confidence=0.72,
             )
-        elif response_model is StructuredPaperSkim:
+        elif response_model is StructuredPaperResearchMap:
             response = self.extract(payload)
         elif response_model is StructuredPaperSignalReconciliation:
             response = self.reconcile(payload)
@@ -267,7 +267,7 @@ class FakeDomainModelExtractor:
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
         title = str(payload.get("title") or "").strip()
         profile_hint = (
             payload.get("profile_hint")
@@ -356,9 +356,9 @@ class FakeDomainModelExtractor:
             if studies
             else "medium" if candidate_materials or candidate_properties else "low"
         )
-        return StructuredPaperSkim(
+        return StructuredPaperResearchMap(
             doc_role=doc_role,
-            **paper_skim_study_outputs(
+            **paper_research_map_scope_outputs(
                 payload,
                 studies,
             ),

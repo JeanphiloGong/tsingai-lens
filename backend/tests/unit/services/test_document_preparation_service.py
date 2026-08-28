@@ -8,7 +8,7 @@ from application.source.document_preparation_service import (
     profile_fingerprint,
     source_fingerprint,
 )
-from domain.core import DocumentProfile, PaperSkim
+from domain.core import DocumentProfile, PaperResearchMap
 from domain.source import Document, SourceDocument
 from infra.persistence.memory import (
     MemoryPaperMapRepository,
@@ -142,10 +142,10 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
     class PaperMapService:
         calls = 0
 
-        def build_document_paper_map(self, owner: str, **kwargs) -> PaperSkim:
+        def build_document_paper_map(self, owner: str, **kwargs) -> PaperResearchMap:
             assert owner == collection_id
             self.calls += 1
-            return PaperSkim.from_mapping(
+            return PaperResearchMap.from_mapping(
                 {
                     "document_id": document_id,
                     "doc_role": "primary_experiment",
@@ -171,7 +171,7 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
     paper_maps = MemoryPaperMapRepository()
     await paper_maps.replace(
         collection_id,
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": document_id,
                 "doc_role": "primary_experiment",
@@ -189,7 +189,7 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
         source_artifact_repository=sources,
         document_profile_service=ProfileService(),
         paper_map_repository=paper_maps,
-        paper_skim_service=paper_map_service,
+        paper_map_service=paper_map_service,
         response_client=object(),
         source_artifact_builder=fail_if_parsed,
         max_concurrency=1,

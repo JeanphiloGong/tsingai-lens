@@ -29,8 +29,10 @@ Read the analysis responsibilities in real research order:
    comparison support become descriptive drafts before they can enter the next
    Source prompt's document state.
 5. `paper_experiment.py` runs after all routed Sources have been inspected. It
-   fills only missing scope from the same paper, binds Methods and Results only
-   through exact sample identities, and derives bounded pairwise comparisons.
+   fills only missing scope from validated facts in those same-paper Sources,
+   binds Methods and Results only through exact sample identities, and derives
+   bounded pairwise comparisons. It never reads preliminary map scope as
+   experiment context.
 6. `evidence_materialization.py` turns reconstructed drafts into durable
    `ObjectiveEvidence`, deduplicates replayed scientific claims by stable
    Evidence identity, and derives each paper's `PaperContribution` from that
@@ -110,6 +112,11 @@ endpoints and report only `changed` or `no_change`. A numeric/category mismatch
 or any incompatible material, sample, or test context remains explicitly
 non-comparable.
 
+`PaperResearchMap` is not an input to this reconstruction. Analysis may use the
+map earlier to prioritize Source inspection and later to report preliminary
+coverage gaps, but a map material, process, variable, or outcome label cannot
+fill, overwrite, or validate an `ExtractedEvidenceDraft`.
+
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,
 canonicalizes uniquely matching axes, resolves exact Source excerpts and
@@ -120,9 +127,9 @@ figure, or paragraph can support several measurements or comparisons.
 from that complete claim set, and its contribution summary is assembled only
 from grounded result text in the final Evidence records. Contribution warnings
 count only final framing fallback, deterministic evidence-routing fallback,
-PaperSkim coverage gaps, and failed Evidence Sources; successful repair is not
-a warning. It does not persist artifacts or synthesize a cross-paper claim. Its
-private materialization trace records only bounded counts and paper
+`PaperResearchMap` coverage gaps, and failed Evidence Sources; successful repair
+is not a warning. It does not persist artifacts or synthesize a cross-paper
+claim. Its private materialization trace records only bounded counts and paper
 dispositions, so an empty result can be distinguished from filtering and
 technical extraction failure without storing Source content in diagnostics.
 For factor/outcome candidates excluded only by material scope, material-scope

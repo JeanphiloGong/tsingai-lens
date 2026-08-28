@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from domain.core import DocumentProfile, PaperSkim
+from domain.core import DocumentProfile, PaperResearchMap
 from domain.source import TaskRecord
 from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
@@ -34,8 +34,8 @@ def _profile(document_id: str, title: str) -> DocumentProfile:
     )
 
 
-def _paper_map(document_id: str, limitation: str = "") -> PaperSkim:
-    return PaperSkim.from_mapping(
+def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
+    return PaperResearchMap.from_mapping(
         {
             "document_id": document_id,
             "doc_role": "primary_experiment",

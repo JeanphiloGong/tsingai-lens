@@ -36,7 +36,7 @@ from application.core.objectives.analysis_service import ObjectiveAnalysisServic
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.paper_skim_service import PaperSkimService
+from application.core.objectives.paper_skim_service import PaperResearchMapService
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
@@ -254,14 +254,14 @@ async def build_application_runtime(
             source_artifact_repository=source_artifact_repository,
             document_profile_repository=document_profile_repository,
         )
-        paper_skim_service = PaperSkimService()
+        paper_map_service = PaperResearchMapService()
         document_preparation_service = DocumentPreparationService(
             collection_service=collection_service,
             task_service=task_service,
             source_artifact_repository=source_artifact_repository,
             document_profile_service=document_profile_service,
             paper_map_repository=paper_map_repository,
-            paper_skim_service=paper_skim_service,
+            paper_map_service=paper_map_service,
         )
         finding_synthesis_service = FindingSynthesisService()
         finding_feedback_service = FindingFeedbackService(

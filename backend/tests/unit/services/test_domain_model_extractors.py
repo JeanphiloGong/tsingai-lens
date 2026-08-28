@@ -50,12 +50,12 @@ from application.core.objectives.discovery.signal_reconciliation import (
     build_paper_signal_reconciliation_prompt,
 )
 from application.core.objectives.discovery.study_window import (
-    PaperStudyWindowExtractor,
+    PaperResearchMapExtractor,
     StructuredExperimentalPaperMap,
-    StructuredPaperSkim,
+    StructuredPaperResearchMap,
     StructuredPaperSourceSignalScreen,
     StructuredReviewPaperMap,
-    build_paper_skim_prompt,
+    build_paper_research_map_prompt,
     build_paper_source_signal_prompt,
 )
 from application.core.objectives.llm.structured_response import (
@@ -72,7 +72,7 @@ from domain.pipeline import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
 
 
-def test_paper_skim_contract_bounds_model_output():
+def test_paper_research_map_contract_bounds_model_output():
     experimental_schema = StructuredExperimentalPaperMap.model_json_schema()
     schema = experimental_schema["properties"]
 
@@ -140,9 +140,10 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
     assert signal_schema["material_scope"]["maxItems"] == 4
     assert signal_schema["process_context"]["maxItems"] == 4
-    assert signal_schema["sample_context"]["maxItems"] == 4
-    assert signal_schema["test_context"]["maxItems"] == 4
-    assert signal_schema["fixed_conditions"]["maxItems"] == 4
+    assert "sample_context" not in signal_schema
+    assert "test_context" not in signal_schema
+    assert "comparator" not in signal_schema
+    assert "fixed_conditions" not in signal_schema
     assert "source_unit_ids" not in signal_schema
     assert "relationships" not in schema
     assert "studies" not in schema
@@ -152,11 +153,11 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     ("left_context", "right_context"),
     [
         ({"design_type": "experimental"}, {"design_type": "observational"}),
-        ({"comparator": "as-built"}, {"comparator": "heat-treated"}),
         (
-            {"fixed_conditions": ["room temperature"]},
-            {"fixed_conditions": ["400 C"]},
+            {"process_context": ["laser powder bed fusion"]},
+            {"process_context": ["heat treatment"]},
         ),
+        ({"experiment_label": "tensile"}, {"experiment_label": "hardness"}),
     ],
 )
 def test_paper_source_signal_identity_preserves_distinct_experiment_context(
@@ -293,7 +294,7 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
             }
         )
     )
-    extractor = PaperStudyWindowExtractor(_response_client(client))
+    extractor = PaperResearchMapExtractor(_response_client(client))
 
     skim = extractor.extract_source_signals(
         {
@@ -328,11 +329,7 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
-def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
-    sample_context = [
-        f"HIP condition {index}: temperature, pressure, and cooling schedule"
-        for index in range(1, 12)
-    ]
+def test_paper_research_map_contract_represents_bounded_preliminary_scope():
     varied_factors = [
         "HIP temperature",
         "HIP pressure",
@@ -340,13 +337,9 @@ def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
         "prior beta grain size",
         "alpha lath thickness",
         "alpha phase fraction",
-        "beta phase fraction",
-        "pore fraction",
-        "pore diameter",
-        "build orientation",
     ]
 
-    parsed = StructuredPaperSkim.model_validate(
+    parsed = StructuredPaperResearchMap.model_validate(
         {
             "studies": [
                 {
@@ -355,15 +348,6 @@ def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
                         "hot isostatic pressing",
                         "sandblasting",
                         "mechanical polishing",
-                        "chemical etching",
-                    ],
-                    "sample_context": sample_context,
-                    "test_context": [
-                        "room-temperature tensile testing",
-                        "optical microscopy",
-                        "scanning electron microscopy",
-                        "electron backscatter diffraction",
-                        "X-ray computed tomography",
                     ],
                     "relationships": [
                         {
@@ -377,7 +361,12 @@ def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
         }
     )
 
-    assert parsed.studies[0].sample_context == sample_context
+    assert parsed.studies[0].process_context == [
+        "laser powder bed fusion",
+        "hot isostatic pressing",
+        "sandblasting",
+        "mechanical polishing",
+    ]
     assert parsed.studies[0].relationships[0].varied_factors == varied_factors
 
 
@@ -447,8 +436,8 @@ def test_paper_signal_reconciliation_bounds_diagnostic_reason_text():
     assert len(parsed.unresolved_signals[0].reason) == 240
 
 
-def test_paper_skim_contract_bounds_diagnostic_warnings():
-    parsed = StructuredPaperSkim.model_validate(
+def test_paper_research_map_contract_bounds_diagnostic_warnings():
+    parsed = StructuredPaperResearchMap.model_validate(
         {"warnings": ["w" * 241, "second", "third"]}
     )
 
@@ -482,13 +471,13 @@ def test_paper_skim_contract_bounds_diagnostic_warnings():
         },
     ],
 )
-def test_paper_skim_contract_rejects_duplicate_source_unit_ids(payload):
+def test_paper_research_map_contract_rejects_duplicate_source_unit_ids(payload):
     with pytest.raises(ValidationError, match="source-unit ids must be unique"):
-        StructuredPaperSkim.model_validate(payload)
+        StructuredPaperResearchMap.model_validate(payload)
 
 
-def test_paper_skim_prompt_defines_lightweight_research_map_contract():
-    _, user_prompt = build_paper_skim_prompt(
+def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
+    _, user_prompt = build_paper_research_map_prompt(
         {
             "document_id": "paper-1",
             "title": "Density study",
@@ -553,7 +542,7 @@ def test_experimental_paper_map_schema_excludes_review_only_output():
         )
     )
 
-    PaperStudyWindowExtractor(_response_client(client)).extract(
+    PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "experimental-paper",
             "document_profile": {"doc_type": "experimental"},
@@ -569,8 +558,8 @@ def test_experimental_paper_map_schema_excludes_review_only_output():
     assert "StructuredReviewKnowledgeItem" not in request_text
 
 
-def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
-    _, user_prompt = build_paper_skim_prompt(
+def test_review_paper_research_map_prompt_extracts_synthesis_not_cited_experiments():
+    _, user_prompt = build_paper_research_map_prompt(
         {
             "document_id": "review-paper",
             "title": "Review of preheating in LPBF",
@@ -638,7 +627,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
         )
     )
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "review-paper",
             "document_profile": {"doc_type": "review"},
@@ -659,7 +648,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
         client.chat.completions.calls[0]["messages"],
         ensure_ascii=False,
     )
-    assert "StructuredPaperStudy" not in request_text
+    assert "StructuredPaperResearchScope" not in request_text
     assert skim.studies[0].claim_scope == "synthesis"
     assert skim.studies[0].relationships[0].varied_factors == [
         "preheating condition"
@@ -668,7 +657,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
     assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
 
 
-def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
+def test_review_paper_research_map_extractor_keeps_only_review_author_synthesis():
     source_unit_id = "source-unit-000001"
     client = _FakeOpenAIClient(
         json.dumps(
@@ -697,7 +686,7 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
         )
     )
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "review-paper",
             "document_profile": {"doc_type": "review"},
@@ -770,7 +759,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "pair classification" in user_prompt
     assert "`decisions` array" in user_prompt
     assert "every input pair" in user_prompt
-    assert "bounded PaperStudy observations" in user_prompt
+    assert "bounded PaperResearchScope observations" in user_prompt
     assert "co-occurrence is not equivalence evidence" in user_prompt
     assert "build orientation and laser speed" in user_prompt.casefold()
     assert "boolean `equivalent`" in user_prompt
@@ -1174,7 +1163,7 @@ def test_response_client_does_not_generate_backend_owned_objective_lineage():
     assert not hasattr(StructuredResponseClient, "discover_research_objectives")
 
 
-def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
+def test_paper_research_map_prompt_token_estimate_counts_complete_schema_prompt():
     client = _FakeOpenAIClient("unused")
     extractor = StructuredResponseClient(
         client=client,
@@ -1197,7 +1186,7 @@ def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
         ],
     }
 
-    estimated_tokens = PaperStudyWindowExtractor(extractor).estimate_prompt_tokens(payload)
+    estimated_tokens = PaperResearchMapExtractor(extractor).estimate_prompt_tokens(payload)
 
     assert estimated_tokens > 1_000
     assert client.beta.chat.completions.calls == []
@@ -1250,7 +1239,7 @@ def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prom
     assert client.chat.completions.calls == []
 
 
-def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
+def test_paper_research_map_provider_length_finish_skips_whole_window_json_repair():
     completion = SimpleNamespace(
         usage=SimpleNamespace(completion_tokens=4096),
     )
@@ -1265,7 +1254,7 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
     )
 
     with pytest.raises(StructuredOutputSaturatedError):
-        PaperStudyWindowExtractor(extractor).extract(
+        PaperResearchMapExtractor(extractor).extract(
             {
                 "document_id": "paper-1",
                 "title": "Density study",
@@ -1279,7 +1268,7 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
     assert client.chat.completions.calls == []
 
 
-def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
+def test_paper_research_map_json_length_finish_skips_whole_window_json_repair():
     client = _FakeOpenAIClient('{"studies":[]}')
 
     def create_with_length_finish(**kwargs):
@@ -1301,7 +1290,7 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
     )
 
     with pytest.raises(StructuredOutputSaturatedError):
-        PaperStudyWindowExtractor(extractor).extract(
+        PaperResearchMapExtractor(extractor).extract(
             {
                 "document_id": "paper-1",
                 "title": "Density study",
@@ -1317,7 +1306,7 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
     assert trace["trace_status"] == "failed"
     assert trace["error_type"] == "StructuredOutputSaturatedError"
     assert trace["error"] == (
-        "PaperSkim JSON output reached the completion-token limit"
+        "PaperResearchMap JSON output reached the completion-token limit"
     )
     assert trace["raw_output"] == '{"studies":[]}'
     assert trace["attempts"] == [
@@ -1327,12 +1316,12 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
             "response_chars": len('{"studies":[]}'),
             "response_preview": '{"studies":[]}',
             "error_type": "StructuredOutputSaturatedError",
-            "error": "PaperSkim JSON output reached the completion-token limit",
+            "error": "PaperResearchMap JSON output reached the completion-token limit",
         }
     ]
 
 
-def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
+def test_paper_research_map_saturation_logs_bounded_source_trace(caplog):
     raw_output = '{"studies":[' + ('"repeated",' * 400) + "]}"
     client = _FakeOpenAIClient(raw_output)
 
@@ -1348,7 +1337,7 @@ def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
         )
 
     client.chat.completions.create = create_with_length_finish
-    extractor = PaperStudyWindowExtractor(
+    extractor = PaperResearchMapExtractor(
         StructuredResponseClient(
             client=client,
             model="fake-model",
@@ -1380,9 +1369,9 @@ def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
     trace_message = next(
         record.getMessage()
         for record in caplog.records
-        if "Paper skim saturation trace" in record.getMessage()
+        if "Paper research map saturation trace" in record.getMessage()
     )
-    assert "contract=paper_skim" in trace_message
+    assert "contract=paper_map" in trace_message
     assert "window_id=results-1" in trace_message
     assert 'source_unit_ids=["source-unit-000071"]' in trace_message
     assert f"input_chars={len(source_text)}" in trace_message
@@ -1685,7 +1674,7 @@ def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
     assert client.beta.chat.completions.calls == []
 
 
-def test_domain_model_extractors_validates_paper_skim_response():
+def test_domain_model_extractors_validates_paper_research_map_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -1717,7 +1706,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     )
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF 316L corrosion study",
@@ -1732,14 +1721,14 @@ def test_domain_model_extractors_validates_paper_skim_response():
         }
     )
 
-    assert isinstance(skim, StructuredPaperSkim)
+    assert isinstance(skim, StructuredPaperResearchMap)
     assert skim.doc_role == "experimental"
     assert skim.studies[0].material_scope == ["316L stainless steel"]
     assert skim.studies[0].relationships[0].outcome == "corrosion current density"
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
-def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_output():
+def test_paper_research_map_bounds_diagnostic_warnings_without_retrying_scientific_output():
     response = {
         "doc_role": "experimental",
         "studies": [],
@@ -1748,7 +1737,7 @@ def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_outpu
     }
     client = _FakeOpenAIClient(json.dumps(response))
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [],
@@ -1761,7 +1750,7 @@ def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_outpu
     assert skim.warnings[0].startswith("diagnostic diagnostic")
 
 
-def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings():
+def test_paper_research_map_downgrades_empty_factor_relationship_without_losing_siblings():
     response = {
         "doc_role": "experimental",
         "studies": [
@@ -1796,7 +1785,7 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     client = _FakeOpenAIClient(json.dumps(response))
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "source_units": [
@@ -1828,7 +1817,7 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     assert unresolved.source_unit_ids == ["window-source-2"]
 
 
-def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome():
+def test_paper_research_map_downgrades_descriptive_factor_clause_to_unresolved_outcome():
     response = {
         "doc_role": "experimental",
         "studies": [
@@ -1853,7 +1842,7 @@ def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome()
     }
     client = _FakeOpenAIClient(json.dumps(response))
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -1875,7 +1864,7 @@ def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome()
     assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
 
 
-def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_siblings():
+def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_losing_siblings():
     response = {
         "doc_role": "experimental",
         "studies": [
@@ -1924,7 +1913,7 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
     }
     client = _FakeOpenAIClient(json.dumps(response))
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -1967,7 +1956,7 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
     assert "unresolved_signals" in prompt
 
 
-def test_structured_paper_skim_rejects_duplicate_study_identities():
+def test_structured_paper_research_map_rejects_duplicate_study_identities():
     study = {
         "experiment_label": "LPBF parameter study",
         "design_type": "experimental",
@@ -1984,14 +1973,14 @@ def test_structured_paper_skim_rejects_duplicate_study_identities():
     }
 
     with pytest.raises(ValidationError, match="duplicate study identities"):
-        StructuredPaperSkim.model_validate(
+        StructuredPaperResearchMap.model_validate(
             {
                 "studies": [study, study],
             }
         )
 
 
-def test_paper_skim_retries_duplicate_study_identities_before_returning():
+def test_paper_research_map_retries_duplicate_study_identities_before_returning():
     first_study = {
         "experiment_label": "LPBF parameter study",
         "design_type": "experimental",
@@ -2043,7 +2032,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF parameter study",
@@ -2074,7 +2063,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     ]
 
 
-def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
+def test_paper_research_map_repairs_unknown_source_unit_ids_before_returning():
     invalid = {
         "doc_role": "experimental",
         "studies": [
@@ -2107,7 +2096,7 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -2135,7 +2124,7 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
     assert 'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]' in repair_prompt
 
 
-def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
+def test_paper_research_map_repairs_unknown_signal_source_unit_ids_before_returning():
     invalid = {
         "doc_role": "experimental",
         "unresolved_signals": [
@@ -2157,7 +2146,7 @@ def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -2178,7 +2167,7 @@ def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
     ]["content"]
 
 
-def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):
+def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(monkeypatch):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
     first_study = {
         "experiment_label": "LPBF parameter study",
@@ -2226,11 +2215,11 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     }
     client = _FakeOpenAIClient(
         json.dumps(valid),
-        parsed=StructuredPaperSkim.model_validate(invalid),
+        parsed=StructuredPaperResearchMap.model_validate(invalid),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF parameter study",
@@ -2258,7 +2247,7 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     )
 
 
-def test_paper_skim_preserves_multi_material_multi_outcome_study():
+def test_paper_research_map_preserves_multi_material_multi_outcome_study():
     client = _FakeOpenAIClient(
         json.dumps(
             {
@@ -2306,7 +2295,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
     )
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "Application of base plate preheating during selective laser melting",
@@ -2340,7 +2329,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
     assert len(skim.warnings[0]) <= 240
 
 
-def test_paper_skim_retries_oversized_study_without_truncating_relationships():
+def test_paper_research_map_retries_oversized_study_without_truncating_relationships():
     invalid = {
         "doc_role": "experimental",
         "studies": [
@@ -2394,7 +2383,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
     )
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "Multi-material preheating study",
@@ -2463,8 +2452,6 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
     [
         ("material_scope", ["316L stainless steel"], ["Ti-6Al-4V"]),
         ("process_context", ["laser powder bed fusion"], ["heat treatment"]),
-        ("sample_context", ["as-built specimen"], ["annealed specimen"]),
-        ("test_context", ["tensile test"], ["corrosion test"]),
     ],
 )
 def test_paper_signal_reconciliation_repairs_conflicting_contexts(

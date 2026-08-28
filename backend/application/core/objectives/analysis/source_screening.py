@@ -11,7 +11,7 @@ from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
 
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
-from domain.core import PaperSkim, ResearchObjective, normalize_objective_terms
+from domain.core import PaperResearchMap, ResearchObjective, normalize_objective_terms
 from domain.source import SourceDocumentTree
 from pydantic import (
     BaseModel,
@@ -177,7 +177,7 @@ def build_objective_paper_frame_prompt(
         "- `objective`: the confirmed comparison question and scientific axes.\n"
         "- `document`: backend metadata; the filename is not scientific evidence.\n"
         "- `document_profile`: backend document-type metadata; it is a routing hint, not authority over visible source text.\n"
-        "- `paper_prior`: compact PaperSkim study context linked to the objective; it is a hint, not authority over visible source text.\n"
+        "- `paper_prior`: compact PaperResearchMap study context linked to the objective; it is a hint, not authority over visible source text.\n"
         "- `source_units`: current section chunks and table-row chunks. Each has a backend-owned `source_unit_id`, kind, stable source reference, and visible scientific content.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
@@ -469,7 +469,7 @@ class _PreparedPaperFrame:
     document_id: str
     document_title: str | None
     source_filename: str | None
-    paper_skim: PaperSkim | None
+    paper_map: PaperResearchMap | None
     payload: dict[str, Any] | None
     batches: tuple[tuple[dict[str, Any], int | None], ...]
     completed_frame: PaperAnalysisFrame | None = None
@@ -503,7 +503,7 @@ def screen_sources(
     collection_id: str,
     source_screener: ObjectiveSourceScreener,
     objectives: tuple[ResearchObjective, ...],
-    paper_skims: tuple[PaperSkim, ...],
+    paper_maps: tuple[PaperResearchMap, ...],
     documents: tuple[Any, ...],
     profiles_by_document_id: dict[str, Any],
     blocks_by_document_id: dict[str, list[Any]],
@@ -511,8 +511,10 @@ def screen_sources(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[PaperAnalysisFrame, ...]:
-    skim_by_document_id = {
-        skim.document_id: skim for skim in paper_skims if skim.document_id
+    maps_by_document_id = {
+        paper_map.document_id: paper_map
+        for paper_map in paper_maps
+        if paper_map.document_id
     }
     logger.info(
         "Research objective paper framing started collection_id=%s objective_count=%s document_count=%s",
@@ -562,7 +564,7 @@ def screen_sources(
                         document_id=document_id,
                         document_title=document_title,
                         source_filename=source_filename,
-                        paper_skim=skim_by_document_id.get(document_id),
+                        paper_map=maps_by_document_id.get(document_id),
                         payload=None,
                         batches=(),
                         completed_frame=PaperAnalysisFrame.from_mapping(
@@ -583,7 +585,7 @@ def screen_sources(
             payload = _build_objective_paper_frame_payload(
                 collection_id=collection_id,
                 objective=objective,
-                paper_skim=skim_by_document_id.get(document_id),
+                paper_map=maps_by_document_id.get(document_id),
                 document=document,
                 profile=profiles_by_document_id.get(document_id),
                 blocks=blocks_by_document_id.get(document_id, []),
@@ -598,7 +600,7 @@ def screen_sources(
                     document_id=document_id,
                     document_title=document_title,
                     source_filename=source_filename,
-                    paper_skim=skim_by_document_id.get(document_id),
+                    paper_map=maps_by_document_id.get(document_id),
                     payload=payload,
                     batches=_build_objective_paper_frame_batches(
                         source_screener=source_screener,
@@ -669,7 +671,7 @@ def screen_sources(
             (
                 _build_conservative_objective_paper_frame_batch(
                     payload=batch_payload,
-                    paper_skim=prepared.paper_skim,
+                    paper_map=prepared.paper_map,
                 ),
                 "fallback",
                 fallback_errors,
@@ -753,7 +755,7 @@ def screen_sources(
                     document_id=prepared.document_id,
                     source_units=prepared.payload["source_units"],
                     batch_results=[outcome[0] for outcome in batch_outcomes],
-                    paper_skim=prepared.paper_skim,
+                    paper_map=prepared.paper_map,
                 )
 
             frames.append(frame)
@@ -843,7 +845,7 @@ def _build_objective_paper_frame_payload(
     *,
     collection_id: str,
     objective: ResearchObjective,
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
     document: Any,
     profile: Any,
     blocks: list[Any],
@@ -868,7 +870,7 @@ def _build_objective_paper_frame_payload(
         "objective": _route_prompt_objective_record(objective),
         "paper_prior": _build_objective_paper_frame_prior(
             objective=objective,
-            paper_skim=paper_skim,
+            paper_map=paper_map,
         ),
         "document": {
             "document_id": getattr(document, "document_id", None),
@@ -954,11 +956,11 @@ def _build_objective_paper_frame_batches(
 def _build_conservative_objective_paper_frame_batch(
     *,
     payload: Mapping[str, Any],
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
 ) -> dict[str, Any]:
     return {
         "relevance": "uncertain",
-        "paper_role": _deterministic_frame_paper_role(paper_skim),
+        "paper_role": _deterministic_frame_paper_role(paper_map),
         "screening_note": None,
         "material_match": [],
         "changed_variables": [],
@@ -979,7 +981,7 @@ def _aggregate_objective_paper_frame_batches(
     document_id: str,
     source_units: Iterable[Mapping[str, Any]],
     batch_results: Iterable[tuple[Mapping[str, Any], str, tuple[str, ...]]],
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
 ) -> PaperAnalysisFrame:
     units = tuple(source_units)
     results = tuple(batch_results)
@@ -1151,7 +1153,7 @@ def _aggregate_objective_paper_frame_batches(
         table_id for table_id in excluded_tables if table_id not in set(relevant_tables)
     ]
 
-    deterministic_paper_role = _deterministic_frame_paper_role(paper_skim)
+    deterministic_paper_role = _deterministic_frame_paper_role(paper_map)
     if deterministic_paper_role == "review":
         paper_role = "review"
     else:
@@ -1187,15 +1189,15 @@ def _aggregate_objective_paper_frame_batches(
 def _build_objective_paper_frame_prior(
     *,
     objective: ResearchObjective,
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
 ) -> dict[str, Any]:
-    if paper_skim is None:
+    if paper_map is None:
         return {}
 
     lineage_relationship_ids = set(objective.source_relationship_ids)
     studies: list[dict[str, Any]] = []
     relationship_count = 0
-    for study in paper_skim.studies:
+    for study in paper_map.studies:
         selected_relationships = []
         for relationship in study.relationships:
             if lineage_relationship_ids:
@@ -1224,10 +1226,6 @@ def _build_objective_paper_frame_prior(
                     "claim_scope": study.claim_scope,
                     "material_scope": list(study.material_scope),
                     "process_context": list(study.process_context),
-                    "sample_context": list(study.sample_context),
-                    "test_context": list(study.test_context),
-                    "comparator": study.comparator,
-                    "fixed_conditions": list(study.fixed_conditions),
                     "relationships": selected_relationships,
                 }
             )
@@ -1237,8 +1235,8 @@ def _build_objective_paper_frame_prior(
         ):
             break
     return {
-        "doc_role": paper_skim.doc_role,
-        "evidence_density": paper_skim.evidence_density,
+        "doc_role": paper_map.doc_role,
+        "evidence_density": paper_map.evidence_density,
         "studies": studies,
     }
 
@@ -1466,8 +1464,8 @@ def _tree_section_label(node: Any) -> str:
     return title or "Unsectioned"
 
 
-def _deterministic_frame_paper_role(paper_skim: PaperSkim | None) -> str:
-    doc_role = str(getattr(paper_skim, "doc_role", "") or "")
+def _deterministic_frame_paper_role(paper_map: PaperResearchMap | None) -> str:
+    doc_role = str(getattr(paper_map, "doc_role", "") or "")
     if doc_role == "experimental":
         return "primary_experiment"
     if doc_role == "review":

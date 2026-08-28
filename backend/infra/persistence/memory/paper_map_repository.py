@@ -4,21 +4,21 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from domain.core import PaperSkim
+from domain.core import PaperResearchMap
 
 
 class MemoryPaperMapRepository:
     def __init__(self) -> None:
-        self._maps: dict[tuple[str, str], PaperSkim] = {}
+        self._maps: dict[tuple[str, str], PaperResearchMap] = {}
 
-    async def replace(self, collection_id: str, paper_map: PaperSkim) -> None:
+    async def replace(self, collection_id: str, paper_map: PaperResearchMap) -> None:
         self._maps[(collection_id, paper_map.document_id)] = deepcopy(paper_map)
 
     async def read(
         self,
         collection_id: str,
         document_id: str,
-    ) -> PaperSkim | None:
+    ) -> PaperResearchMap | None:
         paper_map = self._maps.get((collection_id, document_id))
         return deepcopy(paper_map) if paper_map is not None else None
 
@@ -26,7 +26,7 @@ class MemoryPaperMapRepository:
         self,
         collection_id: str,
         document_ids: tuple[str, ...] | None = None,
-    ) -> tuple[PaperSkim, ...]:
+    ) -> tuple[PaperResearchMap, ...]:
         selected = set(document_ids) if document_ids is not None else None
         return tuple(
             deepcopy(paper_map)

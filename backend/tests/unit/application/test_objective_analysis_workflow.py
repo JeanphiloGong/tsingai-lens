@@ -27,7 +27,7 @@ from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
-    PaperSkim,
+    PaperResearchMap,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
     PreparedDocumentInput,
@@ -80,56 +80,56 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
 
 
 def _ready_objective_facts(
-    paper_skim: PaperSkim,
+    paper_map: PaperResearchMap,
     objective: ResearchObjective,
 ) -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
         document_inputs=(
             PreparedDocumentInput(
-                document_id=paper_skim.document_id,
-                preparation_fingerprint=f"fingerprint-{paper_skim.document_id}",
+                document_id=paper_map.document_id,
+                preparation_fingerprint=f"fingerprint-{paper_map.document_id}",
             ),
         ),
         research_objectives=(objective,),
         study_dispositions=tuple(
             PaperStudyDisposition(
-                document_id=paper_skim.document_id,
+                document_id=paper_map.document_id,
                 study_id=study.study_id,
                 relationship_id=relationship.relationship_id,
                 status=PaperStudyDispositionStatus.PROMOTED,
                 objective_id=objective.objective_id,
             )
-            for study in paper_skim.studies
+            for study in paper_map.studies
             for relationship in study.relationships
         ),
     )
 
 
 def _ready_objective_facts_for_papers(
-    paper_skims: tuple[PaperSkim, ...],
+    paper_maps: tuple[PaperResearchMap, ...],
     objective: ResearchObjective,
 ) -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
         document_inputs=tuple(
             PreparedDocumentInput(
-                document_id=paper_skim.document_id,
-                preparation_fingerprint=f"fingerprint-{paper_skim.document_id}",
+                document_id=paper_map.document_id,
+                preparation_fingerprint=f"fingerprint-{paper_map.document_id}",
             )
-            for paper_skim in paper_skims
+            for paper_map in paper_maps
         ),
         research_objectives=(objective,),
         study_dispositions=tuple(
             PaperStudyDisposition(
-                document_id=paper_skim.document_id,
+                document_id=paper_map.document_id,
                 study_id=study.study_id,
                 relationship_id=relationship.relationship_id,
                 status=PaperStudyDispositionStatus.PROMOTED,
                 objective_id=objective.objective_id,
             )
-            for paper_skim in paper_skims
-            for study in paper_skim.studies
+            for paper_map in paper_maps
+            for study in paper_map.studies
             for relationship in study.relationships
         ),
     )
@@ -139,7 +139,7 @@ def _relationship_id(document_id: str, outcome: str) -> str:
     return f"relationship-{document_id}-{'-'.join(outcome.casefold().split())}"
 
 
-def _paper_skim(
+def _paper_map(
     *,
     document_id: str,
     varied_factors: tuple[str, ...],
@@ -147,8 +147,8 @@ def _paper_skim(
     material_scope: tuple[str, ...],
     process_context: tuple[str, ...],
     source_ref: str,
-) -> PaperSkim:
-    return PaperSkim.from_mapping(
+) -> PaperResearchMap:
+    return PaperResearchMap.from_mapping(
         {
             "document_id": document_id,
             "doc_role": "experimental",
@@ -444,7 +444,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
-        paper_skims=(),
+        paper_maps=(),
         frames=(frame,),
         routes=(),
         evidence_records=evidence_records,
@@ -475,7 +475,7 @@ async def test_objective_contribution_reports_only_final_degraded_source_outcome
         model_name="test-model",
         prompt_versions={},
     )
-    paper_skim = PaperSkim.from_mapping(
+    paper_map = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "doc_role": "experimental",
@@ -550,7 +550,7 @@ async def test_objective_contribution_reports_only_final_degraded_source_outcome
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
-        paper_skims=(paper_skim,),
+        paper_maps=(paper_map,),
         frames=(frame,),
         routes=(
             EvidenceCandidate.from_mapping(
@@ -575,7 +575,7 @@ async def test_objective_contribution_reports_only_final_degraded_source_outcome
     assert contributions[0].warnings == (
         "1 Source unit(s) used conservative paper framing fallback.",
         "1 Source unit(s) used deterministic evidence routing fallback.",
-        "1 PaperSkim Source unit(s) failed extraction before Objective analysis.",
+        "1 PaperResearchMap Source unit(s) failed extraction before Objective analysis.",
         "1 selected source(s) failed extraction.",
     )
 
@@ -638,7 +638,7 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
             "confidence": 0.9,
         }
     )
-    paper_skim = _paper_skim(
+    paper_map = _paper_map(
         document_id="paper-1",
         varied_factors=("scan strategy rotation angle",),
         outcomes=("crystallographic texture", "yield strength"),
@@ -646,10 +646,10 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         process_context=("LPBF",),
         source_ref="b1",
     )
-    await service.paper_map_repository.replace(collection_id, paper_skim)
+    await service.paper_map_repository.replace(collection_id, paper_map)
     await service.objective_repository.replace(
         collection_id,
-        _ready_objective_facts(paper_skim, objective),
+        _ready_objective_facts(paper_map, objective),
     )
     analysis = await _queue_running_analysis(
         service,
@@ -736,7 +736,7 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
             "confidence": 0.9,
         }
     )
-    paper_skim = _paper_skim(
+    paper_map = _paper_map(
         document_id="paper-1",
         varied_factors=("heat treatment",),
         outcomes=("corrosion current",),
@@ -744,10 +744,10 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         process_context=("LPBF", "heat treatment"),
         source_ref="b1",
     )
-    await service.paper_map_repository.replace(collection_id, paper_skim)
+    await service.paper_map_repository.replace(collection_id, paper_map)
     await service.objective_repository.replace(
         collection_id,
-        _ready_objective_facts(paper_skim, objective),
+        _ready_objective_facts(paper_map, objective),
     )
     analysis = await _queue_running_analysis(
         service,
@@ -840,7 +840,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
             "confidence": 0.9,
         }
     )
-    paper_skim = _paper_skim(
+    paper_map = _paper_map(
         document_id="paper-1",
         varied_factors=("heat treatment",),
         outcomes=("corrosion current",),
@@ -848,10 +848,10 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
         process_context=("LPBF", "heat treatment"),
         source_ref="b1",
     )
-    await service.paper_map_repository.replace(collection_id, paper_skim)
+    await service.paper_map_repository.replace(collection_id, paper_map)
     await service.objective_repository.replace(
         collection_id,
-        _ready_objective_facts(paper_skim, objective),
+        _ready_objective_facts(paper_map, objective),
     )
     analysis = await _queue_running_analysis(
         service,
@@ -928,8 +928,8 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
             "confidence": 0.9,
         }
     )
-    paper_skims = tuple(
-        _paper_skim(
+    paper_maps = tuple(
+        _paper_map(
             document_id=document_id,
             varied_factors=("laser power",),
             outcomes=("relative density",),
@@ -939,11 +939,11 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         )
         for document_id in ("paper-1", "paper-2")
     )
-    for paper_skim in paper_skims:
-        await service.paper_map_repository.replace(collection_id, paper_skim)
+    for paper_map in paper_maps:
+        await service.paper_map_repository.replace(collection_id, paper_map)
     await service.objective_repository.replace(
         collection_id,
-        _ready_objective_facts_for_papers(paper_skims, objective),
+        _ready_objective_facts_for_papers(paper_maps, objective),
     )
 
     synthesis_calls: list[tuple[PaperContribution, ...]] = []

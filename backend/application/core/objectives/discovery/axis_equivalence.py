@@ -56,7 +56,7 @@ def build_research_axis_canonicalization_prompt(
         "- `material` pairs are material identities; `variable` pairs are changed "
         "factors; `outcome` pairs are measured or predicted responses.\n"
         "- Variable pairs may include `left_observations` and `right_observations`: "
-        "bounded PaperStudy observations showing a limited varied-factor list plus "
+        "bounded PaperResearchScope observations showing a limited varied-factor list plus "
         "process and sample context from studies where that exact label occurred. They "
         "help disambiguate scientific meaning and processing stage. They are incomplete, "
         "and co-occurrence is not equivalence evidence; a context value need not describe the "

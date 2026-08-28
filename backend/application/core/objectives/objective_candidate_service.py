@@ -16,12 +16,12 @@ from application.core.objectives.discovery.axis_equivalence import (
 )
 from domain.core import (
     ObjectiveFactSet,
-    PaperSkim,
+    PaperResearchMap,
     PaperSourceUnitCoverageStatus,
-    PaperStudy,
+    PaperResearchScope,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    PaperStudyRelationship,
+    PaperResearchRelationship,
     PreparedDocumentInput,
     ResearchObjective,
 )
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict[str, Any]], None]
 RelationshipInventory = Mapping[
     str,
-    tuple[str, PaperStudy, PaperStudyRelationship],
+    tuple[str, PaperResearchScope, PaperResearchRelationship],
 ]
 AxisMapping = Mapping[str, Mapping[str, str]]
 AxisPair = tuple[str, str, str]
@@ -111,12 +111,12 @@ class ObjectiveCandidateService:
         self,
         collection_id: str,
         *,
-        paper_skims: tuple[PaperSkim, ...],
+        paper_maps: tuple[PaperResearchMap, ...],
         document_inputs: tuple[PreparedDocumentInput, ...],
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
         progress_callback: ProgressCallback | None = None,
     ) -> ObjectiveFactSet:
-        source_relationship_inventory = self._relationship_inventory(paper_skims)
+        source_relationship_inventory = self._relationship_inventory(paper_maps)
         relationship_inventory = self._canonicalize_relationship_inventory_axes(
             collection_id=collection_id,
             axis_equivalence_classifier=axis_equivalence_classifier,
@@ -136,7 +136,7 @@ class ObjectiveCandidateService:
             is not None
         }
         relationship_groups = self._build_relationship_groups(
-            paper_skims,
+            paper_maps,
             relationship_inventory=relationship_inventory,
         )
         self._notify_progress(
@@ -145,12 +145,12 @@ class ObjectiveCandidateService:
             current=0,
             total=len(relationship_groups),
             unit="groups",
-            message="Promoting paper-study relationships with shared research scope.",
+            message="Promoting paper research relationships with shared scope.",
         )
 
         accepted_objectives: list[ResearchObjective] = []
         require_cross_paper_support = (
-            len({skim.document_id for skim in paper_skims}) > 1
+            len({paper_map.document_id for paper_map in paper_maps}) > 1
         )
         for group_number, group in enumerate(relationship_groups, start=1):
             relationship_ids = tuple(
@@ -215,8 +215,8 @@ class ObjectiveCandidateService:
         coverage_counts = {
             status: sum(
                 coverage.status is status
-                for skim in paper_skims
-                for coverage in skim.source_unit_coverage
+                for paper_map in paper_maps
+                for coverage in paper_map.source_unit_coverage
             )
             for status in PaperSourceUnitCoverageStatus
         }
@@ -231,7 +231,7 @@ class ObjectiveCandidateService:
         )
         logger.info(
             "Research objective discovery finished collection_id=%s "
-            "paper_skim_count=%s relationship_count=%s group_count=%s "
+            "paper_map_count=%s relationship_count=%s group_count=%s "
             "objective_count=%s promoted_relationship_count=%s "
             "rejected_relationship_count=%s pending_relationship_count=%s "
             "relationship_accounting_complete=%s unresolved_signal_count=%s "
@@ -239,7 +239,7 @@ class ObjectiveCandidateService:
             "no_study_signal_count=%s extraction_failed_count=%s "
             "coverage_complete=%s",
             collection_id,
-            len(paper_skims),
+            len(paper_maps),
             len(relationship_inventory),
             len(relationship_groups),
             len(research_objectives),
@@ -247,7 +247,7 @@ class ObjectiveCandidateService:
             disposition_counts[PaperStudyDispositionStatus.REJECTED],
             disposition_counts[PaperStudyDispositionStatus.PENDING],
             relationship_accounting_complete,
-            sum(len(skim.unresolved_signals) for skim in paper_skims),
+            sum(len(paper_map.unresolved_signals) for paper_map in paper_maps),
             coverage_counts[
                 PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED
             ],
@@ -265,20 +265,22 @@ class ObjectiveCandidateService:
 
     @staticmethod
     def _relationship_inventory(
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> dict[str, tuple[str, PaperStudy, PaperStudyRelationship]]:
-        inventory: dict[str, tuple[str, PaperStudy, PaperStudyRelationship]] = {}
-        for skim in paper_skims:
-            for study in skim.studies:
-                if study.document_id != skim.document_id:
-                    raise ValueError("paper study belongs to another skim document")
+        paper_maps: tuple[PaperResearchMap, ...],
+    ) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
+        inventory: dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]] = {}
+        for paper_map in paper_maps:
+            for study in paper_map.studies:
+                if study.document_id != paper_map.document_id:
+                    raise ValueError(
+                        "paper research scope belongs to another map document"
+                    )
                 for relationship in study.relationships:
                     if relationship.relationship_id in inventory:
                         raise ValueError(
-                            "paper study relationship ids must be collection-unique"
+                            "paper research relationship ids must be collection-unique"
                         )
                     inventory[relationship.relationship_id] = (
-                        skim.document_id,
+                        paper_map.document_id,
                         study,
                         relationship,
                     )
@@ -286,16 +288,18 @@ class ObjectiveCandidateService:
 
     def _build_relationship_groups(
         self,
-        paper_skims: tuple[PaperSkim, ...],
+        paper_maps: tuple[PaperResearchMap, ...],
         *,
         relationship_inventory: RelationshipInventory | None = None,
     ) -> list[list[dict[str, Any]]]:
-        inventory = relationship_inventory or self._relationship_inventory(paper_skims)
-        skims_by_document_id = {skim.document_id: skim for skim in paper_skims}
+        inventory = relationship_inventory or self._relationship_inventory(paper_maps)
+        maps_by_document_id = {
+            paper_map.document_id: paper_map for paper_map in paper_maps
+        }
         records = sorted(
             (
                 self._relationship_record(
-                    skims_by_document_id[document_id],
+                    maps_by_document_id[document_id],
                     study,
                     relationship,
                 )
@@ -383,20 +387,20 @@ class ObjectiveCandidateService:
 
     @staticmethod
     def _relationship_record(
-        skim: PaperSkim,
-        study: PaperStudy,
-        relationship: PaperStudyRelationship,
+        paper_map: PaperResearchMap,
+        study: PaperResearchScope,
+        relationship: PaperResearchRelationship,
     ) -> dict[str, Any]:
         study_record = study.to_record()
         study_record.pop("relationships", None)
         return {
-            "document_id": skim.document_id,
-            "doc_role": skim.doc_role,
+            "document_id": paper_map.document_id,
+            "doc_role": paper_map.doc_role,
             "study": study_record,
             "relationship": relationship.to_record(),
-            "evidence_density": skim.evidence_density,
-            "paper_confidence": skim.confidence,
-            "warnings": list(skim.warnings),
+            "evidence_density": paper_map.evidence_density,
+            "paper_confidence": paper_map.confidence,
+            "warnings": list(paper_map.warnings),
         }
 
     @staticmethod
@@ -427,23 +431,23 @@ class ObjectiveCandidateService:
         ):
             return _Compatibility.INCOMPATIBLE
         return cls._relationship_compatibility(
-            PaperStudy.from_mapping(
+            PaperResearchScope.from_mapping(
                 {**dict(left_study), "relationships": [dict(left_relationship)]}
             ),
-            PaperStudyRelationship.from_mapping(left_relationship),
-            PaperStudy.from_mapping(
+            PaperResearchRelationship.from_mapping(left_relationship),
+            PaperResearchScope.from_mapping(
                 {**dict(right_study), "relationships": [dict(right_relationship)]}
             ),
-            PaperStudyRelationship.from_mapping(right_relationship),
+            PaperResearchRelationship.from_mapping(right_relationship),
         )
 
     @classmethod
     def _relationship_compatibility(
         cls,
-        left_study: PaperStudy,
-        left: PaperStudyRelationship,
-        right_study: PaperStudy,
-        right: PaperStudyRelationship,
+        left_study: PaperResearchScope,
+        left: PaperResearchRelationship,
+        right_study: PaperResearchScope,
+        right: PaperResearchRelationship,
     ) -> _Compatibility:
         factors_share_scope = cls._axis_collections_are_equivalent(
             left.varied_factors,
@@ -691,10 +695,7 @@ class ObjectiveCandidateService:
                 studies,
                 excluded_axes=(*variables, *outcomes),
             ),
-            "requested_comparator": self._shared_study_scalar(
-                studies,
-                "comparator",
-            ),
+            "requested_comparator": None,
             "seed_document_ids": seed_document_ids,
             "source_relationship_ids": list(relationship_ids),
             "confidence": confidence,
@@ -785,22 +786,13 @@ class ObjectiveCandidateService:
 
     @staticmethod
     def _objective_seed_rejection_reason(
-        study: PaperStudy,
-        relationship: PaperStudyRelationship,
+        study: PaperResearchScope,
+        relationship: PaperResearchRelationship,
     ) -> str | None:
         if study.claim_scope != "current_work":
             return (
                 f"Study relationship has claim_scope={study.claim_scope} and cannot "
                 "directly seed a research objective."
-            )
-        if any(
-            property_matching.axis_label_is_mentioned(fixed_condition, factor)
-            for fixed_condition in study.fixed_conditions
-            for factor in relationship.varied_factors
-        ):
-            return (
-                "Study relationship cannot seed an objective because an alleged "
-                "varied factor is recorded as fixed in the same study."
             )
         if property_matching.outcome_label_requires_resolution(relationship.outcome):
             return (
@@ -811,7 +803,7 @@ class ObjectiveCandidateService:
 
     def _shared_study_values(
         self,
-        studies: tuple[PaperStudy, ...],
+        studies: tuple[PaperResearchScope, ...],
         field_name: str,
     ) -> list[str]:
         values_by_study = [tuple(getattr(study, field_name)) for study in studies]
@@ -881,8 +873,8 @@ class ObjectiveCandidateService:
 
     @staticmethod
     def _objective_confidence(
-        studies: tuple[PaperStudy, ...],
-        relationships: tuple[PaperStudyRelationship, ...],
+        studies: tuple[PaperResearchScope, ...],
+        relationships: tuple[PaperResearchRelationship, ...],
     ) -> float:
         available = tuple(
             confidence
@@ -896,17 +888,12 @@ class ObjectiveCandidateService:
 
     def _shared_study_constraints(
         self,
-        studies: tuple[PaperStudy, ...],
+        studies: tuple[PaperResearchScope, ...],
         *,
         excluded_axes: Iterable[str] = (),
     ) -> list[str]:
         constraints: list[str] = []
-        for field_name in (
-            "process_context",
-            "sample_context",
-            "test_context",
-            "fixed_conditions",
-        ):
+        for field_name in ("process_context",):
             constraints.extend(self._shared_study_values(studies, field_name))
         for field_name in ("design_type", "claim_scope"):
             if value := self._shared_study_scalar(studies, field_name):
@@ -923,7 +910,7 @@ class ObjectiveCandidateService:
     @classmethod
     def _shared_study_scalar(
         cls,
-        studies: tuple[PaperStudy, ...],
+        studies: tuple[PaperResearchScope, ...],
         field_name: str,
     ) -> str | None:
         values = tuple(getattr(study, field_name) for study in studies)
@@ -938,7 +925,7 @@ class ObjectiveCandidateService:
         collection_id: str,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
         relationship_inventory: RelationshipInventory,
-    ) -> dict[str, tuple[str, PaperStudy, PaperStudyRelationship]]:
+    ) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
         eligible_relationship_inventory = {
             relationship_id: record
             for relationship_id, record in relationship_inventory.items()
@@ -1152,10 +1139,6 @@ class ObjectiveCandidateService:
                         study.process_context,
                         limit=_AXIS_OBSERVATION_CONTEXT_LIMIT,
                     ),
-                    "sample_context": cls._bounded_axis_observation_values(
-                        study.sample_context,
-                        limit=_AXIS_OBSERVATION_CONTEXT_LIMIT,
-                    ),
                 }
                 axis_observations = observations.setdefault(key, [])
                 if (
@@ -1207,11 +1190,11 @@ class ObjectiveCandidateService:
     ) -> frozenset[AxisPair]:
         indexed_occurrences: dict[
             tuple[str, str],
-            dict[str, list[tuple[str, PaperStudy, str]]],
+            dict[str, list[tuple[str, PaperResearchScope, str]]],
         ] = {}
         indexed_outcomes: dict[
             tuple[str, str],
-            dict[str, list[tuple[str, PaperStudy, str]]],
+            dict[str, list[tuple[str, PaperResearchScope, str]]],
         ] = {}
         for document_id, study, relationship in relationship_inventory.values():
             outcome_key = cls._axis_identity(relationship.outcome)
@@ -1510,7 +1493,7 @@ class ObjectiveCandidateService:
 
     @staticmethod
     def _structured_result_source_count(
-        relationship: PaperStudyRelationship,
+        relationship: PaperResearchRelationship,
     ) -> int:
         """Count structured Source locators that can carry measured results.
 

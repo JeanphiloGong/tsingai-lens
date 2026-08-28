@@ -154,9 +154,9 @@ The production Research Agent currently exposes these automatic capabilities:
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
 - `propose_objective_drafts` records at most three focused, single-outcome
-  drafts in the Chat trajectory. PaperSkim relationships may be reported as
-  proposal context, but they are never presented as Evidence and this call does
-  not persist, confirm, analyze, or publish a Core Objective;
+  drafts in the Chat trajectory. PaperResearchMap relationships may be reported
+  as proposal context, but they are never presented as Evidence and this call
+  does not persist, confirm, analyze, or publish a Core Objective;
 - `create_objective_candidate` is a `write` capability. After exact-argument
   approval, it creates one unconfirmed `chat_assisted` Core candidate. Optional
   seed-document IDs record an untested paper-scope hypothesis, not support or
@@ -219,6 +219,13 @@ fingerprint. The command freezes the resolved `(document_id,
 preparation_fingerprint)` values, reads their current Profiles and Paper Maps,
 and replaces the current generated candidates. It does not silently include all
 Collection papers and does not prepare papers.
+
+A Paper Map is preliminary scope metadata: paper type, material and process
+themes, variable-to-outcome axes, review synthesis, Source lineage, coverage,
+and uncertainty. It does not contain experiment samples, tests, comparators,
+fixed conditions, parameter levels, or measurements. Confirmed-Objective
+analysis may use it to prioritize Source inspection and surface coverage
+warnings, but only facts grounded in inspected Sources may populate Evidence.
 
 `ResearchObjective` is the only business aggregate root. Its identity is
 `(collection_id, objective_id)`. The analysis-state and command responses
@@ -317,7 +324,7 @@ failure may have no reason.
 
 Each published contribution's `warnings` reports only final degraded coverage:
 conservative paper-framing fallback, deterministic evidence-routing fallback,
-PaperSkim Source units whose extraction ultimately failed, and selected
+PaperResearchMap Source units whose extraction ultimately failed, and selected
 Objective Evidence Sources whose extraction ultimately failed. A successful
 bounded retry or framing repair is not a warning. Warning text contains bounded
 counts rather than provider errors or raw exceptions.

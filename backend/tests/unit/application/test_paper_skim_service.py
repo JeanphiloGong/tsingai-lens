@@ -12,13 +12,13 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import (
-    StructuredPaperSkim,
+    StructuredPaperResearchMap,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
 )
-from application.core.objectives.paper_skim_service import PaperSkimService
-from domain.core import PaperSkim, PaperStudy
+from application.core.objectives.paper_skim_service import PaperResearchMapService
+from domain.core import PaperResearchMap, PaperResearchScope
 from domain.source import (
     SourceDocument,
     build_source_document_tree,
@@ -42,7 +42,7 @@ class _WindowExtractor:
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
         self.payloads.append(payload)
         source_units = payload.get("source_units") or []
         text = " ".join(
@@ -140,7 +140,7 @@ class _WindowExtractor:
                         "confidence": 0.88,
                     }
                 )
-        return StructuredPaperSkim(
+        return StructuredPaperResearchMap(
             doc_role="experimental",
             studies=studies,
             unresolved_signals=unresolved_signals,
@@ -267,7 +267,7 @@ class _BoundedSignalReconciliationExtractor(_WindowExtractor):
         self.reject_later_batches = reject_later_batches
         self.response_mode = response_mode
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
         self.payloads.append(payload)
         signals = []
         for source_unit in payload.get("source_units") or ():
@@ -282,7 +282,7 @@ class _BoundedSignalReconciliationExtractor(_WindowExtractor):
                     "confidence": 0.9,
                 }
             )
-        return StructuredPaperSkim(
+        return StructuredPaperResearchMap(
             doc_role="experimental",
             unresolved_signals=signals,
             evidence_density="high" if signals else "low",
@@ -528,20 +528,20 @@ def _build_skims(
     extractor: Any,
     *,
     progress: list[dict[str, Any]] | None = None,
-) -> tuple[PaperSkim, ...]:
-    return PaperSkimService().build_collection_paper_skims(
+) -> tuple[PaperResearchMap, ...]:
+    return PaperResearchMapService().build_collection_paper_maps(
         "collection-test",
         documents=artifacts,
         profiles_by_document_id={},
         document_trees_by_document_id={artifacts[0].document_id: tree},
-        study_window_extractor=extractor,
+        paper_map_extractor=extractor,
         signal_reconciler=extractor,
         progress_callback=progress.append if progress is not None else None,
     )
 
 
-def test_paper_skim_record_keeps_only_the_stable_source_link():
-    skim = PaperSkim.from_mapping({"document_id": "paper-1"})
+def test_paper_map_record_keeps_only_the_stable_source_link():
+    skim = PaperResearchMap.from_mapping({"document_id": "paper-1"})
 
     record = skim.to_record()
 
@@ -550,8 +550,8 @@ def test_paper_skim_record_keeps_only_the_stable_source_link():
     assert "source_filename" not in record
 
 
-def test_paper_skim_record_preserves_explicit_map_insufficiency():
-    skim = PaperSkim.from_mapping(
+def test_paper_map_record_preserves_explicit_map_insufficiency():
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "map_status": "insufficient_map",
@@ -559,7 +559,7 @@ def test_paper_skim_record_preserves_explicit_map_insufficiency():
         }
     )
 
-    restored = PaperSkim.from_mapping(skim.to_record())
+    restored = PaperResearchMap.from_mapping(skim.to_record())
 
     assert restored.map_status == "insufficient_map"
     assert restored.map_limitations == ("missing_outcome",)
@@ -716,9 +716,9 @@ def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
     )
 
     class DuplicateStudyExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             parsed = super().extract(payload)
-            return StructuredPaperSkim.model_construct(
+            return StructuredPaperResearchMap.model_construct(
                 doc_role=parsed.doc_role,
                 studies=[*parsed.studies, *parsed.studies],
                 unresolved_signals=parsed.unresolved_signals,
@@ -826,7 +826,7 @@ def test_independent_windows_run_concurrently_and_merge_in_source_order(monkeypa
             self._active_calls = 0
             self.max_active_calls = 0
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             with self._lock:
                 self._active_calls += 1
                 self.max_active_calls = max(
@@ -951,10 +951,10 @@ def test_model_declared_output_saturation_splits_without_losing_source_units():
     )
 
     class SaturatingExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             if len(payload["source_units"]) > 1:
                 self.payloads.append(payload)
-                return StructuredPaperSkim(output_saturated=True)
+                return StructuredPaperResearchMap(output_saturated=True)
             return super().extract(payload)
 
     extractor = SaturatingExtractor()
@@ -989,17 +989,17 @@ def test_short_singleton_saturation_recovers_through_source_local_signals():
             super().__init__()
             self.compact_payloads: list[dict[str, Any]] = []
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise StructuredOutputSaturatedError("singleton output saturated")
 
         def extract_source_signals(
             self,
             payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_payloads.append(payload)
             source_unit_id = payload["source_units"][0]["source_unit_id"]
-            return StructuredPaperSkim.model_validate(
+            return StructuredPaperResearchMap.model_validate(
                 {
                     "doc_role": "review",
                     "unresolved_signals": [
@@ -1079,17 +1079,17 @@ def test_short_singleton_structured_failure_recovers_source_local_signals(
             super().__init__()
             self.compact_payloads: list[dict[str, Any]] = []
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise full_failure
 
         def extract_source_signals(
             self,
             payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_payloads.append(payload)
             source_unit_id = payload["source_units"][0]["source_unit_id"]
-            return StructuredPaperSkim.model_validate(
+            return StructuredPaperResearchMap.model_validate(
                 {
                     "doc_role": "experimental",
                     "unresolved_signals": [
@@ -1136,21 +1136,21 @@ def test_compact_singleton_retries_one_transient_empty_response():
             super().__init__()
             self.compact_attempts = 0
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise StructuredOutputSaturatedError("singleton output saturated")
 
         def extract_source_signals(
             self,
             payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_attempts += 1
             if self.compact_attempts == 1:
                 raise RuntimeError(
                     "structured extraction returned empty response content"
                 )
             source_unit_id = payload["source_units"][0]["source_unit_id"]
-            return StructuredPaperSkim.model_validate(
+            return StructuredPaperResearchMap.model_validate(
                 {
                     "doc_role": "review",
                     "unresolved_signals": [
@@ -1192,14 +1192,14 @@ def test_compact_singleton_records_the_final_technical_failure_kind():
             super().__init__()
             self.compact_attempts = 0
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise StructuredOutputSaturatedError("singleton output saturated")
 
         def extract_source_signals(
             self,
             _payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_attempts += 1
             raise RuntimeError(
                 "structured extraction returned empty response content"
@@ -1232,7 +1232,7 @@ def test_dense_single_source_recovers_through_lossless_content_fragments():
     )
 
     class DenseSourceExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             content = str(payload["source_units"][0]["content"])
             if len(content) > 1200:
                 self.payloads.append(payload)
@@ -1283,7 +1283,7 @@ def test_successful_fragment_survives_while_failed_parent_coverage_stays_incompl
     )
 
     class PartiallyRecoveringExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             content = str(payload["source_units"][0]["content"])
             if len(content) > 1200:
                 self.payloads.append(payload)
@@ -1298,7 +1298,7 @@ def test_successful_fragment_survives_while_failed_parent_coverage_stays_incompl
         def extract_source_signals(
             self,
             _payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             raise RuntimeError("structured extraction returned empty response content")
 
     extractor = PartiallyRecoveringExtractor()
@@ -1331,7 +1331,7 @@ def test_single_source_content_recovery_preserves_structured_table_context():
         },
     }
 
-    fragments = PaperSkimService._split_single_source_unit_for_retry(source_unit)
+    fragments = PaperResearchMapService._split_single_source_unit_for_retry(source_unit)
 
     assert len(fragments) == 2
     assert "".join(
@@ -1361,7 +1361,7 @@ def test_semantic_single_source_failure_does_not_trigger_content_splitting():
     )
 
     class SemanticFailureExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise ValueError("paper skim references unknown Source-unit ids")
 
@@ -1402,7 +1402,7 @@ def test_single_source_recovery_classifies_only_density_shaped_failures(
     error: Exception,
     expected_kind: str | None,
 ) -> None:
-    assert PaperSkimService._single_source_recovery_kind(error) == expected_kind
+    assert PaperResearchMapService._single_source_recovery_kind(error) == expected_kind
 
 
 def test_single_source_content_recovery_has_a_fixed_request_bound():
@@ -1414,7 +1414,7 @@ def test_single_source_content_recovery_has_a_fixed_request_bound():
     )
 
     class AlwaysSaturatedExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise StructuredOutputSaturatedError("dense singleton output")
 
@@ -1452,14 +1452,14 @@ def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
             super().__init__()
             self.compact_payloads: list[dict[str, Any]] = []
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             source_units = payload.get("source_units") or []
             if any(
                 "METHOD_CANDIDATE" in str(unit.get("content") or "")
                 for unit in source_units
             ):
-                return StructuredPaperSkim(
+                return StructuredPaperResearchMap(
                     doc_role="experimental",
                     studies=[
                         _study(
@@ -1475,7 +1475,7 @@ def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
         def extract_source_signals(
             self,
             payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_payloads.append(payload)
             raise StructuredOutputSaturatedError("dense compact output")
 
@@ -1520,17 +1520,17 @@ def test_saturated_paper_map_recovers_each_source_directly_with_compact_screenin
             super().__init__(reconciliation="unresolved")
             self.compact_payloads: list[dict[str, Any]] = []
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             raise StructuredOutputSaturatedError("paper map output saturated")
 
         def extract_source_signals(
             self,
             payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_payloads.append(payload)
             source_unit = payload["source_units"][0]
-            return StructuredPaperSkim.model_validate(
+            return StructuredPaperResearchMap.model_validate(
                 {
                     "doc_role": "experimental",
                     "unresolved_signals": [
@@ -1575,13 +1575,13 @@ def test_dense_source_in_saturated_map_uses_bounded_content_fragments():
             super().__init__(reconciliation="unresolved")
             self.compact_payloads: list[dict[str, Any]] = []
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             source_units = payload["source_units"]
             if len(source_units) > 1:
                 raise StructuredOutputSaturatedError("paper map output saturated")
             source_unit = source_units[0]
-            return StructuredPaperSkim.model_validate(
+            return StructuredPaperResearchMap.model_validate(
                 {
                     "doc_role": "experimental",
                     "unresolved_signals": [
@@ -1599,12 +1599,12 @@ def test_dense_source_in_saturated_map_uses_bounded_content_fragments():
         def extract_source_signals(
             self,
             payload: dict[str, Any],
-        ) -> StructuredPaperSkim:
+        ) -> StructuredPaperResearchMap:
             self.compact_payloads.append(payload)
             source_unit = payload["source_units"][0]
             if len(str(source_unit["content"])) > 1600:
                 raise StructuredOutputSaturatedError("dense compact output")
-            return StructuredPaperSkim.model_validate(
+            return StructuredPaperResearchMap.model_validate(
                 {
                     "doc_role": "experimental",
                     "unresolved_signals": [
@@ -2207,7 +2207,7 @@ def test_initial_high_level_map_can_expand_to_results_but_still_defers_methods()
     assert all_figure_captions == ["FIGURE_SOURCE"]
 
 
-def test_tables_and_figures_with_filename_heading_paths_reach_paper_skim_before_references():
+def test_tables_and_figures_with_filename_heading_paths_reach_paper_map_before_references():
     artifacts, tree = _artifacts(
         blocks=[
             {**_heading("results", "Results", 1), "page": 2},
@@ -2280,82 +2280,39 @@ def test_complete_window_candidate_keeps_its_stable_source_reference():
     ]
 
 
-def test_fixed_process_setting_is_not_retained_as_a_varied_factor_relationship():
-    payload = {
-        "window_id": "methods-results-1",
-        "source_units": [
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    (
+        ("sample_context", ["vertical coupon"]),
+        ("test_context", ["room-temperature tensile test"]),
+        ("comparator", "preheated versus unheated build platform"),
+        ("fixed_conditions", ["laser power = 200 W"]),
+    ),
+)
+def test_pre_objective_map_contract_rejects_experiment_context(
+    field_name: str,
+    value: object,
+):
+    study = {
+        "experiment_label": "316L build-platform preheating study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["laser powder bed fusion"],
+        "relationships": [
             {
-                "source_unit_id": "source-fixed-power",
-                "source_kind": "block",
-                "source_ref": "methods-power",
-                "section_path": "Methods",
-                "content": "All specimens were fabricated at a fixed laser power of 200 W.",
-            },
-            {
-                "source_unit_id": "source-preheating-result",
-                "source_kind": "block",
-                "source_ref": "results-preheating",
-                "section_path": "Results",
-                "content": (
-                    "Build-platform preheating temperature was varied and porosity "
-                    "was measured for every condition."
-                ),
-            },
-        ],
-    }
-    parsed = StructuredPaperSkim(
-        studies=[
-            {
-                "experiment_label": "316L build-platform preheating experiment",
-                "design_type": "experimental",
-                "claim_scope": "current_work",
-                "material_scope": ["316L stainless steel"],
-                "process_context": ["laser powder bed fusion"],
-                "comparator": "preheated versus unheated build platform",
-                "fixed_conditions": ["laser power = 200 W"],
-                "relationships": [
-                    {
-                        "varied_factors": ["laser power"],
-                        "outcome": "relative density",
-                        "source_unit_ids": ["source-fixed-power"],
-                        "confidence": 0.91,
-                    },
-                    {
-                        "varied_factors": ["build platform preheating temperature"],
-                        "outcome": "porosity",
-                        "source_unit_ids": ["source-preheating-result"],
-                        "confidence": 0.93,
-                    },
-                ],
-                "confidence": 0.9,
+                "varied_factors": ["build platform preheating temperature"],
+                "outcome": "porosity",
+                "source_unit_ids": ["source-preheating-result"],
+                "confidence": 0.93,
             }
-        ]
-    )
+        ],
+        "confidence": 0.9,
+        field_name: value,
+    }
 
-    skim, signals = PaperSkimService()._resolve_window_result(
-        document_id="paper-preheating",
-        payload=payload,
-        parsed=parsed,
-    )
-
-    assert len(skim.studies) == 1
-    assert [relationship.varied_factors for relationship in skim.studies[0].relationships] == [
-        ("build platform preheating temperature",)
-    ]
-    assert len(signals) == 1
-    assert signals[0].signal.signal_type == "outcome"
-    assert signals[0].signal.label == "relative density"
-    assert signals[0].signal.reason == (
-        "alleged varied factor is also recorded as fixed in the same study"
-    )
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "unresolved_signal_emitted",
-        "relationship_emitted",
-    ]
-    assert skim.studies[0].sample_context == ()
-    assert skim.studies[0].test_context == ()
-    assert skim.studies[0].comparator is None
-    assert skim.studies[0].fixed_conditions == ()
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        StructuredPaperResearchMap(studies=[study])
 
 
 def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
@@ -2371,7 +2328,7 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
             }
         ],
     }
-    parsed = StructuredPaperSkim(
+    parsed = StructuredPaperResearchMap(
         studies=[
             {
                 "experiment_label": "heat-treatment experiment",
@@ -2392,7 +2349,7 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
         ]
     )
 
-    skim, signals = PaperSkimService()._resolve_window_result(
+    skim, signals = PaperResearchMapService()._resolve_window_result(
         document_id="paper-heat-treatment",
         payload=payload,
         parsed=parsed,
@@ -2426,7 +2383,7 @@ def test_review_cited_experiment_cannot_become_current_work():
             }
         ],
     }
-    parsed = StructuredPaperSkim(
+    parsed = StructuredPaperResearchMap(
         doc_role="review",
         studies=[
             {
@@ -2459,7 +2416,7 @@ def test_review_cited_experiment_cannot_become_current_work():
         ],
     )
 
-    skim, signals = PaperSkimService()._resolve_window_result(
+    skim, signals = PaperResearchMapService()._resolve_window_result(
         document_id="review-paper",
         payload=payload,
         parsed=parsed,
@@ -2498,13 +2455,13 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
     )
 
     class ReviewExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
             source_ids = {
                 str(unit["source_ref"]): str(unit["source_unit_id"])
                 for unit in payload["source_units"]
             }
-            return StructuredPaperSkim(
+            return StructuredPaperResearchMap(
                 doc_role="review",
                 studies=[
                     {
@@ -2585,7 +2542,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
             )
 
     extractor = ReviewExtractor()
-    skim = PaperSkimService().build_collection_paper_skims(
+    skim = PaperResearchMapService().build_collection_paper_maps(
         "collection-test",
         documents=artifacts,
         profiles_by_document_id={
@@ -2596,7 +2553,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
             )
         },
         document_trees_by_document_id={"paper-1": tree},
-        study_window_extractor=extractor,
+        paper_map_extractor=extractor,
         signal_reconciler=extractor,
     )[0]
 
@@ -3276,9 +3233,9 @@ def test_equivalent_candidates_from_multiple_windows_are_consolidated_once():
 
 
 def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3289,7 +3246,6 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
                         "claim_scope": "current_work",
                         "material_scope": ["Ti-6Al-4V"],
                         "process_context": ["heat treatment at 920 C"],
-                        "sample_context": ["heat-treated coupons"],
                         "relationships": [
                             {
                                 "varied_factors": ["heat treatment temperature"],
@@ -3308,7 +3264,7 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
                 ],
             }
         ),
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3319,7 +3275,6 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
                         "claim_scope": "current_work",
                         "material_scope": ["Ti-6Al-4V"],
                         "process_context": ["heat treatment at 920 C"],
-                        "sample_context": ["heat-treated coupons"],
                         "relationships": [
                             {
                                 "varied_factors": ["heat treatment temperature"],
@@ -3340,7 +3295,7 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
         ),
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3352,10 +3307,10 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
     } == {"grain size", "alpha phase fraction"}
 
 
-def test_labeled_and_unlabeled_repeated_claims_need_identifying_context_to_merge():
-    service = PaperSkimService()
+def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3366,7 +3321,6 @@ def test_labeled_and_unlabeled_repeated_claims_need_identifying_context_to_merge
                         "claim_scope": "current_work",
                         "material_scope": ["Ti-6Al-4V"],
                         "process_context": ["heat treatment"],
-                        "sample_context": ["heat-treated coupons"],
                         "relationships": [
                             {
                                 "varied_factors": ["heat treatment temperature"],
@@ -3385,7 +3339,7 @@ def test_labeled_and_unlabeled_repeated_claims_need_identifying_context_to_merge
                 ],
             }
         ),
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3396,7 +3350,6 @@ def test_labeled_and_unlabeled_repeated_claims_need_identifying_context_to_merge
                         "claim_scope": "current_work",
                         "material_scope": ["Ti-6Al-4V"],
                         "process_context": ["heat treatment"],
-                        "sample_context": ["heat-treated coupons"],
                         "relationships": [
                             {
                                 "varied_factors": ["heat treatment temperature"],
@@ -3417,28 +3370,25 @@ def test_labeled_and_unlabeled_repeated_claims_need_identifying_context_to_merge
         ),
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
     )
 
-    assert len(skim.studies) == 1
-    relationship = skim.studies[0].relationships[0]
-    assert relationship.confidence == 0.9
+    assert len(skim.studies) == 2
     assert {
-        (source_ref.source_kind, source_ref.source_ref)
+        source_ref.source_ref
+        for study in skim.studies
+        for relationship in study.relationships
         for source_ref in relationship.source_refs
-    } == {
-        ("block", "abstract-claim"),
-        ("block", "results-claim"),
-    }
+    } == {"abstract-claim", "results-claim"}
 
 
 def test_different_experiment_labels_keep_equal_relationship_axes_separate():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3451,7 +3401,6 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
                             confidence=0.9,
                         ),
                         "experiment_label": experiment_label,
-                        "sample_context": ["heat-treated coupons"],
                     }
                 ],
             }
@@ -3459,7 +3408,7 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
         for experiment_label in ("experiment A", "experiment B")
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3469,15 +3418,14 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
 
 
 def test_merged_relationship_identity_keeps_its_final_study_boundary():
-    def merge_for_test_context(test_context: str) -> PaperStudy:
+    def merge_for_experiment(experiment_kind: str) -> PaperResearchScope:
         studies = tuple(
-            PaperStudy.from_mapping(
+            PaperResearchScope.from_mapping(
                 {
                     "document_id": "paper-1",
                     "design_type": "experimental",
                     "claim_scope": "current_work",
-                    "experiment_label": f"{test_context} experiment",
-                    "test_context": [test_context],
+                    "experiment_label": f"{experiment_kind} experiment",
                     "relationships": [
                         {
                             "varied_factors": ["laser power"],
@@ -3494,14 +3442,14 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
             )
             for source_ref in ("methods-1", "results-1")
         )
-        return PaperSkimService._merge_studies(
+        return PaperResearchMapService._merge_studies(
             studies[0],
             studies[1],
             document_id="paper-1",
         )
 
-    tensile = merge_for_test_context("ASTM E8 tensile test")
-    hardness = merge_for_test_context("Vickers microhardness test")
+    tensile = merge_for_experiment("tensile")
+    hardness = merge_for_experiment("microhardness")
 
     assert tensile.relationships[0].relationship_id != hardness.relationships[0].relationship_id
 
@@ -3522,9 +3470,9 @@ def test_candidates_with_different_variable_outcome_links_are_not_merged():
 
 
 def test_same_axes_with_incompatible_process_context_are_not_merged():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3537,7 +3485,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
                 ],
             }
         ),
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3552,7 +3500,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
         ),
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3562,9 +3510,9 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
 
 
 def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3577,7 +3525,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
                 ],
             }
         ),
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3592,7 +3540,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
         ),
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3602,9 +3550,9 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
 
 
 def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3634,7 +3582,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
                 ],
             }
         ),
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -3666,7 +3614,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
         ),
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3676,9 +3624,9 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
 
 
 def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "warnings": [f"warning-{position}"],
@@ -3687,7 +3635,7 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
         for position in range(4)
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3697,15 +3645,15 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
 
 
 def test_document_profile_owns_the_paper_role_across_windows():
-    service = PaperSkimService()
+    service = PaperResearchMapService()
     window_skims = [
-        PaperSkim.from_mapping({"document_id": "paper-1", "doc_role": "review"}),
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping({"document_id": "paper-1", "doc_role": "review"}),
+        PaperResearchMap.from_mapping(
             {"document_id": "paper-1", "doc_role": "experimental"}
         ),
     ]
 
-    skim = service._consolidate_window_skims(
+    skim = service._consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=SimpleNamespace(doc_type="experimental"),
@@ -3727,7 +3675,7 @@ def test_document_profile_bounds_study_claim_scope(
     input_scope: str,
     expected_scope: str,
 ):
-    study = PaperStudy.from_mapping(
+    study = PaperResearchScope.from_mapping(
         {
             **_study(
                 varied_factors=["reheating condition"],
@@ -3739,10 +3687,10 @@ def test_document_profile_bounds_study_claim_scope(
         }
     )
 
-    skim = PaperSkimService()._consolidate_window_skims(
+    skim = PaperResearchMapService()._consolidate_window_maps(
         "paper-1",
         [
-            PaperSkim.from_mapping(
+            PaperResearchMap.from_mapping(
                 {
                     "document_id": "paper-1",
                     "doc_role": profile_doc_type,

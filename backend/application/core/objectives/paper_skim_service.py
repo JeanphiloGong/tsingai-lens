@@ -20,11 +20,11 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import (
     PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT,
-    PAPER_SKIM_PROMPT_TOKEN_LIMIT,
-    PaperStudyWindowExtractor,
-    StructuredPaperSkim,
-    StructuredPaperStudy,
-    StructuredPaperStudyRelationship,
+    PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT,
+    PaperResearchMapExtractor,
+    StructuredPaperResearchMap,
+    StructuredPaperResearchScope,
+    StructuredPaperResearchRelationship,
     StructuredReviewSynthesisMap,
     _review_synthesis_only,
 )
@@ -32,12 +32,12 @@ from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
 )
 from domain.core import (
-    PaperSkim,
+    PaperResearchMap,
     PaperSourceUnitCoverage,
     PaperSourceUnitCoverageStatus,
-    PaperStudy,
-    PaperStudyRelationship,
-    PaperStudySignal,
+    PaperResearchScope,
+    PaperResearchRelationship,
+    PaperResearchSignal,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
 )
@@ -120,7 +120,7 @@ class _SkimSourceItem:
 
 @dataclass(frozen=True)
 class _PaperSignalInput:
-    signal: PaperStudySignal
+    signal: PaperResearchSignal
     source_contexts: tuple[dict[str, Any], ...]
 
     def to_payload(self) -> dict[str, Any]:
@@ -176,10 +176,9 @@ class _PaperExtractionBudget:
             return True
 
 
-class PaperSkimService:
+class PaperResearchMapService:
     """Build a bounded Source-linked map of each paper's stated research scope."""
 
-    # define a method that produces one PaperSkim per document
     def build_document_paper_map(
         self,
         collection_id: str,
@@ -187,21 +186,21 @@ class PaperSkimService:
         document: SourceDocument,
         profile: Any,
         document_tree: SourceDocumentTree | None,
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None = None,
-    ) -> PaperSkim:
-        return self.build_collection_paper_skims(
+    ) -> PaperResearchMap:
+        return self.build_collection_paper_maps(
             collection_id,
             documents=(document,),
             profiles_by_document_id={document.document_id: profile},
             document_trees_by_document_id={document.document_id: document_tree},
-            study_window_extractor=study_window_extractor,
+            paper_map_extractor=paper_map_extractor,
             signal_reconciler=signal_reconciler,
             progress_callback=progress_callback,
         )[0]
 
-    def build_collection_paper_skims(
+    def build_collection_paper_maps(
         self,
         collection_id: str,
         *,
@@ -211,29 +210,17 @@ class PaperSkimService:
             str,
             SourceDocumentTree | None,
         ],
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None = None,
-    ) -> tuple[PaperSkim, ...]:
-        """
-        Args:
-            collection_id:  used for tracing
-            documents: contains the already parsed papers, including paragraphs, tables, row, and figures
-            profiles_by_document_id: the profile supplies the paper type, such as experimental or review
-            document_trees_by_document_id: supplies section herarchy and original source ordering
-            study_window_extractor: maps stated research scope from one bounded Source window
-            signal_reconciler: decides whether incomplete variable and outcome signals belong to the same within-paper study
-            progress_callback: is task progress reporting
-        """
+    ) -> tuple[PaperResearchMap, ...]:
         logger.info(
-            "Research objective paper skim started collection_id=%s document_count=%s",
+            "Research objective paper map started collection_id=%s document_count=%s",
             collection_id,
             len(documents),
         )
-        # collects one final PaperSkim for each document
-        paper_skims: list[PaperSkim] = []
+        paper_maps: list[PaperResearchMap] = []
 
-        # Papers are processed sequentially here, although windows inside one paprt may execute concurrently
         document_count = len(documents)
         for document_position, document in enumerate(documents, start=1):
             source_filename = self._resolve_source_filename(document)
@@ -242,7 +229,7 @@ class PaperSkimService:
             document_table_rows = list(document.table_rows)
             document_figures = list(document.figures)
             logger.info(
-                "Research objective paper skim document started collection_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
+                "Research objective paper map document started collection_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
                 collection_id,
                 document.document_id,
                 document_position,
@@ -251,7 +238,7 @@ class PaperSkimService:
                 len(document_tables),
                 len(document_figures),
             )
-            payloads = self._build_paper_skim_payloads(
+            payloads = self._build_paper_map_payloads(
                 collection_id=collection_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
@@ -260,9 +247,9 @@ class PaperSkimService:
                 table_rows=document_table_rows,
                 figures=document_figures,
                 document_tree=document_trees_by_document_id.get(document.document_id),
-                study_window_extractor=study_window_extractor,
+                paper_map_extractor=paper_map_extractor,
             )
-            window_skims: list[PaperSkim] = []
+            window_maps: list[PaperResearchMap] = []
             paper_signals: list[_PaperSignalInput] = []
             window_count = len(payloads)
             selected_source_unit_count = sum(
@@ -292,22 +279,22 @@ class PaperSkimService:
                     active_window_count=window_count,
                     active_window_role=payload["window_role"],
                 )
-            for batch_skims, batch_signals in self._extract_window_payloads(
+            for batch_maps, batch_signals in self._extract_window_payloads(
                 collection_id=collection_id,
                 document_id=document.document_id,
                 payloads=payloads,
-                study_window_extractor=study_window_extractor,
+                paper_map_extractor=paper_map_extractor,
                 extraction_budget=extraction_budget,
             ):
-                window_skims.extend(batch_skims)
+                window_maps.extend(batch_maps)
                 paper_signals.extend(batch_signals)
-            paper_skim = self._consolidate_window_skims(
+            paper_map = self._consolidate_window_maps(
                 document.document_id,
-                window_skims,
+                window_maps,
                 profile=profiles_by_document_id.get(document.document_id),
             )
             assessment = self._assess_paper_map(
-                paper_skim,
+                paper_map,
                 signals=tuple(item.signal for item in paper_signals),
                 final=False,
             )
@@ -321,7 +308,7 @@ class PaperSkimService:
                     for unit in payload.get("source_units") or ()
                     if isinstance(unit, Mapping)
                 )
-                expansion_payloads = self._build_paper_skim_payloads(
+                expansion_payloads = self._build_paper_map_payloads(
                     collection_id=collection_id,
                     document=document,
                     profile=profiles_by_document_id.get(document.document_id),
@@ -332,7 +319,7 @@ class PaperSkimService:
                     document_tree=document_trees_by_document_id.get(
                         document.document_id
                     ),
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     selection_focus=assessment.expansion_focus,
                     excluded_source_keys=selected_source_keys,
                 )
@@ -359,23 +346,23 @@ class PaperSkimService:
                             f"targeted_{assessment.expansion_focus}"
                         ),
                     )
-                for batch_skims, batch_signals in self._extract_window_payloads(
+                for batch_maps, batch_signals in self._extract_window_payloads(
                     collection_id=collection_id,
                     document_id=document.document_id,
                     payloads=expansion_payloads,
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                 ):
-                    window_skims.extend(batch_skims)
+                    window_maps.extend(batch_maps)
                     paper_signals.extend(batch_signals)
                 payloads.extend(expansion_payloads)
-                paper_skim = self._consolidate_window_skims(
+                paper_map = self._consolidate_window_maps(
                     document.document_id,
-                    window_skims,
+                    window_maps,
                     profile=profiles_by_document_id.get(document.document_id),
                 )
-            paper_skim = self._reconcile_paper_signals(
-                paper_skim,
+            paper_map = self._reconcile_paper_signals(
+                paper_map,
                 paper_signals,
                 signal_reconciler=signal_reconciler,
                 extraction_budget=extraction_budget,
@@ -386,31 +373,31 @@ class PaperSkimService:
                 source_filename=source_filename,
             )
             final_assessment = self._assess_paper_map(
-                paper_skim,
-                signals=paper_skim.unresolved_signals,
+                paper_map,
+                signals=paper_map.unresolved_signals,
                 final=True,
             )
-            paper_skim = replace(
-                paper_skim,
+            paper_map = replace(
+                paper_map,
                 map_status=final_assessment.status,
                 map_limitations=final_assessment.limitations,
             )
-            paper_skims.append(paper_skim)
+            paper_maps.append(paper_map)
             logger.info(
-                "Research objective paper skim document finished collection_id=%s document_id=%s document_position=%s document_count=%s window_count=%s doc_role=%s study_count=%s relationship_count=%s unresolved_signal_count=%s completed_documents=%s remaining_documents=%s",
+                "Research objective paper map document finished collection_id=%s document_id=%s document_position=%s document_count=%s window_count=%s doc_role=%s study_count=%s relationship_count=%s unresolved_signal_count=%s completed_documents=%s remaining_documents=%s",
                 collection_id,
                 document.document_id,
                 document_position,
                 document_count,
                 len(payloads),
-                paper_skim.doc_role,
-                len(paper_skim.studies),
-                sum(len(study.relationships) for study in paper_skim.studies),
-                len(paper_skim.unresolved_signals),
+                paper_map.doc_role,
+                len(paper_map.studies),
+                sum(len(study.relationships) for study in paper_map.studies),
+                len(paper_map.unresolved_signals),
                 document_position,
                 max(document_count - document_position, 0),
             )
-        return tuple(paper_skims)
+        return tuple(paper_maps)
 
     def _extract_window_payloads(
         self,
@@ -418,10 +405,10 @@ class PaperSkimService:
         collection_id: str,
         document_id: str,
         payloads: list[dict[str, Any]],
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: _PaperExtractionBudget,
     ) -> tuple[
-        tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]],
+        tuple[tuple[PaperResearchMap, ...], tuple[_PaperSignalInput, ...]],
         ...,
     ]:
         if len(payloads) <= 1 or self._max_extraction_concurrency() == 1:
@@ -430,7 +417,7 @@ class PaperSkimService:
                     collection_id=collection_id,
                     document_id=document_id,
                     payload=payload,
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                 )
                 for payload in payloads
@@ -446,7 +433,7 @@ class PaperSkimService:
                     collection_id=collection_id,
                     document_id=document_id,
                     payload=payload,
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                 )
                 for payload in payloads
@@ -537,7 +524,7 @@ class PaperSkimService:
             ),
         )
 
-    def _build_paper_skim_payloads(
+    def _build_paper_map_payloads(
         self,
         *,
         collection_id: str,
@@ -548,7 +535,7 @@ class PaperSkimService:
         table_rows: list[Any],
         figures: list[Any],
         document_tree: SourceDocumentTree | None = None,
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         selection_focus: str | None = None,
         excluded_source_keys: frozenset[tuple[str, str]] = frozenset(),
     ) -> list[dict[str, Any]]:
@@ -620,7 +607,7 @@ class PaperSkimService:
                 payloads.extend(
                     self._fit_payload_to_prompt_limit(
                         payload,
-                        study_window_extractor=study_window_extractor,
+                        paper_map_extractor=paper_map_extractor,
                     )
                 )
         if payloads:
@@ -638,7 +625,7 @@ class PaperSkimService:
         return list(
             self._fit_payload_to_prompt_limit(
                 empty_payload,
-                study_window_extractor=study_window_extractor,
+                paper_map_extractor=paper_map_extractor,
             )
         )
 
@@ -647,7 +634,7 @@ class PaperSkimService:
         cls,
         items: list[_SkimSourceItem],
     ) -> list[_SkimSourceItem]:
-        """Select how a researcher skims scope before inspecting experiments."""
+        """Select how a researcher maps scope before inspecting experiments."""
 
         abstract_items: list[_SkimSourceItem] = []
         conclusion_items: list[_SkimSourceItem] = []
@@ -1050,18 +1037,18 @@ class PaperSkimService:
             return (item,)
         if isinstance(item.content, Mapping):
             if "row_text" in item.content:
-                return PaperSkimService._split_table_row_source_item(item)
-            return PaperSkimService._split_structured_source_item(item)
+                return PaperResearchMapService._split_table_row_source_item(item)
+            return PaperResearchMapService._split_structured_source_item(item)
         if not isinstance(item.content, str):
             raise ValueError(
-                "paper skim Source item cannot fit in a bounded window"
+                "paper map Source item cannot fit in a bounded window"
             )
         text = str(item.content)
         chunks: list[str] = []
         start = 0
         while len(text) - start > _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
             hard_end = start + _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT
-            split_at = PaperSkimService._natural_text_split(text, start, hard_end)
+            split_at = PaperResearchMapService._natural_text_split(text, start, hard_end)
             chunks.append(text[start:split_at])
             start = split_at
         chunks.append(text[start:])
@@ -1107,10 +1094,10 @@ class PaperSkimService:
                     high = candidate_end - 1
             if end == start:
                 raise ValueError(
-                    "paper skim table context cannot fit in a bounded window"
+                    "paper map table context cannot fit in a bounded window"
                 )
             if end < len(row_text):
-                end = PaperSkimService._natural_text_split(row_text, start, end)
+                end = PaperResearchMapService._natural_text_split(row_text, start, end)
             chunks.append(
                 replace(
                     item,
@@ -1130,10 +1117,10 @@ class PaperSkimService:
         item: _SkimSourceItem,
     ) -> tuple[_SkimSourceItem, ...]:
         chunks: list[_SkimSourceItem] = []
-        for path, value in PaperSkimService._structured_source_leaves(item.content):
+        for path, value in PaperResearchMapService._structured_source_leaves(item.content):
             if isinstance(value, str):
                 chunks.extend(
-                    PaperSkimService._split_structured_text_value(
+                    PaperResearchMapService._split_structured_text_value(
                         item,
                         path=path,
                         value=value,
@@ -1149,7 +1136,7 @@ class PaperSkimService:
             )
             if chunk.size > _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
                 raise ValueError(
-                    "paper skim structured Source value cannot fit in a bounded "
+                    "paper map structured Source value cannot fit in a bounded "
                     "window"
                 )
             chunks.append(chunk)
@@ -1166,7 +1153,7 @@ class PaperSkimService:
             return tuple(
                 leaf
                 for key, child in value.items()
-                for leaf in PaperSkimService._structured_source_leaves(
+                for leaf in PaperResearchMapService._structured_source_leaves(
                     child,
                     (*path, str(key)),
                 )
@@ -1177,7 +1164,7 @@ class PaperSkimService:
             return tuple(
                 leaf
                 for position, child in enumerate(value)
-                for leaf in PaperSkimService._structured_source_leaves(
+                for leaf in PaperResearchMapService._structured_source_leaves(
                     child,
                     (*path, position),
                 )
@@ -1226,11 +1213,11 @@ class PaperSkimService:
                     high = candidate_end - 1
             if end == start:
                 raise ValueError(
-                    "paper skim structured Source path cannot fit in a bounded "
+                    "paper map structured Source path cannot fit in a bounded "
                     "window"
                 )
             if end < len(value):
-                end = PaperSkimService._natural_text_split(value, start, end)
+                end = PaperResearchMapService._natural_text_split(value, start, end)
             chunks.append(
                 replace(
                     item,
@@ -1274,7 +1261,7 @@ class PaperSkimService:
         if not all(source_unit_ids) or len(source_unit_ids) != len(
             set(source_unit_ids)
         ):
-            raise ValueError("paper skim Source-unit ids must be non-empty and unique")
+            raise ValueError("paper map Source-unit ids must be non-empty and unique")
         source_units = [
             {
                 "source_unit_id": item.source_unit_id,
@@ -1310,15 +1297,15 @@ class PaperSkimService:
         collection_id: str,
         document_id: str,
         payload: Mapping[str, Any],
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: _PaperExtractionBudget,
         attempt: int = 1,
         content_split_depth: int = 0,
-    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
+    ) -> tuple[tuple[PaperResearchMap, ...], tuple[_PaperSignalInput, ...]]:
         if not extraction_budget.reserve(recovery=attempt > 1):
             failure_kind = extraction_budget.failure_kind or "recovery_budget_exhausted"
             logger.warning(
-                "Paper skim document budget exhausted; preserving partial coverage "
+                "Paper map document budget exhausted; preserving partial coverage "
                 "collection_id=%s document_id=%s window_id=%s attempt=%s "
                 "source_unit_count=%s failure_kind=%s recovery_calls=%s "
                 "max_recovery_calls=%s",
@@ -1333,7 +1320,7 @@ class PaperSkimService:
             )
             return (
                 (
-                    self._failed_source_unit_skim(
+                    self._failed_source_unit_map(
                         document_id=document_id,
                         payload=payload,
                         failure_kind=failure_kind,
@@ -1342,13 +1329,13 @@ class PaperSkimService:
                 (),
             )
         try:
-            parsed = study_window_extractor.extract(dict(payload))
-            window_skim, window_signals = self._resolve_window_result(
+            parsed = paper_map_extractor.extract(dict(payload))
+            window_map, window_signals = self._resolve_window_result(
                 document_id=document_id,
                 payload=payload,
                 parsed=parsed,
             )
-            return (window_skim,), window_signals
+            return (window_map,), window_signals
         except Exception as exc:  # noqa: BLE001
             source_units = tuple(
                 unit
@@ -1360,7 +1347,7 @@ class PaperSkimService:
                 len(source_units) > 1
                 and failure_kind is not None
                 and callable(
-                    getattr(study_window_extractor, "extract_source_signals", None)
+                    getattr(paper_map_extractor, "extract_source_signals", None)
                 )
             ):
                 return self._recover_source_units_through_compact_signals(
@@ -1368,14 +1355,14 @@ class PaperSkimService:
                     document_id=document_id,
                     payload=payload,
                     source_units=source_units,
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                     attempt=attempt,
                     full_failure_kind=failure_kind,
                 )
             if len(source_units) > 1:
                 logger.warning(
-                    "Paper skim batch failed; splitting retry "
+                    "Paper map batch failed; splitting retry "
                     "collection_id=%s document_id=%s window_id=%s attempt=%s "
                     "source_unit_count=%s error=%s",
                     collection_id,
@@ -1386,13 +1373,13 @@ class PaperSkimService:
                     exc,
                 )
                 midpoint = len(source_units) // 2
-                child_skims: list[PaperSkim] = []
+                child_maps: list[PaperResearchMap] = []
                 child_signals: list[_PaperSignalInput] = []
                 for branch, child_units in (
                     ("left", source_units[:midpoint]),
                     ("right", source_units[midpoint:]),
                 ):
-                    retry_skims, retry_signals = self._extract_window_batch(
+                    retry_maps, retry_signals = self._extract_window_batch(
                         collection_id=collection_id,
                         document_id=document_id,
                         payload=self._payload_with_source_units(
@@ -1400,13 +1387,13 @@ class PaperSkimService:
                             source_units=child_units,
                             suffix=f"retry-{branch}",
                         ),
-                        study_window_extractor=study_window_extractor,
+                        paper_map_extractor=paper_map_extractor,
                         extraction_budget=extraction_budget,
                         attempt=attempt + 1,
                     )
-                    child_skims.extend(retry_skims)
+                    child_maps.extend(retry_maps)
                     child_signals.extend(retry_signals)
-                return tuple(child_skims), tuple(child_signals)
+                return tuple(child_maps), tuple(child_signals)
 
             final_error = exc
             final_failure_kind = failure_kind
@@ -1419,7 +1406,7 @@ class PaperSkimService:
                     collection_id=collection_id,
                     document_id=document_id,
                     payload=payload,
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                     attempt=attempt,
                     full_failure_kind=failure_kind,
@@ -1435,7 +1422,7 @@ class PaperSkimService:
                     document_id=document_id,
                     payload=payload,
                     source_unit=source_units[0],
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                     attempt=attempt,
                     content_split_depth=content_split_depth,
@@ -1445,7 +1432,7 @@ class PaperSkimService:
                     return fragment_result
 
             logger.warning(
-                "Paper skim Source-unit extraction failed permanently "
+                "Paper map Source-unit extraction failed permanently "
                 "collection_id=%s document_id=%s window_id=%s attempt=%s "
                 "source_unit_count=%s error=%s failure_kind=%s",
                 collection_id,
@@ -1458,7 +1445,7 @@ class PaperSkimService:
             )
             return (
                 (
-                    self._failed_source_unit_skim(
+                    self._failed_source_unit_map(
                         document_id=document_id,
                         payload=payload,
                         failure_kind=final_failure_kind,
@@ -1474,12 +1461,12 @@ class PaperSkimService:
         document_id: str,
         payload: Mapping[str, Any],
         source_units: tuple[Mapping[str, Any], ...],
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: _PaperExtractionBudget,
         attempt: int,
         full_failure_kind: str,
-    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
-        recovered_skims: list[PaperSkim] = []
+    ) -> tuple[tuple[PaperResearchMap, ...], tuple[_PaperSignalInput, ...]]:
+        recovered_maps: list[PaperResearchMap] = []
         recovered_signals: list[_PaperSignalInput] = []
         for position, source_unit in enumerate(source_units, start=1):
             singleton_payload = self._payload_with_source_units(
@@ -1491,7 +1478,7 @@ class PaperSkimService:
                 collection_id=collection_id,
                 document_id=document_id,
                 payload=singleton_payload,
-                study_window_extractor=study_window_extractor,
+                paper_map_extractor=paper_map_extractor,
                 extraction_budget=extraction_budget,
                 attempt=attempt + 1,
                 full_failure_kind=full_failure_kind,
@@ -1502,7 +1489,7 @@ class PaperSkimService:
                     document_id=document_id,
                     payload=singleton_payload,
                     source_unit=source_unit,
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                     extraction_budget=extraction_budget,
                     attempt=attempt + 1,
                     content_split_depth=0,
@@ -1511,7 +1498,7 @@ class PaperSkimService:
                 if recovered is None:
                     recovered = (
                         (
-                            self._failed_source_unit_skim(
+                            self._failed_source_unit_map(
                                 document_id=document_id,
                                 payload=singleton_payload,
                                 failure_kind="compact_unavailable",
@@ -1519,11 +1506,11 @@ class PaperSkimService:
                         ),
                         (),
                     )
-            skims, signals = recovered
-            recovered_skims.extend(skims)
+            maps, signals = recovered
+            recovered_maps.extend(maps)
             recovered_signals.extend(signals)
         logger.warning(
-            "Paper skim batch recovered through source-local signals "
+            "Paper map batch recovered through source-local signals "
             "collection_id=%s document_id=%s window_id=%s source_unit_count=%s "
             "full_failure_kind=%s",
             collection_id,
@@ -1532,7 +1519,7 @@ class PaperSkimService:
             len(source_units),
             full_failure_kind,
         )
-        return tuple(recovered_skims), tuple(recovered_signals)
+        return tuple(recovered_maps), tuple(recovered_signals)
 
     def _recover_single_source_through_compact_signals(
         self,
@@ -1540,15 +1527,15 @@ class PaperSkimService:
         collection_id: str,
         document_id: str,
         payload: Mapping[str, Any],
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: _PaperExtractionBudget,
         attempt: int,
         full_failure_kind: str,
     ) -> (
-        tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]] | None
+        tuple[tuple[PaperResearchMap, ...], tuple[_PaperSignalInput, ...]] | None
     ):
         extract_source_signals = getattr(
-            study_window_extractor,
+            paper_map_extractor,
             "extract_source_signals",
             None,
         )
@@ -1581,13 +1568,13 @@ class PaperSkimService:
                         "warnings": [fallback_warning, *compact.warnings][:2],
                     }
                 )
-                window_skim, window_signals = self._resolve_window_result(
+                window_map, window_signals = self._resolve_window_result(
                     document_id=document_id,
                     payload=payload,
                     parsed=compact,
                 )
                 logger.warning(
-                    "Paper skim Source recovered through source-local signals "
+                    "Paper map Source recovered through source-local signals "
                     "collection_id=%s document_id=%s window_id=%s attempt=%s "
                     "compact_attempt=%s source_unit_count=1 full_failure_kind=%s "
                     "signal_count=%s",
@@ -1599,7 +1586,7 @@ class PaperSkimService:
                     full_failure_kind,
                     len(compact.unresolved_signals),
                 )
-                return (window_skim,), window_signals
+                return (window_map,), window_signals
             except Exception as compact_exc:  # noqa: BLE001
                 compact_failure_kind = self._single_source_recovery_kind(compact_exc)
                 final_error = compact_exc
@@ -1615,7 +1602,7 @@ class PaperSkimService:
                     in _PAPER_MAP_TRANSIENT_STRUCTURED_FAILURE_KINDS
                 )
                 logger.warning(
-                    "Paper skim compact Source recovery failed "
+                    "Paper map compact Source recovery failed "
                     "collection_id=%s document_id=%s window_id=%s attempt=%s "
                     "compact_attempt=%s compact_attempt_limit=%s failure_kind=%s "
                     "will_retry=%s error=%s",
@@ -1644,7 +1631,7 @@ class PaperSkimService:
             and self._split_single_source_unit_for_retry(source_units[0])
         ):
             logger.warning(
-                "Paper skim compact Source recovery remains technically unreadable; "
+                "Paper map compact Source recovery remains technically unreadable; "
                 "allowing bounded content fragmentation collection_id=%s "
                 "document_id=%s window_id=%s attempt=%s failure_kind=%s error=%s",
                 collection_id,
@@ -1657,7 +1644,7 @@ class PaperSkimService:
             return None
 
         logger.warning(
-            "Paper skim Source-unit compact recovery failed permanently "
+            "Paper map Source-unit compact recovery failed permanently "
             "collection_id=%s document_id=%s window_id=%s attempt=%s "
             "source_unit_count=1 error=%s failure_kind=%s",
             collection_id,
@@ -1669,7 +1656,7 @@ class PaperSkimService:
         )
         return (
             (
-                self._failed_source_unit_skim(
+                self._failed_source_unit_map(
                     document_id=document_id,
                     payload=payload,
                     failure_kind=final_failure_kind,
@@ -1685,12 +1672,12 @@ class PaperSkimService:
         document_id: str,
         payload: Mapping[str, Any],
         source_unit: Mapping[str, Any],
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: _PaperExtractionBudget,
         attempt: int,
         content_split_depth: int,
         failure_kind: str,
-    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]] | None:
+    ) -> tuple[tuple[PaperResearchMap, ...], tuple[_PaperSignalInput, ...]] | None:
         if content_split_depth >= _PAPER_MAP_RECOVERY_SPLIT_DEPTH_LIMIT:
             return None
         fragments = self._split_single_source_unit_for_retry(source_unit)
@@ -1698,7 +1685,7 @@ class PaperSkimService:
             return None
 
         logger.warning(
-            "Paper skim singleton failed; splitting Source content "
+            "Paper map singleton failed; splitting Source content "
             "collection_id=%s document_id=%s window_id=%s attempt=%s "
             "content_split_depth=%s failure_kind=%s",
             collection_id,
@@ -1708,10 +1695,10 @@ class PaperSkimService:
             content_split_depth,
             failure_kind,
         )
-        fragment_skims: list[PaperSkim] = []
+        fragment_maps: list[PaperResearchMap] = []
         fragment_signals: list[_PaperSignalInput] = []
         for branch, fragment in zip(("left", "right"), fragments, strict=True):
-            retry_skims, retry_signals = self._extract_window_batch(
+            retry_maps, retry_signals = self._extract_window_batch(
                 collection_id=collection_id,
                 document_id=document_id,
                 payload=self._payload_with_source_units(
@@ -1719,17 +1706,17 @@ class PaperSkimService:
                     source_units=(fragment,),
                     suffix=f"content-{branch}",
                 ),
-                study_window_extractor=study_window_extractor,
+                paper_map_extractor=paper_map_extractor,
                 extraction_budget=extraction_budget,
                 attempt=attempt + 1,
                 content_split_depth=content_split_depth + 1,
             )
-            fragment_skims.extend(retry_skims)
+            fragment_maps.extend(retry_maps)
             fragment_signals.extend(retry_signals)
         return (
             self._collapse_single_source_fragment_coverage(
                 payload=payload,
-                skims=tuple(fragment_skims),
+                maps=tuple(fragment_maps),
             ),
             tuple(fragment_signals),
         )
@@ -1834,14 +1821,14 @@ class PaperSkimService:
                 replacement,
             )
             return copied_values
-        raise ValueError("paper skim structured Source path cannot be replaced")
+        raise ValueError("paper map structured Source path cannot be replaced")
 
     @staticmethod
     def _collapse_single_source_fragment_coverage(
         *,
         payload: Mapping[str, Any],
-        skims: tuple[PaperSkim, ...],
-    ) -> tuple[PaperSkim, ...]:
+        maps: tuple[PaperResearchMap, ...],
+    ) -> tuple[PaperResearchMap, ...]:
         source_units = [
             unit
             for unit in payload.get("source_units") or ()
@@ -1852,7 +1839,7 @@ class PaperSkimService:
         source_unit = source_units[0]
         source_unit_id = str(source_unit.get("source_unit_id") or "")
         coverage = tuple(
-            item for skim in skims for item in skim.source_unit_coverage
+            item for paper_map in maps for item in paper_map.source_unit_coverage
         )
         if not coverage or any(
             item.source_unit_id != source_unit_id for item in coverage
@@ -1870,7 +1857,7 @@ class PaperSkimService:
                     for item in coverage
                     if item.status is status and item.reason
                 ),
-                "Paper skim Source-unit extraction remained incomplete after "
+                "Paper map Source-unit extraction remained incomplete after "
                 "bounded content splitting.",
             )
         elif PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED in statuses:
@@ -1898,10 +1885,10 @@ class PaperSkimService:
         )
         return tuple(
             replace(
-                skim,
+                paper_map,
                 source_unit_coverage=(parent_coverage,) if position == 0 else (),
             )
-            for position, skim in enumerate(skims)
+            for position, paper_map in enumerate(maps)
         )
 
     @staticmethod
@@ -1927,11 +1914,11 @@ class PaperSkimService:
         self,
         payload: Mapping[str, Any],
         *,
-        study_window_extractor: PaperStudyWindowExtractor,
+        paper_map_extractor: PaperResearchMapExtractor,
     ) -> tuple[dict[str, Any], ...]:
         candidate = dict(payload)
-        prompt_tokens = study_window_extractor.estimate_prompt_tokens(candidate)
-        if prompt_tokens <= PAPER_SKIM_PROMPT_TOKEN_LIMIT:
+        prompt_tokens = paper_map_extractor.estimate_prompt_tokens(candidate)
+        if prompt_tokens <= PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT:
             return (candidate,)
 
         source_units = tuple(
@@ -1941,19 +1928,19 @@ class PaperSkimService:
         )
         if len(source_units) <= 1:
             raise ValueError(
-                "one PaperSkim Source unit exceeds the complete prompt-token limit: "
+                "one PaperResearchMap Source unit exceeds the complete prompt-token limit: "
                 f"window_id={candidate.get('window_id')} "
                 f"prompt_tokens={prompt_tokens} "
-                f"limit={PAPER_SKIM_PROMPT_TOKEN_LIMIT}"
+                f"limit={PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT}"
             )
 
         logger.info(
-            "Paper skim prompt exceeds token limit; splitting before extraction "
+            "Paper map prompt exceeds token limit; splitting before extraction "
             "window_id=%s source_unit_count=%s prompt_tokens=%s limit=%s",
             candidate.get("window_id"),
             len(source_units),
             prompt_tokens,
-            PAPER_SKIM_PROMPT_TOKEN_LIMIT,
+            PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT,
         )
         midpoint = len(source_units) // 2
         children: list[dict[str, Any]] = []
@@ -1968,7 +1955,7 @@ class PaperSkimService:
                         source_units=child_units,
                         suffix=suffix,
                     ),
-                    study_window_extractor=study_window_extractor,
+                    paper_map_extractor=paper_map_extractor,
                 )
             )
         return tuple(children)
@@ -1978,8 +1965,8 @@ class PaperSkimService:
         *,
         document_id: str,
         payload: Mapping[str, Any],
-        parsed: StructuredPaperSkim,
-    ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
+        parsed: StructuredPaperResearchMap,
+    ) -> tuple[PaperResearchMap, tuple[_PaperSignalInput, ...]]:
         document_profile = payload.get("document_profile")
         is_review = isinstance(document_profile, Mapping) and (
             str(document_profile.get("doc_type") or "").strip() == "review"
@@ -1988,7 +1975,7 @@ class PaperSkimService:
             parsed = _review_synthesis_only(parsed)
         if parsed.output_saturated:
             raise StructuredOutputSaturatedError(
-                "PaperSkim model reported that the bounded output omitted visible facts"
+                "PaperResearchMap model reported that the bounded output omitted visible facts"
             )
         source_units = {
             str(unit.get("source_unit_id") or ""): unit
@@ -1997,19 +1984,11 @@ class PaperSkimService:
         }
         study_identities = [study.identity_key() for study in parsed.studies]
         if len(study_identities) != len(set(study_identities)):
-            raise ValueError("paper skim response contains duplicate study identities")
-        studies: list[PaperStudy] = []
+            raise ValueError("paper map response contains duplicate study identities")
+        studies: list[PaperResearchScope] = []
         signals = []
         for item in parsed.unresolved_signals:
             signal_payload = item.model_dump()
-            signal_payload.update(
-                {
-                    "sample_context": [],
-                    "test_context": [],
-                    "comparator": None,
-                    "fixed_conditions": [],
-                }
-            )
             signal_payload["claim_scope"] = self._claim_scope_for_document(
                 claim_scope=item.claim_scope,
                 experiment_label=item.experiment_label,
@@ -2031,7 +2010,6 @@ class PaperSkimService:
             for source_unit_id in item.source_unit_ids
         ]
         for study in parsed.studies:
-            source_study = study
             study = study.model_copy(
                 update={
                     "claim_scope": self._claim_scope_for_document(
@@ -2045,49 +2023,10 @@ class PaperSkimService:
                         payload=payload,
                         source_units=source_units,
                     ),
-                    "sample_context": [],
-                    "test_context": [],
-                    "comparator": None,
-                    "fixed_conditions": [],
                 }
             )
             retained_relationships = []
             for relationship in study.relationships:
-                if self._relationship_conflicts_with_fixed_conditions(
-                    source_study,
-                    relationship,
-                ):
-                    signal_payload = {
-                        "signal_type": "outcome",
-                        "label": relationship.outcome,
-                        "source_unit_ids": list(relationship.source_unit_ids),
-                        "reason": (
-                            "alleged varied factor is also recorded as fixed in the "
-                            "same study"
-                        ),
-                        "confidence": relationship.confidence,
-                    }
-                    for field_name in (
-                        "experiment_label",
-                        "design_type",
-                        "claim_scope",
-                        "material_scope",
-                        "process_context",
-                        "sample_context",
-                        "test_context",
-                        "comparator",
-                        "fixed_conditions",
-                    ):
-                        signal_payload[field_name] = getattr(study, field_name)
-                    signals.append(
-                        self._signal_from_window_result(
-                            signal_payload,
-                            document_id=document_id,
-                            source_units=source_units,
-                        )
-                    )
-                    signal_source_unit_ids.extend(relationship.source_unit_ids)
-                    continue
                 retained_relationships.append(relationship)
                 relationship_source_unit_ids.extend(relationship.source_unit_ids)
             if retained_relationships:
@@ -2114,7 +2053,7 @@ class PaperSkimService:
             else ReviewSynthesisMap()
         )
         return (
-            PaperSkim.from_mapping(
+            PaperResearchMap.from_mapping(
                 {
                     "document_id": document_id,
                     "doc_role": parsed.doc_role,
@@ -2141,7 +2080,7 @@ class PaperSkimService:
     ) -> tuple[PaperSourceUnitCoverage, ...]:
         input_ids = tuple(source_units)
         if len(input_ids) != len(payload.get("source_units") or ()):
-            raise ValueError("paper skim window contains duplicate Source-unit ids")
+            raise ValueError("paper map window contains duplicate Source-unit ids")
 
         relationship_ids = {
             str(source_unit_id).strip()
@@ -2154,7 +2093,7 @@ class PaperSkimService:
         unknown_ids = (relationship_ids | signal_ids) - set(input_ids)
         if unknown_ids:
             raise ValueError(
-                "paper skim response contains unknown Source-unit ids: "
+                "paper map response contains unknown Source-unit ids: "
                 + ", ".join(sorted(unknown_ids))
             )
         coverage: list[PaperSourceUnitCoverage] = []
@@ -2190,16 +2129,16 @@ class PaperSkimService:
         return tuple(coverage)
 
     @staticmethod
-    def _failed_source_unit_skim(
+    def _failed_source_unit_map(
         *,
         document_id: str,
         payload: Mapping[str, Any],
         failure_kind: str | None = None,
-    ) -> PaperSkim:
-        reason = "Paper skim Source-unit extraction failed after bounded retries."
+    ) -> PaperResearchMap:
+        reason = "Paper map Source-unit extraction failed after bounded retries."
         if failure_kind:
             reason = f"{reason} Failure type: {failure_kind}."
-        return PaperSkim.from_mapping(
+        return PaperResearchMap.from_mapping(
             {
                 "document_id": document_id,
                 "source_unit_coverage": [
@@ -2232,12 +2171,12 @@ class PaperSkimService:
     @classmethod
     def _study_from_window_result(
         cls,
-        study: StructuredPaperStudy,
+        study: StructuredPaperResearchScope,
         *,
         document_id: str,
         source_units: Mapping[str, Mapping[str, Any]],
-        relationships: Iterable[StructuredPaperStudyRelationship] | None = None,
-    ) -> PaperStudy:
+        relationships: Iterable[StructuredPaperResearchRelationship] | None = None,
+    ) -> PaperResearchScope:
         relationship_records: list[dict[str, Any]] = []
         source_relationships = (
             study.relationships if relationships is None else relationships
@@ -2249,7 +2188,7 @@ class PaperSkimService:
             )
             if resolved is None:
                 raise ValueError(
-                    "paper study relationship contains an unknown Source-unit id"
+                    "paper research relationship contains an unknown Source-unit id"
                 )
             relationship_records.append(
                 {
@@ -2257,7 +2196,7 @@ class PaperSkimService:
                     "source_refs": cls._source_refs_from_units(resolved),
                 }
             )
-        return PaperStudy.from_mapping(
+        return PaperResearchScope.from_mapping(
             {
                 **study.model_dump(exclude={"relationships"}),
                 "document_id": document_id,
@@ -2298,17 +2237,6 @@ class PaperSkimService:
             record[field_name] = items
         return ReviewSynthesisMap.from_mapping(record)
 
-    @staticmethod
-    def _relationship_conflicts_with_fixed_conditions(
-        study: StructuredPaperStudy,
-        relationship: StructuredPaperStudyRelationship,
-    ) -> bool:
-        return any(
-            property_matching.axis_label_is_mentioned(fixed_condition, factor)
-            for fixed_condition in study.fixed_conditions
-            for factor in relationship.varied_factors
-        )
-
     @classmethod
     def _signal_from_window_result(
         cls,
@@ -2319,14 +2247,16 @@ class PaperSkimService:
     ) -> _PaperSignalInput:
         source_unit_ids = signal.get("source_unit_ids")
         if not isinstance(source_unit_ids, list):
-            raise ValueError("paper study signal requires Source-unit ids")
+            raise ValueError("paper research signal requires Source-unit ids")
         resolved = cls._resolved_source_units(
             source_unit_ids,
             source_units=source_units,
         )
         if resolved is None:
-            raise ValueError("paper study signal contains an unknown Source-unit id")
-        domain_signal = PaperStudySignal.from_mapping(
+            raise ValueError(
+                "paper research signal contains an unknown Source-unit id"
+            )
+        domain_signal = PaperResearchSignal.from_mapping(
             {
                 **dict(signal),
                 "document_id": document_id,
@@ -2365,7 +2295,7 @@ class PaperSkimService:
 
     @staticmethod
     def _source_excerpt(content: Any) -> str:
-        return PaperSkimService._source_content_text(content)[:800]
+        return PaperResearchMapService._source_content_text(content)[:800]
 
     @staticmethod
     def _source_content_text(content: Any) -> str:
@@ -2415,7 +2345,7 @@ class PaperSkimService:
 
     def _reconcile_paper_signals(
         self,
-        paper_skim: PaperSkim,
+        paper_map: PaperResearchMap,
         signal_inputs: list[_PaperSignalInput],
         *,
         signal_reconciler: PaperSignalReconciler,
@@ -2425,30 +2355,30 @@ class PaperSkimService:
         document_count: int,
         document_title: str | None,
         source_filename: str | None,
-    ) -> PaperSkim:
+    ) -> PaperResearchMap:
         unique_inputs = self._unique_signal_inputs(signal_inputs)
         if not unique_inputs:
-            return paper_skim
+            return paper_map
 
         signal_types = {item.signal.signal_type for item in unique_inputs}
         if len(signal_types) == 1:
             missing_role = "outcome" if "variable" in signal_types else "variable"
             reason = f"no {missing_role} signal was found in this paper"
             return replace(
-                paper_skim,
+                paper_map,
                 unresolved_signals=tuple(
                     replace(item.signal, reason=reason) for item in unique_inputs
                 ),
             )
 
         batches = self._build_signal_reconciliation_batches(
-            paper_skim.document_id,
+            paper_map.document_id,
             unique_inputs,
             signal_reconciler=signal_reconciler,
         )
         if not batches:
             return replace(
-                paper_skim,
+                paper_map,
                 unresolved_signals=tuple(
                     replace(
                         item.signal,
@@ -2465,12 +2395,12 @@ class PaperSkimService:
             total=document_count,
             unit="documents",
             message="Reconciling source-linked signals within one paper.",
-            active_document_id=paper_skim.document_id,
+            active_document_id=paper_map.document_id,
             active_document_title=document_title,
             active_source_filename=source_filename,
             active_operation="paper_reconciliation",
         )
-        reconciled_studies: list[PaperStudy] = []
+        reconciled_studies: list[PaperResearchScope] = []
         linked_signal_ids: set[str] = set()
         unresolved_reasons: dict[str, str] = {}
         for batch_position, batch in enumerate(batches, start=1):
@@ -2479,7 +2409,7 @@ class PaperSkimService:
                     "Paper signal reconciliation stopped at the document budget; "
                     "preserving unresolved signals document_id=%s batch_position=%s "
                     "batch_count=%s failure_kind=%s calls=%s max_calls=%s",
-                    paper_skim.document_id,
+                    paper_map.document_id,
                     batch_position,
                     len(batches),
                     extraction_budget.failure_kind,
@@ -2499,7 +2429,7 @@ class PaperSkimService:
             batch_studies, batch_unresolved = self._reconcile_signal_batch(
                 batch,
                 signal_reconciler=signal_reconciler,
-                document_id=paper_skim.document_id,
+                document_id=paper_map.document_id,
                 batch_position=batch_position,
                 batch_count=len(batches),
             )
@@ -2520,7 +2450,7 @@ class PaperSkimService:
                 ):
                     unresolved_reasons[signal.signal_id] = reason
 
-        unresolved_signals: list[PaperStudySignal] = []
+        unresolved_signals: list[PaperResearchSignal] = []
         for item in unique_inputs:
             signal_id = item.signal.signal_id
             if signal_id in linked_signal_ids:
@@ -2548,10 +2478,10 @@ class PaperSkimService:
             unresolved_signals.append(replace(item.signal, reason=reason))
 
         return replace(
-            paper_skim,
+            paper_map,
             studies=self._consolidate_studies(
-                (*paper_skim.studies, *reconciled_studies),
-                document_id=paper_skim.document_id,
+                (*paper_map.studies, *reconciled_studies),
+                document_id=paper_map.document_id,
             ),
             unresolved_signals=tuple(unresolved_signals),
         )
@@ -2618,25 +2548,10 @@ class PaperSkimService:
         ):
             return True
 
-        for field_name in (
-            "process_context",
-            "sample_context",
-            "test_context",
-            "fixed_conditions",
-        ):
-            if any(
-                property_matching.axis_values_match(left_value, right_value)
-                for left_value in getattr(left.signal, field_name)
-                for right_value in getattr(right.signal, field_name)
-            ):
-                return True
-        return bool(
-            left.signal.comparator
-            and right.signal.comparator
-            and property_matching.axis_values_match(
-                left.signal.comparator,
-                right.signal.comparator,
-            )
+        return any(
+            property_matching.axis_values_match(left_value, right_value)
+            for left_value in left.signal.process_context
+            for right_value in right.signal.process_context
         )
 
     def _build_signal_reconciliation_batches(
@@ -2714,7 +2629,7 @@ class PaperSkimService:
         document_id: str,
         batch_position: int,
         batch_count: int,
-    ) -> tuple[tuple[PaperStudy, ...], tuple[PaperStudySignal, ...]]:
+    ) -> tuple[tuple[PaperResearchScope, ...], tuple[PaperResearchSignal, ...]]:
         try:
             parsed = signal_reconciler.reconcile(
                 {
@@ -2729,7 +2644,7 @@ class PaperSkimService:
             )
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Paper study signal reconciliation batch failed; retaining batch "
+                "Paper map signal reconciliation batch failed; retaining batch "
                 "signals document_id=%s batch_position=%s batch_count=%s "
                 "signal_count=%s",
                 document_id,
@@ -2769,14 +2684,14 @@ class PaperSkimService:
         signal_inputs: tuple[_PaperSignalInput, ...],
         *,
         document_id: str,
-    ) -> tuple[tuple[PaperStudy, ...], tuple[PaperStudySignal, ...]]:
+    ) -> tuple[tuple[PaperResearchScope, ...], tuple[PaperResearchSignal, ...]]:
         signals_by_id = {item.signal.signal_id: item.signal for item in signal_inputs}
         if len(signals_by_id) != len(signal_inputs):
             raise ValueError("paper signals do not have unique ids")
 
         linked_ids: set[str] = set()
         rejected_reasons_by_id: dict[str, str] = {}
-        studies: list[PaperStudy] = []
+        studies: list[PaperResearchScope] = []
         for parsed_study in parsed.studies:
             study_groups: list[
                 tuple[
@@ -2906,7 +2821,7 @@ class PaperSkimService:
                     signals_by_id[signal_id] for signal_id in study_signal_ids
                 )
                 studies.append(
-                    PaperStudy.from_mapping(
+                    PaperResearchScope.from_mapping(
                         {
                             "document_id": document_id,
                             **cls._shared_signal_study_context(study_signals),
@@ -2946,7 +2861,7 @@ class PaperSkimService:
     @classmethod
     def _signal_contexts_are_compatible(
         cls,
-        signals: tuple[PaperStudySignal, ...],
+        signals: tuple[PaperResearchSignal, ...],
     ) -> bool:
         return not property_matching.paper_signal_context_conflicts(
             signal.to_record() for signal in signals
@@ -2955,10 +2870,10 @@ class PaperSkimService:
     @classmethod
     def _shared_signal_study_context(
         cls,
-        signals: tuple[PaperStudySignal, ...],
+        signals: tuple[PaperResearchSignal, ...],
     ) -> dict[str, Any]:
         if not cls._signal_contexts_are_compatible(signals):
-            raise ValueError("paper study signals have conflicting contexts")
+            raise ValueError("paper research signals have conflicting contexts")
 
         def known_scalar(field_name: str, unknown_value: str | None = None) -> str | None:
             return next(
@@ -2981,31 +2896,21 @@ class PaperSkimService:
             "process_context": cls._unique_text_values(
                 value for signal in signals for value in signal.process_context
             ),
-            "sample_context": cls._unique_text_values(
-                value for signal in signals for value in signal.sample_context
-            ),
-            "test_context": cls._unique_text_values(
-                value for signal in signals for value in signal.test_context
-            ),
-            "comparator": known_scalar("comparator"),
-            "fixed_conditions": cls._unique_text_values(
-                value for signal in signals for value in signal.fixed_conditions
-            ),
         }
 
-    def _consolidate_window_skims(
+    def _consolidate_window_maps(
         self,
         document_id: str,
-        window_skims: list[PaperSkim],
+        window_maps: list[PaperResearchMap],
         *,
         profile: Any,
-    ) -> PaperSkim:
-        doc_role = self._consolidate_doc_role(window_skims, profile=profile)
+    ) -> PaperResearchMap:
+        doc_role = self._consolidate_doc_role(window_maps, profile=profile)
         studies = self._consolidate_studies(
             tuple(
                 study
-                for skim in window_skims
-                for study in skim.studies
+                for paper_map in window_maps
+                for study in paper_map.studies
             ),
             document_id=document_id,
         )
@@ -3016,27 +2921,27 @@ class PaperSkimService:
                 else study
                 for study in studies
             )
-        return PaperSkim(
+        return PaperResearchMap(
             document_id=document_id,
             doc_role=doc_role,
             studies=studies,
             evidence_density=max(
-                (skim.evidence_density for skim in window_skims),
+                (paper_map.evidence_density for paper_map in window_maps),
                 key=lambda value: _EVIDENCE_DENSITY_RANK.get(value, 0),
                 default="unknown",
             ),
-            confidence=max((skim.confidence for skim in window_skims), default=0.0),
+            confidence=max((paper_map.confidence for paper_map in window_maps), default=0.0),
             warnings=self._unique_text_values(
-                warning for skim in window_skims for warning in skim.warnings
+                warning for paper_map in window_maps for warning in paper_map.warnings
             )[:_PAPER_MAP_PERSISTED_WARNING_LIMIT],
             source_unit_coverage=tuple(
                 item
-                for skim in window_skims
-                for item in skim.source_unit_coverage
+                for paper_map in window_maps
+                for item in paper_map.source_unit_coverage
             ),
             review_synthesis=(
                 self._consolidate_review_synthesis(
-                    tuple(skim.review_synthesis for skim in window_skims)
+                    tuple(paper_map.review_synthesis for paper_map in window_maps)
                 )
                 if doc_role == "review"
                 else ReviewSynthesisMap()
@@ -3045,14 +2950,14 @@ class PaperSkimService:
 
     @staticmethod
     def _assess_paper_map(
-        skim: PaperSkim,
+        paper_map: PaperResearchMap,
         *,
-        signals: tuple[PaperStudySignal, ...],
+        signals: tuple[PaperResearchSignal, ...],
         final: bool,
     ) -> _PaperMapAssessment:
         owned_relationships = [
             relationship
-            for study in skim.studies
+            for study in paper_map.studies
             if study.claim_scope in {"current_work", "synthesis"}
             for relationship in study.relationships
             if not property_matching.outcome_label_requires_resolution(
@@ -3060,13 +2965,13 @@ class PaperSkimService:
             )
         ]
         limitations: list[str] = []
-        if not skim.coverage_complete:
+        if not paper_map.coverage_complete:
             limitations.append("source_extraction_incomplete")
-        has_review_judgment = skim.doc_role == "review" and any(
+        has_review_judgment = paper_map.doc_role == "review" and any(
             (
-                skim.review_synthesis.synthesis_claims,
-                skim.review_synthesis.disputes,
-                skim.review_synthesis.evidence_gaps,
+                paper_map.review_synthesis.synthesis_claims,
+                paper_map.review_synthesis.disputes,
+                paper_map.review_synthesis.evidence_gaps,
             )
         )
         if owned_relationships or has_review_judgment:
@@ -3075,7 +2980,7 @@ class PaperSkimService:
                 limitations=tuple(limitations),
             )
 
-        visible_signals = tuple((*signals, *skim.unresolved_signals))
+        visible_signals = tuple((*signals, *paper_map.unresolved_signals))
         has_variable = any(
             signal.signal_type == "variable" for signal in visible_signals
         )
@@ -3090,7 +2995,7 @@ class PaperSkimService:
         has_unowned_relationship = any(
             study.relationships
             and study.claim_scope not in {"current_work", "synthesis"}
-            for study in skim.studies
+            for study in paper_map.studies
         )
 
         if not has_variable:
@@ -3180,7 +3085,7 @@ class PaperSkimService:
         return tuple(merged)
 
     @staticmethod
-    def _study_with_claim_scope(study: PaperStudy, claim_scope: str) -> PaperStudy:
+    def _study_with_claim_scope(study: PaperResearchScope, claim_scope: str) -> PaperResearchScope:
         record = study.to_record()
         record.pop("study_id", None)
         record["claim_scope"] = claim_scope
@@ -3192,16 +3097,16 @@ class PaperSkimService:
             }
             for relationship in record["relationships"]
         ]
-        return PaperStudy.from_mapping(record)
+        return PaperResearchScope.from_mapping(record)
 
     @classmethod
     def _consolidate_studies(
         cls,
-        studies: tuple[PaperStudy, ...],
+        studies: tuple[PaperResearchScope, ...],
         *,
         document_id: str,
-    ) -> tuple[PaperStudy, ...]:
-        consolidated: list[PaperStudy] = []
+    ) -> tuple[PaperResearchScope, ...]:
+        consolidated: list[PaperResearchScope] = []
         for study in studies:
             duplicate_position = next(
                 (
@@ -3224,8 +3129,8 @@ class PaperSkimService:
     @classmethod
     def _studies_are_duplicates(
         cls,
-        left: PaperStudy,
-        right: PaperStudy,
+        left: PaperResearchScope,
+        right: PaperResearchScope,
     ) -> bool:
         if not cls._study_identity_matches(left, right):
             return False
@@ -3243,10 +3148,10 @@ class PaperSkimService:
             return False
         if left.experiment_label and right.experiment_label:
             return True
-        return cls._study_context_identifies_experiment(left, right)
+        return bool(cls._study_source_keys(left) & cls._study_source_keys(right))
 
     @classmethod
-    def _study_identity_matches(cls, left: PaperStudy, right: PaperStudy) -> bool:
+    def _study_identity_matches(cls, left: PaperResearchScope, right: PaperResearchScope) -> bool:
         for field_name in ("design_type", "claim_scope"):
             left_value = getattr(left, field_name)
             right_value = getattr(right, field_name)
@@ -3256,7 +3161,7 @@ class PaperSkimService:
                 and left_value != right_value
             ):
                 return False
-        for field_name in ("experiment_label", "comparator"):
+        for field_name in ("experiment_label",):
             left_value = getattr(left, field_name)
             right_value = getattr(right, field_name)
             if (
@@ -3269,9 +3174,6 @@ class PaperSkimService:
         for field_name in (
             "material_scope",
             "process_context",
-            "sample_context",
-            "test_context",
-            "fixed_conditions",
         ):
             left_values = getattr(left, field_name)
             right_values = getattr(right, field_name)
@@ -3287,44 +3189,13 @@ class PaperSkimService:
 
         if left.experiment_label and right.experiment_label:
             return True
-        return bool(
-            cls._study_source_keys(left) & cls._study_source_keys(right)
-        ) or cls._study_context_identifies_experiment(left, right)
-
-    @staticmethod
-    def _study_context_identifies_experiment(
-        left: PaperStudy,
-        right: PaperStudy,
-    ) -> bool:
-        if (
-            left.comparator
-            and right.comparator
-            and property_matching.axis_values_match(
-                left.comparator,
-                right.comparator,
-            )
-        ):
-            return True
-        return any(
-            left_values
-            and right_values
-            and any(
-                property_matching.axis_values_match(left_value, right_value)
-                for left_value in left_values
-                for right_value in right_values
-            )
-            for left_values, right_values in (
-                (left.sample_context, right.sample_context),
-                (left.test_context, right.test_context),
-                (left.fixed_conditions, right.fixed_conditions),
-            )
-        )
+        return bool(cls._study_source_keys(left) & cls._study_source_keys(right))
 
     @classmethod
     def _relationship_sets_overlap(
         cls,
-        left: tuple[PaperStudyRelationship, ...],
-        right: tuple[PaperStudyRelationship, ...],
+        left: tuple[PaperResearchRelationship, ...],
+        right: tuple[PaperResearchRelationship, ...],
     ) -> bool:
         return any(
             cls._relationships_are_duplicates(left_item, right_item)
@@ -3335,8 +3206,8 @@ class PaperSkimService:
     @classmethod
     def _relationships_are_duplicates(
         cls,
-        left: PaperStudyRelationship,
-        right: PaperStudyRelationship,
+        left: PaperResearchRelationship,
+        right: PaperResearchRelationship,
     ) -> bool:
         return cls._axis_collections_are_equivalent(
             left.varied_factors,
@@ -3358,7 +3229,7 @@ class PaperSkimService:
         )
 
     @staticmethod
-    def _study_source_keys(study: PaperStudy) -> set[tuple[str, str]]:
+    def _study_source_keys(study: PaperResearchScope) -> set[tuple[str, str]]:
         return {
             (source_ref.source_kind, source_ref.source_ref)
             for relationship in study.relationships
@@ -3375,12 +3246,12 @@ class PaperSkimService:
     @classmethod
     def _merge_studies(
         cls,
-        existing: PaperStudy,
-        duplicate: PaperStudy,
+        existing: PaperResearchScope,
+        duplicate: PaperResearchScope,
         *,
         document_id: str,
-    ) -> PaperStudy:
-        relationships: list[PaperStudyRelationship] = list(existing.relationships)
+    ) -> PaperResearchScope:
+        relationships: list[PaperResearchRelationship] = list(existing.relationships)
         for relationship in duplicate.relationships:
             duplicate_position = next(
                 (
@@ -3394,7 +3265,7 @@ class PaperSkimService:
                 relationships.append(relationship)
                 continue
             current = relationships[duplicate_position]
-            relationships[duplicate_position] = PaperStudyRelationship.from_mapping(
+            relationships[duplicate_position] = PaperResearchRelationship.from_mapping(
                 {
                     "document_id": document_id,
                     "varied_factors": current.varied_factors,
@@ -3408,7 +3279,7 @@ class PaperSkimService:
                     "confidence": max(current.confidence, relationship.confidence),
                 }
             )
-        return PaperStudy.from_mapping(
+        return PaperResearchScope.from_mapping(
             {
                 "document_id": document_id,
                 "experiment_label": existing.experiment_label
@@ -3428,16 +3299,6 @@ class PaperSkimService:
                 ),
                 "process_context": cls._unique_text_values(
                     (*existing.process_context, *duplicate.process_context)
-                ),
-                "sample_context": cls._unique_text_values(
-                    (*existing.sample_context, *duplicate.sample_context)
-                ),
-                "test_context": cls._unique_text_values(
-                    (*existing.test_context, *duplicate.test_context)
-                ),
-                "comparator": existing.comparator or duplicate.comparator,
-                "fixed_conditions": cls._unique_text_values(
-                    (*existing.fixed_conditions, *duplicate.fixed_conditions)
                 ),
                 "relationships": [
                     {
@@ -3464,12 +3325,12 @@ class PaperSkimService:
         return tuple(unique)
 
     @staticmethod
-    def _consolidate_doc_role(window_skims: list[PaperSkim], *, profile: Any) -> str:
+    def _consolidate_doc_role(window_maps: list[PaperResearchMap], *, profile: Any) -> str:
         profile_role = str(getattr(profile, "doc_type", "") or "").strip()
         if profile_role in {"experimental", "review", "mixed", "uncertain"}:
             return profile_role
         roles = {
-            skim.doc_role for skim in window_skims if skim.doc_role != "uncertain"
+            paper_map.doc_role for paper_map in window_maps if paper_map.doc_role != "uncertain"
         }
         if not roles:
             return "uncertain"
@@ -3599,4 +3460,4 @@ class PaperSkimService:
             )
 
 
-__all__ = ["PaperSkimService"]
+__all__ = ["PaperResearchMapService"]

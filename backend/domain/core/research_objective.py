@@ -131,28 +131,28 @@ _QUESTION_SIGNAL_TERMS: Final[tuple[str, ...]] = (
     "improve",
 )
 _SLUG_NON_WORD_PATTERN = re.compile(r"[^a-z0-9]+")
-_PAPER_STUDY_SOURCE_KINDS = frozenset(
+_PAPER_RESEARCH_SOURCE_KINDS = frozenset(
     {"document", "block", "table", "table_row", "figure"}
 )
 
 
 @dataclass(frozen=True)
-class PaperStudySourceRef:
-    """Stable Source locator supporting a paper-level study fact."""
+class PaperResearchSourceRef:
+    """Stable Source locator supporting a preliminary paper-map judgment."""
 
     source_kind: str
     source_ref: str
 
     def __post_init__(self) -> None:
         if not self.source_kind.strip() or not self.source_ref.strip():
-            raise ValueError("paper study source reference cannot be empty")
-        if self.source_kind not in _PAPER_STUDY_SOURCE_KINDS:
+            raise ValueError("paper research Source reference cannot be empty")
+        if self.source_kind not in _PAPER_RESEARCH_SOURCE_KINDS:
             raise ValueError(
-                f"unsupported paper study source kind: {self.source_kind}"
+                f"unsupported paper research Source kind: {self.source_kind}"
             )
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperStudySourceRef":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSourceRef":
         return cls(
             source_kind=_text(payload.get("source_kind")) or "",
             source_ref=_text(payload.get("source_ref")) or "",
@@ -165,13 +165,13 @@ class PaperStudySourceRef:
         }
 
 
-def _paper_study_source_refs(value: Any) -> tuple[PaperStudySourceRef, ...]:
-    refs: list[PaperStudySourceRef] = []
+def _paper_research_source_refs(value: Any) -> tuple[PaperResearchSourceRef, ...]:
+    refs: list[PaperResearchSourceRef] = []
     seen: set[tuple[str, str]] = set()
     for item in value or ():
         if not isinstance(item, Mapping):
             continue
-        source_ref = PaperStudySourceRef.from_mapping(item)
+        source_ref = PaperResearchSourceRef.from_mapping(item)
         key = (source_ref.source_kind, source_ref.source_ref)
         if key in seen:
             continue
@@ -189,7 +189,7 @@ class ReviewKnowledgeItem:
     variables: tuple[str, ...]
     outcomes: tuple[str, ...]
     conditions: tuple[str, ...]
-    source_refs: tuple[PaperStudySourceRef, ...]
+    source_refs: tuple[PaperResearchSourceRef, ...]
     confidence: float
 
     def __post_init__(self) -> None:
@@ -206,7 +206,7 @@ class ReviewKnowledgeItem:
             variables=normalize_objective_terms(payload.get("variables")),
             outcomes=normalize_objective_terms(payload.get("outcomes")),
             conditions=normalize_objective_terms(payload.get("conditions")),
-            source_refs=_paper_study_source_refs(payload.get("source_refs")),
+            source_refs=_paper_research_source_refs(payload.get("source_refs")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
         )
 
@@ -282,24 +282,26 @@ class ReviewSynthesisMap:
 
 
 @dataclass(frozen=True)
-class PaperStudyRelationship:
+class PaperResearchRelationship:
     """One Source-supported joint-factor-to-outcome candidate-scope link."""
 
     relationship_id: str
     varied_factors: tuple[str, ...]
     outcome: str
-    source_refs: tuple[PaperStudySourceRef, ...]
+    source_refs: tuple[PaperResearchSourceRef, ...]
     confidence: float
 
     def __post_init__(self) -> None:
         if not self.relationship_id.strip():
-            raise ValueError("paper study relationship requires relationship_id")
+            raise ValueError("paper research relationship requires relationship_id")
         if not self.varied_factors:
-            raise ValueError("paper study relationship requires varied factors")
+            raise ValueError("paper research relationship requires varied factors")
         if not self.outcome.strip():
-            raise ValueError("paper study relationship requires an outcome")
+            raise ValueError("paper research relationship requires an outcome")
         if not self.source_refs:
-            raise ValueError("paper study relationship requires a source reference")
+            raise ValueError(
+                "paper research relationship requires a source reference"
+            )
 
     @classmethod
     def from_mapping(
@@ -307,10 +309,10 @@ class PaperStudyRelationship:
         payload: Mapping[str, Any],
         *,
         parent_study_boundary: str | None = None,
-    ) -> "PaperStudyRelationship":
+    ) -> "PaperResearchRelationship":
         varied_factors = normalize_objective_terms(payload.get("varied_factors"))
         outcome = _text(payload.get("outcome")) or ""
-        source_refs = _paper_study_source_refs(payload.get("source_refs"))
+        source_refs = _paper_research_source_refs(payload.get("source_refs"))
         relationship_id = _text(payload.get("relationship_id"))
         if relationship_id is None:
             identity = json.dumps(
@@ -350,17 +352,17 @@ class PaperStudyRelationship:
         }
 
 
-_PAPER_STUDY_DESIGN_TYPES = frozenset(
+_PAPER_RESEARCH_DESIGN_TYPES = frozenset(
     {"experimental", "observational", "modeling", "mixed", "uncertain"}
 )
-_PAPER_STUDY_CLAIM_SCOPES = frozenset(
+_PAPER_RESEARCH_CLAIM_SCOPES = frozenset(
     {"current_work", "synthesis", "background", "uncertain"}
 )
 
 
 @dataclass(frozen=True)
-class PaperStudy:
-    """One paper-owned research-scope group used for Objective screening."""
+class PaperResearchScope:
+    """One paper-owned research scope observed during preliminary reading."""
 
     study_id: str
     document_id: str
@@ -369,39 +371,35 @@ class PaperStudy:
     experiment_label: str | None
     material_scope: tuple[str, ...]
     process_context: tuple[str, ...]
-    sample_context: tuple[str, ...]
-    test_context: tuple[str, ...]
-    comparator: str | None
-    fixed_conditions: tuple[str, ...]
-    relationships: tuple[PaperStudyRelationship, ...]
+    relationships: tuple[PaperResearchRelationship, ...]
     confidence: float
 
     def __post_init__(self) -> None:
         if not self.study_id.strip() or not self.document_id.strip():
-            raise ValueError("paper study requires study and document ids")
-        if self.design_type not in _PAPER_STUDY_DESIGN_TYPES:
-            raise ValueError(f"unsupported paper study design type: {self.design_type}")
-        if self.claim_scope not in _PAPER_STUDY_CLAIM_SCOPES:
-            raise ValueError(f"unsupported paper study claim scope: {self.claim_scope}")
+            raise ValueError("paper research scope requires study and document ids")
+        if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
+            raise ValueError(
+                f"unsupported paper research design type: {self.design_type}"
+            )
+        if self.claim_scope not in _PAPER_RESEARCH_CLAIM_SCOPES:
+            raise ValueError(
+                f"unsupported paper research claim scope: {self.claim_scope}"
+            )
         object.__setattr__(self, "relationships", tuple(self.relationships))
         if not self.relationships:
-            raise ValueError("paper study requires at least one relationship")
+            raise ValueError("paper research scope requires at least one relationship")
         relationship_ids = [item.relationship_id for item in self.relationships]
         if len(relationship_ids) != len(set(relationship_ids)):
-            raise ValueError("paper study relationship ids must be unique")
+            raise ValueError("paper research relationship ids must be unique")
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperStudy":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchScope":
         document_id = _text(payload.get("document_id")) or ""
         design_type = _text(payload.get("design_type")) or "uncertain"
         claim_scope = _text(payload.get("claim_scope")) or "uncertain"
         experiment_label = _text(payload.get("experiment_label"))
         material_scope = normalize_objective_terms(payload.get("material_scope"))
         process_context = normalize_objective_terms(payload.get("process_context"))
-        sample_context = normalize_objective_terms(payload.get("sample_context"))
-        test_context = normalize_objective_terms(payload.get("test_context"))
-        comparator = _text(payload.get("comparator"))
-        fixed_conditions = normalize_objective_terms(payload.get("fixed_conditions"))
         parent_study_boundary = json.dumps(
             {
                 "document_id": document_id.casefold(),
@@ -414,19 +412,13 @@ class PaperStudy:
                 "process_context": sorted(
                     value.casefold() for value in process_context
                 ),
-                "sample_context": sorted(value.casefold() for value in sample_context),
-                "test_context": sorted(value.casefold() for value in test_context),
-                "comparator": comparator.casefold() if comparator else None,
-                "fixed_conditions": sorted(
-                    value.casefold() for value in fixed_conditions
-                ),
             },
             ensure_ascii=True,
             sort_keys=True,
             separators=(",", ":"),
         )
         relationships = tuple(
-            PaperStudyRelationship.from_mapping(
+            PaperResearchRelationship.from_mapping(
                 {**dict(item), "document_id": document_id},
                 parent_study_boundary=parent_study_boundary,
             )
@@ -449,16 +441,6 @@ class PaperStudy:
                     "process_context": sorted(
                         value.casefold() for value in process_context
                     ),
-                    "sample_context": sorted(
-                        value.casefold() for value in sample_context
-                    ),
-                    "test_context": sorted(
-                        value.casefold() for value in test_context
-                    ),
-                    "comparator": comparator.casefold() if comparator else None,
-                    "fixed_conditions": sorted(
-                        value.casefold() for value in fixed_conditions
-                    ),
                     "relationship_ids": sorted(
                         item.relationship_id for item in relationships
                     ),
@@ -476,10 +458,6 @@ class PaperStudy:
             experiment_label=experiment_label,
             material_scope=material_scope,
             process_context=process_context,
-            sample_context=sample_context,
-            test_context=test_context,
-            comparator=comparator,
-            fixed_conditions=fixed_conditions,
             relationships=relationships,
             confidence=normalize_objective_confidence(payload.get("confidence")),
         )
@@ -493,10 +471,6 @@ class PaperStudy:
             "experiment_label": self.experiment_label,
             "material_scope": list(self.material_scope),
             "process_context": list(self.process_context),
-            "sample_context": list(self.sample_context),
-            "test_context": list(self.test_context),
-            "comparator": self.comparator,
-            "fixed_conditions": list(self.fixed_conditions),
             "relationships": [item.to_record() for item in self.relationships],
             "confidence": self.confidence,
         }
@@ -576,8 +550,8 @@ class PaperStudyDisposition:
 
 
 @dataclass(frozen=True)
-class PaperStudySignal:
-    """One source-linked factor or outcome awaiting a paper-study link."""
+class PaperResearchSignal:
+    """One source-linked research axis awaiting a paper-scope link."""
 
     signal_id: str
     signal_type: str
@@ -587,32 +561,28 @@ class PaperStudySignal:
     experiment_label: str | None
     material_scope: tuple[str, ...]
     process_context: tuple[str, ...]
-    sample_context: tuple[str, ...]
-    test_context: tuple[str, ...]
-    comparator: str | None
-    fixed_conditions: tuple[str, ...]
-    source_refs: tuple[PaperStudySourceRef, ...]
+    source_refs: tuple[PaperResearchSourceRef, ...]
     confidence: float
     reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.signal_type not in {"variable", "outcome"}:
-            raise ValueError("paper study signal type must be variable or outcome")
-        if self.design_type not in _PAPER_STUDY_DESIGN_TYPES:
+            raise ValueError("paper research signal type must be variable or outcome")
+        if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
             raise ValueError(
-                f"unsupported paper study signal design type: {self.design_type}"
+                f"unsupported paper research signal design type: {self.design_type}"
             )
-        if self.claim_scope not in _PAPER_STUDY_CLAIM_SCOPES:
+        if self.claim_scope not in _PAPER_RESEARCH_CLAIM_SCOPES:
             raise ValueError(
-                f"unsupported paper study signal claim scope: {self.claim_scope}"
+                f"unsupported paper research signal claim scope: {self.claim_scope}"
             )
         if not self.label.strip():
-            raise ValueError("paper study signal label cannot be empty")
+            raise ValueError("paper research signal label cannot be empty")
         if not self.source_refs:
-            raise ValueError("paper study signal requires at least one source")
+            raise ValueError("paper research signal requires at least one source")
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperStudySignal":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSignal":
         signal_type = _text(payload.get("signal_type")) or ""
         label = _text(payload.get("label")) or ""
         design_type = _text(payload.get("design_type")) or "uncertain"
@@ -620,11 +590,7 @@ class PaperStudySignal:
         experiment_label = _text(payload.get("experiment_label"))
         material_scope = normalize_objective_terms(payload.get("material_scope"))
         process_context = normalize_objective_terms(payload.get("process_context"))
-        sample_context = normalize_objective_terms(payload.get("sample_context"))
-        test_context = normalize_objective_terms(payload.get("test_context"))
-        comparator = _text(payload.get("comparator"))
-        fixed_conditions = normalize_objective_terms(payload.get("fixed_conditions"))
-        source_refs = _paper_study_source_refs(payload.get("source_refs"))
+        source_refs = _paper_research_source_refs(payload.get("source_refs"))
         signal_id = _text(payload.get("signal_id"))
         if signal_id is None:
             identity = json.dumps(
@@ -645,16 +611,6 @@ class PaperStudySignal:
                     "process_context": sorted(
                         value.casefold() for value in process_context
                     ),
-                    "sample_context": sorted(
-                        value.casefold() for value in sample_context
-                    ),
-                    "test_context": sorted(
-                        value.casefold() for value in test_context
-                    ),
-                    "comparator": comparator.casefold() if comparator else None,
-                    "fixed_conditions": sorted(
-                        value.casefold() for value in fixed_conditions
-                    ),
                     "source_refs": sorted(
                         (item.source_kind, item.source_ref) for item in source_refs
                     ),
@@ -673,10 +629,6 @@ class PaperStudySignal:
             experiment_label=experiment_label,
             material_scope=material_scope,
             process_context=process_context,
-            sample_context=sample_context,
-            test_context=test_context,
-            comparator=comparator,
-            fixed_conditions=fixed_conditions,
             source_refs=source_refs,
             confidence=normalize_objective_confidence(payload.get("confidence")),
             reason=_text(payload.get("reason")),
@@ -692,10 +644,6 @@ class PaperStudySignal:
             "experiment_label": self.experiment_label,
             "material_scope": list(self.material_scope),
             "process_context": list(self.process_context),
-            "sample_context": list(self.sample_context),
-            "test_context": list(self.test_context),
-            "comparator": self.comparator,
-            "fixed_conditions": list(self.fixed_conditions),
             "source_refs": [item.to_record() for item in self.source_refs],
             "confidence": self.confidence,
             "reason": self.reason,
@@ -731,7 +679,7 @@ class PaperSourceUnitCoverage:
             )
         ):
             raise ValueError("paper Source-unit coverage fields cannot be empty")
-        if self.source_kind not in _PAPER_STUDY_SOURCE_KINDS:
+        if self.source_kind not in _PAPER_RESEARCH_SOURCE_KINDS:
             raise ValueError(
                 f"unsupported paper Source-unit kind: {self.source_kind}"
             )
@@ -783,16 +731,16 @@ class PaperSourceUnitCoverage:
 
 
 @dataclass(frozen=True)
-class PaperSkim:
-    """Bounded Source-linked research-scope map for one paper."""
+class PaperResearchMap:
+    """Pre-Objective map of one paper's stated research scope."""
 
     document_id: str
     doc_role: str
-    studies: tuple[PaperStudy, ...]
+    studies: tuple[PaperResearchScope, ...]
     evidence_density: str
     confidence: float
     warnings: tuple[str, ...]
-    unresolved_signals: tuple[PaperStudySignal, ...] = ()
+    unresolved_signals: tuple[PaperResearchSignal, ...] = ()
     source_unit_coverage: tuple[PaperSourceUnitCoverage, ...] = ()
     map_status: str = "unknown"
     map_limitations: tuple[str, ...] = ()
@@ -800,7 +748,7 @@ class PaperSkim:
 
     def __post_init__(self) -> None:
         if not self.document_id.strip():
-            raise ValueError("paper skim requires document_id")
+            raise ValueError("paper research map requires document_id")
         object.__setattr__(self, "studies", tuple(self.studies))
         object.__setattr__(self, "unresolved_signals", tuple(self.unresolved_signals))
         object.__setattr__(
@@ -816,17 +764,23 @@ class PaperSkim:
             normalize_objective_terms(self.map_limitations),
         )
         if not isinstance(self.review_synthesis, ReviewSynthesisMap):
-            raise TypeError("paper skim review_synthesis must be a ReviewSynthesisMap")
+            raise TypeError(
+                "paper research map review_synthesis must be a ReviewSynthesisMap"
+            )
         if self.doc_role != "review" and not self.review_synthesis.is_empty:
             raise ValueError("review synthesis requires a review paper")
         if any(study.document_id != self.document_id for study in self.studies):
-            raise ValueError("paper skim contains a study owned by another document")
+            raise ValueError(
+                "paper research map contains a scope owned by another document"
+            )
         study_ids = [study.study_id for study in self.studies]
         if len(study_ids) != len(set(study_ids)):
-            raise ValueError("paper skim study ids must be unique")
+            raise ValueError("paper research map scope ids must be unique")
         coverage_ids = [item.source_unit_id for item in self.source_unit_coverage]
         if len(coverage_ids) != len(set(coverage_ids)):
-            raise ValueError("paper skim Source-unit coverage ids must be unique")
+            raise ValueError(
+                "paper research map Source-unit coverage ids must be unique"
+            )
 
     @property
     def coverage_complete(self) -> bool:
@@ -836,13 +790,13 @@ class PaperSkim:
         )
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperSkim":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchMap":
         document_id = _text(payload.get("document_id") or payload.get("paper_id")) or ""
         return cls(
             document_id=document_id,
             doc_role=_text(payload.get("doc_role")) or "uncertain",
             studies=tuple(
-                PaperStudy.from_mapping(
+                PaperResearchScope.from_mapping(
                     {**dict(item), "document_id": item.get("document_id", document_id)}
                 )
                 for item in payload.get("studies") or ()
@@ -852,7 +806,7 @@ class PaperSkim:
             confidence=normalize_objective_confidence(payload.get("confidence")),
             warnings=normalize_objective_terms(payload.get("warnings")),
             unresolved_signals=tuple(
-                PaperStudySignal.from_mapping(
+                PaperResearchSignal.from_mapping(
                     {**dict(item), "document_id": document_id}
                 )
                 for item in payload.get("unresolved_signals") or ()

@@ -774,9 +774,6 @@ def paper_signal_context_conflicts(
     for field_name in (
         "material_scope",
         "process_context",
-        "sample_context",
-        "test_context",
-        "fixed_conditions",
     ):
         contexts = [
             tuple(str(value) for value in signal.get(field_name) or ())
@@ -789,7 +786,7 @@ def paper_signal_context_conflicts(
             for right in contexts[position + 1 :]
         ):
             conflicts.append(field_name)
-    for field_name in ("experiment_label", "comparator"):
+    for field_name in ("experiment_label",):
         values = {
             axis_key(signal.get(field_name))
             for signal in signal_values

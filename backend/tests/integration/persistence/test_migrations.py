@@ -15,7 +15,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260828_0001"
+HEAD_REVISION = "20260827_0039"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -70,8 +70,36 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             for column in inspect(connection).get_columns("objective_analyses")
         }
 
-        command.downgrade(config, "base")
-        assert inspect(connection).get_table_names() == ["alembic_version"]
+        with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
+            command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_v01211_database_upgrades_to_current_document_schema(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "migration-from-v01211.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260825_0036")
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            "20260825_0036"
+        )
+
+        command.upgrade(config, "head")
+
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            HEAD_REVISION
+        )
+        assert sorted(inspect(connection).get_table_names()) == sorted(
+            {*Base.metadata.tables, "alembic_version"}
+        )
 
     engine.dispose()
 

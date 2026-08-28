@@ -14,12 +14,13 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    only synthesis explicitly authored by the review; individually cited
    experiments remain leads back to primary literature. The backend binds
    Source identity.
-2. `paper_skim_service.py` in the parent package selects how a researcher reads
-   before choosing a question: bounded abstract, conclusion or summary,
-   overview, and table/figure caption Sources. Detailed Methods, Results text,
-   and table rows do not enter this pre-Objective stage. The service groups the
-   selected Sources by broad reading role, retries technical failures under one
-   small per-paper budget, and consolidates the results into one paper map.
+2. `paper_research_map_service.py` in the parent package selects how a
+   researcher reads before choosing a question: bounded abstract, conclusion or
+   summary, overview, and table/figure caption Sources. Detailed Methods,
+   Results text, and table rows do not enter this pre-Objective stage. The
+   service groups the selected Sources by broad reading role, retries technical
+   failures under one small per-paper budget, and consolidates the results into
+   one paper map.
 3. `signal_reconciliation.py` decides whether compatible incomplete signals
    found in different high-level windows describe the same paper-owned research
    scope. It does not reconstruct experiment conditions or results.
@@ -48,8 +49,11 @@ Source selection, batching, recursive failed-batch subdivision, stable Source
 identity, selected-Source coverage, scope consolidation, and persistence remain
 outside these model contracts. A valid model response is therefore an input to
 discovery, not proof that a collection Objective or durable Evidence exists.
+The model sees each selected Source only as a short window-local label plus its
+section path and scientific content. Collection, Document, window, Source, and
+parser identities remain backend-owned and are rebound after model validation.
 The backend also enforces paper ownership: a primary research paper may retain
 supported `current_work`, while a review retains only `synthesis`. Explicit
 numbered citations, named prior authors, generic background, and ambiguous
-ownership are discarded from review discovery and require inspection of the primary Source
-before they can support an experiment relationship.
+ownership are discarded from review discovery and require inspection of the
+primary Source before they can support an experiment relationship.

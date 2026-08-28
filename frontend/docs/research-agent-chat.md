@@ -33,7 +33,7 @@ fact store.
 - Current Documents and their preparation tasks remain the runtime authority for
   paper preparation progress. Chat reads that state; it does not persist another
   workflow.
-- PaperSkim relationships may support an Objective proposal but are labeled as
+- Paper Map relationships may support an Objective proposal but are labeled as
   proposal context, never Evidence.
 - Preparing papers and starting Objective analysis are separate approved writes.
   Preparation targets exact Documents; analysis targets an exact non-empty set

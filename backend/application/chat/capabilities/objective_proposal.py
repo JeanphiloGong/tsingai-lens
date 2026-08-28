@@ -120,7 +120,7 @@ class ProposeObjectiveDraftsCapability:
                     "status": "draft",
                     **draft.model_dump(),
                     "support_status": (
-                        "paper_skim_context" if support_ids else "unsupported"
+                        "paper_map_context" if support_ids else "unsupported"
                     ),
                     "supporting_document_ids": list(support_ids),
                     "similar_objective_ids": list(similar_ids),

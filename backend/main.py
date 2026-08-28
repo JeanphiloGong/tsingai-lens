@@ -36,7 +36,7 @@ from application.core.objectives.analysis_service import ObjectiveAnalysisServic
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.paper_skim_service import PaperResearchMapService
+from application.core.objectives.paper_research_map_service import PaperResearchMapService
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )

@@ -94,8 +94,9 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "fixed_conditions" not in study_schema
     assert study_schema["relationships"]["maxItems"] == 4
     assert relationship_schema["varied_factors"]["maxItems"] == 6
-    assert relationship_schema["source_unit_ids"]["minItems"] == 1
-    assert relationship_schema["source_unit_ids"]["maxItems"] == 4
+    assert "source_unit_ids" not in relationship_schema
+    assert relationship_schema["source_labels"]["minItems"] == 1
+    assert relationship_schema["source_labels"]["maxItems"] == 4
     signal_schema = experimental_schema["$defs"]["StructuredPaperMapSignal"][
         "properties"
     ]
@@ -104,18 +105,19 @@ def test_paper_research_map_contract_bounds_model_output():
     assert signal_schema["process_context"]["items"]["maxLength"] == 160
     assert "sample_context" not in signal_schema
     assert "test_context" not in signal_schema
-    assert signal_schema["source_unit_ids"]["minItems"] == 1
-    assert signal_schema["source_unit_ids"]["maxItems"] == 4
+    assert "source_unit_ids" not in signal_schema
+    assert signal_schema["source_labels"]["minItems"] == 1
+    assert signal_schema["source_labels"]["maxItems"] == 4
     assert "source_unit_coverage" not in schema
     assert "review_synthesis" not in schema
     assert schema["warnings"]["items"]["maxLength"] == 240
 
     review_model_schema = StructuredReviewPaperMap.model_json_schema()
-    review_schema = review_model_schema["$defs"]["StructuredReviewSynthesisMap"][
+    review_schema = review_model_schema["$defs"]["StructuredReviewMapSynthesis"][
         "properties"
     ]
     review_item_schema = review_model_schema["$defs"][
-        "StructuredReviewKnowledgeItem"
+        "StructuredReviewMapKnowledgeItem"
     ]["properties"]
     assert "studies" not in review_model_schema["properties"]
     assert "unresolved_signals" not in review_model_schema["properties"]
@@ -124,8 +126,9 @@ def test_paper_research_map_contract_bounds_model_output():
     assert review_schema["evidence_gaps"]["maxItems"] == 2
     assert review_schema["citation_leads"]["maxItems"] == 3
     assert review_item_schema["content"]["maxLength"] == 240
-    assert review_item_schema["source_unit_ids"]["minItems"] == 1
-    assert review_item_schema["source_unit_ids"]["maxItems"] == 4
+    assert "source_unit_ids" not in review_item_schema
+    assert review_item_schema["source_labels"]["minItems"] == 1
+    assert review_item_schema["source_labels"]["maxItems"] == 4
 
 
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
@@ -298,9 +301,14 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
 
     skim = extractor.extract_source_signals(
         {
+            "collection_id": "collection-internal",
             "document_id": "review-paper",
             "window_id": "results-1.retry-left",
             "window_role": "results",
+            "document_profile": {
+                "doc_type": "review",
+                "parsing_warnings": ["parser internal warning"],
+            },
             "source_units": [
                 {
                     "source_unit_id": "source-unit-000071",
@@ -327,6 +335,17 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
         ["source-unit-000071"],
     ]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"label": "S1"' in request_text
+    for internal_value in (
+        "collection-internal",
+        "review-paper",
+        "results-1.retry-left",
+        "source-unit-000071",
+        "block-71",
+        "parser internal warning",
+    ):
+        assert internal_value not in request_text
 
 
 def test_paper_research_map_contract_represents_bounded_preliminary_scope():
@@ -502,7 +521,7 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "not full experiment reconstruction" in user_prompt
     assert "candidate scope, not proven Evidence" in user_prompt
     assert "fields are intentionally absent" in user_prompt
-    assert "`window_id` is this bounded window's identity" in user_prompt
+    assert "`window_role` describes this bounded reading view" in user_prompt
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
     assert "full jointly varied, compared, or modeled factor set" in user_prompt
@@ -511,8 +530,8 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "Return empty arrays rather than guessing" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
-    assert "copy `source_unit_ids`" in user_prompt
-    assert "at most 4 unique `source_unit_ids`" in user_prompt
+    assert "copy `source_labels`" in user_prompt
+    assert "at most 4 unique `source_labels`" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 2 studies" in user_prompt
     assert "up to 4 relationships per study" in user_prompt
@@ -525,6 +544,102 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "outcome='fatigue strength'" in user_prompt
     assert "result direction, value, or comparison sentence" in user_prompt
     assert "source_unit_coverage" not in user_prompt
+
+
+def test_paper_research_map_prompt_exposes_science_without_backend_lineage():
+    _, user_prompt = build_paper_research_map_prompt(
+        {
+            "collection_id": "col-internal-123",
+            "document_id": "doc-internal-456",
+            "title": "Scientific title",
+            "window_id": "results-7.retry-left",
+            "window_role": "results",
+            "document_profile": {
+                "doc_type": "experimental",
+                "parsing_warnings": ["parser internal warning"],
+                "confidence": 0.84,
+            },
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000071",
+                    "source_kind": "table",
+                    "source_ref": "table-internal-71",
+                    "section_path": "Results / Porosity",
+                    "content": {
+                        "table_id": "table-internal-71",
+                        "row_id": "row-internal-3",
+                        "caption_text": "Porosity measurements",
+                        "column_headers": ["Power", "Porosity"],
+                        "row_text": "200 W | 0.7%",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert '"label": "S1"' in user_prompt
+    assert "Scientific title" in user_prompt
+    assert "Results / Porosity" in user_prompt
+    assert "Porosity measurements" in user_prompt
+    assert "200 W | 0.7%" in user_prompt
+    for internal_value in (
+        "col-internal-123",
+        "doc-internal-456",
+        "results-7.retry-left",
+        "source-unit-000071",
+        "table-internal-71",
+        "row-internal-3",
+        "parser internal warning",
+    ):
+        assert internal_value not in user_prompt
+
+
+def test_paper_research_map_rebinds_model_source_labels_to_backend_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "experimental",
+                "studies": [
+                    {
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "relationships": [
+                            {
+                                "varied_factors": ["laser power"],
+                                "outcome": "porosity",
+                                "source_labels": ["S1"],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+
+    paper_map = PaperResearchMapExtractor(_response_client(client)).extract(
+        {
+            "collection_id": "col-internal-123",
+            "document_id": "doc-internal-456",
+            "window_id": "results-7",
+            "window_role": "results",
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000071",
+                    "source_kind": "block",
+                    "source_ref": "block-internal-71",
+                    "section_path": "Results",
+                    "content": "Laser power was varied and porosity was measured.",
+                }
+            ],
+        }
+    )
+
+    relationship = paper_map.studies[0].relationships[0]
+    assert relationship.source_unit_ids == ["source-unit-000071"]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"label": "S1"' in request_text
+    assert "source-unit-000071" not in request_text
+    assert "block-internal-71" not in request_text
 
 
 def test_experimental_paper_map_schema_excludes_review_only_output():
@@ -592,6 +707,11 @@ def test_review_paper_research_map_prompt_extracts_synthesis_not_cited_experimen
     assert "evidence_gaps" in user_prompt
     assert "citation_leads" in user_prompt
     assert "never primary Evidence" in user_prompt
+    assert '"label": "S1"' in user_prompt
+    assert "review-paper" not in user_prompt
+    assert "unknown-1" not in user_prompt
+    assert "source-unit-000001" not in user_prompt
+    assert "block-1" not in user_prompt
 
 
 def test_review_paper_map_derives_candidate_relationship_without_duplicate_output():
@@ -606,7 +726,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
                             "content": "Preheating generally reduces residual stress.",
                             "variables": ["preheating condition"],
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.9,
                         }
                     ],
@@ -614,7 +734,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
                         {
                             "content": "Miranda et al. [20]",
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.8,
                         }
                     ],
@@ -669,7 +789,7 @@ def test_review_paper_research_map_extractor_keeps_only_review_author_synthesis(
                             "content": "Preheating generally reduces residual stress.",
                             "variables": ["preheating condition"],
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.9,
                         }
                     ],
@@ -677,7 +797,7 @@ def test_review_paper_research_map_extractor_keeps_only_review_author_synthesis(
                         {
                             "content": "Miranda et al. [20]",
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.8,
                         }
                     ],
@@ -1690,7 +1810,7 @@ def test_domain_model_extractors_validates_paper_research_map_response():
                 {
                   "varied_factors": ["heat treatment"],
                       "outcome": "corrosion current density",
-                  "source_unit_ids": ["window-source-1"],
+                  "source_labels": ["S1"],
                   "confidence": 0.91
                 }
               ],
@@ -1764,13 +1884,13 @@ def test_paper_research_map_downgrades_empty_factor_relationship_without_losing_
                     {
                         "varied_factors": ["laser power"],
                         "outcome": "porosity",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
                         "varied_factors": [],
                         "outcome": "microhardness",
-                        "source_unit_ids": ["window-source-2"],
+                        "source_labels": ["S2"],
                         "confidence": 0.84,
                     },
                 ],
@@ -1833,7 +1953,7 @@ def test_paper_research_map_downgrades_descriptive_factor_clause_to_unresolved_o
                             "pole figures"
                         ],
                         "outcome": "alpha phase fraction",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                     }
                 ],
             }
@@ -1878,19 +1998,19 @@ def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_los
                     {
                         "varied_factors": ["annealing temperature"],
                         "outcome": "microstructure",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
                         "varied_factors": ["annealing temperature"],
                         "outcome": "strength and ductility of SLMed Ti-6Al-4V",
-                        "source_unit_ids": ["window-source-2"],
+                        "source_labels": ["S2"],
                         "confidence": 0.86,
                     },
                     {
                         "varied_factors": ["annealing temperature"],
                         "outcome": "mechanical property combination",
-                        "source_unit_ids": ["window-source-3"],
+                        "source_labels": ["S3"],
                         "confidence": 0.81,
                     },
                     {
@@ -1899,7 +2019,7 @@ def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_los
                             "microstructure (grain size, shape, phase fraction, "
                             "composition)"
                         ),
-                        "source_unit_ids": ["window-source-4"],
+                        "source_labels": ["S4"],
                         "confidence": 0.79,
                     },
                 ],
@@ -1991,7 +2111,7 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
             {
                 "varied_factors": ["laser power"],
                 "outcome": "porosity",
-                "source_unit_ids": ["window-source-1"],
+                "source_labels": ["S1"],
             }
         ],
     }
@@ -2000,7 +2120,7 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
         "relationships": [
             {
                 **first_study["relationships"][0],
-                "source_unit_ids": ["window-source-2"],
+                "source_labels": ["S2"],
             }
         ],
     }
@@ -2020,9 +2140,9 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
                 "relationships": [
                     {
                         **first_study["relationships"][0],
-                        "source_unit_ids": [
-                            "window-source-1",
-                            "window-source-2",
+                        "source_labels": [
+                            "S1",
+                            "S2",
                         ],
                     }
                 ],
@@ -2058,12 +2178,12 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
     assert "duplicate study identities" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "at most 4 IDs" in client.chat.completions.calls[1]["messages"][-1][
+    assert "at most 4 labels" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
 
 
-def test_paper_research_map_repairs_unknown_source_unit_ids_before_returning():
+def test_paper_research_map_repairs_unknown_source_labels_before_returning():
     invalid = {
         "doc_role": "experimental",
         "studies": [
@@ -2074,7 +2194,7 @@ def test_paper_research_map_repairs_unknown_source_unit_ids_before_returning():
                     {
                         "varied_factors": ["HIP temperature"],
                         "outcome": "yield strength",
-                        "source_unit_ids": ["invented-source-unit"],
+                        "source_labels": ["S9"],
                     }
                 ],
             }
@@ -2088,7 +2208,7 @@ def test_paper_research_map_repairs_unknown_source_unit_ids_before_returning():
                 "relationships": [
                     {
                         **invalid["studies"][0]["relationships"][0],
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                     }
                 ],
             }
@@ -2115,23 +2235,23 @@ def test_paper_research_map_repairs_unknown_source_unit_ids_before_returning():
     ]
     assert len(client.chat.completions.calls) == 2
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "invented-source-unit" in repair_prompt
-    assert "Copy only unique Source-unit IDs from the input" in repair_prompt
+    assert "S9" in repair_prompt
+    assert "Copy only unique Source labels from the input" in repair_prompt
     assert (
-        'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]'
+        'ALLOWED SOURCE LABELS: ["S1"]'
         in client.chat.completions.calls[0]["messages"][-1]["content"]
     )
-    assert 'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]' in repair_prompt
+    assert 'ALLOWED SOURCE LABELS: ["S1"]' in repair_prompt
 
 
-def test_paper_research_map_repairs_unknown_signal_source_unit_ids_before_returning():
+def test_paper_research_map_repairs_unknown_signal_source_labels_before_returning():
     invalid = {
         "doc_role": "experimental",
         "unresolved_signals": [
             {
                 "signal_type": "outcome",
                 "label": "elongation",
-                "source_unit_ids": ["invented-source-unit"],
+                "source_labels": ["S9"],
             }
         ],
     }
@@ -2140,7 +2260,7 @@ def test_paper_research_map_repairs_unknown_signal_source_unit_ids_before_return
         "unresolved_signals": [
             {
                 **invalid["unresolved_signals"][0],
-                "source_unit_ids": ["window-source-1"],
+                "source_labels": ["S1"],
             }
         ],
     }
@@ -2162,7 +2282,7 @@ def test_paper_research_map_repairs_unknown_signal_source_unit_ids_before_return
 
     assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
     assert len(client.chat.completions.calls) == 2
-    assert "invented-source-unit" in client.chat.completions.calls[1]["messages"][
+    assert "S9" in client.chat.completions.calls[1]["messages"][
         -1
     ]["content"]
 
@@ -2179,7 +2299,7 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
             {
                 "varied_factors": ["laser power"],
                 "outcome": "porosity",
-                "source_unit_ids": ["window-source-1"],
+                "source_labels": ["S1"],
             }
         ],
     }
@@ -2188,7 +2308,7 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
         "relationships": [
             {
                 **first_study["relationships"][0],
-                "source_unit_ids": ["window-source-2"],
+                "source_labels": ["S2"],
             }
         ],
     }
@@ -2204,9 +2324,9 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
                 "relationships": [
                     {
                         **first_study["relationships"][0],
-                        "source_unit_ids": [
-                            "window-source-1",
-                            "window-source-2",
+                        "source_labels": [
+                            "S1",
+                            "S2",
                         ],
                     }
                 ],
@@ -2215,7 +2335,7 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
     }
     client = _FakeOpenAIClient(
         json.dumps(valid),
-        parsed=StructuredPaperResearchMap.model_validate(invalid),
+        parsed=StructuredExperimentalPaperMap.model_validate(invalid),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 
@@ -2270,7 +2390,7 @@ def test_paper_research_map_preserves_multi_material_multi_outcome_study():
                                     "base plate preheating temperature"
                                 ],
                                 "outcome": outcome,
-                                "source_unit_ids": ["window-source-1"],
+                                "source_labels": ["S1"],
                                 "confidence": 0.92,
                             }
                             for outcome in (
@@ -2342,7 +2462,7 @@ def test_paper_research_map_retries_oversized_study_without_truncating_relations
                     {
                         "varied_factors": ["preheating temperature"],
                         "outcome": "density",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.8,
                     }
                 ],
@@ -2370,7 +2490,7 @@ def test_paper_research_map_retries_oversized_study_without_truncating_relations
                     {
                         "varied_factors": ["scan speed"],
                         "outcome": "porosity",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.75,
                     }
                 ],

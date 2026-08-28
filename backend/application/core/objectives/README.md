@@ -151,7 +151,7 @@ state through the public API.
 
 ## Main Owners
 
-- `paper_skim_service.py`: one Document's lightweight Paper Map.
+- `paper_research_map_service.py`: one Document's lightweight Paper Map.
 - `objective_candidate_service.py`: candidate formation from selected maps.
 - `research_objective_service.py`: selected-input loading and scientific
   orchestration.

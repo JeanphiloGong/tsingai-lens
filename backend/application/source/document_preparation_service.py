@@ -27,7 +27,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
     build_default_structured_response_client,
 )
-from application.core.objectives.paper_skim_service import PaperResearchMapService
+from application.core.objectives.paper_research_map_service import PaperResearchMapService
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,

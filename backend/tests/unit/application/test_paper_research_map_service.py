@@ -17,7 +17,9 @@ from application.core.objectives.discovery.study_window import (
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
 )
-from application.core.objectives.paper_skim_service import PaperResearchMapService
+from application.core.objectives.paper_research_map_service import (
+    PaperResearchMapService,
+)
 from domain.core import PaperResearchMap, PaperResearchScope
 from domain.source import (
     SourceDocument,
@@ -1363,7 +1365,7 @@ def test_semantic_single_source_failure_does_not_trigger_content_splitting():
     class SemanticFailureExtractor(_WindowExtractor):
         def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
             self.payloads.append(payload)
-            raise ValueError("paper skim references unknown Source-unit ids")
+            raise ValueError("paper research map references unknown Source-unit ids")
 
     extractor = SemanticFailureExtractor()
 
@@ -2629,7 +2631,7 @@ def test_methods_variable_and_results_outcome_reconcile_into_one_candidate():
 
 
 def test_reconciliation_shares_the_paper_judgment_budget(monkeypatch):
-    monkeypatch.setenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "0")
+    monkeypatch.setenv("CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS", "0")
     artifacts, tree = _artifacts(
         blocks=[
             _heading("abstract", "Abstract", 1),
@@ -2662,7 +2664,7 @@ def test_reconciliation_shares_the_paper_judgment_budget(monkeypatch):
 
 
 def test_reconciliation_stops_after_using_the_remaining_paper_budget(monkeypatch):
-    monkeypatch.setenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "1")
+    monkeypatch.setenv("CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS", "1")
     signal_specs = {
         "power": {
             "signal_type": "variable",

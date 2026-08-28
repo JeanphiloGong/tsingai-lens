@@ -15,11 +15,12 @@ SourceDocument
 ```
 
 `document_profiles/service.py` classifies the paper for research triage.
-`objectives/paper_skim_service.py` creates one bounded `PaperResearchMap` that
-describes paper role, material and process themes, variable-to-outcome research
-axes, review synthesis, gaps, Source lineage, and uncertainty. It cannot
-represent samples, tests, comparators, fixed conditions, parameter levels, or
-measurements. The map is a navigation and proposal input, not proven Evidence.
+`objectives/paper_research_map_service.py` creates one bounded
+`PaperResearchMap` that describes paper role, material and process themes,
+variable-to-outcome research axes, review synthesis, gaps, Source lineage, and
+uncertainty. It cannot represent samples, tests, comparators, fixed conditions,
+parameter levels, or measurements. The map is a navigation and proposal input,
+not proven Evidence.
 
 ## Objective Discovery
 
@@ -55,7 +56,7 @@ inputs allowed to reconstruct experiment context or create Evidence.
 ## Owners
 
 - `document_profiles/`: document-level type and warning profile.
-- `objectives/paper_skim_service.py`: lightweight Paper Map construction.
+- `objectives/paper_research_map_service.py`: lightweight Paper Map construction.
 - `objectives/objective_candidate_service.py`: candidate formation from selected
   Paper Maps.
 - `objectives/research_objective_service.py`: selected-input loading and

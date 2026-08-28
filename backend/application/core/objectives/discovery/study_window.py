@@ -20,8 +20,8 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 
-PAPER_RESEARCH_MAP_PROMPT_VERSION = "paper_map.v2"
-PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v1"
+PAPER_RESEARCH_MAP_PROMPT_VERSION = "paper_map.v3"
+PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v2"
 PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT = 12
 PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT = 4
@@ -43,6 +43,30 @@ _SOURCE_SIGNAL_LIMIT = 8
 _REVIEW_KNOWLEDGE_ITEM_LIMIT = 2
 _REVIEW_CITATION_LEAD_LIMIT = 3
 
+_MODEL_HIDDEN_CONTENT_KEYS = {
+    "block_id",
+    "cell_id",
+    "collection_id",
+    "column_id",
+    "column_index",
+    "document_id",
+    "end_col",
+    "end_row",
+    "figure_id",
+    "fragment_start",
+    "page_index",
+    "row_id",
+    "row_index",
+    "source_kind",
+    "source_ref",
+    "source_unit_id",
+    "start_col",
+    "start_row",
+    "structured_path",
+    "table_id",
+    "window_id",
+}
+
 _MAX_COMPLETION_TOKENS = 2048
 _SOURCE_SIGNAL_MAX_COMPLETION_TOKENS = 2048
 _DOC_ROLES = {"experimental", "review", "modeling", "mixed", "uncertain"}
@@ -57,7 +81,7 @@ Non-negotiable rules:
 - This is lightweight paper mapping, not experiment reconstruction or Evidence extraction.
 - Return exactly one JSON object and nothing else.
 - Scientific labels must be supported by supplied Source-unit content.
-- Copy only supplied `source_unit_id` values; never invent or rewrite an id.
+- Copy only supplied short `source_labels`; the backend owns real Source identity.
 - Do not infer material systems from filenames or section names.
 """.strip()
 
@@ -69,7 +93,7 @@ Non-negotiable rules:
 - This is synthesis screening, not reconstruction of every cited experiment.
 - Return exactly one JSON object and nothing else.
 - Scientific labels must be supported by supplied Source-unit content.
-- Copy only supplied `source_unit_id` values; never invent or rewrite an id.
+- Copy only supplied short `source_labels`; the backend owns real Source identity.
 - A citation points to primary literature; it is not review-owned evidence.
 """.strip()
 
@@ -277,23 +301,23 @@ class StructuredPaperMapRelationship(_PaperResearchMapResponse):
         Annotated[str, Field(max_length=80)]
     ] = Field(min_length=1, max_length=_PAPER_MAP_VARIED_FACTOR_LIMIT)
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
-    source_unit_ids: list[
-        Annotated[str, Field(min_length=1, max_length=160)]
+    source_labels: list[
+        Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
     ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
     confidence: float = 0.0
 
-    @field_validator("varied_factors", "source_unit_ids", mode="before")
+    @field_validator("varied_factors", "source_labels", mode="before")
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_unit_ids(self) -> "StructuredPaperMapRelationship":
-        normalized = [value.strip() for value in self.source_unit_ids]
+    def _validate_source_labels(self) -> "StructuredPaperMapRelationship":
+        normalized = [value.strip() for value in self.source_labels]
         if any(not value for value in normalized):
-            raise ValueError("paper-map relationship Source-unit ids cannot be empty")
+            raise ValueError("paper-map relationship Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
-            raise ValueError("paper-map relationship Source-unit ids must be unique")
+            raise ValueError("paper-map relationship Source labels must be unique")
         return self
 
 
@@ -360,15 +384,15 @@ class StructuredPaperMapSignal(_PaperResearchMapResponse):
     process_context: list[
         Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
     ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
-    source_unit_ids: list[
-        Annotated[str, Field(min_length=1, max_length=160)]
+    source_labels: list[
+        Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
     ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
     confidence: float = 0.0
 
     @field_validator(
         "material_scope",
         "process_context",
-        "source_unit_ids",
+        "source_labels",
         mode="before",
     )
     @classmethod
@@ -376,12 +400,12 @@ class StructuredPaperMapSignal(_PaperResearchMapResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_unit_ids(self) -> "StructuredPaperMapSignal":
-        normalized = [value.strip() for value in self.source_unit_ids]
+    def _validate_source_labels(self) -> "StructuredPaperMapSignal":
+        normalized = [value.strip() for value in self.source_labels]
         if any(not value for value in normalized):
-            raise ValueError("paper-map signal Source-unit ids cannot be empty")
+            raise ValueError("paper-map signal Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
-            raise ValueError("paper-map signal Source-unit ids must be unique")
+            raise ValueError("paper-map signal Source labels must be unique")
         return self
 
 
@@ -576,8 +600,83 @@ class StructuredPaperSourceSignalScreen(_PaperResearchMapResponse):
         return self
 
 
+class StructuredReviewMapKnowledgeItem(_PaperResearchMapResponse):
+    """One model-returned review statement linked by a short Source label."""
+
+    content: Annotated[str, Field(min_length=1, max_length=240)]
+    material_scope: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    variables: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    outcomes: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    conditions: list[Annotated[str, Field(max_length=160)]] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    source_labels: list[
+        Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
+    ] = Field(min_length=1, max_length=4)
+    confidence: float = 0.0
+
+    @field_validator(
+        "material_scope",
+        "variables",
+        "outcomes",
+        "conditions",
+        "source_labels",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+    @model_validator(mode="after")
+    def _validate_source_labels(self) -> "StructuredReviewMapKnowledgeItem":
+        normalized = [value.strip() for value in self.source_labels]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("review knowledge Source labels must be unique")
+        return self
+
+
+class StructuredReviewMapSynthesis(_PaperResearchMapResponse):
+    synthesis_claims: list[StructuredReviewMapKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    disputes: list[StructuredReviewMapKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    evidence_gaps: list[StructuredReviewMapKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    citation_leads: list[StructuredReviewMapKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_CITATION_LEAD_LIMIT,
+    )
+
+    @field_validator(
+        "synthesis_claims",
+        "disputes",
+        "evidence_gaps",
+        "citation_leads",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+
 class StructuredReviewKnowledgeItem(_PaperResearchMapResponse):
-    """One bounded, Source-linked review-author statement or citation lead."""
+    """One review-author statement rebound to backend Source identity."""
 
     content: Annotated[str, Field(min_length=1, max_length=240)]
     material_scope: list[Annotated[str, Field(max_length=120)]] = Field(
@@ -655,8 +754,8 @@ class StructuredReviewPaperMap(_PaperResearchMapResponse):
     """Review-author knowledge without duplicate study or signal output."""
 
     doc_role: Literal["review"] = "review"
-    review_synthesis: StructuredReviewSynthesisMap = Field(
-        default_factory=StructuredReviewSynthesisMap
+    review_synthesis: StructuredReviewMapSynthesis = Field(
+        default_factory=StructuredReviewMapSynthesis
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
@@ -745,12 +844,17 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
                 ):
                     retained_relationships.append(relationship)
                     continue
-                source_unit_ids = relationship.get("source_unit_ids")
+                lineage_field = (
+                    "source_labels"
+                    if "source_labels" in relationship
+                    else "source_unit_ids"
+                )
+                lineage_values = relationship.get(lineage_field)
                 if (
                     not outcome
                     or len(outcome) > 80
-                    or not isinstance(source_unit_ids, list)
-                    or not any(str(item).strip() for item in source_unit_ids)
+                    or not isinstance(lineage_values, list)
+                    or not any(str(item).strip() for item in lineage_values)
                 ):
                     retained_relationships.append(relationship)
                     continue
@@ -758,7 +862,7 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
                 signal = {
                     "signal_type": "outcome",
                     "label": outcome,
-                    "source_unit_ids": list(source_unit_ids),
+                    lineage_field: list(lineage_values),
                     "confidence": relationship.get(
                         "confidence",
                         study.get("confidence"),
@@ -838,6 +942,81 @@ def _review_synthesis_only(response: StructuredPaperResearchMap) -> StructuredPa
     )
 
 
+def _model_visible_content(value: object) -> object:
+    """Remove backend identity and slicing coordinates from scientific content."""
+
+    if isinstance(value, Mapping):
+        return {
+            str(key): _model_visible_content(item)
+            for key, item in value.items()
+            if str(key) not in _MODEL_HIDDEN_CONTENT_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_model_visible_content(item) for item in value]
+    return value
+
+
+def _paper_map_model_payload(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Mapping[str, Any]]]:
+    """Project backend input into the scientific contract visible to the model."""
+
+    source_units_by_label: dict[str, Mapping[str, Any]] = {}
+    source_unit_ids: set[str] = set()
+    model_sources: list[dict[str, Any]] = []
+    for source_unit in payload.get("source_units") or ():
+        if not isinstance(source_unit, Mapping):
+            continue
+        source_unit_id = str(source_unit.get("source_unit_id") or "").strip()
+        if not source_unit_id:
+            raise ValueError("paper map Source-unit ids must be non-empty")
+        if source_unit_id in source_unit_ids:
+            raise ValueError("paper map Source-unit ids must be unique")
+        source_unit_ids.add(source_unit_id)
+        label = f"S{len(model_sources) + 1}"
+        source_units_by_label[label] = source_unit
+        model_sources.append(
+            {
+                "label": label,
+                "section_path": str(source_unit.get("section_path") or "").strip(),
+                "content": _model_visible_content(source_unit.get("content")),
+            }
+        )
+
+    profile = payload.get("document_profile")
+    document_type = (
+        str(profile.get("doc_type") or "").strip()
+        if isinstance(profile, Mapping)
+        else ""
+    )
+    return (
+        {
+            "title": str(payload.get("title") or "").strip(),
+            "document_type": document_type,
+            "window_role": str(payload.get("window_role") or "unknown").strip()
+            or "unknown",
+            "sources": model_sources,
+        },
+        source_units_by_label,
+    )
+
+
+def _source_unit_ids_from_labels(
+    source_labels: list[str],
+    source_units_by_label: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    unknown_labels = sorted(set(source_labels) - source_units_by_label.keys())
+    if unknown_labels:
+        raise ValueError(
+            "paper research map references unknown Source labels: "
+            f"{unknown_labels}"
+        )
+    return [
+        str(source_units_by_label[label].get("source_unit_id") or "").strip()
+        for label in source_labels
+    ]
+
+
 def _paper_map_response_model(
     payload: Mapping[str, Any],
 ) -> type[StructuredExperimentalPaperMap] | type[StructuredReviewPaperMap]:
@@ -852,9 +1031,22 @@ def _paper_map_response_model(
 
 def _paper_map_response(
     response: StructuredExperimentalPaperMap | StructuredReviewPaperMap,
+    source_units_by_label: Mapping[str, Mapping[str, Any]],
 ) -> StructuredPaperResearchMap:
     if isinstance(response, StructuredExperimentalPaperMap):
-        return StructuredPaperResearchMap.model_validate(response.model_dump())
+        payload = response.model_dump()
+        for study in payload["studies"]:
+            for relationship in study["relationships"]:
+                relationship["source_unit_ids"] = _source_unit_ids_from_labels(
+                    relationship.pop("source_labels"),
+                    source_units_by_label,
+                )
+        for signal in payload["unresolved_signals"]:
+            signal["source_unit_ids"] = _source_unit_ids_from_labels(
+                signal.pop("source_labels"),
+                source_units_by_label,
+            )
+        return StructuredPaperResearchMap.model_validate(payload)
 
     studies: list[dict[str, Any]] = []
     unresolved_signals: list[dict[str, Any]] = []
@@ -872,7 +1064,10 @@ def _paper_map_response(
             dict.fromkeys(value.strip() for value in item.outcomes if value.strip())
         )
         source_unit_ids = tuple(
-            dict.fromkeys(value.strip() for value in item.source_unit_ids if value.strip())
+            _source_unit_ids_from_labels(
+                list(dict.fromkeys(item.source_labels)),
+                source_units_by_label,
+            )
         )
         material_scope = tuple(
             dict.fromkeys(value.strip() for value in item.material_scope if value.strip())
@@ -927,7 +1122,24 @@ def _paper_map_response(
             "unresolved_signals": unresolved_signals[
                 :PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT
             ],
-            "review_synthesis": response.review_synthesis.model_dump(),
+            "review_synthesis": {
+                field_name: [
+                    {
+                        **item.model_dump(exclude={"source_labels"}),
+                        "source_unit_ids": _source_unit_ids_from_labels(
+                            item.source_labels,
+                            source_units_by_label,
+                        ),
+                    }
+                    for item in getattr(response.review_synthesis, field_name)
+                ]
+                for field_name in (
+                    "synthesis_claims",
+                    "disputes",
+                    "evidence_gaps",
+                    "citation_leads",
+                )
+            },
             "output_saturated": response.output_saturated or derived_saturated,
             "evidence_density": response.evidence_density,
             "confidence": response.confidence,
@@ -937,14 +1149,13 @@ def _paper_map_response(
 
 
 def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
-    allowed_source_unit_ids = [
-        str(source_unit.get("source_unit_id") or "").strip()
-        for source_unit in payload.get("source_units") or ()
-        if isinstance(source_unit, Mapping)
-        and str(source_unit.get("source_unit_id") or "").strip()
+    allowed_source_labels = [
+        str(source.get("label") or "").strip()
+        for source in payload.get("sources") or ()
+        if isinstance(source, Mapping) and str(source.get("label") or "").strip()
     ]
-    allowed_source_unit_ids_json = json.dumps(
-        allowed_source_unit_ids,
+    allowed_source_labels_json = json.dumps(
+        allowed_source_labels,
         ensure_ascii=True,
         separators=(",", ":"),
     )
@@ -956,11 +1167,11 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "backend derives candidate factor/outcome pairs from the returned review-author "
         "statements; do not return a second study representation.\n\n"
         "INPUT SCHEMA\n"
-        "- `document_id` and `title` identify the review paper.\n"
-        "- `window_id`, `window_role`, and `section_paths` orient this incomplete window "
-        "but are not scientific evidence.\n"
-        "- `source_units` contain review text, table summaries, or figure captions. "
-        "Content is the authority; each opaque ID provides lineage.\n"
+        "- `title` identifies the review paper; `document_type` is a coarse role hint.\n"
+        "- `window_role` describes this incomplete reading view but is not scientific "
+        "evidence.\n"
+        "- `sources` contain review text, table summaries, or figure captions. Content "
+        "is the authority; each short label lets the backend restore lineage.\n"
         "- Named authors and numbered citations are navigation to primary literature, "
         "not review-owned experimental Evidence.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
@@ -978,7 +1189,7 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "relationships from these fields.\n"
         "4. Preserve a partial variable-only or outcome-only statement in the same "
         "knowledge item. Do not borrow its missing axis from another Source.\n"
-        "5. Copy only the Source-unit IDs that directly support each retained statement. "
+        "5. Copy only the Source labels that directly support each retained statement. "
         "Use confidence and warnings for ambiguity instead of filling gaps.\n\n"
         "HARD RULES\n"
         "- Do not return `studies` or `unresolved_signals`; those are derived by the "
@@ -1007,31 +1218,31 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         f"{_REVIEW_KNOWLEDGE_ITEM_LIMIT} evidence gaps, and "
         f"{_REVIEW_CITATION_LEAD_LIMIT} citation leads.\n"
         "- Each item contains one concise review-author statement, compact scientific "
-        "scope, confidence, and 1-4 allowed Source-unit IDs.\n"
+        "scope, confidence, and 1-4 allowed `source_labels`.\n"
         "- Set output_saturated=true when eligible review-author knowledge exceeds "
         "these limits. Return only compact schema-valid JSON.\n\n"
         "BATCH LINEAGE CONTRACT\n"
-        f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
-        "Copy IDs only from this exact list."
+        f"ALLOWED SOURCE LABELS: {allowed_source_labels_json}\n"
+        "Copy labels only from this exact list."
     )
     return _REVIEW_SYSTEM_PROMPT, user_prompt
 
 
 def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    model_payload, _ = _paper_map_model_payload(payload)
     document_profile = payload.get("document_profile")
     if isinstance(document_profile, Mapping) and (
         str(document_profile.get("doc_type") or "").strip() == "review"
     ):
-        return _build_review_synthesis_prompt(payload)
+        return _build_review_synthesis_prompt(model_payload)
 
-    allowed_source_unit_ids = [
-        str(source_unit.get("source_unit_id") or "").strip()
-        for source_unit in payload.get("source_units") or ()
-        if isinstance(source_unit, Mapping)
-        and str(source_unit.get("source_unit_id") or "").strip()
+    allowed_source_labels = [
+        str(source.get("label") or "").strip()
+        for source in model_payload.get("sources") or ()
+        if isinstance(source, Mapping) and str(source.get("label") or "").strip()
     ]
-    allowed_source_unit_ids_json = json.dumps(
-        allowed_source_unit_ids,
+    allowed_source_labels_json = json.dumps(
+        allowed_source_labels,
         ensure_ascii=True,
         separators=(",", ":"),
     )
@@ -1043,20 +1254,20 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "or Objective wording. A returned relationship is candidate scope, not "
         "proven Evidence.\n\n"
         "INPUT SCHEMA\n"
-        "- `document_id` and `title` identify the Source paper.\n"
-        "- `window_id` is this bounded window's identity; `window_role` is one of "
-        "overview, methods, results, conclusion, or unknown.\n"
-        "- `source_units` contains a bounded researcher-like skim selected from "
+        "- `title` identifies the Source paper; `document_type` is a coarse paper-role "
+        "hint.\n"
+        "- `window_role` describes this bounded reading view: overview, methods, "
+        "results, conclusion, or unknown.\n"
+        "- `sources` contains a bounded researcher-like skim selected from "
         "abstract, conclusion or summary, overview, and visual captions. Each "
-        "unit has an opaque `source_unit_id`, stable Source kind/reference, section "
-        "path, and text or caption content. Source identity is provenance; content "
-        "is the scientific authority.\n"
-        "- `document_profile` is a coarse paper-level classification hint.\n"
+        "Source has a short label, section path, and text or caption content. The "
+        "label exists only so the backend can restore Source lineage; content is the "
+        "scientific authority.\n"
         "This is one incomplete view of the paper; absence from this window is not "
         "evidence of absence elsewhere. Detailed Methods, Results, and table rows "
         "are inspected only after a user confirms an Objective. Window metadata "
         "describes input provenance and must not appear in output.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
         "1. Classify the paper role from explicit high-level study-design signals.\n"
         "2. Identify the paper-owned research themes stated in the supplied Source: "
@@ -1082,10 +1293,10 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "6. Record material_scope and concise process_context when explicit. Sample, "
         "test, comparator, fixed-condition, and factor-level fields are intentionally "
         "absent because they belong to confirmed-Objective experiment reconstruction.\n"
-        "7. Copy every unique Source-unit id that directly supports each relationship "
+        "7. Copy every unique Source label that directly supports each relationship "
         "or unresolved signal. Each item may contain at most "
         f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} unique "
-        "`source_unit_ids`.\n"
+        "`source_labels`.\n"
         "8. When the Source explicitly identifies a varied/modeled variable but no "
         "response, or a measured/predicted outcome but no changed variable, return "
         "the explicit axis in `unresolved_signals` for bounded paper-level "
@@ -1095,10 +1306,10 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "HARD RULES\n"
         "- Return only the schema object and only axes supported inside this window.\n"
         "- Never move a factor, outcome, or context between studies.\n"
-        "- Every relationship and unresolved signal must copy `source_unit_ids` that "
-        "directly support it. Do not return an id absent from `source_units`, repeat an "
-        f"id inside one item, or return more than {PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} "
-        "IDs for one item.\n"
+        "- Every relationship and unresolved signal must copy `source_labels` that "
+        "directly support it. Do not return a label absent from `sources`, repeat a "
+        f"label inside one item, or return more than {PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} "
+        "labels for one item.\n"
         "- Do not repeat an axis in `unresolved_signals` when it is already part of a "
         "complete relationship in this window. Material and fixed process context are "
         "not partial variable/outcome signals.\n"
@@ -1110,7 +1321,7 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "confidence, warnings, and `output_saturated`. A study has "
         "paper-scope design/context fields and "
         "one or more relationships. A relationship has `varied_factors`, one "
-        "`outcome`, `source_unit_ids`, and confidence.\n"
+        "`outcome`, `source_labels`, and confidence.\n"
         f"- Return up to {_PAPER_MAP_STUDY_LIMIT} studies, up to "
         f"{_PAPER_MAP_RELATIONSHIP_LIMIT} relationships per study, and up to "
         f"{_PAPER_MAP_SIGNAL_LIMIT} "
@@ -1120,7 +1331,7 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "backend may inspect a smaller high-level Source window.\n"
         "- Each relationship and unresolved signal returns at most "
         f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} unique "
-        "`source_unit_ids`, matching the maximum Source units in one input window.\n"
+        "`source_labels`, matching the maximum Sources in one input window.\n"
         "- Each relationship returns at most "
         f"{_PAPER_MAP_VARIED_FACTOR_LIMIT} varied-factor labels, each at most 80 "
         "characters. Preserve the full joint-factor set within these bounds.\n"
@@ -1149,7 +1360,7 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- Incomplete relationship: a Methods window names laser power but no "
         "measured or predicted response. Return `studies=[]`; do not "
         "borrow an outcome from another section. Return the explicit axis in "
-        "`unresolved_signals` with its supporting Source-unit id.\n"
+        "`unresolved_signals` with its supporting Source label.\n"
         "- No study signal: a unit contains only general background. Return no study "
         "or unresolved signal for that unit.\n"
         "- Cited result: text says 'Miranda et al. [20] increased laser power and "
@@ -1159,9 +1370,9 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "not say which axis was compared. Do not turn settings into varied factors; "
         "confirmed-Objective extraction will inspect the table rows and Methods.\n\n"
         "BATCH LINEAGE CONTRACT\n"
-        f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
-        "Copy IDs only from this exact list. Do not continue its numbering or cite "
-        "a Source unit from another window."
+        f"ALLOWED SOURCE LABELS: {allowed_source_labels_json}\n"
+        "Copy labels only from this exact list. Do not continue their numbering or "
+        "cite a Source from another window."
     )
     return _SYSTEM_PROMPT, user_prompt
 
@@ -1174,6 +1385,7 @@ Do not construct experiments, relationships, findings, or research objectives.
 
 
 def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    model_payload, _ = _paper_map_model_payload(payload)
     user_prompt = (
         "TASK MODEL\n"
         "Perform source-local scientific signal screening after paper-scope mapping "
@@ -1187,7 +1399,7 @@ def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "provide provenance and orientation only.\n"
         "- The downstream backend binds Source identity and performs paper-level "
         "reconciliation.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
         "1. Decide whether the Source explicitly names a changed, compared, or modeled "
         "variable and/or a measured, observed, or predicted outcome.\n"
@@ -1253,14 +1465,9 @@ class PaperResearchMapExtractor:
 
     def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
         system_prompt, user_prompt = build_paper_research_map_prompt(payload)
-        allowed_source_unit_ids = [
-            str(source_unit.get("source_unit_id") or "").strip()
-            for source_unit in payload.get("source_units") or ()
-            if isinstance(source_unit, Mapping)
-            and str(source_unit.get("source_unit_id") or "").strip()
-        ]
-        allowed_source_unit_ids_json = json.dumps(
-            allowed_source_unit_ids,
+        _, source_units_by_label = _paper_map_model_payload(payload)
+        allowed_source_labels_json = json.dumps(
+            list(source_units_by_label),
             ensure_ascii=True,
             separators=(",", ":"),
         )
@@ -1278,9 +1485,9 @@ class PaperResearchMapExtractor:
                     "authored by the review. Return each judgment once inside "
                     "review_synthesis; do not return studies or unresolved_signals. "
                     "Discard reconstructions of individually cited experiments. Copy "
-                    "only unique Source-unit IDs from the input and return compact "
+                    "only unique Source labels from the input and return compact "
                     "schema-valid JSON.\n"
-                    f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
+                    f"ALLOWED SOURCE LABELS: {allowed_source_labels_json}"
                 )
             return (
                 "Previous paper-map output was invalid: "
@@ -1288,13 +1495,13 @@ class PaperResearchMapExtractor:
                 "group, relationship, and unresolved signal. Do not reconstruct "
                 "samples, tests, comparators, fixed conditions, or factor levels. "
                 "Those detailed fields are not part of this output contract. Copy only "
-                "unique Source-unit IDs from the input, with at most "
-                f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} IDs per relationship or signal. "
+                "unique Source labels from the input, with at most "
+                f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} labels per relationship or signal. "
                 f"Keep at most {_PAPER_MAP_VARIED_FACTOR_LIMIT} varied factors per "
                 "relationship. Set output_saturated=true "
                 "instead of silently omitting a scientific item. Return only compact "
                 "schema-valid JSON.\n"
-                f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
+                f"ALLOWED SOURCE LABELS: {allowed_source_labels_json}"
             )
 
         def validate_output_contract(response: BaseModel) -> BaseModel | None:
@@ -1303,7 +1510,7 @@ class PaperResearchMapExtractor:
                 (StructuredExperimentalPaperMap, StructuredReviewPaperMap),
             ):
                 raise TypeError("unexpected paper research map response type")
-            paper_map = _paper_map_response(response)
+            paper_map = _paper_map_response(response, source_units_by_label)
             source_keys = {
                 str(source_unit.get("source_unit_id") or "").strip(): (
                     str(source_unit.get("source_kind") or "").strip(),
@@ -1318,34 +1525,6 @@ class PaperResearchMapExtractor:
             ]
             if len(study_identities) != len(set(study_identities)):
                 raise ValueError("studies contain duplicate study identities")
-            referenced_source_unit_ids = {
-                source_unit_id.strip()
-                for study in paper_map.studies
-                for relationship in study.relationships
-                for source_unit_id in relationship.source_unit_ids
-            } | {
-                source_unit_id.strip()
-                for signal in paper_map.unresolved_signals
-                for source_unit_id in signal.source_unit_ids
-            } | {
-                source_unit_id.strip()
-                for field_name in (
-                    "synthesis_claims",
-                    "disputes",
-                    "evidence_gaps",
-                    "citation_leads",
-                )
-                for item in getattr(paper_map.review_synthesis, field_name)
-                for source_unit_id in item.source_unit_ids
-            }
-            unknown_source_unit_ids = sorted(
-                referenced_source_unit_ids - source_keys.keys()
-            )
-            if unknown_source_unit_ids:
-                raise ValueError(
-                    "paper research map references unknown Source-unit ids: "
-                    f"{unknown_source_unit_ids}"
-                )
             return paper_map
 
         def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:

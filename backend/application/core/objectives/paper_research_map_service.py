@@ -73,8 +73,8 @@ _PAPER_MAP_TRANSIENT_STRUCTURED_FAILURE_KINDS = {
     "malformed_json",
     "no_json_object",
 }
-_SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
-_SKIM_ROLE_BY_SEMANTIC_ROLE = {
+_PAPER_MAP_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
+_PAPER_MAP_ROLE_BY_SEMANTIC_ROLE = {
     "abstract": "overview",
     "introduction": "overview",
     "methods": "methods",
@@ -96,7 +96,7 @@ _NAMED_PRIOR_AUTHOR_PATTERN = re.compile(r"\bet\s+al\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
-class _SkimSourceItem:
+class _PaperMapSourceItem:
     role: str
     order: int
     source_kind: str
@@ -267,7 +267,7 @@ class PaperResearchMapService:
             for window_position, payload in enumerate(payloads, start=1):
                 self._notify_progress(
                     progress_callback,
-                    phase="objective_paper_skim_started",
+                    phase="paper_research_map_started",
                     current=document_position,
                     total=document_count,
                     unit="documents",
@@ -329,7 +329,7 @@ class PaperResearchMapService:
                 ):
                     self._notify_progress(
                         progress_callback,
-                        phase="objective_paper_skim_started",
+                        phase="paper_research_map_started",
                         current=document_position,
                         total=document_count,
                         unit="documents",
@@ -466,7 +466,7 @@ class PaperResearchMapService:
     @staticmethod
     def _document_time_budget_seconds() -> int:
         raw_value = os.getenv(
-            "CORE_PAPER_SKIM_DOCUMENT_TIME_BUDGET_SECONDS",
+            "CORE_PAPER_RESEARCH_MAP_DOCUMENT_TIME_BUDGET_SECONDS",
             "",
         ).strip()
         if not raw_value:
@@ -475,7 +475,7 @@ class PaperResearchMapService:
             value = int(raw_value)
         except ValueError:
             logger.warning(
-                "Invalid CORE_PAPER_SKIM_DOCUMENT_TIME_BUDGET_SECONDS=%s; "
+                "Invalid CORE_PAPER_RESEARCH_MAP_DOCUMENT_TIME_BUDGET_SECONDS=%s; "
                 "using default=%s",
                 raw_value,
                 _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS,
@@ -483,7 +483,7 @@ class PaperResearchMapService:
             return _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS
         if value < 1:
             logger.warning(
-                "Non-positive CORE_PAPER_SKIM_DOCUMENT_TIME_BUDGET_SECONDS=%s; "
+                "Non-positive CORE_PAPER_RESEARCH_MAP_DOCUMENT_TIME_BUDGET_SECONDS=%s; "
                 "using default=%s",
                 raw_value,
                 _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS,
@@ -497,13 +497,13 @@ class PaperResearchMapService:
         *,
         selected_source_unit_count: int,
     ) -> int:
-        raw_value = os.getenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "").strip()
+        raw_value = os.getenv("CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS", "").strip()
         if raw_value:
             try:
                 value = int(raw_value)
             except ValueError:
                 logger.warning(
-                    "Invalid CORE_PAPER_SKIM_MAX_RECOVERY_CALLS=%s; using "
+                    "Invalid CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS=%s; using "
                     "the document-sized default",
                     raw_value,
                 )
@@ -511,7 +511,7 @@ class PaperResearchMapService:
                 if value >= 0:
                     return value
                 logger.warning(
-                    "Negative CORE_PAPER_SKIM_MAX_RECOVERY_CALLS=%s; using "
+                    "Negative CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS=%s; using "
                     "the document-sized default",
                     raw_value,
                 )
@@ -564,7 +564,7 @@ class PaperResearchMapService:
                 focus=selection_focus,
             )
         )
-        bounded_items: list[_SkimSourceItem] = []
+        bounded_items: list[_PaperMapSourceItem] = []
         for item in selected_items:
             fragments = self._split_oversized_source_item(item)
             bounded_items.extend(
@@ -587,7 +587,7 @@ class PaperResearchMapService:
             )
         )
         payloads: list[dict[str, Any]] = []
-        role_window_positions = {role: 0 for role in _SKIM_WINDOW_ROLES}
+        role_window_positions = {role: 0 for role in _PAPER_MAP_WINDOW_ROLES}
         for role_items in self._paper_map_item_groups(items):
             role = role_items[0].role
             for window_items in self._pack_source_items(list(role_items)):
@@ -632,16 +632,16 @@ class PaperResearchMapService:
     @classmethod
     def _select_paper_map_items(
         cls,
-        items: list[_SkimSourceItem],
-    ) -> list[_SkimSourceItem]:
+        items: list[_PaperMapSourceItem],
+    ) -> list[_PaperMapSourceItem]:
         """Select how a researcher maps scope before inspecting experiments."""
 
-        abstract_items: list[_SkimSourceItem] = []
-        conclusion_items: list[_SkimSourceItem] = []
-        overview_items: list[_SkimSourceItem] = []
-        table_items: list[_SkimSourceItem] = []
-        figure_items: list[_SkimSourceItem] = []
-        fallback_items: list[_SkimSourceItem] = []
+        abstract_items: list[_PaperMapSourceItem] = []
+        conclusion_items: list[_PaperMapSourceItem] = []
+        overview_items: list[_PaperMapSourceItem] = []
+        table_items: list[_PaperMapSourceItem] = []
+        figure_items: list[_PaperMapSourceItem] = []
+        fallback_items: list[_PaperMapSourceItem] = []
         for item in items:
             section = cls._normalized_section_path(item.section_path)
             compact_section = section.replace(" ", "")
@@ -711,11 +711,11 @@ class PaperResearchMapService:
     @classmethod
     def _select_paper_map_expansion_items(
         cls,
-        items: list[_SkimSourceItem],
+        items: list[_PaperMapSourceItem],
         *,
         focus: str,
-    ) -> list[_SkimSourceItem]:
-        selected: list[_SkimSourceItem] = []
+    ) -> list[_PaperMapSourceItem]:
+        selected: list[_PaperMapSourceItem] = []
         for item in items:
             if item.source_kind == "table_row":
                 continue
@@ -770,7 +770,7 @@ class PaperResearchMapService:
         )
 
     @staticmethod
-    def _is_paper_map_visual(item: _SkimSourceItem) -> bool:
+    def _is_paper_map_visual(item: _PaperMapSourceItem) -> bool:
         if not isinstance(item.content, Mapping):
             return False
         caption = str(item.content.get("caption_text") or "").strip()
@@ -784,8 +784,8 @@ class PaperResearchMapService:
 
     @staticmethod
     def _compact_paper_map_item_metadata(
-        item: _SkimSourceItem,
-    ) -> _SkimSourceItem:
+        item: _PaperMapSourceItem,
+    ) -> _PaperMapSourceItem:
         if not isinstance(item.content, Mapping) or "caption_text" not in item.content:
             return item
 
@@ -810,9 +810,9 @@ class PaperResearchMapService:
 
     @staticmethod
     def _paper_map_item_groups(
-        items: list[_SkimSourceItem],
-    ) -> tuple[tuple[_SkimSourceItem, ...], ...]:
-        groups: dict[str, list[_SkimSourceItem]] = {}
+        items: list[_PaperMapSourceItem],
+    ) -> tuple[tuple[_PaperMapSourceItem, ...], ...]:
+        groups: dict[str, list[_PaperMapSourceItem]] = {}
         for item in items:
             groups.setdefault(item.role, []).append(item)
         return tuple(tuple(group) for group in groups.values())
@@ -826,7 +826,7 @@ class PaperResearchMapService:
         table_rows: list[Any],
         figures: list[Any],
         document_tree: SourceDocumentTree | None,
-    ) -> list[_SkimSourceItem]:
+    ) -> list[_PaperMapSourceItem]:
         items = (
             self._text_items_from_tree(document_tree)
             if document_tree is not None
@@ -834,7 +834,7 @@ class PaperResearchMapService:
         )
         if not items and str(getattr(document, "text", "") or "").strip():
             items = [
-                _SkimSourceItem(
+                _PaperMapSourceItem(
                     role="unknown",
                     order=0,
                     source_kind="document",
@@ -850,9 +850,9 @@ class PaperResearchMapService:
     def _text_items_from_tree(
         self,
         document_tree: SourceDocumentTree,
-    ) -> list[_SkimSourceItem]:
+    ) -> list[_PaperMapSourceItem]:
         return [
-            _SkimSourceItem(
+            _PaperMapSourceItem(
                 role=self._tree_node_window_role(document_tree, node),
                 order=int(getattr(node, "order", 0) or 0),
                 source_kind=str(node.source_ref_kind or "block"),
@@ -866,8 +866,8 @@ class PaperResearchMapService:
             and str(node.text or "").strip()
         ]
 
-    def _text_items_from_blocks(self, blocks: list[Any]) -> list[_SkimSourceItem]:
-        items: list[_SkimSourceItem] = []
+    def _text_items_from_blocks(self, blocks: list[Any]) -> list[_PaperMapSourceItem]:
+        items: list[_PaperMapSourceItem] = []
         for block in sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
@@ -880,7 +880,7 @@ class PaperResearchMapService:
             if not text or role == "references":
                 continue
             items.append(
-                _SkimSourceItem(
+                _PaperMapSourceItem(
                     role=role,
                     order=int(getattr(block, "block_order", 0) or 0),
                     source_kind="block",
@@ -896,8 +896,8 @@ class PaperResearchMapService:
         tables: list[Any],
         table_rows: list[Any],
         document_tree: SourceDocumentTree | None,
-    ) -> list[_SkimSourceItem]:
-        items: list[_SkimSourceItem] = []
+    ) -> list[_PaperMapSourceItem]:
+        items: list[_PaperMapSourceItem] = []
         rows_by_table_id: dict[str, list[Any]] = {}
         for row in table_rows:
             rows_by_table_id.setdefault(str(row.table_id), []).append(row)
@@ -917,7 +917,7 @@ class PaperResearchMapService:
                 "column_headers": [str(value) for value in table.column_headers],
             }
             items.append(
-                _SkimSourceItem(
+                _PaperMapSourceItem(
                     role=role,
                     order=200_000 + int(table.table_order or 0) * 10_000,
                     source_kind="table",
@@ -962,7 +962,7 @@ class PaperResearchMapService:
                 ]
             )
             items.extend(
-                _SkimSourceItem(
+                _PaperMapSourceItem(
                     role=role,
                     order=(
                         200_000
@@ -986,8 +986,8 @@ class PaperResearchMapService:
         self,
         figures: list[Any],
         document_tree: SourceDocumentTree | None,
-    ) -> list[_SkimSourceItem]:
-        items: list[_SkimSourceItem] = []
+    ) -> list[_PaperMapSourceItem]:
+        items: list[_PaperMapSourceItem] = []
         for figure in sorted(figures, key=lambda item: item.figure_order):
             role = self._source_ref_window_role(
                 document_tree,
@@ -998,7 +998,7 @@ class PaperResearchMapService:
             if role == "references":
                 continue
             items.append(
-                _SkimSourceItem(
+                _PaperMapSourceItem(
                     role=role,
                     order=300_000 + int(figure.figure_order or 0) * 10,
                     source_kind="figure",
@@ -1016,10 +1016,10 @@ class PaperResearchMapService:
 
     @staticmethod
     def _pack_source_items(
-        items: list[_SkimSourceItem],
-    ) -> list[tuple[_SkimSourceItem, ...]]:
-        windows: list[tuple[_SkimSourceItem, ...]] = []
-        current: list[_SkimSourceItem] = []
+        items: list[_PaperMapSourceItem],
+    ) -> list[tuple[_PaperMapSourceItem, ...]]:
+        windows: list[tuple[_PaperMapSourceItem, ...]] = []
+        current: list[_PaperMapSourceItem] = []
         for item in items:
             if current and len(current) >= PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT:
                 windows.append(tuple(current))
@@ -1031,8 +1031,8 @@ class PaperResearchMapService:
 
     @staticmethod
     def _split_oversized_source_item(
-        item: _SkimSourceItem,
-    ) -> tuple[_SkimSourceItem, ...]:
+        item: _PaperMapSourceItem,
+    ) -> tuple[_PaperMapSourceItem, ...]:
         if item.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
             return (item,)
         if isinstance(item.content, Mapping):
@@ -1053,7 +1053,7 @@ class PaperResearchMapService:
             start = split_at
         chunks.append(text[start:])
         return tuple(
-            _SkimSourceItem(
+            _PaperMapSourceItem(
                 role=item.role,
                 order=item.order + position,
                 source_kind=item.source_kind,
@@ -1066,11 +1066,11 @@ class PaperResearchMapService:
 
     @staticmethod
     def _split_table_row_source_item(
-        item: _SkimSourceItem,
-    ) -> tuple[_SkimSourceItem, ...]:
+        item: _PaperMapSourceItem,
+    ) -> tuple[_PaperMapSourceItem, ...]:
         content = dict(item.content)
         row_text = str(content.pop("row_text", ""))
-        chunks: list[_SkimSourceItem] = []
+        chunks: list[_PaperMapSourceItem] = []
         start = 0
         while start < len(row_text):
             low = start + 1
@@ -1114,9 +1114,9 @@ class PaperResearchMapService:
 
     @staticmethod
     def _split_structured_source_item(
-        item: _SkimSourceItem,
-    ) -> tuple[_SkimSourceItem, ...]:
-        chunks: list[_SkimSourceItem] = []
+        item: _PaperMapSourceItem,
+    ) -> tuple[_PaperMapSourceItem, ...]:
+        chunks: list[_PaperMapSourceItem] = []
         for path, value in PaperResearchMapService._structured_source_leaves(item.content):
             if isinstance(value, str):
                 chunks.extend(
@@ -1173,11 +1173,11 @@ class PaperResearchMapService:
 
     @staticmethod
     def _split_structured_text_value(
-        item: _SkimSourceItem,
+        item: _PaperMapSourceItem,
         *,
         path: tuple[str | int, ...],
         value: str,
-    ) -> tuple[_SkimSourceItem, ...]:
+    ) -> tuple[_PaperMapSourceItem, ...]:
         if not value:
             return (
                 replace(
@@ -1190,7 +1190,7 @@ class PaperResearchMapService:
                 ),
             )
 
-        chunks: list[_SkimSourceItem] = []
+        chunks: list[_PaperMapSourceItem] = []
         start = 0
         while start < len(value):
             low = start + 1
@@ -1252,7 +1252,7 @@ class PaperResearchMapService:
         profile: Any,
         role: str,
         role_window_position: int,
-        items: tuple[_SkimSourceItem, ...],
+        items: tuple[_PaperMapSourceItem, ...],
     ) -> dict[str, Any]:
         section_paths = self._unique_text_values(
             item.section_path for item in items if item.section_path
@@ -2390,7 +2390,7 @@ class PaperResearchMapService:
 
         self._notify_progress(
             progress_callback,
-            phase="objective_paper_skim_started",
+            phase="paper_research_map_started",
             current=document_position,
             total=document_count,
             unit="documents",
@@ -3365,7 +3365,7 @@ class PaperResearchMapService:
             semantic_role = str(getattr(current, "semantic_role", "") or "")
             if semantic_role == "references":
                 return "references"
-            mapped_role = _SKIM_ROLE_BY_SEMANTIC_ROLE.get(semantic_role)
+            mapped_role = _PAPER_MAP_ROLE_BY_SEMANTIC_ROLE.get(semantic_role)
             if mapped_role is not None:
                 return mapped_role
             parent_id = getattr(current, "parent_id", None)

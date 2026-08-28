@@ -681,7 +681,7 @@ async def test_agent_continues_from_observable_research_process_result() -> None
                                 "status": "running",
                                 "progress_percent": 72,
                                 "progress_detail": {
-                                    "phase": "objective_paper_skim_started",
+                                    "phase": "paper_research_map_started",
                                     "current": 3,
                                     "total": 10,
                                 },
@@ -799,7 +799,7 @@ async def test_objective_drafts_are_transient_and_paper_map_is_not_evidence() ->
 
     assert result.status.value == "succeeded"
     assert result.data["draft_count"] == 2
-    assert result.data["drafts"][0]["support_status"] == "paper_skim_context"
+    assert result.data["drafts"][0]["support_status"] == "paper_map_context"
     assert result.data["drafts"][0]["supporting_document_ids"] == ["paper-1"]
     assert result.data["drafts"][1]["support_status"] == "unsupported"
     assert {ref.resource_type for ref in result.resource_refs} == {"objective_draft"}

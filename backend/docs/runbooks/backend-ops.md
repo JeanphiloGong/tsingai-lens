@@ -67,8 +67,16 @@ alembic upgrade head
 alembic current --check-heads
 ```
 
-For a fresh development database, run the same commands. Historical SQLite or
-JSON data is not imported by startup or by these migrations.
+The maintained migration history is one explicit current-schema baseline. It is
+for a fresh or deliberately reset database; it is not an in-place upgrade path
+from an earlier Lens schema. When a test or development database contains an
+older revision, recreate that disposable database and run `alembic upgrade
+head`. Historical PostgreSQL, SQLite, or JSON data is not imported or preserved
+by startup or by this baseline.
+
+`alembic downgrade base` removes the entire baseline schema. Run downgrade only
+against a disposable database whose name ends in `_test`, as shown in the
+verification section below.
 
 ## Start the Backend
 

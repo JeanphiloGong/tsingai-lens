@@ -15,7 +15,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260827_0039"
+HEAD_REVISION = "20260828_0001"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -70,8 +70,8 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             for column in inspect(connection).get_columns("objective_analyses")
         }
 
-        with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
-            command.downgrade(config, "20260827_0037")
+        command.downgrade(config, "base")
+        assert inspect(connection).get_table_names() == ["alembic_version"]
 
     engine.dispose()
 

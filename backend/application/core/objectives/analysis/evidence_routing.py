@@ -54,7 +54,7 @@ _OBJECTIVE_ROUTE_ROLES = {
 }
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _ROUTE_MAX_COMPLETION_TOKENS = 512
-_ROUTE_PROMPT_VERSION = "objective_evidence_route.v2"
+OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v3"
 _ROUTE_SYSTEM_PROMPT = """
 You are routing source units for one research objective in an evidence-backed literature comparison backend.
 
@@ -123,12 +123,74 @@ class StructuredEvidenceSelections(BaseModel):
         return [] if value is None else value
 
 
+def _objective_evidence_route_model_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    objective = payload.get("objective")
+    objective_record = objective if isinstance(objective, Mapping) else {}
+    frame = payload.get("paper_frame")
+    frame_record = frame if isinstance(frame, Mapping) else {}
+    tree_position = payload.get("tree_position")
+    tree_record = tree_position if isinstance(tree_position, Mapping) else {}
+    current_source = payload.get("current_source")
+    source_record = current_source if isinstance(current_source, Mapping) else {}
+    return {
+        "objective": {
+            key: objective_record[key]
+            for key in (
+                "question",
+                "material_scope",
+                "variables",
+                "outcomes",
+                "mechanisms",
+                "constraints",
+                "requested_comparator",
+            )
+            if objective_record.get(key) not in (None, "", [], {})
+        },
+        "paper_frame": {
+            key: frame_record[key]
+            for key in (
+                "relevance",
+                "paper_role",
+                "material_match",
+                "changed_variables",
+                "measured_property_scope",
+                "test_environment_scope",
+            )
+            if frame_record.get(key) not in (None, "", [], {})
+        },
+        "source_orientation": {
+            key: tree_record[key]
+            for key in ("node_type", "section_path")
+            if tree_record.get(key) not in (None, "", [], {})
+        },
+        "current_source": {
+            key: source_record[key]
+            for key in (
+                "source_kind",
+                "frame_status",
+                "section_label",
+                "block_type",
+                "text_hint",
+                "caption_text",
+                "heading_path",
+                "column_headers",
+                "row_count",
+                "col_count",
+            )
+            if source_record.get(key) not in (None, "", [], {})
+        },
+    }
+
+
 def build_objective_evidence_route_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
+    model_payload = _objective_evidence_route_model_payload(payload)
     user_prompt = (
         "Route the current source unit for this one research objective.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
         "Return only schema-valid structured data with a `selections` array.\n"
         "Return at most one route for `current_source`. If it is not useful "
         "for later objective-scoped extraction, return `{\"selections\": []}`.\n"
@@ -175,7 +237,7 @@ class ObjectiveEvidenceRouter:
             max_completion_tokens=_ROUTE_MAX_COMPLETION_TOKENS,
             force_json_text=True,
             task_type="objective_evidence_route",
-            prompt_version=_ROUTE_PROMPT_VERSION,
+            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceSelections):
             raise TypeError("unexpected objective evidence route response type")

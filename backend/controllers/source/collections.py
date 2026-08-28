@@ -14,8 +14,8 @@ from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.collection import (
     CollectionCreateRequest,
     CollectionDeleteResponse,
-    CollectionFileListResponse,
-    CollectionFileResponse,
+    CollectionDocumentListResponse,
+    CollectionDocumentResponse,
     CollectionListResponse,
     CollectionResponse,
     CollectionSourceArchiveRequest,
@@ -37,8 +37,8 @@ def _source_archive_error_detail(
         "message": exc.message,
         "collection_id": exc.collection_id,
     }
-    if exc.file_id is not None:
-        detail["file_id"] = exc.file_id
+    if exc.document_id is not None:
+        detail["document_id"] = exc.document_id
     return detail
 
 
@@ -98,22 +98,22 @@ async def delete_collection(collection_id: str, request: Request) -> CollectionD
 
 
 @router.post(
-    "/{collection_id}/files",
-    response_model=CollectionFileResponse,
+    "/{collection_id}/documents",
+    response_model=CollectionDocumentResponse,
     summary="Upload a paper to a collection",
 )
-async def upload_collection_file(
+async def upload_collection_document(
     collection_id: str,
     request: Request,
     file: UploadFile = File(...),
-) -> CollectionFileResponse:
+) -> CollectionDocumentResponse:
     collection_service = request.app.state.collection_service
     try:
         await collection_service.get_collection_for_user(
             collection_id, await current_user_id(request)
         )
         content = await file.read()
-        record = await collection_service.add_file(
+        record = await collection_service.add_document(
             collection_id=collection_id,
             filename=file.filename or "upload.bin",
             content=content,
@@ -125,36 +125,31 @@ async def upload_collection_file(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
-    return CollectionFileResponse(
-        **record,
-        stored_path=str(record["storage_key"]),
-    )
+    return CollectionDocumentResponse(**record)
 
 
 @router.get(
-    "/{collection_id}/files",
-    response_model=CollectionFileListResponse,
-    summary="List collection files",
+    "/{collection_id}/documents",
+    response_model=CollectionDocumentListResponse,
+    summary="List collection documents",
 )
-async def list_collection_files(
+async def list_collection_documents(
     collection_id: str,
     request: Request,
-) -> CollectionFileListResponse:
+) -> CollectionDocumentListResponse:
     collection_service = request.app.state.collection_service
     try:
         await collection_service.get_collection_for_user(
             collection_id, await current_user_id(request)
         )
+        collection = await collection_service.get_collection(collection_id)
         items = [
-            CollectionFileResponse(
-                **record,
-                stored_path=str(record["storage_key"]),
-            )
-            for record in await collection_service.list_files(collection_id)
+            CollectionDocumentResponse(**record)
+            for record in collection["documents"]
         ]
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return CollectionFileListResponse(items=items)
+    return CollectionDocumentListResponse(items=items)
 
 
 @router.post(
@@ -174,13 +169,13 @@ async def create_collection_source_archive(
         )
         result = await collection_service.build_source_archive(
             collection_id,
-            payload.file_ids,
+            payload.document_ids,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CollectionSourceArchiveError as exc:
         status_code = {
-            "collection_source_file_not_found": 404,
+            "collection_source_document_not_found": 404,
             "collection_source_archive_too_large": 413,
         }.get(exc.code, 409)
         raise HTTPException(

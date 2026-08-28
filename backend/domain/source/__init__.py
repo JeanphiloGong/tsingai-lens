@@ -1,12 +1,7 @@
 """Source-domain records and status semantics."""
 
 from domain.source.artifact_status import ArtifactStatusRecord
-from domain.source.build import (
-    ArtifactVersionRecord,
-    BuildStageRecord,
-    CollectionBuildRecord,
-    TaskRecord,
-)
+from domain.source.task import TaskRecord, TaskStageRecord
 from domain.source.artifacts import (
     SourceBlock,
     SourceBlockType,
@@ -43,35 +38,12 @@ from domain.source.artifacts import (
     source_documents_from_records,
     update_heading_stack,
 )
-from domain.source.collection import (
-    CollectionFileRecord,
-    CollectionHandoffRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
-    CollectionRecord,
-    empty_import_manifest,
-)
-from domain.source.document import (
-    CollectionDocumentRecord,
-    DocumentRecord,
-    DocumentVersionRecord,
-    collection_document_identity,
-    document_identity_for_sha256,
-)
+from domain.source.collection import Collection, Document
 
 __all__ = [
-    "ArtifactVersionRecord",
     "ArtifactStatusRecord",
-    "BuildStageRecord",
-    "CollectionFileRecord",
-    "CollectionHandoffRecord",
-    "CollectionImportDocumentRecord",
-    "CollectionImportRecord",
-    "CollectionRecord",
-    "CollectionBuildRecord",
-    "CollectionDocumentRecord",
-    "DocumentRecord",
-    "DocumentVersionRecord",
+    "Collection",
+    "Document",
     "SourceBlock",
     "SourceBlockType",
     "SourceDocument",
@@ -90,15 +62,13 @@ __all__ = [
     "SourceTableRow",
     "SourceTextUnit",
     "TaskRecord",
+    "TaskStageRecord",
     "assemble_source_documents",
     "build_figure_caption_blocks",
     "build_heading_blocks",
     "build_source_document_tree",
     "build_source_table_rows_from_cells",
     "build_table_caption_blocks",
-    "collection_document_identity",
-    "document_identity_for_sha256",
-    "empty_import_manifest",
     "extract_unit_hint",
     "find_nearest_caption_block",
     "first_non_null",

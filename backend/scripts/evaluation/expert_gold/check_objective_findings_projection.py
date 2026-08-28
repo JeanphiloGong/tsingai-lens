@@ -933,11 +933,8 @@ async def _resolve_manifest_document_ids(
             build_database_engine,
             build_session_factory,
         )
-        from infra.persistence.postgres.models.build import (  # noqa: PLC0415
-            CollectionActiveBuild,
-        )
         from infra.persistence.postgres.models.document import (  # noqa: PLC0415
-            DocumentVersion,
+            Document,
         )
         from infra.persistence.postgres.models.source import (  # noqa: PLC0415
             SourceDocument,
@@ -947,20 +944,15 @@ async def _resolve_manifest_document_ids(
         try:
             async with build_session_factory(engine)() as session:
                 rows = (await session.execute(
-                    select(SourceDocument.source_document_id, DocumentVersion.sha256)
+                    select(SourceDocument.source_document_id, Document.sha256)
                     .join(
-                        DocumentVersion,
-                        DocumentVersion.document_version_id
-                        == SourceDocument.document_version_id,
-                    )
-                    .join(
-                        CollectionActiveBuild,
-                        (CollectionActiveBuild.collection_id == collection_id)
-                        & (CollectionActiveBuild.build_id == SourceDocument.build_id),
+                        Document,
+                        Document.document_id == SourceDocument.source_document_id,
                     )
                     .where(
                         SourceDocument.collection_id == collection_id,
-                        DocumentVersion.sha256.in_(expected_hashes),
+                        Document.collection_id == collection_id,
+                        Document.sha256.in_(expected_hashes),
                     )
                 )).all()
         finally:
@@ -975,7 +967,7 @@ async def _resolve_manifest_document_ids(
     }
     if unresolved:
         raise RuntimeError(
-            "acceptance papers must resolve exactly once in the active Source build: "
+            "acceptance papers must resolve exactly once among current Source documents: "
             f"{unresolved}"
         )
     return {

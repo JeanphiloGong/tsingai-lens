@@ -20,10 +20,12 @@ from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
-    PaperSkim,
+    PaperResearchMap,
     PaperSourceUnitCoverageStatus,
     ResearchObjective,
 )
+
+OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v1"
 
 
 _CONTRIBUTION_SUMMARY_CHARS = 320
@@ -56,7 +58,7 @@ def materialize_evidence(
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
     drafts: tuple[ExtractedEvidenceDraft, ...],
-    paper_skims: tuple[PaperSkim, ...],
+    paper_maps: tuple[PaperResearchMap, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
     blocks_by_document_id: Mapping[str, list[Any]],
@@ -86,7 +88,7 @@ def materialize_evidence(
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
-        paper_skims=paper_skims,
+        paper_maps=paper_maps,
         frames=frames,
         routes=routes,
         evidence_records=evidence_records,
@@ -258,13 +260,13 @@ def _analysis_contributions(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    paper_skims: tuple[PaperSkim, ...],
+    paper_maps: tuple[PaperResearchMap, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
     evidence_records: tuple[ObjectiveEvidence, ...],
 ) -> tuple[PaperContribution, ...]:
-    paper_skims_by_document_id = {
-        paper_skim.document_id: paper_skim for paper_skim in paper_skims
+    paper_maps_by_document_id = {
+        paper_map.document_id: paper_map for paper_map in paper_maps
     }
     routed_sources_by_document: dict[str, set[tuple[str, str]]] = {}
     for route in routes:
@@ -355,11 +357,11 @@ def _analysis_contributions(
                 if route.document_id == frame.document_id and route.used_fallback
             }
         )
-        paper_skim = paper_skims_by_document_id.get(frame.document_id)
-        paper_skim_failure_count = sum(
+        paper_map = paper_maps_by_document_id.get(frame.document_id)
+        paper_map_failure_count = sum(
             coverage.status is PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
             for coverage in (
-                paper_skim.source_unit_coverage if paper_skim is not None else ()
+                paper_map.source_unit_coverage if paper_map is not None else ()
             )
         )
         warnings: list[str] = []
@@ -373,9 +375,9 @@ def _analysis_contributions(
                 f"{routing_fallback_source_count} Source unit(s) used deterministic "
                 "evidence routing fallback."
             )
-        if paper_skim_failure_count:
+        if paper_map_failure_count:
             warnings.append(
-                f"{paper_skim_failure_count} PaperSkim Source unit(s) failed "
+                f"{paper_map_failure_count} PaperResearchMap Source unit(s) failed "
                 "extraction before Objective analysis."
             )
         if failed_source_count:

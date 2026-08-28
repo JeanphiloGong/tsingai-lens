@@ -10,6 +10,8 @@ from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from domain.core import ResearchObjective
 
+OBJECTIVE_SOURCE_GROUNDING_VERSION = "objective-source-grounding.v1"
+
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _NO_CHANGE_RESULT_KEYS = (
     "no_change",

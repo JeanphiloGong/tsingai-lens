@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from types import SimpleNamespace
-
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
 import pytest
@@ -17,7 +15,13 @@ from application.chat import (
 )
 from application.chat.capabilities import GetCollectionContextCapability
 from application.chat.session_service import ChatSessionService
+from application.source.task_service import TaskService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from infra.persistence.memory import (
+    MemoryDocumentProfileRepository,
+    MemoryPaperMapRepository,
+    MemoryTaskRepository,
+)
 from main import create_app
 from tests.support.chat_repository import MemoryChatRepository
 
@@ -42,6 +46,9 @@ class _ObjectiveRepository:
     async def list_objectives(self, collection_id: str) -> tuple:
         assert collection_id
         return ()
+
+    async def interrupt_active_analyses(self) -> int:
+        return 0
 
 
 class _CandidateArguments(BaseModel):
@@ -146,9 +153,10 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app(
         auth_session_service=auth_session_service,
         collection_service=collection_service,
-        task_service=SimpleNamespace(repository=object()),
+        task_service=TaskService(MemoryTaskRepository()),
         source_artifact_repository=object(),
-        paper_fact_repository=object(),
+        document_profile_repository=MemoryDocumentProfileRepository(),
+        paper_map_repository=MemoryPaperMapRepository(),
         objective_repository=objective_repository,
         finding_review_repository=object(),
         experiment_plan_repository=object(),

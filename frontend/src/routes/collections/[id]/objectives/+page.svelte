@@ -4,6 +4,10 @@
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
 	import {
+		listCollectionDocuments,
+		type CollectionDocument
+	} from '../../../_shared/collectionDocuments';
+	import {
 		fetchCollectionObjectives,
 		fetchObjectiveAnalysis,
 		runObjectiveAnalysis,
@@ -13,6 +17,8 @@
 	} from '../../../_shared/researchView';
 
 	let objectiveList: ObjectiveList | null = null;
+	let readyDocuments: CollectionDocument[] = [];
+	let selectedDocumentIds: string[] = [];
 	let analysisStates: Record<string, ObjectiveAnalysisState | null> = {};
 	let loading = false;
 	let actionObjectiveId = '';
@@ -36,10 +42,22 @@
 		loading = true;
 		error = '';
 		try {
-			objectiveList = await fetchCollectionObjectives(collectionId);
+			const [objectivesResult, documentsResult] = await Promise.all([
+				fetchCollectionObjectives(collectionId),
+				listCollectionDocuments(collectionId)
+			]);
+			objectiveList = objectivesResult;
+			readyDocuments = documentsResult.items.filter((document) => document.status === 'ready');
+			const readyIds = new Set(readyDocuments.map((document) => document.document_id));
+			selectedDocumentIds = selectedDocumentIds.filter((documentId) => readyIds.has(documentId));
+			if (!selectedDocumentIds.length) {
+				selectedDocumentIds = readyDocuments.map((document) => document.document_id);
+			}
 			await refreshActiveAnalysisStates();
 		} catch (err) {
 			objectiveList = null;
+			readyDocuments = [];
+			selectedDocumentIds = [];
 			analysisStates = {};
 			error = errorMessage(err);
 		} finally {
@@ -103,20 +121,18 @@
 		return objective.confirmation_status === 'candidate' ? '确认并分析' : '开始分析';
 	}
 
-	function objectiveHref(objectiveId: string) {
-		return resolve('/collections/[id]/objectives/[objective_id]', {
-			id: collectionId,
-			objective_id: objectiveId
-		});
-	}
-
 	async function startAnalysis(objective: ObjectiveSummary) {
-		if (actionObjectiveId) return;
+		if (actionObjectiveId || !selectedDocumentIds.length) return;
 		actionObjectiveId = objective.objective_id;
 		error = '';
 		try {
-			await runObjectiveAnalysis(collectionId, objective.objective_id);
-			await goto(objectiveHref(objective.objective_id));
+			await runObjectiveAnalysis(collectionId, objective.objective_id, selectedDocumentIds);
+			await goto(
+				resolve('/collections/[id]/objectives/[objective_id]', {
+					id: collectionId,
+					objective_id: objective.objective_id
+				})
+			);
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -126,6 +142,12 @@
 
 	function joined(items: string[]) {
 		return items.length ? items.join(', ') : '-';
+	}
+
+	function toggleDocument(documentId: string) {
+		selectedDocumentIds = selectedDocumentIds.includes(documentId)
+			? selectedDocumentIds.filter((item) => item !== documentId)
+			: [...selectedDocumentIds, documentId];
 	}
 </script>
 
@@ -144,93 +166,122 @@
 		<p class="state" aria-busy="true">正在加载...</p>
 	{:else if error}
 		<p class="state state--error" role="alert">{error}</p>
-	{:else if !objectives.length}
-		<section class="empty-state">
-			<h3>没有可供确认的研究目标</h3>
-			<p>
-				当前没有候选同时满足材料范围、研究变量、结果指标和来源支持规则。这不表示目标级证据分析已经完成。
-			</p>
-			<div class="actions">
-				<a
-					class="btn btn--ghost btn--small"
-					href={resolve('/collections/[id]', { id: collectionId })}
-				>
-					返回集合概览
-				</a>
-				<a
-					class="btn btn--primary btn--small"
-					href={resolve('/collections/[id]/documents', { id: collectionId })}
-				>
-					检查文献
-				</a>
-			</div>
-		</section>
 	{:else}
-		<div class="summary" aria-label="研究目标概览">
-			<div><strong>{objectives.length}</strong><span>研究目标</span></div>
-			<div><strong>{confirmedCount}</strong><span>已确认</span></div>
-			<div><strong>{publishedCount}</strong><span>已有结果</span></div>
-		</div>
+		<fieldset class="analysis-scope">
+			<legend>本次分析的论文范围</legend>
+			<p>分析会冻结所选论文当前的准备状态。后续新增论文不会改变已经发布的结果。</p>
+			{#if readyDocuments.length}
+				<div class="scope-options">
+					{#each readyDocuments as document (document.document_id)}
+						<label>
+							<input
+								type="checkbox"
+								checked={selectedDocumentIds.includes(document.document_id)}
+								on:change={() => toggleDocument(document.document_id)}
+							/>
+							<span>{document.original_filename}</span>
+						</label>
+					{/each}
+				</div>
+			{:else}
+				<p class="state state--error">还没有准备完成的论文，请先返回集合概览准备论文。</p>
+			{/if}
+		</fieldset>
 
-		<div class="objective-list">
-			{#each objectives as objective (objective.objective_id)}
-				<article>
-					<div class="heading">
-						<div>
-							<h3>{objective.question}</h3>
-							<p>{objective.requested_comparator || '尚未设置比较意图'}</p>
-						</div>
-						<span
-							class:published={objective.published_analysis_version !== null}
-							class:failed={analysisStatus(objective) === 'failed'}
-						>
-							{statusLabel(objective)}
-						</span>
-					</div>
-					<dl>
-						<div>
-							<dt>材料</dt>
-							<dd>{joined(objective.material_scope)}</dd>
-						</div>
-						<div>
-							<dt>变量</dt>
-							<dd>{joined(objective.variables)}</dd>
-						</div>
-						<div>
-							<dt>结果</dt>
-							<dd>{joined(objective.outcomes)}</dd>
-						</div>
-						<div>
-							<dt>机制</dt>
-							<dd>{joined(objective.mechanisms)}</dd>
-						</div>
-						<div>
-							<dt>约束</dt>
-							<dd>{joined(objective.constraints)}</dd>
-						</div>
-						<div>
-							<dt>文献范围</dt>
-							<dd>{objective.seed_document_ids.length} 篇</dd>
-						</div>
-					</dl>
-					<div class="actions">
-						{#if canStartAnalysis(objective)}
-							<button
-								class="btn btn--primary btn--small"
-								type="button"
-								disabled={Boolean(actionObjectiveId)}
-								on:click={() => startAnalysis(objective)}
+		{#if !objectives.length}
+			<section class="empty-state">
+				<h3>没有可供确认的研究目标</h3>
+				<p>
+					当前没有候选同时满足材料范围、研究变量、结果指标和来源支持规则。这不表示目标级证据分析已经完成。
+				</p>
+				<div class="actions">
+					<a
+						class="btn btn--ghost btn--small"
+						href={resolve('/collections/[id]', { id: collectionId })}
+					>
+						返回集合概览
+					</a>
+					<a
+						class="btn btn--primary btn--small"
+						href={resolve('/collections/[id]/documents', { id: collectionId })}
+					>
+						检查文献
+					</a>
+				</div>
+			</section>
+		{:else}
+			<div class="summary" aria-label="研究目标概览">
+				<div><strong>{objectives.length}</strong><span>研究目标</span></div>
+				<div><strong>{confirmedCount}</strong><span>已确认</span></div>
+				<div><strong>{publishedCount}</strong><span>已有结果</span></div>
+			</div>
+
+			<div class="objective-list">
+				{#each objectives as objective (objective.objective_id)}
+					<article>
+						<div class="heading">
+							<div>
+								<h3>{objective.question}</h3>
+								<p>{objective.requested_comparator || '尚未设置比较意图'}</p>
+							</div>
+							<span
+								class:published={objective.published_analysis_version !== null}
+								class:failed={analysisStatus(objective) === 'failed'}
 							>
-								{actionLabel(objective)}
-							</button>
-						{/if}
-						<a class="btn btn--ghost btn--small" href={objectiveHref(objective.objective_id)}>
-							{objective.published_analysis_version === null ? '查看状态' : '查看 Findings'}
-						</a>
-					</div>
-				</article>
-			{/each}
-		</div>
+								{statusLabel(objective)}
+							</span>
+						</div>
+						<dl>
+							<div>
+								<dt>材料</dt>
+								<dd>{joined(objective.material_scope)}</dd>
+							</div>
+							<div>
+								<dt>变量</dt>
+								<dd>{joined(objective.variables)}</dd>
+							</div>
+							<div>
+								<dt>结果</dt>
+								<dd>{joined(objective.outcomes)}</dd>
+							</div>
+							<div>
+								<dt>机制</dt>
+								<dd>{joined(objective.mechanisms)}</dd>
+							</div>
+							<div>
+								<dt>约束</dt>
+								<dd>{joined(objective.constraints)}</dd>
+							</div>
+							<div>
+								<dt>文献范围</dt>
+								<dd>{objective.seed_document_ids.length} 篇</dd>
+							</div>
+						</dl>
+						<div class="actions">
+							{#if canStartAnalysis(objective)}
+								<button
+									class="btn btn--primary btn--small"
+									type="button"
+									disabled={Boolean(actionObjectiveId) || !selectedDocumentIds.length}
+									on:click={() => startAnalysis(objective)}
+								>
+									{actionLabel(objective)}
+								</button>
+							{/if}
+							<a
+								class="btn btn--ghost btn--small"
+								href={resolve('/collections/[id]/objectives/[objective_id]', {
+									id: collectionId,
+									objective_id: objective.objective_id
+								})}
+							>
+								{objective.published_analysis_version === null ? '查看状态' : '查看 Findings'}
+							</a>
+						</div>
+					</article>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 </section>
 
@@ -276,6 +327,35 @@
 		gap: 10px;
 		padding: 28px 0;
 		border-bottom: 1px solid var(--border-default);
+	}
+	.analysis-scope {
+		margin: 0;
+		padding: 16px 0;
+		border: 0;
+		border-block: 1px solid var(--border-default);
+	}
+	.analysis-scope legend {
+		padding: 0;
+		font-weight: 700;
+	}
+	.analysis-scope > p {
+		margin-top: 6px;
+		color: var(--text-secondary);
+	}
+	.scope-options {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px 16px;
+		margin-top: 14px;
+	}
+	.scope-options label {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		min-width: 0;
+	}
+	.scope-options span {
+		overflow-wrap: anywhere;
 	}
 	.empty-state p {
 		max-width: 720px;
@@ -362,6 +442,9 @@
 		}
 		dl {
 			grid-template-columns: 1fr 1fr;
+		}
+		.scope-options {
+			grid-template-columns: 1fr;
 		}
 		.summary {
 			grid-template-columns: 1fr;

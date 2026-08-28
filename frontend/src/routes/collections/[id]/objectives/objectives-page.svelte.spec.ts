@@ -81,7 +81,10 @@ function analysisState(status: 'queued' | 'running' | 'succeeded' | 'failed') {
 		collection_id: 'col_123',
 		objective_id: 'obj_heat_strength',
 		analysis_version: 1,
-		source_build_id: 'build-1',
+		document_inputs: [
+			{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' },
+			{ document_id: 'paper-2', preparation_fingerprint: 'fingerprint-paper-2' }
+		],
 		pipeline_version: 'objective-analysis-v1',
 		model_name: null,
 		prompt_versions: {},
@@ -110,7 +113,12 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 	});
 
 	it('shows an explicit empty state before Objective candidates exist', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ collection_id: 'col_123', objectives: [] }));
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = new URL(String(input), 'http://localhost').pathname;
+			return path.endsWith('/documents')
+				? jsonResponse({ items: [] })
+				: jsonResponse({ collection_id: 'col_123', objectives: [] });
+		});
 
 		render(Page);
 
@@ -131,6 +139,26 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			requests.push(current);
+			if (current.path.endsWith('/documents') && current.method === 'GET') {
+				return jsonResponse({
+					items: [
+						{
+							document_id: 'paper-1',
+							original_filename: 'paper-1.pdf',
+							status: 'ready',
+							size_bytes: 100,
+							created_at: '2026-08-27T00:00:00Z'
+						},
+						{
+							document_id: 'paper-2',
+							original_filename: 'paper-2.pdf',
+							status: 'ready',
+							size_bytes: 100,
+							created_at: '2026-08-27T00:00:00Z'
+						}
+					]
+				});
+			}
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({ collection_id: 'col_123', objectives: [objective()] });
 			}
@@ -157,11 +185,18 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			expect(requests.filter((item) => item.method === 'POST')).toHaveLength(1);
 			expect(goto).toHaveBeenCalledWith('/collections/col_123/objectives/obj_heat_strength');
 		});
+		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+			document_ids: ['paper-1', 'paper-2']
+		});
 	});
 
 	it('shows active analysis progress instead of offering confirmation again', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
+			if (current.path.endsWith('/documents') && current.method === 'GET') {
+				return jsonResponse({ items: [] });
+			}
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -198,8 +233,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 	});
 
 	it('shows the published version without a second result lookup', async () => {
-		fetchMock.mockResolvedValue(
-			jsonResponse({
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = new URL(String(input), 'http://localhost').pathname;
+			if (path.endsWith('/documents')) return jsonResponse({ items: [] });
+			return jsonResponse({
 				collection_id: 'col_123',
 				objectives: [
 					objective({
@@ -208,8 +245,8 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 						published_analysis_version: 2
 					})
 				]
-			})
-		);
+			});
+		});
 
 		render(Page);
 
@@ -217,6 +254,6 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: '查看 Findings' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 });

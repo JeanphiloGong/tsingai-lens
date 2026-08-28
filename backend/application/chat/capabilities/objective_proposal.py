@@ -72,16 +72,23 @@ class ProposeObjectiveDraftsCapability:
         description=(
             "Record one to three focused transient Research Objective drafts for user "
             "review. Each draft must have one specific outcome. The result may report "
-            "PaperSkim proposal context, but it is not Evidence and does not create a "
-            "Core Objective."
+            "PaperResearchMap proposal context, but it is not Evidence and does not "
+            "create a Core Objective."
         ),
         risk=ToolRisk.DRAFT,
         input_model=ProposeObjectiveDraftsArguments,
     )
 
-    def __init__(self, *, collection_service: Any, objective_repository: Any) -> None:
+    def __init__(
+        self,
+        *,
+        collection_service: Any,
+        objective_repository: Any,
+        paper_map_repository: Any,
+    ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
+        self.paper_map_repository = paper_map_repository
 
     async def execute(
         self,
@@ -92,7 +99,9 @@ class ProposeObjectiveDraftsCapability:
             context.collection_id,
             context.user_id,
         )
-        facts = await self.objective_repository.read(context.collection_id)
+        paper_maps = await self.paper_map_repository.list_collection(
+            context.collection_id
+        )
         existing = await self.objective_repository.list_objectives(
             context.collection_id
         )
@@ -100,7 +109,7 @@ class ProposeObjectiveDraftsCapability:
         refs: list[ChatResourceRef] = []
         unsupported_count = 0
         for position, draft in enumerate(arguments.drafts):
-            support_ids = self._supporting_documents(draft, facts.paper_skims)
+            support_ids = self._supporting_documents(draft, paper_maps)
             similar_ids = self._similar_objectives(draft, existing)
             if not support_ids:
                 unsupported_count += 1
@@ -111,7 +120,7 @@ class ProposeObjectiveDraftsCapability:
                     "status": "draft",
                     **draft.model_dump(),
                     "support_status": (
-                        "paper_skim_context" if support_ids else "unsupported"
+                        "paper_map_context" if support_ids else "unsupported"
                     ),
                     "supporting_document_ids": list(support_ids),
                     "similar_objective_ids": list(similar_ids),
@@ -126,8 +135,8 @@ class ProposeObjectiveDraftsCapability:
             )
         warnings = (
             (
-                f"{unsupported_count} drafts have no matching PaperSkim relationship "
-                "context; they remain unverified proposals.",
+                f"{unsupported_count} drafts have no matching PaperResearchMap "
+                "relationship context; they remain unverified proposals.",
             )
             if unsupported_count
             else ()
@@ -145,9 +154,12 @@ class ProposeObjectiveDraftsCapability:
         )
 
     @staticmethod
-    def _supporting_documents(draft: ObjectiveDraftInput, paper_skims: tuple) -> tuple[str, ...]:
+    def _supporting_documents(
+        draft: ObjectiveDraftInput,
+        paper_maps: tuple,
+    ) -> tuple[str, ...]:
         document_ids: list[str] = []
-        for skim in paper_skims:
+        for paper_map in paper_maps:
             if any(
                 ProposeObjectiveDraftsCapability._relationship_supports(
                     draft,
@@ -155,10 +167,10 @@ class ProposeObjectiveDraftsCapability:
                     relationship.varied_factors,
                     relationship.outcome,
                 )
-                for study in skim.studies
+                for study in paper_map.studies
                 for relationship in study.relationships
             ):
-                document_ids.append(skim.document_id)
+                document_ids.append(paper_map.document_id)
         return tuple(dict.fromkeys(document_ids))
 
     @staticmethod

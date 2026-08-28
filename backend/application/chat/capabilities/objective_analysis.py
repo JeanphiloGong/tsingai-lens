@@ -23,6 +23,7 @@ class StartObjectiveAnalysisArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
+    document_ids: list[str] = Field(min_length=1, max_length=100)
 
 
 class InspectObjectiveAnalysisArguments(BaseModel):
@@ -61,6 +62,7 @@ class StartObjectiveAnalysisCapability:
             payload = await self.objective_analysis_service.start_analysis(
                 context.collection_id,
                 arguments.objective_id,
+                tuple(arguments.document_ids),
             )
         except ObjectiveAnalysisDispatchError:
             payload = await self.objective_analysis_service.get_analysis_state(

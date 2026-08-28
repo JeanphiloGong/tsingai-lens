@@ -18,40 +18,11 @@ async function mockPaperReaderApis(page: Page, sourceReady = true) {
 		}
 		if (path === `/api/v1/collections/${collectionId}`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, name: 'LPBF source review', status: 'ready' })
-			);
-		}
-		if (path === `/api/v1/collections/${collectionId}/workspace`) {
-			return route.fulfill(
 				json({
-					collection: { collection_id: collectionId, name: 'LPBF source review' },
-					file_count: 1,
-					status_summary: 'ready',
-					workflow: {
-						documents: { status: 'ready', detail: 'Document profiles are available.' },
-						objectives: { status: 'ready', detail: 'Objective discovery is complete.' }
-					},
-					document_summary: { total_documents: 1, by_doc_type: { experimental: 1 } },
-					warnings: [],
-					artifacts: {
-						source_documents_ready: true,
-						document_profiles_ready: true,
-						objective_candidates_ready: true,
-						updated_at: '2026-08-20T00:00:00Z'
-					},
-					latest_task: null,
-					recent_tasks: [],
-					capabilities: {
-						can_view_documents: true,
-						can_view_objectives: true,
-						can_view_comparisons: true
-					},
-					links: {
-						workspace: `/collections/${collectionId}`,
-						documents: `/collections/${collectionId}/documents`,
-						objectives: `/collections/${collectionId}/objectives`,
-						comparisons: `/collections/${collectionId}/comparisons`
-					}
+					collection_id: collectionId,
+					name: 'LPBF source review',
+					status: 'ready',
+					documents: [{ document_id: documentId, status: sourceReady ? 'ready' : 'stored' }]
 				})
 			);
 		}

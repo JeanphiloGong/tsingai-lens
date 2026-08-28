@@ -33,8 +33,9 @@ from application.core.objectives.research_objective_service import (
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from domain.core import (
     ObjectiveFactSet,
-    PaperSkim,
+    PaperResearchMap,
     PaperStudyDisposition,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 
@@ -69,8 +70,8 @@ def _objective(
     )
 
 
-def _skim() -> PaperSkim:
-    return PaperSkim.from_mapping(
+def _skim() -> PaperResearchMap:
+    return PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "doc_role": "experimental",
@@ -117,7 +118,30 @@ class _CollectionService:
             "description": "Processing, microstructure, and tensile behavior.",
             "status": "ready",
             "paper_count": 10,
+            "documents": [
+                {
+                    "document_id": "paper-1",
+                    "status": "stored",
+                },
+                {
+                    "document_id": "paper-2",
+                    "status": "stored",
+                },
+            ],
         }
+
+    async def get_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SimpleNamespace:
+        if collection_id != "col-1" or document_id not in {"paper-1", "paper-2"}:
+            raise FileNotFoundError("document not found")
+        return SimpleNamespace(
+            document_id=document_id,
+            status="ready",
+            preparation_fingerprint=f"fingerprint-{document_id}",
+        )
 
 
 class _EmptyCollectionService(_CollectionService):
@@ -129,13 +153,16 @@ class _EmptyCollectionService(_CollectionService):
         return {
             **await super().get_collection_for_user(collection_id, user_id),
             "paper_count": 0,
+            "documents": [],
         }
 
 
 class _ObjectiveRepository:
     def __init__(self, objectives: tuple[ResearchObjective, ...]) -> None:
         self.objectives = objectives
-        self.facts = ObjectiveFactSet(paper_skims=(_skim(),))
+        self.facts = ObjectiveFactSet(
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),)
+        )
 
     async def list_objectives(
         self,
@@ -159,18 +186,41 @@ class _TaskService:
         return self.tasks
 
 
-class _CollectionBuildPipelineService:
+class _DocumentPreparationService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def queue_build(self, collection_id: str, **kwargs) -> dict:
-        self.calls.append({"collection_id": collection_id, **kwargs})
+    async def queue_document(
+        self, collection_id: str, document_id: str, **kwargs
+    ) -> dict:
+        self.calls.append(
+            {"collection_id": collection_id, "document_id": document_id, **kwargs}
+        )
         return {
-            "task_id": "task-agent-1",
+            "task_id": f"task-{document_id}",
             "collection_id": collection_id,
+            "document_id": document_id,
             "status": "queued",
             "mode": kwargs.get("mode", "standard"),
         }
+
+
+class _PaperMapRepository:
+    def __init__(self, paper_maps: tuple[PaperResearchMap, ...] = (_skim(),)) -> None:
+        self.paper_maps = paper_maps
+
+    async def list_collection(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...] | None = None,
+    ) -> tuple[PaperResearchMap, ...]:
+        assert collection_id == "col-1"
+        selected = set(document_ids) if document_ids is not None else None
+        return tuple(
+            item
+            for item in self.paper_maps
+            if selected is None or item.document_id in selected
+        )
 
 
 class _StartResearchProcessModel:
@@ -202,7 +252,7 @@ class _ObjectiveAuthoringRepository(_ObjectiveRepository):
         super().__init__((objective,))
         self.facts = ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(_skim(),),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             research_objectives=(objective,),
             study_dispositions=(
                 PaperStudyDisposition.from_mapping(
@@ -237,7 +287,6 @@ class _ObjectiveAuthoringRepository(_ObjectiveRepository):
                 **objective.to_record(),
                 "rank": 2,
                 "origin": "chat_assisted",
-                "source_build_id": "build-1",
                 "created_by_user_id": created_by_user_id,
                 "created_by_tool_call_id": created_by_tool_call_id,
             }
@@ -366,25 +415,11 @@ async def test_research_process_projects_canonical_task_without_retry_internals(
         [
             {
                 "task_id": "task-1",
+                "document_id": "paper-1",
                 "status": "running",
-                "current_stage": "objective_paper_skim_started",
+                "current_stage": "paper_map",
                 "progress_percent": 72,
-                "progress_detail": {
-                    "phase": "objective_paper_skim_started",
-                    "message": "Screening paper Sources for research themes.",
-                    "current": 3,
-                    "total": 10,
-                    "active_document_id": "paper-3",
-                    "active_document_title": "LPBF process review",
-                    "active_window_position": 41,
-                    "active_window_count": 96,
-                    "retry_attempt": 7,
-                },
-                "pipeline_nodes": {
-                    "source_artifacts": {"status": "succeeded"},
-                    "document_profiles": {"status": "succeeded"},
-                    "objective_candidates": {"status": "running"},
-                },
+                "progress_detail": {"phase": "paper_map"},
                 "warnings": ["One paper could not be parsed."],
                 "errors": [],
             }
@@ -398,24 +433,18 @@ async def test_research_process_projects_canonical_task_without_retry_internals(
     result = await capability.execute(_context(), capability.spec.input_model())
 
     assert result.status.value == "succeeded"
-    assert result.data["process"]["status"] == "running"
-    assert result.data["process"]["current_step"] == "research_scope_screening"
-    assert result.data["process"]["document_progress"] == {"current": 3, "total": 10}
-    assert result.data["process"]["active_document"] == {
-        "document_id": "paper-3",
-        "title": "LPBF process review",
+    assert result.data["process"]["status"] == "processing"
+    assert result.data["process"]["counts"] == {
+        "stored": 1,
+        "processing": 1,
+        "ready": 0,
+        "failed": 0,
     }
-    assert [step["status"] for step in result.data["process"]["steps"]] == [
-        "completed",
-        "completed",
-        "running",
-        "queued",
-    ]
-    assert "active_window_position" not in str(result.data)
-    assert "retry_attempt" not in str(result.data)
+    assert result.data["process"]["documents"][0]["stage"] == "paper_map"
+    assert result.data["process"]["documents"][0]["progress_percent"] == 72
     assert result.warnings == ("One paper could not be parsed.",)
     assert task_service.calls == [
-        {"collection_id": "col-1", "limit": 1, "offset": 0}
+        {"collection_id": "col-1", "limit": 200, "offset": 0}
     ]
     assert result.resource_refs[0].href == "/collections/col-1"
 
@@ -431,26 +460,74 @@ async def test_research_process_reports_not_started_without_faking_progress() ->
     assert result.status.value == "succeeded"
     assert result.data["process"] == {
         "status": "not_started",
-        "current_step": None,
-        "summary": "Literature analysis has not started.",
-        "progress_percent": 0,
-        "document_progress": None,
-        "active_document": None,
-        "steps": [
-            {"step_id": "source_understanding", "status": "queued"},
-            {"step_id": "paper_classification", "status": "queued"},
-            {"step_id": "research_scope_screening", "status": "queued"},
-            {"step_id": "objective_formation", "status": "queued"},
+        "document_count": 2,
+        "counts": {"stored": 2, "processing": 0, "ready": 0, "failed": 0},
+        "documents": [
+            {
+                "document_id": "paper-1",
+                "filename": "",
+                "status": "stored",
+                "task_id": None,
+                "stage": None,
+                "progress_percent": 0,
+            },
+            {
+                "document_id": "paper-2",
+                "filename": "",
+                "status": "stored",
+                "task_id": None,
+                "stage": None,
+                "progress_percent": 0,
+            },
         ],
+        "objective_discovery_started": False,
+        "objective_analysis_started": False,
         "failures": [],
     }
 
 
+async def test_research_process_treats_interrupted_preparation_as_not_started() -> None:
+    capability = InspectResearchProcessCapability(
+        collection_service=_CollectionService(),
+        task_service=_TaskService(
+            [
+                {
+                    "task_id": "task-interrupted",
+                    "document_id": "paper-1",
+                    "status": "failed",
+                    "current_stage": "interrupted",
+                    "progress_percent": 68,
+                    "warnings": [],
+                    "errors": [
+                        "Document preparation was interrupted by a backend restart."
+                    ],
+                }
+            ]
+        ),
+    )
+
+    result = await capability.execute(_context(), capability.spec.input_model())
+
+    process = result.data["process"]
+    assert process["status"] == "not_started"
+    assert process["counts"] == {
+        "stored": 2,
+        "processing": 0,
+        "ready": 0,
+        "failed": 0,
+    }
+    assert [document["status"] for document in process["documents"]] == [
+        "stored",
+        "stored",
+    ]
+    assert process["failures"] == []
+
+
 async def test_agent_starts_research_process_only_after_exact_user_approval() -> None:
-    pipeline_service = _CollectionBuildPipelineService()
+    preparation_service = _DocumentPreparationService()
     capability = StartResearchProcessCapability(
         collection_service=_CollectionService(),
-        collection_build_pipeline_service=pipeline_service,
+        document_preparation_service=preparation_service,
     )
     model = _StartResearchProcessModel(
         ModelTurn(
@@ -480,7 +557,7 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
     )
 
     assert proposed.status.value == "approval_required"
-    assert pipeline_service.calls == []
+    assert preparation_service.calls == []
     assert proposed.pending_approval is not None
     approved_call = proposed.pending_approval.approve(
         user_id="user-1",
@@ -499,32 +576,54 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
     )
 
     assert completed.status.value == "completed"
-    assert pipeline_service.calls == [
+    assert preparation_service.calls == [
         {
             "collection_id": "col-1",
+            "document_id": "paper-1",
+            "mode": "standard",
+        },
+        {
+            "collection_id": "col-1",
+            "document_id": "paper-2",
             "mode": "standard",
         }
     ]
     assert completed.tool_results[0].status.value == "queued"
     assert completed.tool_results[0].data == {
         "collection_id": "col-1",
-        "task_id": "task-agent-1",
-        "status": "queued",
+        "document_ids": ["paper-1", "paper-2"],
+        "tasks": (
+            {
+                "task_id": "task-paper-1",
+                "collection_id": "col-1",
+                "document_id": "paper-1",
+                "status": "queued",
+                "mode": "standard",
+            },
+            {
+                "task_id": "task-paper-2",
+                "collection_id": "col-1",
+                "document_id": "paper-2",
+                "status": "queued",
+                "mode": "standard",
+            },
+        ),
         "mode": "standard",
-        "research_scope": "paper_map_and_objective_candidates",
+        "research_scope": "document_preparation",
+        "objective_discovery_started": False,
         "objective_analysis_started": False,
     }
     assert completed.tool_results[0].resource_refs[0].resource_type == (
-        "collection_build_task"
+        "document_preparation_task"
     )
     assert completed.tool_results[0].resource_refs[0].href == "/collections/col-1"
 
 
 async def test_start_research_process_reports_missing_papers_as_a_precondition() -> None:
-    pipeline_service = _CollectionBuildPipelineService()
+    preparation_service = _DocumentPreparationService()
     capability = StartResearchProcessCapability(
         collection_service=_EmptyCollectionService(),
-        collection_build_pipeline_service=pipeline_service,
+        document_preparation_service=preparation_service,
     )
 
     result = await capability.execute(_context(), capability.spec.input_model())
@@ -534,38 +633,33 @@ async def test_start_research_process_reports_missing_papers_as_a_precondition()
     assert result.error_message == (
         "Upload at least one paper before starting literature analysis."
     )
-    assert pipeline_service.calls == []
+    assert preparation_service.calls == []
 
 
 @pytest.mark.parametrize(
-    ("task_status", "node_status", "expected_summary", "expected_step_status"),
+    ("task_status", "expected_process_status", "expected_document_status"),
     (
         (
             "completed",
-            "succeeded",
-            "Paper preparation and candidate research-question synthesis "
-            "are complete.",
-            "completed",
+            "partial_ready",
+            "ready",
         ),
         (
             "partial_success",
-            "succeeded",
-            "Literature analysis is complete, but some content still needs review.",
-            "completed",
+            "partial_ready",
+            "ready",
         ),
         (
             "failed",
-            "failed",
-            "Literature analysis stopped before all stages were complete.",
+            "attention_required",
             "failed",
         ),
     ),
 )
 async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
     task_status: str,
-    node_status: str,
-    expected_summary: str,
-    expected_step_status: str,
+    expected_process_status: str,
+    expected_document_status: str,
 ) -> None:
     capability = InspectResearchProcessCapability(
         collection_service=_CollectionService(),
@@ -573,14 +667,10 @@ async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
             [
                 {
                     "task_id": "task-terminal",
+                    "document_id": "paper-1",
                     "status": task_status,
                     "progress_percent": 100,
                     "progress_detail": {"message": "Build artifacts are ready."},
-                    "pipeline_nodes": {
-                        "source_artifacts": {"status": node_status},
-                        "document_profiles": {"status": node_status},
-                        "objective_candidates": {"status": node_status},
-                    },
                     "warnings": [],
                     "errors": (
                         ["Source processing stopped."]
@@ -595,11 +685,9 @@ async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
     result = await capability.execute(_context(), capability.spec.input_model())
 
     assert result.status.value == "succeeded"
-    assert result.data["process"]["status"] == task_status
-    assert result.data["process"]["summary"] == expected_summary
-    assert result.data["process"]["steps"][-1]["status"] == expected_step_status
-    assert result.data["process"]["current_step"] == (
-        "source_understanding" if task_status == "failed" else None
+    assert result.data["process"]["status"] == expected_process_status
+    assert result.data["process"]["documents"][0]["status"] == (
+        expected_document_status
     )
     assert result.data["process"]["failures"] == (
         ["Source processing stopped."] if task_status == "failed" else []
@@ -639,17 +727,13 @@ async def test_agent_continues_from_observable_research_process_result() -> None
                         [
                             {
                                 "task_id": "task-1",
+                                "document_id": "paper-1",
                                 "status": "running",
                                 "progress_percent": 72,
                                 "progress_detail": {
-                                    "phase": "objective_paper_skim_started",
+                                    "phase": "paper_research_map_started",
                                     "current": 3,
                                     "total": 10,
-                                },
-                                "pipeline_nodes": {
-                                    "source_artifacts": {"status": "succeeded"},
-                                    "document_profiles": {"status": "succeeded"},
-                                    "objective_candidates": {"status": "running"},
                                 },
                                 "warnings": [],
                                 "errors": [],
@@ -672,9 +756,7 @@ async def test_agent_continues_from_observable_research_process_result() -> None
     )
 
     assert result.status.value == "completed"
-    assert result.tool_results[0].data["process"]["current_step"] == (
-        "research_scope_screening"
-    )
+    assert result.tool_results[0].data["process"]["status"] == "processing"
     assert result.messages[-1].content.startswith("The collection is screening")
     assert [message.role.value for message in model.contexts[-1][-2:]] == [
         "assistant",
@@ -737,10 +819,11 @@ async def test_missing_published_results_is_a_successful_scientific_absence() ->
     assert "No selected Objective has a published analysis." in result.warnings
 
 
-async def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -> None:
+async def test_objective_drafts_are_transient_and_paper_map_is_not_evidence() -> None:
     capability = ProposeObjectiveDraftsCapability(
         collection_service=_CollectionService(),
         objective_repository=_ObjectiveRepository((_objective("objective-existing"),)),
+        paper_map_repository=_PaperMapRepository(),
     )
     arguments = ProposeObjectiveDraftsArguments.model_validate(
         {
@@ -766,7 +849,7 @@ async def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -
 
     assert result.status.value == "succeeded"
     assert result.data["draft_count"] == 2
-    assert result.data["drafts"][0]["support_status"] == "paper_skim_context"
+    assert result.data["drafts"][0]["support_status"] == "paper_map_context"
     assert result.data["drafts"][0]["supporting_document_ids"] == ["paper-1"]
     assert result.data["drafts"][1]["support_status"] == "unsupported"
     assert {ref.resource_type for ref in result.resource_refs} == {"objective_draft"}
@@ -800,7 +883,6 @@ async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candi
             "seed_document_ids": ["paper-1"],
             "confidence": 0.86,
             "origin": "chat_assisted",
-            "source_build_id": "build-1",
             "created_by_user_id": "user-1",
             "created_by_tool_call_id": "call-create",
         }
@@ -826,7 +908,6 @@ async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candi
         "objective_id": "objective-chat",
         "confirmation_status": "candidate",
         "origin": "chat_assisted",
-        "source_build_id": "build-1",
         "analysis_started": False,
         "research_status": "untested",
     }
@@ -843,10 +924,10 @@ async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candi
 
 
 async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -> None:
-    relevant = PaperSkim.from_mapping(
+    relevant = PaperResearchMap.from_mapping(
         {**_skim().to_record(), "map_status": "sufficient"}
     )
-    insufficient = PaperSkim.from_mapping(
+    insufficient = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-2",
             "doc_role": "experimental",
@@ -855,7 +936,7 @@ async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -
             "map_limitations": ["The outcome was not visible in high-level Sources."],
         }
     )
-    unrelated = PaperSkim.from_mapping(
+    unrelated = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-3",
             "doc_role": "experimental",
@@ -881,13 +962,11 @@ async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -
             ],
         }
     )
-    repository = _ObjectiveRepository(())
-    repository.facts = ObjectiveFactSet(
-        paper_skims=(relevant, insufficient, unrelated),
-    )
     capability = PreviewResearchScopeCapability(
         collection_service=_CollectionService(),
-        objective_repository=repository,
+        paper_map_repository=_PaperMapRepository(
+            (relevant, insufficient, unrelated)
+        ),
     )
 
     result = await capability.execute(
@@ -919,10 +998,9 @@ async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -
 
 
 async def test_scope_preview_maps_energy_input_to_precise_laser_interventions() -> None:
-    repository = _ObjectiveRepository(())
     capability = PreviewResearchScopeCapability(
         collection_service=_CollectionService(),
-        objective_repository=repository,
+        paper_map_repository=_PaperMapRepository(),
     )
 
     result = await capability.execute(
@@ -948,7 +1026,7 @@ async def test_scope_preview_maps_energy_input_to_precise_laser_interventions() 
 
 
 async def test_scope_preview_does_not_exclude_a_same_material_paper_for_an_umbrella_variable_miss() -> None:
-    same_material_unmatched = PaperSkim.from_mapping(
+    same_material_unmatched = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-unmatched",
             "doc_role": "experimental",
@@ -977,11 +1055,9 @@ async def test_scope_preview_does_not_exclude_a_same_material_paper_for_an_umbre
             ],
         }
     )
-    repository = _ObjectiveRepository(())
-    repository.facts = ObjectiveFactSet(paper_skims=(same_material_unmatched,))
     capability = PreviewResearchScopeCapability(
         collection_service=_CollectionService(),
-        objective_repository=repository,
+        paper_map_repository=_PaperMapRepository((same_material_unmatched,)),
     )
 
     result = await capability.execute(
@@ -1008,7 +1084,7 @@ async def test_scope_preview_does_not_exclude_a_same_material_paper_for_an_umbre
 
 
 async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence() -> None:
-    review = PaperSkim.from_mapping(
+    review = PaperResearchMap.from_mapping(
         {
             "document_id": "review-1",
             "doc_role": "review",
@@ -1029,14 +1105,9 @@ async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence
             },
         }
     )
-    repository = _ObjectiveRepository(())
-    repository.facts = ObjectiveFactSet(
-        research_objectives_ready=True,
-        paper_skims=(review,),
-    )
     capability = PreviewResearchScopeCapability(
         collection_service=_CollectionService(),
-        objective_repository=repository,
+        paper_map_repository=_PaperMapRepository((review,)),
     )
 
     result = await capability.execute(
@@ -1054,16 +1125,16 @@ async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence
     assert result.data["needs_inspection"][0]["reason"] == "citation_lead_only"
 
 
-async def test_core_authoring_persists_a_seedless_question_as_explicitly_untested() -> None:
+async def test_core_authoring_without_discovery_persists_a_seedless_question_as_untested() -> None:
     repository = _ObjectiveAuthoringRepository()
+    repository.facts = ObjectiveFactSet()
     service = ResearchObjectiveService(
         collection_service=_CollectionService(),
         source_artifact_repository=SimpleNamespace(),
-        paper_fact_repository=SimpleNamespace(),
+        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
         document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        paper_skim_service=SimpleNamespace(),
         objective_candidate_service=SimpleNamespace(),
     )
 
@@ -1090,16 +1161,50 @@ async def test_core_authoring_persists_a_seedless_question_as_explicitly_unteste
     )
 
 
+async def test_core_authoring_rejects_a_seed_document_outside_the_collection() -> None:
+    repository = _ObjectiveAuthoringRepository()
+    service = ResearchObjectiveService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=SimpleNamespace(),
+        paper_map_repository=SimpleNamespace(),
+        objective_repository=repository,
+        document_profile_service=SimpleNamespace(),
+        finding_synthesis_service=SimpleNamespace(),
+        objective_candidate_service=SimpleNamespace(),
+    )
+
+    with pytest.raises(FileNotFoundError, match="document not found"):
+        await service.create_chat_assisted_candidate(
+            collection_id="col-1",
+            user_id="user-1",
+            tool_call_id="call-unknown-seed",
+            question="How does oxygen content affect elongation?",
+            material_scope=["Ti-6Al-4V"],
+            variables=["oxygen content"],
+            outcomes=["elongation"],
+            mechanisms=[],
+            constraints=[],
+            requested_comparator=None,
+            seed_document_ids=["paper-outside-collection"],
+            excluded_document_ids=[],
+        )
+
+
 class _ObjectiveAnalysisCapabilityService:
     def __init__(self) -> None:
-        self.start_calls: list[tuple[str, str]] = []
+        self.start_calls: list[tuple[str, str, tuple[str, ...]]] = []
         self.read_calls: list[tuple[str, str]] = []
         self.dispatch_error: ObjectiveAnalysisDispatchError | None = None
         self.analysis_status = "queued"
         self.inspection_status = "running"
 
-    async def start_analysis(self, collection_id: str, objective_id: str) -> dict:
-        self.start_calls.append((collection_id, objective_id))
+    async def start_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_ids: tuple[str, ...],
+    ) -> dict:
+        self.start_calls.append((collection_id, objective_id, document_ids))
         if self.dispatch_error is not None:
             raise self.dispatch_error
         return self._payload(status=self.analysis_status)
@@ -1156,7 +1261,10 @@ async def test_agent_starts_objective_analysis_only_after_exact_approval() -> No
             content="This question is ready for your approval.",
             tool_call=ModelToolCall(
                 name="start_objective_analysis",
-                arguments={"objective_id": "objective-agent"},
+                arguments={
+                    "objective_id": "objective-agent",
+                    "document_ids": ["paper-1"],
+                },
             ),
         ),
         ModelTurn(content="The question is queued for evidence analysis."),
@@ -1185,7 +1293,9 @@ async def test_agent_starts_objective_analysis_only_after_exact_approval() -> No
         approved_call=approved,
     )
 
-    assert analysis_service.start_calls == [("col-1", "objective-agent")]
+    assert analysis_service.start_calls == [
+        ("col-1", "objective-agent", ("paper-1",))
+    ]
     assert completed.tool_results[0].status.value == "queued"
     assert completed.tool_results[0].data["analysis"]["status"] == "queued"
 
@@ -1205,7 +1315,10 @@ async def test_agent_reports_persisted_state_when_analysis_dispatch_fails() -> N
 
     result = await capability.execute(
         _context("call-analysis-dispatch-failed"),
-        capability.spec.input_model(objective_id="objective-agent"),
+        capability.spec.input_model(
+            objective_id="objective-agent",
+            document_ids=["paper-1"],
+        ),
     )
 
     assert result.status.value == "failed"
@@ -1241,7 +1354,7 @@ async def test_agent_inspects_the_canonical_objective_analysis_state_read_only()
 
 
 async def test_researcher_question_follows_scope_two_approvals_and_canonical_analysis() -> None:
-    insufficient = PaperSkim.from_mapping(
+    insufficient = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-2",
             "doc_role": "experimental",
@@ -1250,10 +1363,11 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
             "map_limitations": ["missing_outcome"],
         }
     )
-    repository = _ObjectiveRepository(())
-    repository.facts = ObjectiveFactSet(
-        paper_skims=(
-            PaperSkim.from_mapping({**_skim().to_record(), "map_status": "sufficient"}),
+    paper_map_repository = _PaperMapRepository(
+        (
+            PaperResearchMap.from_mapping(
+                {**_skim().to_record(), "map_status": "sufficient"}
+            ),
             insufficient,
         )
     )
@@ -1268,7 +1382,6 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
             "seed_document_ids": ["paper-1"],
             "confidence": 0,
             "origin": "chat_assisted",
-            "source_build_id": "build-1",
             "created_by_user_id": "user-1",
             "created_by_tool_call_id": "call-create",
         }
@@ -1306,7 +1419,10 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                     ModelTurn(
                         tool_call=ModelToolCall(
                             name="start_objective_analysis",
-                            arguments={"objective_id": "objective-agent"},
+                            arguments={
+                                "objective_id": "objective-agent",
+                                "document_ids": ["paper-1"],
+                            },
                         )
                     ),
                     ModelTurn(
@@ -1335,7 +1451,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
             (
                 PreviewResearchScopeCapability(
                     collection_service=_CollectionService(),
-                    objective_repository=repository,
+                    paper_map_repository=paper_map_repository,
                 ),
                 CreateObjectiveCandidateCapability(
                     research_objective_service=authoring_service,
@@ -1390,7 +1506,9 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
         approved_call=approved_analysis,
     )
 
-    assert analysis_service.start_calls == [("col-1", "objective-agent")]
+    assert analysis_service.start_calls == [
+        ("col-1", "objective-agent", ("paper-1",))
+    ]
     assert analysis_service.read_calls == [("col-1", "objective-agent")]
     assert [result.status.value for result in completed.tool_results] == [
         "queued",
@@ -1405,11 +1523,10 @@ async def test_core_authoring_keeps_seed_documents_as_untested_scope_hypotheses(
     service = ResearchObjectiveService(
         collection_service=_CollectionService(),
         source_artifact_repository=SimpleNamespace(),
-        paper_fact_repository=SimpleNamespace(),
+        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
         document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        paper_skim_service=SimpleNamespace(),
         objective_candidate_service=SimpleNamespace(),
     )
 
@@ -1498,6 +1615,7 @@ async def test_agent_uses_collection_context_then_records_drafts_before_final_an
                 ProposeObjectiveDraftsCapability(
                     collection_service=collection_service,
                     objective_repository=repository,
+                    paper_map_repository=_PaperMapRepository(),
                 ),
             )
         ),

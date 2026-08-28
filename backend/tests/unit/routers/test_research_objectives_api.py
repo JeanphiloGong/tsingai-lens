@@ -14,7 +14,7 @@ from domain.core import (
     ObjectiveFactSet,
     PaperContribution,
     PaperStudyDisposition,
-    PaperSkim,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
@@ -45,7 +45,9 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
         collection_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(
+            PreparedDocumentInput("paper-1", "fingerprint-paper-1"),
+        ),
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={"paper_framing": "paper_framing.v1"},
@@ -192,13 +194,13 @@ class _Service:
     def __init__(self, *, queued: bool = False) -> None:
         self.analysis_status = "queued" if queued else "succeeded"
         self.dispatch_failure_version: int | None = None
-        self.start_calls: list[tuple[str, str]] = []
+        self.start_calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-    async def start_analysis(self, collection_id, objective_id):
-        self.start_calls.append((collection_id, objective_id))
-        return await self.queue_analysis(collection_id, objective_id)
+    async def start_analysis(self, collection_id, objective_id, document_ids):
+        self.start_calls.append((collection_id, objective_id, document_ids))
+        return await self.queue_analysis(collection_id, objective_id, document_ids)
 
-    async def queue_analysis(self, collection_id, objective_id):
+    async def queue_analysis(self, collection_id, objective_id, document_ids):
         return await self.get_analysis_state(collection_id, objective_id)
 
     async def execute_queued_analysis(
@@ -382,37 +384,14 @@ def _ranked_objective(rank: int) -> ResearchObjective:
 
 
 def _ranked_facts(count: int) -> ObjectiveFactSet:
-    skims = tuple(
-        PaperSkim.from_mapping(
-            {
-                "document_id": f"paper-{rank}",
-                "studies": [
-                    {
-                        "study_id": f"study-{rank}",
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "relationships": [
-                            {
-                                "relationship_id": f"relationship-{rank}",
-                                "varied_factors": [f"variable {rank}"],
-                                "outcome": f"outcome {rank}",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "block",
-                                        "source_ref": f"block-{rank}",
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            }
-        )
-        for rank in range(1, count + 1)
-    )
     return ObjectiveFactSet(
         research_objectives_ready=True,
-        paper_skims=skims,
+        document_inputs=tuple(
+            PreparedDocumentInput(
+                f"paper-{rank}", f"fingerprint-paper-{rank}"
+            )
+            for rank in range(1, count + 1)
+        ),
         research_objectives=tuple(
             _ranked_objective(rank) for rank in range(1, count + 1)
         ),
@@ -432,32 +411,11 @@ def _ranked_facts(count: int) -> ObjectiveFactSet:
 
 
 def _default_objective_facts() -> ObjectiveFactSet:
-    skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                {
-                    "study_id": "study-1",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": ["Alloy A"],
-                    "relationships": [
-                        {
-                            "relationship_id": "relationship-1",
-                            "varied_factors": ["temperature"],
-                            "outcome": "strength",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "block-7"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
-    )
     return ObjectiveFactSet(
         research_objectives_ready=True,
-        paper_skims=(skim,),
+        document_inputs=(
+            PreparedDocumentInput("paper-1", "fingerprint-paper-1"),
+        ),
         research_objectives=(_objective(),),
         study_dispositions=(
             PaperStudyDisposition.from_mapping(
@@ -527,21 +485,23 @@ def test_start_analysis_uses_the_canonical_service_dispatch() -> None:
     service = _Service(queued=True)
 
     response = _client(service).post(
-        "/collections/col-1/objectives/obj-1/analysis"
+        "/collections/col-1/objectives/obj-1/analysis",
+        json={"document_ids": ["paper-1"]},
     )
 
     assert response.status_code == 200
     assert response.json()["active_analysis"]["status"] == "queued"
-    assert service.start_calls == [("col-1", "obj-1")]
+    assert service.start_calls == [("col-1", "obj-1", ("paper-1",))]
 
 
 def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:
     class DispatchFailureService(_Service):
-        async def start_analysis(self, collection_id, objective_id):
+        async def start_analysis(self, collection_id, objective_id, document_ids):
             raise ObjectiveAnalysisDispatchError(collection_id, objective_id, 1)
 
     response = _client(DispatchFailureService(), raise_server_exceptions=False).post(
-        "/collections/col-1/objectives/obj-1/analysis"
+        "/collections/col-1/objectives/obj-1/analysis",
+        json={"document_ids": ["paper-1"]},
     )
 
     assert response.status_code == 503

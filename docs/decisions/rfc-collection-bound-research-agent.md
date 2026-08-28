@@ -54,7 +54,7 @@ This maps to implementation responsibilities as follows:
 
 ## Scientific Boundaries
 
-- A relevant paper, Source, PaperSkim signal, or Objective draft is not
+- A relevant paper, Source, Paper Map signal, or Objective draft is not
   Evidence.
 - Collection facts returned to the model are bounded and identify their
   canonical resource references.

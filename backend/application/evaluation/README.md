@@ -1,7 +1,7 @@
 # Evaluation Application Layer
 
 This package evaluates and reviews already-persisted Lens outputs. It does not
-parse Source documents or run collection builds.
+prepare Source documents, discover Objectives, or run Objective analyses.
 
 ## Services
 

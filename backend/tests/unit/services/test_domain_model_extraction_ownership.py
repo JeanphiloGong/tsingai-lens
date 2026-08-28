@@ -19,7 +19,7 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import StructuredPaperSkim
+from application.core.objectives.discovery.study_window import StructuredPaperResearchMap
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.paper_facts.extraction import PaperFactsExtractor
 
@@ -36,7 +36,7 @@ def test_model_clients_are_owned_by_their_domains() -> None:
 
 def test_objective_judgments_own_their_response_contracts() -> None:
     expected_owners = {
-        StructuredPaperSkim: "application.core.objectives.discovery.study_window",
+        StructuredPaperResearchMap: "application.core.objectives.discovery.study_window",
         StructuredPaperSignalReconciliation: (
             "application.core.objectives.discovery.signal_reconciliation"
         ),

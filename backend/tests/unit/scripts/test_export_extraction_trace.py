@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
-from domain.core.paper_fact import PaperFactSet
+from domain.core import DocumentProfile
 from domain.source import source_documents_from_records
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.comparison_repository import MemoryComparisonRepository
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from infra.persistence.memory import (
+    MemoryDocumentProfileRepository,
+    MemoryPaperMapRepository,
+    MemorySourceArtifactRepository,
+)
 
 
 @pytest.fixture
@@ -23,120 +23,97 @@ def anyio_backend() -> str:
 
 
 def _load_trace_module():
-    backend_root = Path(__file__).resolve().parents[3]
-    script_path = backend_root / "scripts" / "export_extraction_trace.py"
-    spec = importlib.util.spec_from_file_location(
-        "export_extraction_trace",
-        script_path,
-    )
-    assert spec is not None
-    assert spec.loader is not None
+    path = Path(__file__).resolve().parents[3] / "scripts" / "export_extraction_trace.py"
+    spec = importlib.util.spec_from_file_location("export_extraction_trace", path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
+class _Record:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def to_record(self) -> dict:
+        return dict(self.payload)
+
+
+class _ObjectiveRepository:
+    async def list_objectives(self, collection_id: str):
+        return (
+            SimpleNamespace(
+                objective_id="obj-1",
+                published_analysis_version=1,
+            ),
+        )
+
+    async def list_evidence(self, *args, **kwargs):
+        records = (
+            _Record(
+                {
+                    "evidence_id": "ev-1",
+                    "document_id": "paper-1",
+                    "source_kind": "table",
+                    "source_ref": "tbl-paper-1-1",
+                    "source_excerpt": "Sample A reached 560 MPa.",
+                }
+            ),
+        )
+        return records, len(records)
+
+    async def list_findings(self, *args, **kwargs):
+        records = (
+            _Record(
+                {
+                    "finding_id": "finding-1",
+                    "statement": "Sample A reached 560 MPa in the reported test.",
+                }
+            ),
+        )
+        return records, len(records)
+
+
 @pytest.mark.anyio
-async def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
+async def test_export_trace_writes_current_source_and_objective_views(
+    tmp_path,
+    monkeypatch,
+):
     trace = _load_trace_module()
-    monkeypatch.setenv(
-        "LENS_DATABASE_URL",
-        "postgresql+psycopg://test:test@localhost/test",
-    )
-    backend_root = tmp_path / "backend"
-    collection_id = "col-test"
     source_repository = MemorySourceArtifactRepository()
-    await source_repository.replace_collection_documents(
-        collection_id,
-        "build_test",
-        source_documents_from_records(
-            documents=[
-                {
-                    "id": "paper-1",
-                    "title": "Trace Paper",
-                    "text": "Table 1 Mechanical Results",
-                }
-            ],
-            tables=[
-                {
-                    "table_id": "tbl-paper-1-1",
-                    "document_id": "paper-1",
-                    "table_order": 1,
-                    "caption_text": "Table 1 Mechanical Results",
-                    "caption_block_id": "blk-1",
-                    "page": 5,
-                    "heading_path": "Results",
-                    "column_headers": ["Sample", "Strength (MPa)"],
-                    "table_matrix": [["Sample", "Strength (MPa)"], ["A", "560"]],
-                    "metadata": {"source": "test"},
-                }
-            ],
-            table_rows=[
-                {
-                    "row_id": "row-1",
-                    "document_id": "paper-1",
-                    "table_id": "tbl-paper-1-1",
-                    "row_index": 1,
-                    "row_text": "A | 560",
-                    "page": 5,
-                    "heading_path": "Results",
-                }
-            ],
-        ),
-    )
-    paper_fact_repository = MemoryPaperFactRepository()
-    await paper_fact_repository.replace_paper_facts(
-        collection_id,
-        "build_test",
-        PaperFactSet(
-            paper_facts_ready=True,
-            evidence_anchors=(
-                EvidenceAnchor.from_mapping(
-                    {
-                        "anchor_id": "anchor-1",
-                        "document_id": "paper-1",
-                        "source_kind": "table",
-                        "source_ref": "tbl-paper-1-1",
-                        "source_type": "table",
-                        "page": 5,
-                        "quote": "A | 560",
-                    }
-                ),
-            ),
-            sample_variants=(
-                SampleVariant.from_mapping(
-                    {
-                        "variant_id": "var-1",
-                        "document_id": "paper-1",
-                        "collection_id": collection_id,
-                        "variant_label": "A",
-                        "host_material_system": {"normalized": "Trace alloy"},
-                        "source_anchor_ids": ["anchor-1"],
-                    }
-                ),
-            ),
-            measurement_results=(
-                MeasurementResult.from_mapping(
-                    {
-                        "result_id": "res-1",
-                        "document_id": "paper-1",
-                        "collection_id": collection_id,
-                        "variant_id": "var-1",
-                        "property_normalized": "strength",
-                        "result_type": "scalar",
-                        "value_payload": {
-                            "value": 560,
-                            "statement": "A reached 560 MPa.",
-                        },
-                        "unit": "MPa",
-                        "evidence_anchor_ids": ["anchor-1"],
-                        "traceability_status": "direct",
-                        "result_source_type": "table",
-                    }
-                ),
-            ),
-        ),
+    source_document = source_documents_from_records(
+        documents=[
+            {
+                "id": "paper-1",
+                "title": "Trace Paper",
+                "text": "Table 1 Mechanical Results",
+            }
+        ],
+        tables=[
+            {
+                "table_id": "tbl-paper-1-1",
+                "document_id": "paper-1",
+                "table_order": 1,
+                "caption_text": "Table 1 Mechanical Results",
+                "page": 5,
+                "column_headers": ["Sample", "Strength (MPa)"],
+                "table_matrix": [["Sample", "Strength (MPa)"], ["A", "560"]],
+            }
+        ],
+    )[0]
+    await source_repository.replace_document("col-test", source_document)
+    profile_repository = MemoryDocumentProfileRepository()
+    await profile_repository.replace(
+        DocumentProfile.from_mapping(
+            {
+                "document_id": "paper-1",
+                "collection_id": "col-test",
+                "title": "Trace Paper",
+                "doc_type": "experimental",
+                "parsing_warnings": [],
+                "confidence": 0.9,
+            }
+        )
     )
     monkeypatch.setattr(
         trace,
@@ -147,33 +124,39 @@ async def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch
     monkeypatch.setattr(
         trace,
         "PostgresSourceArtifactRepository",
-        lambda _session_factory: source_repository,
+        lambda _sessions: source_repository,
     )
     monkeypatch.setattr(
         trace,
-        "PostgresPaperFactRepository",
-        lambda _session_factory: paper_fact_repository,
+        "PostgresDocumentProfileRepository",
+        lambda _sessions: profile_repository,
     )
     monkeypatch.setattr(
         trace,
-        "PostgresComparisonRepository",
-        lambda _session_factory: MemoryComparisonRepository(),
+        "PostgresPaperMapRepository",
+        lambda _sessions: MemoryPaperMapRepository(),
+    )
+    monkeypatch.setattr(
+        trace,
+        "PostgresObjectiveRepository",
+        lambda _sessions: _ObjectiveRepository(),
     )
 
     trace_dir = await trace.export_trace(
-        backend_root=backend_root,
-        collection_id=collection_id,
+        backend_root=tmp_path,
+        collection_id="col-test",
         trace_name="trace-test",
     )
 
     summary = json.loads((trace_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["artifact_rows"]["tables"] == 1
-    assert summary["artifact_rows"]["evidence_cards"] == 1
+    assert summary["artifact_rows"]["objective_evidence"] == 1
     assert (trace_dir / "artifacts" / "tables.json").is_file()
-    assert (trace_dir / "artifacts" / "tables.csv").is_file()
     assert "Table 1 Mechanical Results" in (trace_dir / "source_tables.md").read_text(
         encoding="utf-8"
     )
-    extraction_trace = (trace_dir / "extraction_trace.md").read_text(encoding="utf-8")
-    assert "A reached 560 MPa." in extraction_trace
-    assert "quote=A | 560" in extraction_trace
+    objective_trace = (trace_dir / "extraction_trace.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Sample A reached 560 MPa in the reported test." in objective_trace
+    assert "Sample A reached 560 MPa." in objective_trace

@@ -18,7 +18,7 @@ from application.source.reference_extraction_service import (
 )
 from controllers.source import references as references_controller
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from infra.persistence.memory import MemorySourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -26,6 +26,11 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+async def _store_source_documents(repository, collection_id, documents) -> None:
+    for document in documents:
+        await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
@@ -83,17 +88,15 @@ async def test_source_reference_routes_build_and_read_refs(source_reference_serv
             ),
         ),
     )
-    await repository.replace_collection_documents(
+    await _store_source_documents(
+        repository,
         collection_id,
-        "build_test",
         artifacts,
     )
-    await repository.replace_collection_references(
-        collection_id,
-        "build_test",
+    await repository.replace_document_references(
+        "doc-1",
         SourceReferenceExtractionService().extract(artifacts),
     )
-
     summary = await references_controller.build_collection_references(
         collection_id,
         request,

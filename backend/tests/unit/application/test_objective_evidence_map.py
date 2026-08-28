@@ -11,6 +11,7 @@ from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 
@@ -38,7 +39,13 @@ def _analysis() -> ObjectiveAnalysis:
         collection_id="collection-1",
         objective_id="objective-1",
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=tuple(
+            PreparedDocumentInput(
+                document_id=f"paper-{index}",
+                preparation_fingerprint=f"fingerprint-paper-{index}",
+            )
+            for index in range(1, 4)
+        ),
         pipeline_version="objective-analysis.v2",
         model_name="model-1",
         prompt_versions={},

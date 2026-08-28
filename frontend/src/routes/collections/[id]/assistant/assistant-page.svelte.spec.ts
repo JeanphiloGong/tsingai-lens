@@ -410,7 +410,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 							data: {},
 							resource_refs: [
 								{
-									resource_type: 'collection_build_task',
+									resource_type: 'document_preparation_task',
 									resource_id: 'task_1',
 									href: '/collections/col_123'
 								}

@@ -45,13 +45,29 @@ Owns:
 It does not own execution progress, errors, complete document content, or
 embedded child arrays.
 
+Candidate discovery and analysis never infer all Collection papers. Their
+commands receive an explicit non-empty ready `document_ids` selection.
+
+### PreparedDocumentInput
+
+Identity: `document_id + preparation_fingerprint` within one discovery or
+analysis record.
+
+The fingerprint binds current document bytes, parser version, and
+document-analysis version. Discovery records the inputs used to form current
+candidates. Every ObjectiveAnalysis freezes its own selected inputs and checks
+that they still match ready Documents before Source is read. A mismatch is
+stale input and blocks analysis; it is never repaired by silently switching to
+new Source.
+
 ### ObjectiveAnalysis
 
 Identity: `(collection_id, objective_id, analysis_version)`.
 
 Owns one reproducible execution attempt:
 
-- immutable Source build, pipeline, model, and prompt versions;
+- immutable selected PreparedDocumentInputs plus pipeline, model, and prompt
+  versions;
 - `queued | running | succeeded | failed` status;
 - phase, current document, processed/total document counts, and user-readable
   progress;
@@ -180,9 +196,19 @@ All routes are under `/api/v1/collections/{collection_id}`.
 
 ### Objective lifecycle
 
+- `POST /objective-discovery`
 - `GET /objectives`
 - `POST /objectives/{objective_id}/analysis`
 - `GET /objectives/{objective_id}/analysis`
+
+Discovery and analysis POST bodies are:
+
+```json
+{"document_ids": ["doc_a", "doc_b"]}
+```
+
+Every selected Document must be current and ready. Processing and failed papers
+do not block research over another explicitly selected ready subset.
 
 The analysis-state and command responses contain `objective`,
 `active_analysis`, `published_analysis`, and warnings. They never embed all
@@ -190,9 +216,9 @@ Findings or Evidence.
 
 `POST .../analysis` is the single approval-and-analysis command. For a
 candidate Objective, it atomically freezes the accepted definition as
-`confirmed` and queues analysis version 1. For an already confirmed Objective,
-it creates or reuses the appropriate active version. There is no separate
-confirmation command.
+`confirmed`, freezes the selected PreparedDocumentInputs, and queues analysis
+version 1. For an already confirmed Objective, it creates or reuses the
+appropriate active version. There is no separate confirmation command.
 
 ### Published result reads
 
@@ -235,6 +261,10 @@ or curation event controls review and training status.
   published Findings readable.
 - `succeeded`: show the published Finding list and selected detail.
 
+The Collection page allows upload and independent prepare/retry while other
+papers run. Objective discovery and analysis controls expose ready-paper
+selection; disabled processing or failed papers do not create a global lock.
+
 The first Finding is selected deterministically when no selection exists.
 Selecting another Finding loads that Finding detail and Evidence page together;
 stale rapid-selection responses are discarded. Source links open the owning
@@ -243,6 +273,10 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
 ## Invariants
 
 - Every child shares the same collection, Objective, and analysis version.
+- Every analysis has at least one unique PreparedDocumentInput, and each paper
+  contribution belongs to that frozen selection.
+- Source, DocumentProfile, and PaperMap are current Document-owned records, not
+  collection-build snapshots.
 - Findings reference only role-eligible Evidence from their own version and
   bind every PaperContribution in that version.
 - Every eligible direct result in an atomic result set is assigned exactly once

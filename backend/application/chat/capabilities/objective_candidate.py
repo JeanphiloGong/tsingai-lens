@@ -65,7 +65,6 @@ class CreateObjectiveCandidateCapability:
                 "objective_id": objective.objective_id,
                 "confirmation_status": objective.confirmation_status,
                 "origin": objective.origin,
-                "source_build_id": objective.source_build_id,
                 "analysis_started": objective.active_analysis_version is not None,
                 "research_status": "untested",
             },

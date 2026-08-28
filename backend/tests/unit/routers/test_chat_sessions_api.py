@@ -15,6 +15,7 @@ from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatSessionNotFoundError,
 )
+from application.source.task_service import TaskService
 from controllers.chat import sessions as sessions_controller
 from controllers.schemas.chat.session import (
     ChatSessionCreateRequest,
@@ -22,6 +23,7 @@ from controllers.schemas.chat.session import (
     ChatTurnRequest,
 )
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ToolRisk
+from infra.persistence.memory import MemoryObjectiveRepository, MemoryTaskRepository
 from main import create_app
 
 
@@ -242,14 +244,15 @@ class _AuthService:
 
 def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> None:
     service = _Service()
-    inert_task_service = SimpleNamespace(repository=object())
+    inert_task_service = TaskService(MemoryTaskRepository())
     app = create_app(
         auth_session_service=_AuthService(),
         collection_service=SimpleNamespace(),
         task_service=inert_task_service,
         source_artifact_repository=object(),
-        paper_fact_repository=object(),
-        objective_repository=object(),
+        document_profile_repository=object(),
+        paper_map_repository=object(),
+        objective_repository=MemoryObjectiveRepository(),
         finding_review_repository=object(),
         experiment_plan_repository=object(),
         chat_session_service=service,
@@ -282,10 +285,11 @@ def test_chat_message_route_streams_text_then_the_persisted_turn() -> None:
     app = create_app(
         auth_session_service=_AuthService(),
         collection_service=SimpleNamespace(),
-        task_service=SimpleNamespace(repository=object()),
+        task_service=TaskService(MemoryTaskRepository()),
         source_artifact_repository=object(),
-        paper_fact_repository=object(),
-        objective_repository=object(),
+        document_profile_repository=object(),
+        paper_map_repository=object(),
+        objective_repository=MemoryObjectiveRepository(),
         finding_review_repository=object(),
         experiment_plan_repository=object(),
         chat_session_service=service,

@@ -11,7 +11,7 @@ from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
 
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
-from domain.core import PaperSkim, ResearchObjective, normalize_objective_terms
+from domain.core import PaperResearchMap, ResearchObjective, normalize_objective_terms
 from domain.source import SourceDocumentTree
 from pydantic import (
     BaseModel,
@@ -36,7 +36,7 @@ _FRAME_TABLE_VALUE_CHARS = 240
 _FRAME_SCREENING_NOTE_CHARS = 320
 _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY = 10
 OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
-OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v3"
+OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v4"
 
 _FRAME_MAX_COMPLETION_TOKENS = 1024
 _FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
@@ -56,8 +56,8 @@ You are the source-relevance judge for one bounded neighborhood of a paper under
 Non-negotiable rules:
 - This is bounded source-candidate classification, not whole-paper summarization or final fact extraction.
 - Return exactly one JSON object and nothing else.
-- Copy every supplied `source_unit_id` exactly once into either `relevant_source_unit_ids` or `excluded_source_unit_ids`.
-- Never invent, rewrite, omit, or duplicate a source-unit id.
+- Copy every supplied short Source `label` exactly once into either `relevant_source_labels` or `excluded_source_labels`.
+- Never invent, rewrite, omit, or duplicate a Source label. The backend owns real Source identity.
 - Treat uncertain candidates as relevant so the downstream evidence router can inspect them.
 - Do not emit measurement results, sample variants, evidence anchors, source text, or persistence ids.
 - Do not infer material systems from filenames.
@@ -160,30 +160,216 @@ class StructuredPaperFrameBatch(_SourceScreeningResponse):
         return _normalize_choice(value, allowed=_FRAME_PAPER_ROLES, default="uncertain")
 
 
+class _StructuredPaperFrameModelBatch(_SourceScreeningResponse):
+    relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
+        "uncertain"
+    )
+    paper_role: Literal[
+        "primary_experiment",
+        "supporting_method",
+        "supporting_background",
+        "review",
+        "modeling_only",
+        "irrelevant",
+        "mixed",
+        "uncertain",
+    ] = "uncertain"
+    screening_note: str | None = None
+    material_match: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    changed_variables: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    measured_property_scope: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    test_environment_scope: list[Annotated[str, Field(max_length=160)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    relevant_source_labels: list[Annotated[str, Field(max_length=12)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    excluded_source_labels: list[Annotated[str, Field(max_length=12)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+
+    @field_validator(
+        "material_match",
+        "changed_variables",
+        "measured_property_scope",
+        "test_environment_scope",
+        "relevant_source_labels",
+        "excluded_source_labels",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return [] if value is None else value
+
+    @model_validator(mode="after")
+    def _validate_source_partition(self) -> "_StructuredPaperFrameModelBatch":
+        relevant = self.relevant_source_labels
+        excluded = self.excluded_source_labels
+        if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
+            raise ValueError("paper frame Source labels must be unique")
+        if set(relevant) & set(excluded):
+            raise ValueError(
+                "paper frame Source labels cannot be both relevant and excluded"
+            )
+        return self
+
+    @field_validator("relevance", mode="before")
+    @classmethod
+    def _normalize_relevance(cls, value: object) -> str:
+        return _normalize_choice(value, allowed=_FRAME_RELEVANCE, default="uncertain")
+
+    @field_validator("paper_role", mode="before")
+    @classmethod
+    def _normalize_paper_role(cls, value: object) -> str:
+        return _normalize_choice(value, allowed=_FRAME_PAPER_ROLES, default="uncertain")
+
+
 def _normalize_choice(value: object, *, allowed: set[str], default: str) -> str:
     lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     return lowered if lowered in allowed else default
 
 
+def _objective_paper_frame_model_payload(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Mapping[str, Any]]]:
+    source_units_by_label: dict[str, Mapping[str, Any]] = {}
+    source_unit_ids: set[str] = set()
+    model_sources: list[dict[str, Any]] = []
+    for source_unit in payload.get("source_units") or ():
+        if not isinstance(source_unit, Mapping):
+            continue
+        source_unit_id = str(source_unit.get("source_unit_id") or "").strip()
+        if not source_unit_id:
+            raise ValueError("objective paper framing Source-unit ids must be non-empty")
+        if source_unit_id in source_unit_ids:
+            raise ValueError("objective paper framing Source-unit ids must be unique")
+        source_unit_ids.add(source_unit_id)
+        label = f"S{len(model_sources) + 1}"
+        source_units_by_label[label] = source_unit
+        source_kind = str(source_unit.get("source_kind") or "").strip()
+        if source_kind == "table":
+            content: object = {
+                "caption": str(source_unit.get("caption_text") or "").strip(),
+                "column_headers": list(source_unit.get("column_headers") or ()),
+                "rows": list(source_unit.get("sample_rows") or ()),
+            }
+        else:
+            content = str(source_unit.get("text") or "").strip()
+        model_sources.append(
+            {
+                "label": label,
+                "source_kind": source_kind,
+                "section_path": str(
+                    source_unit.get("section_label")
+                    or source_unit.get("heading_path")
+                    or ""
+                ).strip(),
+                "content": content,
+            }
+        )
+
+    objective = payload.get("objective")
+    objective_record = objective if isinstance(objective, Mapping) else {}
+    document = payload.get("document")
+    document_record = document if isinstance(document, Mapping) else {}
+    profile = payload.get("document_profile")
+    profile_record = profile if isinstance(profile, Mapping) else {}
+    paper_prior = payload.get("paper_prior")
+    prior_record = paper_prior if isinstance(paper_prior, Mapping) else {}
+    prior_studies = []
+    for study in prior_record.get("studies") or ():
+        if not isinstance(study, Mapping):
+            continue
+        relationships = [
+            {
+                key: relationship[key]
+                for key in ("varied_factors", "outcome")
+                if relationship.get(key) not in (None, "", [], {})
+            }
+            for relationship in study.get("relationships") or ()
+            if isinstance(relationship, Mapping)
+        ]
+        prior_studies.append(
+            {
+                **{
+                    key: study[key]
+                    for key in (
+                        "experiment_label",
+                        "design_type",
+                        "claim_scope",
+                        "material_scope",
+                        "process_context",
+                    )
+                    if study.get(key) not in (None, "", [], {})
+                },
+                "relationships": relationships,
+            }
+        )
+    model_prior = {
+        key: prior_record[key]
+        for key in ("doc_role", "evidence_density")
+        if prior_record.get(key) not in (None, "", [], {})
+    }
+    if prior_studies or "studies" in prior_record:
+        model_prior["studies"] = prior_studies
+    return (
+        {
+            "objective": {
+                key: objective_record[key]
+                for key in (
+                    "question",
+                    "material_scope",
+                    "variables",
+                    "outcomes",
+                    "mechanisms",
+                    "constraints",
+                    "requested_comparator",
+                )
+                if objective_record.get(key) not in (None, "", [], {})
+            },
+            "paper": {
+                "title": str(document_record.get("title") or "").strip(),
+                "document_type": str(profile_record.get("doc_type") or "").strip(),
+            },
+            "paper_prior": model_prior,
+            "sources": model_sources,
+        },
+        source_units_by_label,
+    )
+
+
 def build_objective_paper_frame_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
+    model_payload, _source_units_by_label = _objective_paper_frame_model_payload(
+        payload
+    )
     user_prompt = (
         "TASK MODEL\n"
         "Perform bounded source-candidate classification for downstream objective-scoped evidence routing. "
         "This request contains one partial neighborhood, not the whole paper.\n\n"
         "INPUT SCHEMA\n"
-        "- `collection_id`: backend scope identity; it is not scientific evidence and must not be returned.\n"
         "- `objective`: the confirmed comparison question and scientific axes.\n"
-        "- `document`: backend metadata; the filename is not scientific evidence.\n"
-        "- `document_profile`: backend document-type metadata; it is a routing hint, not authority over visible source text.\n"
-        "- `paper_prior`: compact PaperSkim study context linked to the objective; it is a hint, not authority over visible source text.\n"
-        "- `source_units`: current section chunks and table-row chunks. Each has a backend-owned `source_unit_id`, kind, stable source reference, and visible scientific content.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "- `paper`: title and coarse document type; document type is a routing hint, not authority over visible Source content.\n"
+        "- `paper_prior`: compact PaperResearchMap study context linked to the objective; it is a hint, not authority over visible source text.\n"
+        "- `sources`: current section or table chunks. Each has a request-local short `label`, type, section orientation, and visible scientific content.\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
         "1. Read the objective variables, outcomes, material scope, constraints, and comparator.\n"
         "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
-        "3. Put useful or uncertain candidates in `relevant_source_unit_ids`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_unit_ids`.\n"
+        "3. Put useful or uncertain candidates in `relevant_source_labels`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_labels`.\n"
         "4. Optionally write one short `screening_note` explaining why the current candidates should or should not be inspected. This is a local selection note, not a paper summary or scientific Evidence.\n"
         "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
         "BOUNDARY EXAMPLES\n"
@@ -193,15 +379,15 @@ def build_objective_paper_frame_prompt(
         "- Shared material alone does not make generic composition or background text relevant.\n\n"
         "SAME-SCHEMA EXAMPLES\n"
         "Relevant input: "
-        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"document_profile":{"doc_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"source_units":[{"source_unit_id":"unit-methods","source_kind":"section","text":"Laser power was varied."},{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
+        '{"objective":{"variables":["laser power"],"outcomes":["relative density"]},"paper":{"document_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"sources":[{"label":"S1","source_kind":"section","content":"Laser power was varied."},{"label":"S2","source_kind":"table","content":{"caption":"Nominal composition."}}]}\n'
         "Relevant output: "
-        '{"relevance":"medium","paper_role":"primary_experiment","screening_note":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        '{"relevance":"medium","paper_role":"primary_experiment","screening_note":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_labels":["S1"],"excluded_source_labels":["S2"]}\n\n'
         "Local exclusion input: "
-        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"source_units":[{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
+        '{"objective":{"variables":["laser power"],"outcomes":["relative density"]},"sources":[{"label":"S1","source_kind":"table","content":{"caption":"Nominal composition."}}]}\n'
         "Local exclusion output: "
-        '{"relevance":"low","paper_role":"uncertain","screening_note":"This batch contains nominal composition only.","material_match":[],"changed_variables":[],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":[],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        '{"relevance":"low","paper_role":"uncertain","screening_note":"This batch contains nominal composition only.","material_match":[],"changed_variables":[],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_labels":[],"excluded_source_labels":["S1"]}\n\n'
         "OUTPUT CONTRACT\n"
-        "Return only schema-valid structured data. Every input `source_unit_id` must appear exactly once across `relevant_source_unit_ids` and `excluded_source_unit_ids`. "
+        "Return only schema-valid structured data. Every input Source `label` must appear exactly once across `relevant_source_labels` and `excluded_source_labels`. "
         "Keep `screening_note` to one concise sentence and return no source text, paper-level conclusion, or reasoning transcript."
     )
     return _FRAME_SYSTEM_PROMPT, user_prompt
@@ -215,14 +401,12 @@ class ObjectiveSourceScreener:
 
     def screen_batch(self, payload: dict[str, Any]) -> StructuredPaperFrameBatch:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
-        source_accounting_errors: list[str] = []
-        source_unit_ids = tuple(
-            str(item.get("source_unit_id") or "").strip()
-            for item in payload.get("source_units") or ()
-            if isinstance(item, Mapping)
-            and str(item.get("source_unit_id") or "").strip()
+        _model_payload, source_units_by_label = _objective_paper_frame_model_payload(
+            payload
         )
-        if not source_unit_ids or len(source_unit_ids) != len(set(source_unit_ids)):
+        source_accounting_errors: list[str] = []
+        source_labels = tuple(source_units_by_label)
+        if not source_labels:
             raise ValueError("objective paper framing requires unique source-unit ids")
 
         def record_source_accounting_error(error: Exception) -> None:
@@ -231,7 +415,7 @@ class ObjectiveSourceScreener:
                 marker in detail
                 for marker in (
                     "objective paper frame must account",
-                    "paper frame source-unit ids",
+                    "paper frame Source labels",
                 )
             ):
                 return
@@ -239,40 +423,36 @@ class ObjectiveSourceScreener:
                 source_accounting_errors.append(detail)
 
         def validate_source_accounting(parsed: BaseModel) -> BaseModel:
-            if not isinstance(parsed, StructuredPaperFrameBatch):
+            if not isinstance(parsed, _StructuredPaperFrameModelBatch):
                 raise TypeError("unexpected objective paper frame response type")
-            returned_ids = (
-                *parsed.relevant_source_unit_ids,
-                *parsed.excluded_source_unit_ids,
+            returned_labels = (
+                *parsed.relevant_source_labels,
+                *parsed.excluded_source_labels,
             )
-            missing_ids = [
-                source_unit_id
-                for source_unit_id in source_unit_ids
-                if source_unit_id not in returned_ids
+            missing_labels = [
+                label for label in source_labels if label not in returned_labels
             ]
-            unknown_ids = [
-                source_unit_id
-                for source_unit_id in returned_ids
-                if source_unit_id not in source_unit_ids
+            unknown_labels = [
+                label for label in returned_labels if label not in source_labels
             ]
-            if missing_ids or unknown_ids:
+            if missing_labels or unknown_labels:
                 raise ValueError(
-                    "objective paper frame must account for every source-unit id "
+                    "objective paper frame must account for every Source label "
                     "exactly once; "
-                    f"expected_source_unit_ids={list(source_unit_ids)}; "
-                    f"missing_source_unit_ids={missing_ids}; "
-                    f"unknown_source_unit_ids={unknown_ids}"
+                    f"expected_source_labels={list(source_labels)}; "
+                    f"missing_source_labels={missing_labels}; "
+                    f"unknown_source_labels={unknown_labels}"
                 )
             return parsed
 
         def build_repair_instruction(repair_detail: str) -> str:
             return (
-                "Previous objective paper framing output had invalid source-unit "
+                "Previous objective paper framing output had invalid Source-label "
                 f"accounting: {repair_detail}. Return only one compact JSON object. "
-                "Partition this exact ID list once and only once between "
-                "relevant_source_unit_ids and excluded_source_unit_ids: "
-                f"{json.dumps(source_unit_ids, ensure_ascii=True)}. Copy every ID "
-                "verbatim; do not omit, duplicate, shorten, or invent an ID. Treat "
+                "Partition this exact label list once and only once between "
+                "relevant_source_labels and excluded_source_labels: "
+                f"{json.dumps(source_labels, ensure_ascii=True)}. Copy every label "
+                "verbatim; do not omit, duplicate, shorten, or invent a label. Treat "
                 "an uncertain source as relevant."
             )
 
@@ -288,7 +468,7 @@ class ObjectiveSourceScreener:
             response = self.response_client.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                response_model=StructuredPaperFrameBatch,
+                response_model=_StructuredPaperFrameModelBatch,
                 max_completion_tokens=_FRAME_MAX_COMPLETION_TOKENS,
                 json_text_parser=parse_json_text_with_contract,
                 parsed_validator=validate_source_accounting,
@@ -303,7 +483,7 @@ class ObjectiveSourceScreener:
                 "objective paper frame source accounting repair failed; "
                 f"initial_errors={source_accounting_errors}; final_error={exc}"
             ) from exc
-        if not isinstance(response, StructuredPaperFrameBatch):
+        if not isinstance(response, _StructuredPaperFrameModelBatch):
             raise TypeError("unexpected objective paper frame response type")
         screening_note = _optional_text(response.screening_note)
         if screening_note and len(screening_note) > _FRAME_SCREENING_NOTE_CHARS:
@@ -315,17 +495,32 @@ class ObjectiveSourceScreener:
                 _FRAME_SCREENING_NOTE_CHARS,
             )
             screening_note = screening_note[:_FRAME_SCREENING_NOTE_CHARS].rstrip()
-        response.screening_note = screening_note
+        rebound = StructuredPaperFrameBatch.model_validate(
+            {
+                **response.model_dump(
+                    exclude={"relevant_source_labels", "excluded_source_labels"}
+                ),
+                "screening_note": screening_note,
+                "relevant_source_unit_ids": [
+                    str(source_units_by_label[label].get("source_unit_id") or "").strip()
+                    for label in response.relevant_source_labels
+                ],
+                "excluded_source_unit_ids": [
+                    str(source_units_by_label[label].get("source_unit_id") or "").strip()
+                    for label in response.excluded_source_labels
+                ],
+            }
+        )
         if source_accounting_errors:
-            response.record_source_accounting_repair(source_accounting_errors)
-        return response
+            rebound.record_source_accounting_repair(source_accounting_errors)
+        return rebound
 
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
         return self.response_client.estimate_prompt_tokens(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredPaperFrameBatch,
+            response_model=_StructuredPaperFrameModelBatch,
         )
 
 
@@ -469,7 +664,7 @@ class _PreparedPaperFrame:
     document_id: str
     document_title: str | None
     source_filename: str | None
-    paper_skim: PaperSkim | None
+    paper_map: PaperResearchMap | None
     payload: dict[str, Any] | None
     batches: tuple[tuple[dict[str, Any], int | None], ...]
     completed_frame: PaperAnalysisFrame | None = None
@@ -503,7 +698,7 @@ def screen_sources(
     collection_id: str,
     source_screener: ObjectiveSourceScreener,
     objectives: tuple[ResearchObjective, ...],
-    paper_skims: tuple[PaperSkim, ...],
+    paper_maps: tuple[PaperResearchMap, ...],
     documents: tuple[Any, ...],
     profiles_by_document_id: dict[str, Any],
     blocks_by_document_id: dict[str, list[Any]],
@@ -511,8 +706,10 @@ def screen_sources(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[PaperAnalysisFrame, ...]:
-    skim_by_document_id = {
-        skim.document_id: skim for skim in paper_skims if skim.document_id
+    maps_by_document_id = {
+        paper_map.document_id: paper_map
+        for paper_map in paper_maps
+        if paper_map.document_id
     }
     logger.info(
         "Research objective paper framing started collection_id=%s objective_count=%s document_count=%s",
@@ -562,7 +759,7 @@ def screen_sources(
                         document_id=document_id,
                         document_title=document_title,
                         source_filename=source_filename,
-                        paper_skim=skim_by_document_id.get(document_id),
+                        paper_map=maps_by_document_id.get(document_id),
                         payload=None,
                         batches=(),
                         completed_frame=PaperAnalysisFrame.from_mapping(
@@ -583,7 +780,7 @@ def screen_sources(
             payload = _build_objective_paper_frame_payload(
                 collection_id=collection_id,
                 objective=objective,
-                paper_skim=skim_by_document_id.get(document_id),
+                paper_map=maps_by_document_id.get(document_id),
                 document=document,
                 profile=profiles_by_document_id.get(document_id),
                 blocks=blocks_by_document_id.get(document_id, []),
@@ -598,7 +795,7 @@ def screen_sources(
                     document_id=document_id,
                     document_title=document_title,
                     source_filename=source_filename,
-                    paper_skim=skim_by_document_id.get(document_id),
+                    paper_map=maps_by_document_id.get(document_id),
                     payload=payload,
                     batches=_build_objective_paper_frame_batches(
                         source_screener=source_screener,
@@ -669,7 +866,7 @@ def screen_sources(
             (
                 _build_conservative_objective_paper_frame_batch(
                     payload=batch_payload,
-                    paper_skim=prepared.paper_skim,
+                    paper_map=prepared.paper_map,
                 ),
                 "fallback",
                 fallback_errors,
@@ -753,7 +950,7 @@ def screen_sources(
                     document_id=prepared.document_id,
                     source_units=prepared.payload["source_units"],
                     batch_results=[outcome[0] for outcome in batch_outcomes],
-                    paper_skim=prepared.paper_skim,
+                    paper_map=prepared.paper_map,
                 )
 
             frames.append(frame)
@@ -843,7 +1040,7 @@ def _build_objective_paper_frame_payload(
     *,
     collection_id: str,
     objective: ResearchObjective,
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
     document: Any,
     profile: Any,
     blocks: list[Any],
@@ -868,7 +1065,7 @@ def _build_objective_paper_frame_payload(
         "objective": _route_prompt_objective_record(objective),
         "paper_prior": _build_objective_paper_frame_prior(
             objective=objective,
-            paper_skim=paper_skim,
+            paper_map=paper_map,
         ),
         "document": {
             "document_id": getattr(document, "document_id", None),
@@ -954,11 +1151,11 @@ def _build_objective_paper_frame_batches(
 def _build_conservative_objective_paper_frame_batch(
     *,
     payload: Mapping[str, Any],
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
 ) -> dict[str, Any]:
     return {
         "relevance": "uncertain",
-        "paper_role": _deterministic_frame_paper_role(paper_skim),
+        "paper_role": _deterministic_frame_paper_role(paper_map),
         "screening_note": None,
         "material_match": [],
         "changed_variables": [],
@@ -979,7 +1176,7 @@ def _aggregate_objective_paper_frame_batches(
     document_id: str,
     source_units: Iterable[Mapping[str, Any]],
     batch_results: Iterable[tuple[Mapping[str, Any], str, tuple[str, ...]]],
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
 ) -> PaperAnalysisFrame:
     units = tuple(source_units)
     results = tuple(batch_results)
@@ -1151,7 +1348,7 @@ def _aggregate_objective_paper_frame_batches(
         table_id for table_id in excluded_tables if table_id not in set(relevant_tables)
     ]
 
-    deterministic_paper_role = _deterministic_frame_paper_role(paper_skim)
+    deterministic_paper_role = _deterministic_frame_paper_role(paper_map)
     if deterministic_paper_role == "review":
         paper_role = "review"
     else:
@@ -1187,15 +1384,15 @@ def _aggregate_objective_paper_frame_batches(
 def _build_objective_paper_frame_prior(
     *,
     objective: ResearchObjective,
-    paper_skim: PaperSkim | None,
+    paper_map: PaperResearchMap | None,
 ) -> dict[str, Any]:
-    if paper_skim is None:
+    if paper_map is None:
         return {}
 
     lineage_relationship_ids = set(objective.source_relationship_ids)
     studies: list[dict[str, Any]] = []
     relationship_count = 0
-    for study in paper_skim.studies:
+    for study in paper_map.studies:
         selected_relationships = []
         for relationship in study.relationships:
             if lineage_relationship_ids:
@@ -1224,10 +1421,6 @@ def _build_objective_paper_frame_prior(
                     "claim_scope": study.claim_scope,
                     "material_scope": list(study.material_scope),
                     "process_context": list(study.process_context),
-                    "sample_context": list(study.sample_context),
-                    "test_context": list(study.test_context),
-                    "comparator": study.comparator,
-                    "fixed_conditions": list(study.fixed_conditions),
                     "relationships": selected_relationships,
                 }
             )
@@ -1237,8 +1430,8 @@ def _build_objective_paper_frame_prior(
         ):
             break
     return {
-        "doc_role": paper_skim.doc_role,
-        "evidence_density": paper_skim.evidence_density,
+        "doc_role": paper_map.doc_role,
+        "evidence_density": paper_map.evidence_density,
         "studies": studies,
     }
 
@@ -1466,8 +1659,8 @@ def _tree_section_label(node: Any) -> str:
     return title or "Unsectioned"
 
 
-def _deterministic_frame_paper_role(paper_skim: PaperSkim | None) -> str:
-    doc_role = str(getattr(paper_skim, "doc_role", "") or "")
+def _deterministic_frame_paper_role(paper_map: PaperResearchMap | None) -> str:
+    doc_role = str(getattr(paper_map, "doc_role", "") or "")
     if doc_role == "experimental":
         return "primary_experiment"
     if doc_role == "review":

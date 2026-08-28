@@ -24,7 +24,7 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import StructuredPaperSkim
+from application.core.objectives.discovery.study_window import StructuredPaperResearchMap
 
 
 def source_unit_ids_from_payload(payload: dict[str, Any]) -> list[str]:
@@ -57,7 +57,7 @@ def studies_with_source_units(
     ]
 
 
-def paper_skim_study_outputs(
+def paper_research_map_scope_outputs(
     payload: dict[str, Any],
     studies: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
@@ -87,11 +87,11 @@ class FakeObjectiveExtractor:
             confidence=0.9,
         )
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
         self.skim_payloads.append(payload)
         title = str(payload.get("title") or "")
         if "Review" in title:
-            return StructuredPaperSkim(
+            return StructuredPaperResearchMap(
                 doc_role="review",
                 studies=[],
                 unresolved_signals=[],
@@ -119,7 +119,7 @@ class FakeObjectiveExtractor:
                     }
             ],
         )
-        return StructuredPaperSkim(
+        return StructuredPaperResearchMap(
             doc_role="experimental",
             studies=studies,
             unresolved_signals=[],

@@ -15,6 +15,12 @@ path assumptions or a fixed `backend/.env` location.
 - `text_window_probe.py`
   One prompt, one payload, multiple execution modes for comparing raw text,
   local validation, and provider-native structured parsing
+- `paper_map_prompt_probe.py`
+  Offline token audit and optional live scientific-boundary A/B matrix for the
+  current Paper Map prompt in JSON fallback and provider-native modes, compact
+  JSON-object guidance, and compact provider-native structured parsing. Use
+  `--scenario-file` to replay real Source payloads without adding production
+  artifacts or paper text to the repository.
 - `paper_facts_collection_benchmark.py`
   Collection-level extraction cost benchmark with window-pruning and
   table-row accounting
@@ -61,6 +67,13 @@ Scripts in this directory should follow these rules:
 cd backend
 python scripts/benchmarks/llm_connectivity_probe.py --help
 python scripts/benchmarks/text_window_probe.py --help
+python scripts/benchmarks/paper_map_prompt_probe.py --execution offline
+python scripts/benchmarks/paper_map_prompt_probe.py --execution both --repeat 1
+python scripts/benchmarks/paper_map_prompt_probe.py \
+  --execution both \
+  --scenario-file /tmp/paper-map-scenarios.json \
+  --variant current_provider_parse \
+  --variant compact_provider_parse
 python scripts/benchmarks/paper_facts_collection_benchmark.py --help
 python scripts/benchmarks/source_parser_benchmark.py --help
 ```

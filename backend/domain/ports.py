@@ -4,31 +4,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
-from domain.core.comparison import (
-    ComparisonFactSet,
-)
 from domain.core.document_profile import DocumentProfile
-from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
+    PaperResearchMap,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 from domain.pipeline import ExecutionStats
 from domain.core.finding import Finding
 from domain.source import (
-    ArtifactVersionRecord,
-    BuildStageRecord,
-    CollectionBuildRecord,
-    CollectionFileRecord,
-    CollectionHandoffRecord,
-    CollectionImportRecord,
-    CollectionRecord,
-    CollectionDocumentRecord,
-    DocumentRecord,
-    DocumentVersionRecord,
+    Collection,
+    Document,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -39,6 +30,7 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
     TaskRecord,
+    TaskStageRecord,
 )
 from domain.evaluation import (
     EvaluationGoldItem,
@@ -60,70 +52,45 @@ class CollectionPaths:
 
 
 class CollectionRepository(Protocol):
-    async def add_collection(self, record: CollectionRecord) -> None: ...
+    async def add_collection(self, collection: Collection) -> None: ...
 
     async def list_collections(
         self,
         owner_user_id: str | None = None,
-    ) -> tuple[CollectionRecord, ...]: ...
+    ) -> tuple[Collection, ...]: ...
 
     async def read_collection(
         self, collection_id: str
-    ) -> CollectionRecord | None: ...
+    ) -> Collection | None: ...
 
-    async def update_collection(self, record: CollectionRecord) -> bool: ...
-
-    async def add_collection_import(
+    async def read_document(
         self,
-        record: CollectionImportRecord,
+        collection_id: str,
+        document_id: str,
+    ) -> Document | None: ...
+
+    async def update_collection(self, collection: Collection) -> bool: ...
+
+    async def add_documents(
+        self,
+        collection_id: str,
+        documents: tuple[Document, ...],
         *,
         updated_at: str,
     ) -> None: ...
 
-    async def list_collection_files(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionFileRecord, ...]: ...
-
-    async def list_collection_imports(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionImportRecord, ...]: ...
-
-    async def read_document(
-        self, document_id: str
-    ) -> DocumentRecord | None: ...
-
-    async def read_document_version(
-        self,
-        document_version_id: str,
-    ) -> DocumentVersionRecord | None: ...
-
-    async def list_collection_documents(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionDocumentRecord, ...]: ...
-
-    async def add_collection_handoff(
-        self, record: CollectionHandoffRecord
-    ) -> None: ...
-
-    async def list_collection_handoffs(
-        self,
-        collection_id: str,
-    ) -> tuple[CollectionHandoffRecord, ...]: ...
+    async def update_document(self, document: Document) -> bool: ...
 
     async def delete_collection(self, collection_id: str) -> bool: ...
 
 
-class BuildRepository(Protocol):
-    async def add_task(
+class TaskRepository(Protocol):
+    async def add_task(self, record: TaskRecord) -> TaskRecord: ...
+
+    async def get_or_create_document_task(
         self,
         record: TaskRecord,
-        *,
-        build_id: str,
-        mode: str = "standard",
-    ) -> CollectionBuildRecord: ...
+    ) -> tuple[TaskRecord, bool]: ...
 
     async def read_task(self, task_id: str) -> TaskRecord | None: ...
 
@@ -140,40 +107,12 @@ class BuildRepository(Protocol):
         self,
         record: TaskRecord,
         *,
-        stages: tuple[BuildStageRecord, ...] | None = None,
+        stages: tuple[TaskStageRecord, ...] | None = None,
     ) -> bool: ...
-
-    async def read_build(
-        self, task_id: str
-    ) -> CollectionBuildRecord | None: ...
 
     async def list_stages(
         self, task_id: str
-    ) -> tuple[BuildStageRecord, ...]: ...
-
-    async def add_artifact_versions(
-        self,
-        task_id: str,
-        records: tuple[ArtifactVersionRecord, ...],
-    ) -> None: ...
-
-    async def list_artifact_versions(
-        self,
-        task_id: str,
-    ) -> tuple[ArtifactVersionRecord, ...]: ...
-
-    async def finish_build(
-        self,
-        record: TaskRecord,
-        *,
-        build_status: str,
-        activate: bool,
-    ) -> CollectionBuildRecord: ...
-
-    async def read_active_build(
-        self,
-        collection_id: str,
-    ) -> CollectionBuildRecord | None: ...
+    ) -> tuple[TaskStageRecord, ...]: ...
 
 
 class ChatRepository(Protocol):
@@ -232,63 +171,62 @@ class ExperimentPlanRepository(Protocol):
 class SourceArtifactRepository(Protocol):
     backend_name: str
 
-    async def replace_collection_documents(
+    async def replace_document(
         self,
         collection_id: str,
-        build_id: str,
-        documents: tuple[SourceDocument, ...],
+        document: SourceDocument,
     ) -> None: ...
+
+    async def read_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SourceDocument | None: ...
 
     async def read_collection_documents(
         self,
         collection_id: str,
-        build_id: str | None = None,
+    ) -> tuple[SourceDocument, ...]: ...
+
+    async def read_documents(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
     ) -> tuple[SourceDocument, ...]: ...
 
     async def read_document_tree(
         self,
         collection_id: str,
         document_id: str,
-        build_id: str | None = None,
     ) -> SourceDocumentTree: ...
 
     async def list_documents(
         self,
         collection_id: str,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceDocument]: ...
 
     async def list_text_units(
         self,
         collection_id: str,
         document_id: str | None = None,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceTextUnit]: ...
 
     async def list_blocks(
         self,
         collection_id: str,
         document_id: str | None = None,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceBlock]: ...
 
     async def list_tables(
         self,
         collection_id: str,
         document_id: str | None = None,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceTable]: ...
 
     async def list_table_rows(
         self,
         collection_id: str,
         table_id: str | None = None,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceTableRow]: ...
 
     async def list_table_cells(
@@ -296,55 +234,57 @@ class SourceArtifactRepository(Protocol):
         collection_id: str,
         table_id: str | None = None,
         row_index: int | None = None,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceTableCell]: ...
 
-    async def replace_collection_references(
+    async def replace_document_references(
         self,
-        collection_id: str,
-        build_id: str,
+        document_id: str,
         references: SourceReferenceSet,
     ) -> None: ...
 
     async def read_collection_references(
         self,
         collection_id: str,
-        build_id: str | None = None,
+        document_ids: tuple[str, ...] | None = None,
     ) -> SourceReferenceSet: ...
 
     async def list_figures(
         self,
         collection_id: str,
         document_id: str | None = None,
-        *,
-        build_id: str | None = None,
     ) -> list[SourceFigure]: ...
 
 
-class PaperFactRepository(Protocol):
-    backend_name: str
-
-    async def replace_document_profiles(
-        self,
-        collection_id: str,
-        build_id: str,
-        profiles: tuple[DocumentProfile, ...],
-    ) -> None: ...
-
-    async def replace_paper_facts(
-        self,
-        collection_id: str,
-        build_id: str,
-        facts: PaperFactSet,
-    ) -> None: ...
+class DocumentProfileRepository(Protocol):
+    async def replace(self, profile: DocumentProfile) -> None: ...
 
     async def read(
         self,
         collection_id: str,
-        *,
-        build_id: str | None = None,
-    ) -> PaperFactSet: ...
+        document_id: str,
+    ) -> DocumentProfile | None: ...
+
+    async def list_collection(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...] | None = None,
+    ) -> tuple[DocumentProfile, ...]: ...
+
+
+class PaperMapRepository(Protocol):
+    async def replace(self, collection_id: str, paper_map: PaperResearchMap) -> None: ...
+
+    async def read(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> PaperResearchMap | None: ...
+
+    async def list_collection(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...] | None = None,
+    ) -> tuple[PaperResearchMap, ...]: ...
 
 
 class ObjectiveRepository(Protocol):
@@ -353,15 +293,12 @@ class ObjectiveRepository(Protocol):
     async def replace(
         self,
         collection_id: str,
-        build_id: str,
         facts: ObjectiveFactSet,
     ) -> None: ...
 
     async def read(
         self,
         collection_id: str,
-        *,
-        build_id: str | None = None,
     ) -> ObjectiveFactSet: ...
 
     async def list_objectives(
@@ -388,6 +325,7 @@ class ObjectiveRepository(Protocol):
         collection_id: str,
         objective_id: str,
         *,
+        document_inputs: tuple[PreparedDocumentInput, ...],
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
@@ -435,6 +373,21 @@ class ObjectiveRepository(Protocol):
         error_message: str,
         expected_status: str | None = None,
     ) -> ObjectiveAnalysis: ...
+
+    async def interrupt_active_analyses(self) -> int: ...
+
+    async def write_document_evidence(
+        self,
+        checkpoint: ObjectiveDocumentEvidence,
+    ) -> None: ...
+
+    async def read_document_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_id: str,
+        input_fingerprint: str,
+    ) -> ObjectiveDocumentEvidence | None: ...
 
     async def publish_analysis(
         self,
@@ -495,24 +448,6 @@ class ObjectiveRepository(Protocol):
         offset: int = 0,
         limit: int = 100,
     ) -> tuple[tuple[ObjectiveEvidence, ...], int]: ...
-
-
-class ComparisonRepository(Protocol):
-    backend_name: str
-
-    async def replace(
-        self,
-        collection_id: str,
-        build_id: str,
-        facts: ComparisonFactSet,
-    ) -> None: ...
-
-    async def read(
-        self,
-        collection_id: str,
-        *,
-        build_id: str | None = None,
-    ) -> ComparisonFactSet: ...
 
 
 class FindingReviewRepository(Protocol):

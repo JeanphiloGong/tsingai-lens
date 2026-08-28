@@ -13,7 +13,7 @@ The directory structure mirrors the target test module layout so new tests can b
 Objective workflow tests follow their application responsibilities under
 `unit/application/`:
 
-- `test_paper_skim_service.py` covers per-document research maps.
+- `test_paper_research_map_service.py` covers per-document research maps.
 - `test_objective_candidate_service.py` covers collection-level candidate
   discovery and validation.
 - `test_objective_evidence_comparison.py`,

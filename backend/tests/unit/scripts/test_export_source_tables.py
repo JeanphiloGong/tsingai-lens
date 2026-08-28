@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 from hashlib import sha256
-from unittest.mock import AsyncMock
 
 import pytest
 
-from domain.source import (
-    CollectionFileRecord,
-    CollectionImportDocumentRecord,
-    CollectionImportRecord,
-    CollectionRecord,
-)
+from domain.source import Collection, Document
 from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.memory import MemoryCollectionRepository
 from scripts import export_source_tables as export_script
+
 
 pytestmark = pytest.mark.anyio
 
@@ -23,156 +18,73 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_collection_input_rows_use_registered_storage_key(tmp_path):
-    collections_root = tmp_path / "collections"
-    collection_dir = collections_root / "col_demo"
-    collection_dir.mkdir(parents=True)
-    payload = b"%PDF-1.4\nregistered input\n"
-    storage_key = "col_demo/input/paper.pdf"
-    digest = sha256(payload).hexdigest()
-    FileObjectStore(collections_root).write(storage_key, payload, digest)
+async def _repository_with_pdf(payload: bytes) -> MemoryCollectionRepository:
     repository = MemoryCollectionRepository()
-    await repository.add_collection(
-        CollectionRecord.create(
-            collection_id="col_demo",
-            name="Demo",
-            description=None,
-            now_iso="2026-07-19T00:00:00+00:00",
-        )
-    )
-    file_record = CollectionFileRecord(
-        file_id="file_1",
+    collection = Collection.create(
         collection_id="col_demo",
-        object_id="obj_1",
-        object_kind="source_input",
+        name="Demo",
+        description=None,
+        now_iso="2026-08-27T00:00:00+00:00",
+    )
+    document = Document(
+        document_id="doc_1",
         original_filename="paper.pdf",
         stored_filename="paper.pdf",
-        storage_key=storage_key,
-        sha256=digest,
+        storage_key="col_demo/input/paper.pdf",
+        sha256=sha256(payload).hexdigest(),
         media_type="application/pdf",
         status="stored",
         size_bytes=len(payload),
-        created_at="2026-07-19T00:00:00+00:00",
+        created_at="2026-08-27T00:00:00+00:00",
     )
-    await repository.add_collection_import(
-        CollectionImportRecord(
-            import_id="imp_1",
-            collection_id="col_demo",
-            channel="upload",
-            adapter_name="upload",
-            adapter_version=None,
-            raw_locator="paper.pdf",
-            goal_context=None,
-            warnings=(),
-            ingested_at=file_record.created_at,
-            documents=(
-                CollectionImportDocumentRecord(
-                    source_document_id="srcdoc_1",
-                    origin_channel="upload",
-                    file=file_record,
-                    language=None,
-                    ingest_status="normalized",
-                    text_units=(),
-                ),
-            ),
-        ),
-        updated_at=file_record.created_at,
+    await repository.add_collection(collection)
+    await repository.add_documents(
+        collection.collection_id,
+        (document,),
+        updated_at=document.created_at,
     )
+    return repository
+
+
+async def test_collection_input_rows_use_collection_documents(tmp_path) -> None:
+    payload = b"%PDF-1.4\nregistered input\n"
+    repository = await _repository_with_pdf(payload)
 
     rows = await export_script._collection_input_rows(repository, "col_demo")
 
     assert rows == [
         {
-            "id": "srcdoc_1",
+            "id": "doc_1",
             "title": "paper.pdf",
-            "creation_date": "2026-07-19T00:00:00+00:00",
-            "source_path": storage_key,
-            "storage_key": storage_key,
-            "sha256": digest,
-            "source_type": "pdf",
-        }
-    ]
-
-    repository.list_collection_imports = AsyncMock(return_value=())
-
-    assert await export_script._collection_input_rows(repository, "col_demo") == [
-        {
-            "id": "file_1",
-            "title": "paper.pdf",
-            "creation_date": "2026-07-19T00:00:00+00:00",
-            "source_path": storage_key,
-            "storage_key": storage_key,
-            "sha256": digest,
+            "creation_date": "2026-08-27T00:00:00+00:00",
+            "source_path": "col_demo/input/paper.pdf",
+            "storage_key": "col_demo/input/paper.pdf",
+            "sha256": sha256(payload).hexdigest(),
             "source_type": "pdf",
         }
     ]
 
 
-async def test_collection_input_rows_do_not_scan_input_directory(tmp_path):
-    collection_dir = tmp_path / "collections" / "col_demo" / "input"
-    collection_dir.mkdir(parents=True)
-    (collection_dir / "unregistered.pdf").write_bytes(b"%PDF-1.4")
-    repository = MemoryCollectionRepository()
+async def test_collection_input_rows_do_not_scan_input_directory(tmp_path) -> None:
+    input_dir = tmp_path / "collections" / "col_demo" / "input"
+    input_dir.mkdir(parents=True)
+    (input_dir / "unregistered.pdf").write_bytes(b"%PDF-1.4")
 
-    assert await export_script._collection_input_rows(repository, "col_demo") == []
+    assert await export_script._collection_input_rows(
+        MemoryCollectionRepository(), "col_demo"
+    ) == []
 
 
-async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path):
+async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path) -> None:
     collections_root = tmp_path / "collections"
     collection_dir = collections_root / "col_demo"
     collection_dir.mkdir(parents=True)
     payload = b"%PDF-1.4\nregistered input\n"
-    storage_key = "col_demo/input/paper.pdf"
-    digest = sha256(payload).hexdigest()
-    FileObjectStore(collections_root).write(storage_key, payload, digest)
-    repository = MemoryCollectionRepository()
-    await repository.add_collection(
-        CollectionRecord.create(
-            collection_id="col_demo",
-            name="Demo",
-            description=None,
-            now_iso="2026-07-19T00:00:00+00:00",
-        )
+    repository = await _repository_with_pdf(payload)
+    FileObjectStore(collections_root).write(
+        "col_demo/input/paper.pdf", payload, sha256(payload).hexdigest()
     )
-    file_record = CollectionFileRecord(
-        file_id="file_1",
-        collection_id="col_demo",
-        object_id="obj_1",
-        object_kind="source_input",
-        original_filename="paper.pdf",
-        stored_filename="paper.pdf",
-        storage_key=storage_key,
-        sha256=digest,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(payload),
-        created_at="2026-07-19T00:00:00+00:00",
-    )
-    await repository.add_collection_import(
-        CollectionImportRecord(
-            import_id="imp_1",
-            collection_id="col_demo",
-            channel="upload",
-            adapter_name="upload",
-            adapter_version=None,
-            raw_locator="paper.pdf",
-            goal_context=None,
-            warnings=(),
-            ingested_at=file_record.created_at,
-            documents=(
-                CollectionImportDocumentRecord(
-                    source_document_id="srcdoc_1",
-                    origin_channel="upload",
-                    file=file_record,
-                    language=None,
-                    ingest_status="normalized",
-                    text_units=(),
-                ),
-            ),
-        ),
-        updated_at=file_record.created_at,
-    )
-    (collections_root / storage_key).write_bytes(b"tampered")
+    (collections_root / "col_demo/input/paper.pdf").write_bytes(b"tampered")
     monkeypatch.setattr(export_script, "build_pdf_converter", lambda: object())
 
     with pytest.raises(ValueError, match="SHA-256 mismatch"):

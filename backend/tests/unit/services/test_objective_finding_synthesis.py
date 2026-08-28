@@ -12,6 +12,7 @@ from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
+    PreparedDocumentInput,
     ResearchObjective,
 )
 
@@ -54,12 +55,18 @@ def _analysis(**overrides) -> ObjectiveAnalysis:
         "collection_id": "col-1",
         "objective_id": "obj-density",
         "analysis_version": 1,
-        "source_build_id": "build-1",
+        "document_inputs": (
+            PreparedDocumentInput(
+                document_id="paper-1",
+                preparation_fingerprint="fingerprint-paper-1",
+            ),
+        ),
         "pipeline_version": "objective-analysis.v2",
         "model_name": "test-model",
         "prompt_versions": {},
         "status": "running",
         "phase": "finding_synthesis",
+        "total_document_count": 1,
     }
     payload.update(overrides)
     return ObjectiveAnalysis(**payload)

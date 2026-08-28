@@ -1,0 +1,11 @@
+Abstract
+This independent experiment evaluates laser exposure condition and porosity in LPBF Ti-6Al-4V.
+
+Materials and Methods
+Ti-6Al-4V coupons were fabricated by LPBF and retained in the as-built state. Porosity was measured by X-ray computed tomography.
+
+Results
+For the as-built sample state, changing laser exposure condition from low exposure to high exposure decreased porosity from 1.9% to 0.7% in Ti-6Al-4V measured by X-ray computed tomography.
+
+Conclusions
+The second experiment also associated higher laser exposure with lower porosity in the tested as-built coupons.

@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
-from domain.pipeline import (
-    ExecutionStats,
-    ExecutionTimestamps,
-    PipelineRun,
-    PipelineRunStatus,
-)
-from domain.ports import BuildRepository
-from domain.source import BuildStageRecord, TaskRecord
+from domain.ports import TaskRepository
+from domain.source import TaskRecord
 
 
 def _now_iso() -> str:
@@ -19,44 +13,52 @@ def _now_iso() -> str:
 
 
 class TaskService:
-    """Application operations over durable task and collection-build state."""
+    """Durable execution state without owning scientific artifact versions."""
 
-    def __init__(self, repository: BuildRepository) -> None:
+    def __init__(self, repository: TaskRepository) -> None:
         self.repository = repository
 
     async def create_task(
         self,
         collection_id: str,
-        task_type: str = "build",
+        task_type: str = "document_preparation",
         *,
         mode: str = "standard",
-    ) -> dict:
-        task_id = f"task_{uuid4().hex[:12]}"
-        now = _now_iso()
-        record = TaskRecord(
-            task_id=task_id,
-            collection_id=str(collection_id),
-            task_type=str(task_type),
-            status="queued",
-            current_stage="queued",
-            progress_percent=0,
-            progress_detail=None,
-            output_path=None,
-            errors=(),
-            warnings=(),
-            created_at=now,
-            updated_at=now,
-            started_at=None,
-            finished_at=None,
+        document_id: str | None = None,
+        input_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
+        record = self._new_task(
+            collection_id=collection_id,
+            document_id=document_id,
+            task_type=task_type,
+            mode=mode,
+            input_fingerprint=input_fingerprint,
         )
-        build = await self.repository.add_task(
-            record,
-            build_id=f"build_{uuid4().hex[:12]}",
-            mode=str(mode).strip(),
-        )
-        return {**record.to_record(), "mode": build.mode}
+        return (await self.repository.add_task(record)).to_record()
 
-    async def get_task(self, task_id: str) -> dict:
+    async def get_or_create_document_task(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        task_type: str,
+        input_fingerprint: str,
+        mode: str = "standard",
+    ) -> tuple[dict[str, Any], bool]:
+        if not str(document_id).strip() or not str(input_fingerprint).strip():
+            raise ValueError("document task requires document and input fingerprint")
+        record, created = await self.repository.get_or_create_document_task(
+            self._new_task(
+                collection_id=collection_id,
+                document_id=document_id,
+                task_type=task_type,
+                mode=mode,
+                input_fingerprint=input_fingerprint,
+            )
+        )
+        return await self._project_task(record), created
+
+    async def get_task(self, task_id: str) -> dict[str, Any]:
         record = await self.repository.read_task(task_id)
         if record is None:
             raise FileNotFoundError(f"task not found: {task_id}")
@@ -68,7 +70,7 @@ class TaskService:
         status: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         return [
             await self._project_task(record)
             for record in await self.repository.list_tasks(
@@ -79,47 +81,29 @@ class TaskService:
             )
         ]
 
-    async def update_task(self, task_id: str, **fields: Any) -> dict:
+    async def update_task(self, task_id: str, **fields: Any) -> dict[str, Any]:
         stored = await self.repository.read_task(task_id)
         if stored is None:
             raise FileNotFoundError(f"task not found: {task_id}")
-        pipeline_run = fields.pop("pipeline_run", None)
-        if pipeline_run is not None and not isinstance(pipeline_run, PipelineRun):
-            raise TypeError("pipeline_run must be a PipelineRun")
         now = _now_iso()
         payload = {**stored.to_record(), **fields, "updated_at": now}
         if not stored.started_at and fields.get("status") == "running":
-            payload["started_at"] = (
-                pipeline_run.timestamps.started_at
-                if pipeline_run is not None
-                else now
-            )
+            payload["started_at"] = now
         record = TaskRecord.from_mapping(payload)
-        stages = (
-            await self._build_stages(task_id, pipeline_run)
-            if pipeline_run is not None
-            else None
-        )
-        if not await self.repository.update_task(record, stages=stages):
+        if not await self.repository.update_task(record):
             raise FileNotFoundError(f"task not found: {task_id}")
-        return await self._project_task(record, stages=stages)
+        return await self._project_task(record)
 
     async def finish_task(
-        self, task_id: str, *, status: str, **fields: Any
-    ) -> dict:
+        self,
+        task_id: str,
+        *,
+        status: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
         stored = await self.repository.read_task(task_id)
         if stored is None:
             raise FileNotFoundError(f"task not found: {task_id}")
-        pipeline_run = fields.pop("pipeline_run", None)
-        if pipeline_run is not None:
-            if not isinstance(pipeline_run, PipelineRun):
-                raise TypeError("pipeline_run must be a PipelineRun")
-            if pipeline_run.run_id != task_id:
-                raise ValueError("pipeline run belongs to another task")
-            fields.setdefault("errors", list(pipeline_run.errors))
-            fields.setdefault("warnings", list(pipeline_run.warnings))
-            fields.setdefault("started_at", pipeline_run.timestamps.started_at)
-            fields.setdefault("finished_at", pipeline_run.timestamps.finished_at)
         now = _now_iso()
         successful = status in {"completed", "partial_success"}
         record = TaskRecord.from_mapping(
@@ -136,92 +120,57 @@ class TaskService:
                 "finished_at": fields.get("finished_at", now),
             }
         )
-        await self.repository.finish_build(
-            record,
-            build_status="succeeded" if successful else "failed",
-            activate=successful,
-        )
+        if not await self.repository.update_task(record):
+            raise FileNotFoundError(f"task not found: {task_id}")
         return await self._project_task(record)
 
-    async def append_error(self, task_id: str, error: str) -> dict:
+    async def append_error(self, task_id: str, error: str) -> dict[str, Any]:
         stored = await self.repository.read_task(task_id)
         if stored is None:
             raise FileNotFoundError(f"task not found: {task_id}")
         return await self.update_task(
-            task_id, errors=[*stored.errors, str(error)]
+            task_id,
+            errors=[*stored.errors, str(error)],
         )
 
-    async def _build_stages(
+    def _new_task(
         self,
-        task_id: str,
-        pipeline_run: PipelineRun,
-    ) -> tuple[BuildStageRecord, ...]:
-        build = await self.repository.read_build(task_id)
-        if build is None:
-            raise RuntimeError(f"build not found for task: {task_id}")
-        if pipeline_run.run_id != task_id:
-            raise ValueError("pipeline run belongs to another task")
-        if pipeline_run.output_build_id != build.build_id:
-            raise ValueError("pipeline run output belongs to another build")
-        if pipeline_run.mode != build.mode:
-            raise ValueError("pipeline run mode belongs to another build mode")
-        if pipeline_run.scope_type != "collection":
-            raise ValueError("collection build requires collection scope")
-        if pipeline_run.scope_id != build.collection_id:
-            raise ValueError("pipeline run belongs to another collection")
-        return tuple(
-            BuildStageRecord(
-                stage_id=(
-                    f"stage_{uuid5(NAMESPACE_URL, f'{build.build_id}:{node.name}').hex[:24]}"
-                ),
-                build_id=build.build_id,
-                stage_order=stage_order,
-                node=node,
-            )
-            for stage_order, node in enumerate(pipeline_run.nodes)
-        )
-
-    async def read_pipeline_run(self, task_id: str) -> PipelineRun:
-        task = await self.repository.read_task(task_id)
-        if task is None:
-            raise FileNotFoundError(f"task not found: {task_id}")
-        build = await self.repository.read_build(task_id)
-        if build is None:
-            raise RuntimeError(f"build not found for task: {task_id}")
-        nodes = tuple(
-            stage.node for stage in await self.repository.list_stages(task_id)
-        )
-        timestamps = ExecutionTimestamps(
-            created_at=task.created_at,
-            started_at=task.started_at,
-            finished_at=task.finished_at,
-        )
-        return PipelineRun(
-            pipeline_name=(
-                "collection_build" if task.task_type == "build" else task.task_type
+        *,
+        collection_id: str,
+        document_id: str | None,
+        task_type: str,
+        mode: str,
+        input_fingerprint: str | None,
+    ) -> TaskRecord:
+        now = _now_iso()
+        return TaskRecord(
+            task_id=f"task_{uuid4().hex[:12]}",
+            collection_id=str(collection_id),
+            document_id=str(document_id) if document_id is not None else None,
+            task_type=str(task_type),
+            mode=str(mode).strip() or "standard",
+            input_fingerprint=(
+                str(input_fingerprint).strip() if input_fingerprint else None
             ),
-            mode=build.mode,
-            run_id=task.task_id,
-            scope_type="collection",
-            scope_id=task.collection_id,
-            status=PipelineRunStatus(task.status),
-            nodes=nodes,
-            errors=task.errors,
-            warnings=task.warnings,
-            stats=ExecutionStats.aggregate(
-                (node.stats for node in nodes),
-                duration_ms=timestamps.duration_ms(),
-            ),
-            timestamps=timestamps,
-            output_build_id=build.build_id,
+            status="queued",
+            current_stage="queued",
+            progress_percent=0,
+            progress_detail=None,
+            output_path=None,
+            errors=(),
+            warnings=(),
+            created_at=now,
+            updated_at=now,
+            started_at=None,
+            finished_at=None,
         )
 
     async def _project_task(
         self,
         record: TaskRecord,
         *,
-        stages: tuple[BuildStageRecord, ...] | None = None,
-    ) -> dict:
+        stages: tuple[TaskStageRecord, ...] | None = None,
+    ) -> dict[str, Any]:
         payload = record.to_record()
         resolved_stages = (
             stages

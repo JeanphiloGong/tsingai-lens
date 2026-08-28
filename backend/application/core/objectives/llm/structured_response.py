@@ -152,7 +152,7 @@ class StructuredResponseClient:
                 except LengthFinishReasonError as exc:
                     if fail_on_output_saturation:
                         error = StructuredOutputSaturatedError(
-                            "PaperSkim provider output reached the completion-token "
+                            "PaperResearchMap provider output reached the completion-token "
                             "limit"
                         )
                         completion = getattr(exc, "completion", None)
@@ -439,7 +439,7 @@ class StructuredResponseClient:
                     and finish_reason == "length"
                 ):
                     raise StructuredOutputSaturatedError(
-                        "PaperSkim JSON output reached the completion-token limit"
+                        "PaperResearchMap JSON output reached the completion-token limit"
                     )
                 if not raw_content:
                     raise RuntimeError(

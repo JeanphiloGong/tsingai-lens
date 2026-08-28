@@ -7,16 +7,18 @@ import pytest
 from domain.core import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
+    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
+    PreparedDocumentInput,
     PaperContribution,
     PaperSourceUnitCoverage,
     PaperSourceUnitCoverageStatus,
-    PaperStudy,
+    PaperResearchScope,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    PaperStudyRelationship,
-    PaperSkim,
+    PaperResearchRelationship,
+    PaperResearchMap,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
     ResearchObjective,
@@ -41,7 +43,7 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
             "confidence": 0.82,
         }
     )
-    skim = PaperSkim.from_mapping(
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "review-paper",
             "doc_role": "review",
@@ -49,7 +51,7 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
         }
     )
 
-    restored = PaperSkim.from_mapping(skim.to_record())
+    restored = PaperResearchMap.from_mapping(skim.to_record())
 
     assert restored == skim
     assert restored.review_synthesis.disputes == (item,)
@@ -58,7 +60,7 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
 
 def test_non_review_paper_rejects_review_synthesis_map() -> None:
     with pytest.raises(ValueError, match="review synthesis requires a review paper"):
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "experimental-paper",
                 "doc_role": "experimental",
@@ -108,7 +110,7 @@ def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
         )
 
 
-def test_paper_skim_retains_unique_source_unit_coverage() -> None:
+def test_paper_map_retains_unique_source_unit_coverage() -> None:
     coverage = PaperSourceUnitCoverage.from_mapping(
         {
             "source_unit_id": "methods-1-source-1",
@@ -119,7 +121,7 @@ def test_paper_skim_retains_unique_source_unit_coverage() -> None:
             "reason": "The window extraction failed validation.",
         }
     )
-    skim = PaperSkim.from_mapping(
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "source_unit_coverage": [coverage.to_record()],
@@ -128,10 +130,10 @@ def test_paper_skim_retains_unique_source_unit_coverage() -> None:
 
     assert skim.source_unit_coverage == (coverage,)
     assert skim.coverage_complete is False
-    assert PaperSkim.from_mapping(skim.to_record()) == skim
+    assert PaperResearchMap.from_mapping(skim.to_record()) == skim
 
     with pytest.raises(ValueError, match="coverage ids must be unique"):
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "source_unit_coverage": [coverage.to_record(), coverage.to_record()],
@@ -156,14 +158,22 @@ def _objective(**overrides) -> ResearchObjective:
 
 
 def _analysis(**overrides) -> ObjectiveAnalysis:
+    total_document_count = int(overrides.get("total_document_count", 2))
     payload = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
-        "source_build_id": "build-1",
+        "document_inputs": tuple(
+            PreparedDocumentInput(
+                f"paper-{position}",
+                f"fingerprint-{position}",
+            )
+            for position in range(1, total_document_count + 1)
+        ),
         "pipeline_version": "objective-analysis.v1",
         "model_name": "model-1",
         "prompt_versions": {"evidence": "v1", "finding": "v1"},
+        "total_document_count": 2,
     }
     payload.update(overrides)
     return ObjectiveAnalysis(**payload)
@@ -339,6 +349,50 @@ def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
     assert succeeded.error_message is None
 
 
+def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
+    document_inputs = (
+        PreparedDocumentInput("paper-1", "fingerprint-1"),
+        PreparedDocumentInput("paper-2", "fingerprint-2"),
+    )
+
+    analysis = ObjectiveAnalysis(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_inputs=document_inputs,
+        pipeline_version="objective-analysis.v1",
+        model_name="test-model",
+        prompt_versions={},
+        total_document_count=2,
+    )
+
+    assert analysis.document_inputs == document_inputs
+    assert analysis.to_record()["document_inputs"] == [
+        {
+            "document_id": "paper-1",
+            "preparation_fingerprint": "fingerprint-1",
+        },
+        {
+            "document_id": "paper-2",
+            "preparation_fingerprint": "fingerprint-2",
+        },
+    ]
+
+
+def test_objective_analysis_rejects_document_count_that_differs_from_manifest() -> None:
+    with pytest.raises(ValueError, match="document input count"):
+        ObjectiveAnalysis(
+            collection_id="collection-1",
+            objective_id="objective-1",
+            analysis_version=1,
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            pipeline_version="objective-analysis.v1",
+            model_name=None,
+            prompt_versions={},
+            total_document_count=2,
+        )
+
+
 def test_objective_analysis_failure_is_terminal_and_retry_is_new_version() -> None:
     failed = _analysis().start().fail(
         error_code="provider_connection",
@@ -381,6 +435,85 @@ def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> 
         "succeeded",
         "failed",
     }
+
+
+def test_objective_document_evidence_preserves_scientific_absence_as_success() -> None:
+    started_at = datetime(2026, 8, 27, 8, 0, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 8, 27, 8, 2, tzinfo=timezone.utc)
+    running = ObjectiveDocumentEvidence.start(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        document_id="paper-1",
+        input_fingerprint="checkpoint-input-1",
+        analysis_version=2,
+        extraction_version="objective-document-evidence.v1",
+        model_name="test-model",
+        started_at=started_at,
+    )
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 2,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "low",
+            "paper_role": "primary_experiment",
+            "confidence": 0.8,
+            "evidence_disposition": "no_routable_evidence",
+            "routed_source_count": 0,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+            "evidence_disposition_reason": (
+                "The paper was inspected and contains no Source for this Objective."
+            ),
+        }
+    )
+
+    succeeded = running.succeed(
+        contribution=contribution,
+        evidence_records=(),
+        completed_at=completed_at,
+    )
+
+    assert succeeded.status == "succeeded"
+    assert succeeded.contribution == contribution
+    assert succeeded.evidence_records == ()
+    assert succeeded.completed_at == completed_at
+    assert ObjectiveDocumentEvidence.from_mapping(succeeded.to_record()) == succeeded
+
+
+def test_objective_document_evidence_rejects_cross_document_payload() -> None:
+    running = ObjectiveDocumentEvidence.start(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        document_id="paper-1",
+        input_fingerprint="checkpoint-input-1",
+        analysis_version=2,
+        extraction_version="objective-document-evidence.v1",
+        model_name="test-model",
+    )
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 2,
+            "document_id": "paper-2",
+            "analysis_status": "failed",
+            "relevance": "uncertain",
+            "paper_role": "uncertain",
+            "warnings": ["Technical extraction failed."],
+            "confidence": 0,
+        }
+    )
+
+    with pytest.raises(ValueError, match="another document"):
+        running.fail(
+            contribution=contribution,
+            error_code="provider_error",
+            error_message="provider unavailable",
+        )
 
 
 def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
@@ -728,8 +861,8 @@ def test_normalizers_remain_stable() -> None:
     assert normalize_objective_confidence(float("nan")) == 0.0
 
 
-def test_paper_skim_round_trips_multi_outcome_study_context_and_signals() -> None:
-    skim = PaperSkim.from_mapping(
+def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "studies": [
@@ -739,10 +872,6 @@ def test_paper_skim_round_trips_multi_outcome_study_context_and_signals() -> Non
                     "experiment_label": "LPBF process-window study",
                     "material_scope": ["316L"],
                     "process_context": ["LPBF"],
-                    "sample_context": ["vertical tensile coupons"],
-                    "test_context": ["Archimedes density", "ASTM E8 tensile test"],
-                    "comparator": "200 W baseline",
-                    "fixed_conditions": ["scan speed = 800 mm/s"],
                     "relationships": [
                         {
                             "varied_factors": ["laser power", "hatch spacing"],
@@ -776,10 +905,6 @@ def test_paper_skim_round_trips_multi_outcome_study_context_and_signals() -> Non
                     "experiment_label": "surface study",
                     "material_scope": ["316L"],
                     "process_context": ["LPBF"],
-                    "sample_context": ["horizontal surface coupons"],
-                    "test_context": ["confocal microscopy"],
-                    "comparator": "as-built reference",
-                    "fixed_conditions": ["layer thickness = 30 um"],
                     "source_refs": [
                         {"source_kind": "table", "source_ref": "table-4"}
                     ],
@@ -799,12 +924,8 @@ def test_paper_skim_round_trips_multi_outcome_study_context_and_signals() -> Non
         "relative density",
         "yield strength",
     }
-    assert record["studies"][0]["sample_context"] == ["vertical tensile coupons"]
-    assert record["studies"][0]["test_context"] == [
-        "Archimedes density",
-        "ASTM E8 tensile test",
-    ]
-    assert record["studies"][0]["comparator"] == "200 W baseline"
+    assert record["studies"][0]["material_scope"] == ["316L"]
+    assert record["studies"][0]["process_context"] == ["LPBF"]
     assert record["studies"][0]["relationships"][0]["source_refs"] == [
         {"source_kind": "block", "source_ref": "methods-1"},
         {"source_kind": "table", "source_ref": "table-2"},
@@ -813,20 +934,54 @@ def test_paper_skim_round_trips_multi_outcome_study_context_and_signals() -> Non
     assert record["unresolved_signals"][0]["design_type"] == "experimental"
     assert record["unresolved_signals"][0]["claim_scope"] == "current_work"
     assert record["unresolved_signals"][0]["experiment_label"] == "surface study"
-    assert record["unresolved_signals"][0]["sample_context"] == [
-        "horizontal surface coupons"
-    ]
-    assert record["unresolved_signals"][0]["test_context"] == [
-        "confocal microscopy"
-    ]
-    assert record["unresolved_signals"][0]["comparator"] == "as-built reference"
-    assert record["unresolved_signals"][0]["fixed_conditions"] == [
-        "layer thickness = 30 um"
-    ]
-    assert PaperSkim.from_mapping(record) == skim
+    assert PaperResearchMap.from_mapping(record) == skim
 
 
-def test_paper_study_signal_identity_includes_study_boundary_context() -> None:
+def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None:
+    paper_map = PaperResearchMap.from_mapping(
+        {
+            "document_id": "paper-1",
+            "studies": [
+                {
+                    "material_scope": ["Ti-6Al-4V"],
+                    "process_context": ["laser powder bed fusion"],
+                    "sample_context": ["vertical tensile coupons"],
+                    "test_context": ["ASTM E8 tensile test"],
+                    "comparator": "as-built reference",
+                    "fixed_conditions": ["strain rate = 0.001 /s"],
+                    "relationships": [
+                        {
+                            "varied_factors": ["laser power"],
+                            "outcome": "porosity",
+                            "source_refs": [
+                                {"source_kind": "block", "source_ref": "abstract"}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    scope = paper_map.studies[0]
+    assert not hasattr(scope, "sample_context")
+    assert not hasattr(scope, "test_context")
+    assert not hasattr(scope, "comparator")
+    assert not hasattr(scope, "fixed_conditions")
+    assert set(paper_map.to_record()["studies"][0]) == {
+        "study_id",
+        "document_id",
+        "design_type",
+        "claim_scope",
+        "experiment_label",
+        "material_scope",
+        "process_context",
+        "relationships",
+        "confidence",
+    }
+
+
+def test_paper_research_signal_identity_uses_only_preliminary_scope() -> None:
     payload = {
         "signal_type": "outcome",
         "label": "yield strength",
@@ -843,26 +998,26 @@ def test_paper_study_signal_identity_includes_study_boundary_context() -> None:
         "confidence": 0.8,
     }
 
-    base = PaperSkim.from_mapping(
+    base = PaperResearchMap.from_mapping(
         {"document_id": "paper-1", "unresolved_signals": [payload]}
     ).unresolved_signals[0]
-    other_test = PaperSkim.from_mapping(
+    other_test = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-1",
             "unresolved_signals": [{**payload, "test_context": ["nanoindentation"]}],
         }
     ).unresolved_signals[0]
 
-    assert base.signal_id != other_test.signal_id
+    assert base.signal_id == other_test.signal_id
     with pytest.raises(ValueError, match="design type"):
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "unresolved_signals": [{**payload, "design_type": "invalid"}],
             }
         )
     with pytest.raises(ValueError, match="claim scope"):
-        PaperSkim.from_mapping(
+        PaperResearchMap.from_mapping(
             {
                 "document_id": "paper-1",
                 "unresolved_signals": [{**payload, "claim_scope": "invalid"}],
@@ -877,10 +1032,10 @@ def test_paper_study_signal_identity_is_scoped_to_its_document() -> None:
         "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
     }
 
-    first = PaperSkim.from_mapping(
+    first = PaperResearchMap.from_mapping(
         {"document_id": "paper-1", "unresolved_signals": [signal]}
     ).unresolved_signals[0]
-    second = PaperSkim.from_mapping(
+    second = PaperResearchMap.from_mapping(
         {"document_id": "paper-2", "unresolved_signals": [signal]}
     ).unresolved_signals[0]
 
@@ -909,9 +1064,9 @@ def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> No
         "confidence": 0.88,
     }
 
-    study = PaperStudy.from_mapping(payload)
-    same_study = PaperStudy.from_mapping(payload)
-    different_source = PaperStudy.from_mapping(
+    study = PaperResearchScope.from_mapping(payload)
+    same_study = PaperResearchScope.from_mapping(payload)
+    different_source = PaperResearchScope.from_mapping(
         {
             **payload,
             "relationships": [
@@ -930,7 +1085,7 @@ def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> No
     assert study.relationships[0].relationship_id.startswith("relationship_")
     assert same_study.study_id == study.study_id
     assert different_source.study_id != study.study_id
-    assert PaperStudy.from_mapping(study.to_record()) == study
+    assert PaperResearchScope.from_mapping(study.to_record()) == study
 
 
 def test_relationship_identity_includes_its_parent_study_boundary() -> None:
@@ -939,7 +1094,7 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
         "outcome": "yield strength",
         "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
     }
-    tensile_study = PaperStudy.from_mapping(
+    tensile_study = PaperResearchScope.from_mapping(
         {
             "document_id": "paper-1",
             "design_type": "experimental",
@@ -949,7 +1104,7 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
             "relationships": [shared_relationship],
         }
     )
-    hardness_study = PaperStudy.from_mapping(
+    hardness_study = PaperResearchScope.from_mapping(
         {
             "document_id": "paper-1",
             "design_type": "experimental",
@@ -964,18 +1119,14 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
         tensile_study.relationships[0].relationship_id
         != hardness_study.relationships[0].relationship_id
     )
-    ObjectiveFactSet(
-        paper_skims=(
-            PaperSkim.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "studies": [
-                        tensile_study.to_record(),
-                        hardness_study.to_record(),
-                    ],
-                }
-            ),
-        ),
+    PaperResearchMap.from_mapping(
+        {
+            "document_id": "paper-1",
+            "studies": [
+                tensile_study.to_record(),
+                hardness_study.to_record(),
+            ],
+        }
     )
 
 
@@ -986,10 +1137,10 @@ def test_paper_study_owns_nested_relationship_identity() -> None:
         "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
     }
 
-    expected = PaperStudy.from_mapping(
+    expected = PaperResearchScope.from_mapping(
         {"document_id": "paper-1", "relationships": [relationship]}
     )
-    attempted_override = PaperStudy.from_mapping(
+    attempted_override = PaperResearchScope.from_mapping(
         {
             "document_id": "paper-1",
             "relationships": [{**relationship, "document_id": "paper-2"}],
@@ -999,8 +1150,8 @@ def test_paper_study_owns_nested_relationship_identity() -> None:
     assert attempted_override.relationships == expected.relationships
 
 
-def test_paper_skim_rejects_study_owned_by_another_document() -> None:
-    study = PaperStudy.from_mapping(
+def test_paper_map_rejects_study_owned_by_another_document() -> None:
+    study = PaperResearchScope.from_mapping(
         {
             "document_id": "paper-2",
             "relationships": [
@@ -1016,7 +1167,7 @@ def test_paper_skim_rejects_study_owned_by_another_document() -> None:
     )
 
     with pytest.raises(ValueError, match="another document|document"):
-        PaperSkim(
+        PaperResearchMap(
             document_id="paper-1",
             doc_role="experimental",
             studies=(study,),
@@ -1030,8 +1181,8 @@ def _accounted_study_skim(
     document_id: str,
     *,
     relationships: list[tuple[list[str], str]],
-) -> PaperSkim:
-    return PaperSkim.from_mapping(
+) -> PaperResearchMap:
+    return PaperResearchMap.from_mapping(
         {
             "document_id": document_id,
             "studies": [
@@ -1063,7 +1214,7 @@ def _accounted_study_skim(
 
 
 def _study_disposition(
-    skim: PaperSkim,
+    skim: PaperResearchMap,
     relationship_position: int,
     status: PaperStudyDispositionStatus,
     *,
@@ -1089,7 +1240,7 @@ def test_ready_objective_fact_set_requires_every_relationship_exactly_once() -> 
     with pytest.raises(ValueError, match="pending"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1114,7 +1265,7 @@ def test_ready_objective_fact_set_rejects_duplicate_relationship_accounting() ->
     with pytest.raises(ValueError, match="duplicate|exactly once|more than once"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             study_dispositions=(rejected, rejected),
         )
 
@@ -1124,10 +1275,10 @@ def test_ready_objective_fact_set_rejects_unknown_relationship_disposition() -> 
         "paper-1", relationships=[(["laser power"], "density")]
     )
 
-    with pytest.raises(ValueError, match="unknown|dangling"):
+    with pytest.raises(ValueError, match="unselected"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1167,7 +1318,10 @@ def test_ready_objective_fact_set_rejects_cross_document_objective_lineage() -> 
     with pytest.raises(ValueError):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(
+                PreparedDocumentInput("paper-1", "fingerprint-1"),
+                PreparedDocumentInput("paper-2", "fingerprint-2"),
+            ),
             research_objectives=(objective,),
             study_dispositions=(
                 _study_disposition(
@@ -1212,7 +1366,7 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
 
     facts = ObjectiveFactSet(
         research_objectives_ready=True,
-        paper_skims=(skim,),
+        document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
         research_objectives=(density_objective, strength_objective),
         study_dispositions=(
             _study_disposition(

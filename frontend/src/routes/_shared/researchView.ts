@@ -99,7 +99,7 @@ export type ObjectiveAnalysisState = {
 	collection_id: string;
 	objective_id: string;
 	analysis_version: number;
-	source_build_id: string;
+	document_inputs: PreparedDocumentInput[];
 	pipeline_version: string;
 	model_name: string | null;
 	prompt_versions: Record<string, string>;
@@ -114,6 +114,15 @@ export type ObjectiveAnalysisState = {
 	created_at: string | null;
 	started_at: string | null;
 	completed_at: string | null;
+};
+export type PreparedDocumentInput = {
+	document_id: string;
+	preparation_fingerprint: string;
+};
+export type ObjectiveDiscovery = {
+	collection_id: string;
+	document_inputs: PreparedDocumentInput[];
+	objectives: ObjectiveSummary[];
 };
 
 export type ObjectiveSummary = {
@@ -437,7 +446,16 @@ function normalizeObjectiveAnalysisState(value: unknown): ObjectiveAnalysisState
 		collection_id: toText(record.collection_id),
 		objective_id: toText(record.objective_id),
 		analysis_version: toNumber(record.analysis_version),
-		source_build_id: toText(record.source_build_id),
+		document_inputs: asArray(record.document_inputs)
+			.map((item) => {
+				const input = asRecord(item);
+				const documentId = toText(input?.document_id);
+				const fingerprint = toText(input?.preparation_fingerprint);
+				return documentId && fingerprint
+					? { document_id: documentId, preparation_fingerprint: fingerprint }
+					: null;
+			})
+			.filter((item): item is PreparedDocumentInput => item !== null),
 		pipeline_version: toText(record.pipeline_version),
 		model_name: nonEmptyText(record.model_name),
 		prompt_versions: Object.fromEntries(
@@ -474,6 +492,17 @@ export async function fetchCollectionObjectives(collectionId: string): Promise<O
 	const encoded = encodeURIComponent(collectionId);
 	const data = await requestJson(`/collections/${encoded}/objectives`);
 	return normalizeObjectiveList(data, collectionId);
+}
+
+export async function discoverCollectionObjectives(
+	collectionId: string,
+	documentIds: string[]
+): Promise<ObjectiveDiscovery> {
+	const encoded = encodeURIComponent(collectionId);
+	return requestJson(`/collections/${encoded}/objective-discovery`, {
+		method: 'POST',
+		body: JSON.stringify({ document_ids: documentIds })
+	}) as Promise<ObjectiveDiscovery>;
 }
 
 function normalizeObjectiveAnalysis(value: unknown, collectionId: string): ObjectiveAnalysis {
@@ -562,12 +591,19 @@ export async function fetchObjectiveEvidenceMap(
 	return requestJson(path) as Promise<ObjectiveEvidenceMap>;
 }
 
-export async function runObjectiveAnalysis(collectionId: string, objectiveId: string) {
+export async function runObjectiveAnalysis(
+	collectionId: string,
+	objectiveId: string,
+	documentIds: string[]
+) {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const data = await requestJson(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`,
-		{ method: 'POST' }
+		{
+			method: 'POST',
+			body: JSON.stringify({ document_ids: documentIds })
+		}
 	);
 	return normalizeObjectiveAnalysis(data, collectionId);
 }

@@ -13,7 +13,7 @@ from application.core.objectives.analysis.evidence_routing import (
     SourceSelectionHint,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from domain.core import PaperSkim
+from domain.core import PaperResearchMap
 from domain.source import SourceDocumentNode, SourceDocumentTree
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
@@ -43,6 +43,52 @@ def test_objective_evidence_route_prompt_uses_response_schema_field_name():
         assert '{"selections": []}' in prompt
         assert "`routes`" not in prompt
         assert '{"routes": []}' not in prompt
+
+
+def test_objective_evidence_route_prompt_hides_backend_lineage():
+    _system_prompt, user_prompt = (
+        evidence_routing.build_objective_evidence_route_prompt(
+            {
+                "collection_id": "collection-internal",
+                "objective": {
+                    "objective_id": "objective-internal",
+                    "question": "How does scan strategy affect residual stress?",
+                    "variables": ["scan strategy"],
+                    "outcomes": ["residual stress"],
+                },
+                "paper_frame": {
+                    "objective_id": "objective-internal",
+                    "document_id": "document-internal",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "changed_variables": ["scan strategy"],
+                },
+                "tree_position": {
+                    "node_id": "node-internal",
+                    "node_type": "paragraph",
+                    "section_path": ["Results"],
+                    "source_ref_id": "block-internal",
+                },
+                "current_source": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-internal",
+                    "section_label": "Results",
+                    "text_hint": "Residual stress depends on scan strategy.",
+                },
+            }
+        )
+    )
+
+    assert "Residual stress depends on scan strategy." in user_prompt
+    assert '"section_path": [' in user_prompt
+    for internal_value in (
+        "collection-internal",
+        "objective-internal",
+        "document-internal",
+        "node-internal",
+        "block-internal",
+    ):
+        assert internal_value not in user_prompt
 
 
 def test_research_objective_service_forces_extractable_objective_route_roles():
@@ -101,7 +147,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
             "stainless steel."
         ),
     }
-    paper_skim = PaperSkim.from_mapping(
+    paper_map = PaperResearchMap.from_mapping(
         {
             "document_id": "paper-scanning-review",
             "doc_role": "review",
@@ -112,7 +158,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
     )
     frame = source_screening._aggregate_objective_paper_frame_batches(
         objective_id=objective.objective_id,
-        document_id=paper_skim.document_id,
+        document_id=paper_map.document_id,
         source_units=(source_unit,),
         batch_results=(
             (
@@ -129,7 +175,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
                 (),
             ),
         ),
-        paper_skim=paper_skim,
+        paper_map=paper_map,
     )
     assert frame.paper_role == "review"
     review_block = SimpleNamespace(

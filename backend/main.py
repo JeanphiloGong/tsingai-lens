@@ -36,19 +36,17 @@ from application.core.objectives.analysis_service import ObjectiveAnalysisServic
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.paper_skim_service import PaperSkimService
+from application.core.objectives.paper_research_map_service import PaperResearchMapService
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
-from application.core.workspace_overview_service import WorkspaceService
 from application.evaluation import (
     FindingFeedbackService,
 )
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
-from application.pipeline.collection_build.service import CollectionBuildPipelineService
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
+from application.source.document_preparation_service import DocumentPreparationService
 from application.source.document_markdown_service import DocumentMarkdownService
 from application.source.reference_workflow_service import SourceReferenceWorkflowService
 from application.source.task_service import TaskService
@@ -59,7 +57,6 @@ from controllers.core import (
     documents,
     finding_review,
     research_objectives,
-    workspace,
 )
 from controllers.goal import experiment_plans
 from controllers.goal import intake as goals
@@ -68,8 +65,9 @@ from domain.ports import (
     ChatRepository,
     ExperimentPlanRepository,
     FindingReviewRepository,
+    DocumentProfileRepository,
     ObjectiveRepository,
-    PaperFactRepository,
+    PaperMapRepository,
     SourceArtifactRepository,
 )
 from infra.llm.chat_model import OpenAIChatModel
@@ -80,7 +78,6 @@ from infra.persistence.database import (
 )
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
@@ -88,18 +85,20 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.finding_review_repository import (
     PostgresFindingReviewRepository,
 )
+from infra.persistence.postgres.document_profile_repository import (
+    PostgresDocumentProfileRepository,
+)
 from infra.persistence.postgres.objective_repository import (
     PostgresObjectiveRepository,
 )
 from infra.persistence.postgres.experiment_plan_repository import (
     PostgresExperimentPlanRepository,
 )
-from infra.persistence.postgres.paper_fact_repository import (
-    PostgresPaperFactRepository,
-)
+from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
+from infra.persistence.postgres.task_repository import PostgresTaskRepository
 from utils.logger import (
     REQUEST_ID_HEADER,
     bind_request_id,
@@ -138,7 +137,8 @@ class ApplicationOverrides:
     collection_service: CollectionService | None = None
     task_service: TaskService | None = None
     source_artifact_repository: SourceArtifactRepository | None = None
-    paper_fact_repository: PaperFactRepository | None = None
+    document_profile_repository: DocumentProfileRepository | None = None
+    paper_map_repository: PaperMapRepository | None = None
     objective_repository: ObjectiveRepository | None = None
     finding_review_repository: FindingReviewRepository | None = None
     experiment_plan_repository: ExperimentPlanRepository | None = None
@@ -151,7 +151,8 @@ class ApplicationOverrides:
             self.collection_service,
             self.task_service,
             self.source_artifact_repository,
-            self.paper_fact_repository,
+            self.document_profile_repository,
+            self.paper_map_repository,
             self.objective_repository,
             self.finding_review_repository,
             self.experiment_plan_repository,
@@ -169,17 +170,16 @@ class ApplicationRuntime:
     auth_session_service: AuthSessionService
     collection_service: CollectionService
     task_service: TaskService
-    paper_fact_repository: PaperFactRepository
+    document_profile_repository: DocumentProfileRepository
+    paper_map_repository: PaperMapRepository
     objective_repository: ObjectiveRepository
     finding_review_repository: FindingReviewRepository
     finding_feedback_service: FindingFeedbackService
-    artifact_registry_service: ArtifactRegistryService
     document_profile_service: DocumentProfileService
+    document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
     reference_workflow_service: SourceReferenceWorkflowService
     research_objective_service: ResearchObjectiveService
-    workspace_service: WorkspaceService
-    build_pipeline_service: CollectionBuildPipelineService
     goal_service: GoalService
     chat_session_service: ChatSessionService
     experiment_plan_service: ExperimentPlanService
@@ -216,15 +216,19 @@ async def build_application_runtime(
             workspace=FileCollectionWorkspace(),
         )
         task_service = overrides.task_service or TaskService(
-            PostgresBuildRepository(session_factory)
+            PostgresTaskRepository(session_factory)
         )
         source_artifact_repository = (
             overrides.source_artifact_repository
             or PostgresSourceArtifactRepository(session_factory)
         )
-        paper_fact_repository = (
-            overrides.paper_fact_repository
-            or PostgresPaperFactRepository(session_factory)
+        document_profile_repository = (
+            overrides.document_profile_repository
+            or PostgresDocumentProfileRepository(session_factory)
+        )
+        paper_map_repository = (
+            overrides.paper_map_repository
+            or PostgresPaperMapRepository(session_factory)
         )
         objective_repository = (
             overrides.objective_repository
@@ -245,14 +249,19 @@ async def build_application_runtime(
         )
 
         # Services share the resolved objects above; no service locator is used.
-        artifact_registry_service = ArtifactRegistryService(
-            task_service.repository,
-            source_artifact_repository,
-        )
         document_profile_service = DocumentProfileService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
-            paper_fact_repository=paper_fact_repository,
+            document_profile_repository=document_profile_repository,
+        )
+        paper_map_service = PaperResearchMapService()
+        document_preparation_service = DocumentPreparationService(
+            collection_service=collection_service,
+            task_service=task_service,
+            source_artifact_repository=source_artifact_repository,
+            document_profile_service=document_profile_service,
+            paper_map_repository=paper_map_repository,
+            paper_map_service=paper_map_service,
         )
         finding_synthesis_service = FindingSynthesisService()
         finding_feedback_service = FindingFeedbackService(
@@ -262,19 +271,11 @@ async def build_application_runtime(
         research_objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
-            paper_fact_repository=paper_fact_repository,
+            paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
             document_profile_service=document_profile_service,
             finding_synthesis_service=finding_synthesis_service,
-            paper_skim_service=PaperSkimService(),
             objective_candidate_service=ObjectiveCandidateService(),
-        )
-        workspace_service = WorkspaceService(
-            collection_service=collection_service,
-            task_service=task_service,
-            source_artifact_repository=source_artifact_repository,
-            objective_repository=objective_repository,
-            document_profile_service=document_profile_service,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,
@@ -282,14 +283,6 @@ async def build_application_runtime(
         )
         reference_workflow_service = SourceReferenceWorkflowService(
             source_artifact_repository=source_artifact_repository,
-        )
-        build_pipeline_service = CollectionBuildPipelineService(
-            collection_service=collection_service,
-            task_service=task_service,
-            artifact_registry_service=artifact_registry_service,
-            source_artifact_repository=source_artifact_repository,
-            document_profile_service=document_profile_service,
-            research_objective_service=research_objective_service,
         )
         goal_service = GoalService(collection_service)
         objective_analysis_service = ObjectiveAnalysisService(
@@ -315,8 +308,8 @@ async def build_application_runtime(
                             ),
                             StartResearchProcessCapability(
                                 collection_service=collection_service,
-                                collection_build_pipeline_service=(
-                                    build_pipeline_service
+                                document_preparation_service=(
+                                    document_preparation_service
                                 ),
                             ),
                             QueryPublishedFindingsCapability(
@@ -327,10 +320,11 @@ async def build_application_runtime(
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
+                                paper_map_repository=paper_map_repository,
                             ),
                             PreviewResearchScopeCapability(
                                 collection_service=collection_service,
-                                objective_repository=objective_repository,
+                                paper_map_repository=paper_map_repository,
                             ),
                             CreateObjectiveCandidateCapability(
                                 research_objective_service=research_objective_service,
@@ -355,17 +349,16 @@ async def build_application_runtime(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             task_service=task_service,
-            paper_fact_repository=paper_fact_repository,
+            document_profile_repository=document_profile_repository,
+            paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
             finding_review_repository=finding_review_repository,
             finding_feedback_service=finding_feedback_service,
-            artifact_registry_service=artifact_registry_service,
             document_profile_service=document_profile_service,
+            document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
             reference_workflow_service=reference_workflow_service,
             research_objective_service=research_objective_service,
-            workspace_service=workspace_service,
-            build_pipeline_service=build_pipeline_service,
             goal_service=goal_service,
             chat_session_service=chat_session_service,
             experiment_plan_service=ExperimentPlanService(
@@ -389,17 +382,16 @@ def install_application_runtime(
     application.state.auth_session_service = runtime.auth_session_service
     application.state.collection_service = runtime.collection_service
     application.state.task_service = runtime.task_service
-    application.state.paper_fact_repository = runtime.paper_fact_repository
+    application.state.document_profile_repository = runtime.document_profile_repository
+    application.state.paper_map_repository = runtime.paper_map_repository
     application.state.objective_repository = runtime.objective_repository
     application.state.finding_review_repository = runtime.finding_review_repository
     application.state.finding_feedback_service = runtime.finding_feedback_service
-    application.state.artifact_registry_service = runtime.artifact_registry_service
     application.state.document_profile_service = runtime.document_profile_service
+    application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service
     application.state.reference_workflow_service = runtime.reference_workflow_service
     application.state.research_objective_service = runtime.research_objective_service
-    application.state.workspace_service = runtime.workspace_service
-    application.state.build_pipeline_service = runtime.build_pipeline_service
     application.state.goal_service = runtime.goal_service
     application.state.chat_session_service = runtime.chat_session_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
@@ -414,6 +406,8 @@ def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
         runtime = await build_application_runtime(overrides)
         try:
             install_application_runtime(application, runtime)
+            await runtime.document_preparation_service.recover_interrupted_tasks()
+            await runtime.objective_analysis_service.recover_interrupted_analyses()
             yield
         finally:
             await runtime.close()
@@ -533,7 +527,6 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(finding_review.router, prefix=PUBLIC_API_V1_PREFIX)
@@ -545,7 +538,8 @@ def create_app(
     collection_service: CollectionService | None = None,
     task_service: TaskService | None = None,
     source_artifact_repository: SourceArtifactRepository | None = None,
-    paper_fact_repository: PaperFactRepository | None = None,
+    document_profile_repository: DocumentProfileRepository | None = None,
+    paper_map_repository: PaperMapRepository | None = None,
     objective_repository: ObjectiveRepository | None = None,
     finding_review_repository: FindingReviewRepository | None = None,
     experiment_plan_repository: ExperimentPlanRepository | None = None,
@@ -557,7 +551,8 @@ def create_app(
         collection_service=collection_service,
         task_service=task_service,
         source_artifact_repository=source_artifact_repository,
-        paper_fact_repository=paper_fact_repository,
+        document_profile_repository=document_profile_repository,
+        paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
         finding_review_repository=finding_review_repository,
         experiment_plan_repository=experiment_plan_repository,
@@ -566,7 +561,7 @@ def create_app(
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.12.11",
+        version="0.12.12",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

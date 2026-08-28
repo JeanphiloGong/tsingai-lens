@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 import pytest
@@ -17,8 +16,8 @@ from tests.support.collection_service import build_test_collection_service
 from domain.core.document_profile import DocumentProfile
 from domain.source import source_documents_from_records
 from infra.source.runtime.source_evidence import build_blocks
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from infra.persistence.memory import MemoryDocumentProfileRepository
+from infra.persistence.memory import MemorySourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -33,7 +32,7 @@ def _build_profile_service(tmp_path):
     return collection_service, DocumentProfileService(
         collection_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
-        paper_fact_repository=MemoryPaperFactRepository(),
+        document_profile_repository=MemoryDocumentProfileRepository(),
     )
 
 
@@ -44,16 +43,35 @@ async def _write_source_artifacts(
     text_units: pd.DataFrame | None = None,
 ) -> None:
     blocks = build_blocks(documents, text_units)
-    await profile_service.source_artifact_repository.replace_collection_documents(
-        collection_id,
-        "build_test",
-        source_documents_from_records(
+    source_documents = source_documents_from_records(
             documents=documents.to_dict(orient="records"),
             text_units=(
                 [] if text_units is None else text_units.to_dict(orient="records")
             ),
             blocks=blocks.to_dict(orient="records"),
-        ),
+    )
+    for document in source_documents:
+        await profile_service.source_artifact_repository.replace_document(
+            collection_id,
+            document,
+        )
+
+
+async def _build_profiles(
+    profile_service: DocumentProfileService,
+    collection_id: str,
+) -> tuple[DocumentProfile, ...]:
+    documents = await profile_service.source_artifact_repository.read_collection_documents(
+        collection_id
+    )
+    return tuple(
+        [
+            await profile_service.build_document_profile(
+                collection_id,
+                document.document_id,
+            )
+            for document in documents
+        ]
     )
 
 
@@ -117,7 +135,7 @@ async def test_document_profile_service_builds_profiles_and_summary(tmp_path):
         ]
     )
     await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await profile_service.build_document_profiles(collection_id, build_id="build_test")
+    await _build_profiles(profile_service, collection_id)
 
     payload = await profile_service.list_document_profiles(collection_id)
 
@@ -132,8 +150,10 @@ async def test_document_profile_service_builds_profiles_and_summary(tmp_path):
         "mixed": 1,
         "review": 1,
     }
-    facts = await profile_service.paper_fact_repository.read(collection_id)
-    assert len(facts.document_profiles) == 3
+    stored = await profile_service.document_profile_repository.list_collection(
+        collection_id
+    )
+    assert len(stored) == 3
 
 
 async def test_document_profile_service_returns_source_filename_from_file_mapping(
@@ -142,7 +162,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
     collection_service, profile_service = _build_profile_service(tmp_path)
     collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
-    file_record = await collection_service.add_file(
+    document_record = await collection_service.add_document(
         collection_id,
         "wang_2024_battery.txt",
         b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",
@@ -152,7 +172,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
         [
             {
                 "id": "doc-1",
-                "title": file_record["stored_filename"],
+                "title": document_record["stored_filename"],
                 "text": "\n".join(
                     [
                         "Experimental Section",
@@ -174,7 +194,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
         ]
     )
     await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await profile_service.build_document_profiles(collection_id, build_id="build_test")
+    await _build_profiles(profile_service, collection_id)
 
     payload = await profile_service.list_document_profiles(collection_id)
 
@@ -194,7 +214,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
     profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
-        paper_fact_repository=MemoryPaperFactRepository(),
+        document_profile_repository=MemoryDocumentProfileRepository(),
         document_profile_extractor=ExplodingExtractor(),
     )
     collection = await collection_service.create_collection("Sparse Profiles")
@@ -202,7 +222,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
     await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await profile_service.build_document_profiles(collection_id, build_id="build_test")
+    await _build_profiles(profile_service, collection_id)
 
     payload = await profile_service.list_document_profiles(collection_id)
 
@@ -267,7 +287,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
-        paper_fact_repository=MemoryPaperFactRepository(),
+        document_profile_repository=MemoryDocumentProfileRepository(),
         document_profile_extractor=OneFailedProfileExtractor(),
     )
     collection = await collection_service.create_collection("Partial Profiles")
@@ -289,10 +309,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     await _write_source_artifacts(profile_service, collection_id, documents)
 
     with caplog.at_level("WARNING"):
-        profiles = await profile_service.build_document_profiles(
-            collection_id,
-            build_id="build_test",
-        )
+        profiles = await _build_profiles(profile_service, collection_id)
 
     records = {profile.document_id: profile.to_record() for profile in profiles}
     assert records["paper-failed"]["doc_type"] == "uncertain"
@@ -307,37 +324,12 @@ async def test_document_profile_service_continues_after_one_model_format_failure
         if "Document profile classification unavailable" in record.getMessage()
     )
     assert f"collection_id={collection_id}" in failure_log
-    assert "build_id=build_test" in failure_log
     assert "document_id=paper-failed" in failure_log
     assert '"model":"test-model"' in failure_log
     assert '"error":"structured extraction returned no JSON object"' in failure_log
     assert '"attempt":1' in failure_log
     assert '"attempt":2' in failure_log
     assert "paper content" not in failure_log
-
-
-async def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):
-    profile_service = DocumentProfileService(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        source_artifact_repository=MemorySourceArtifactRepository(),
-        paper_fact_repository=MemoryPaperFactRepository(),
-    )
-
-    profiles = [
-        DocumentProfile.from_mapping(
-            {
-                "document_id": "doc-1",
-                "collection_id": "col-1",
-                "doc_type": "experimental",
-                "parsing_warnings": np.array(["condition_context_weak"]),
-                "confidence": 0.91,
-            }
-        )
-    ]
-
-    normalized = profile_service._normalize_profile_records(profiles, "col-1")
-
-    assert normalized[0].to_record()["parsing_warnings"] == ["condition_context_weak"]
 
 
 async def test_document_profile_read_does_not_build_missing_profiles(
@@ -351,7 +343,7 @@ async def test_document_profile_read_does_not_build_missing_profiles(
     def fail_build(collection_id: str):  # noqa: ANN001
         raise AssertionError(f"build should not run from read path: {collection_id}")
 
-    monkeypatch.setattr(profile_service, "build_document_profiles", fail_build)
+    monkeypatch.setattr(profile_service, "build_document_profile", fail_build)
 
     with pytest.raises(DocumentProfilesNotReadyError):
         await profile_service.read_document_profiles(collection_id)
@@ -388,7 +380,7 @@ async def test_document_profile_service_round_trips_repository_storage_fields(tm
         ]
     )
     await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await profile_service.build_document_profiles(collection_id, build_id="build_test")
+    await _build_profiles(profile_service, collection_id)
 
     restored = await profile_service.read_document_profiles(collection_id)
     assert isinstance(restored[0].to_record()["parsing_warnings"], list)

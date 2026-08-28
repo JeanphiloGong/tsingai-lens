@@ -14,7 +14,7 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
-from domain.source import CollectionRecord
+from domain.source import Collection
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
@@ -41,17 +41,11 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     collections = PostgresCollectionRepository(sessions)
     for collection_id in ("col-gold", "col-other"):
         await collections.add_collection(
-            CollectionRecord.from_mapping(
-                {
-                    "collection_id": collection_id,
-                    "owner_user_id": "user-evaluation",
-                    "name": collection_id,
-                    "description": None,
-                    "created_at": "2026-07-20T00:00:00+00:00",
-                    "updated_at": "2026-07-20T00:00:00+00:00",
-                    "status": "active",
-                },
-                collection_id,
+            Collection.create(
+                collection_id=collection_id,
+                owner_user_id="user-evaluation",
+                name=collection_id,
+                description=None,
                 now_iso="2026-07-20T00:00:00+00:00",
             )
         )
@@ -226,17 +220,11 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     )
     collections = PostgresCollectionRepository(sessions)
     await collections.add_collection(
-        CollectionRecord.from_mapping(
-            {
-                "collection_id": "col-evaluation-cascade",
-                "owner_user_id": "user-evaluation-cascade",
-                "name": "Evaluation cascade",
-                "description": None,
-                "created_at": "2026-07-20T00:00:00+00:00",
-                "updated_at": "2026-07-20T00:00:00+00:00",
-                "status": "active",
-            },
-            "col-evaluation-cascade",
+        Collection.create(
+            collection_id="col-evaluation-cascade",
+            owner_user_id="user-evaluation-cascade",
+            name="Evaluation cascade",
+            description=None,
             now_iso="2026-07-20T00:00:00+00:00",
         )
     )

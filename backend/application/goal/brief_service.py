@@ -4,7 +4,7 @@ from application.source.collection_service import CollectionService
 
 
 class GoalService:
-    """Minimal Goal Brief / Intake orchestration that registers collection-builder handoffs."""
+    """Minimal Goal Brief / Intake orchestration that creates a seed collection."""
 
     def __init__(
         self,
@@ -91,13 +91,13 @@ class GoalService:
             "reason": reason,
             "next_actions": [
                 "Upload papers or connect a source adapter into the seeded collection.",
-                "Run indexing to generate document profiles, evidence cards, and comparison rows.",
-                "Open the workspace and review readiness, warnings, and next-step links.",
+                "Prepare each paper to generate its Source, profile, and paper map.",
+                "Select ready papers to discover candidate research objectives.",
             ],
             "links": [
                 f"/api/v1/collections/{collection_id}",
-                f"/api/v1/collections/{collection_id}/files",
-                f"/api/v1/collections/{collection_id}/workspace",
+                f"/api/v1/collections/{collection_id}/documents",
+                f"/api/v1/collections/{collection_id}/objectives",
             ],
         }
 
@@ -160,20 +160,12 @@ class GoalService:
             owner_user_id=owner_user_id,
         )
         collection_id = collection["collection_id"]
-        handoff = await self.collection_service.register_goal_brief_handoff(
-            collection_id,
-            research_brief,
-            coverage_assessment,
-            source_channels=self._build_source_channels(),
-        )
         seed_collection = {
             "collection_id": collection_id,
             "name": collection["name"],
             "created": True,
             "seeded_document_count": 0,
-            "source_channels": handoff["source_channels"],
-            "handoff_id": handoff["handoff_id"],
-            "handoff_status": handoff["status"],
+            "source_channels": self._build_source_channels(),
         }
         entry_recommendation = self._build_entry_recommendation(
             collection_id,

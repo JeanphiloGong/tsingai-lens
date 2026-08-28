@@ -11,69 +11,28 @@
 		fetchCollections
 	} from '../../_shared/collections';
 	import { t } from '../../_shared/i18n';
-	import {
-		fetchWorkspaceOverview,
-		getOverviewReadinessState,
-		type WorkspaceOverview
-	} from '../../_shared/workspace';
 
 	let deleteLoading = false;
 	let deleteError = '';
-	let workspace: WorkspaceOverview | null = null;
-	let loadedWorkspaceId = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: storeCollection = $collections.find((item) => item.id === collectionId);
-	$: collection = workspace?.collection
-		? {
-				...workspace.collection,
-				status: storeCollection?.status ?? workspace.collection.status
-			}
-		: storeCollection;
+	$: collection = $collections.find((item) => item.id === collectionId);
 	$: collectionName = collection?.name;
-	$: effectiveDocumentCount = Math.max(
-		workspace?.document_summary.total_documents ?? 0,
-		workspace?.file_count ?? 0,
-		collection?.paper_count ?? 0,
-		storeCollection?.paper_count ?? 0
-	);
-	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
-	$: documentCount = effectiveDocumentCount;
-	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
-	$: workspaceUpdatedAt =
-		workspace?.latest_task?.updated_at ||
-		workspace?.collection.updated_at ||
-		workspace?.artifacts.updated_at ||
-		'';
-	$: storeHasNewerWorkspaceState = isLaterTimestamp(
-		storeCollection?.updated_at,
-		workspaceUpdatedAt
-	);
+	$: documentCount = collection?.documents.length ?? collection?.paper_count ?? 0;
+	$: readyDocumentCount =
+		collection?.documents.filter((document) => document.status === 'ready').length ?? 0;
+	$: processingDocumentCount =
+		collection?.documents.filter((document) => document.status === 'processing').length ?? 0;
 	$: currentPath = $page.url.pathname;
-	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
-	$: isAssistantRoute = currentPath.startsWith(`/collections/${collectionId}/assistant`);
-	$: readinessState =
-		stateWorkspace && !(storeHasNewerWorkspaceState && storeReadinessState)
-			? getOverviewReadinessState(stateWorkspace)
-			: storeReadinessState;
-	$: statusLabel = readinessState
-		? $t(`overview.readinessLabels.${readinessState}`)
-		: formatStatus(collection?.status);
-	$: statusTone = readinessState ?? 'pending';
-	$: updatedAt = collection?.updated_at || workspace?.artifacts.updated_at || '';
-	$: downstreamUnlocked = readinessState === 'ready';
-	$: lockReason = buildLockReason(readinessState);
-	$: readinessKnown = Boolean(readinessState);
-	$: showLockedSurface =
-		collectionId &&
-		!isOverviewRoute &&
-		!isAssistantRoute &&
-		(!readinessKnown || !downstreamUnlocked);
-
-	$: if (collectionId && collectionId !== loadedWorkspaceId) {
-		loadedWorkspaceId = collectionId;
-		void loadWorkspace();
-	}
+	$: statusTone = processingDocumentCount ? 'processing' : readyDocumentCount ? 'ready' : 'pending';
+	$: statusLabel = processingDocumentCount
+		? $t('overview.currentModel.status.processing')
+		: readyDocumentCount
+			? $t('overview.currentModel.status.ready')
+			: documentCount
+				? $t('overview.currentModel.status.stored')
+				: $t('overview.readinessLabels.empty');
+	$: updatedAt = collection?.updated_at || '';
 
 	onMount(() => {
 		if (!$collections.length) {
@@ -84,65 +43,8 @@
 		}
 	});
 
-	async function loadWorkspace() {
-		try {
-			workspace = await fetchWorkspaceOverview(collectionId);
-		} catch {
-			workspace = null;
-		}
-	}
-
-	function formatStatus(status?: string | null) {
-		if (!status) return $t('overview.statusUnknown');
-		const key = `overview.status.${status}`;
-		const translated = $t(key);
-		return translated === key ? status : translated;
-	}
-
-	function readinessFromCollectionStatus(status?: string | null) {
-		const normalized = String(status ?? '').trim();
-		if (['processing', 'running', 'queued', 'started', 'in_progress'].includes(normalized)) {
-			return 'processing';
-		}
-		if (['idle', 'pending', 'uploaded', 'ready_to_process'].includes(normalized)) {
-			return 'ready_to_process';
-		}
-		if (
-			['ready', 'complete', 'completed', 'document_profiled', 'graph_ready'].includes(normalized)
-		) {
-			return 'ready';
-		}
-		if (['failed', 'error', 'attention_required'].includes(normalized)) {
-			return 'failed';
-		}
-		return null;
-	}
-
-	function isLaterTimestamp(candidate?: string | null, current?: string | null) {
-		if (!candidate) return false;
-		if (!current) return false;
-		const candidateTime = Date.parse(candidate);
-		const currentTime = Date.parse(current);
-		if (Number.isNaN(candidateTime) || Number.isNaN(currentTime)) return candidate > current;
-		return candidateTime > currentTime;
-	}
-
-	function buildLockReason(state: typeof readinessState) {
-		if (state === 'processing') return $t('collection.lock.processing');
-		if (state === 'failed') return $t('collection.lock.failed');
-		if (state === 'empty') return $t('collection.lock.empty');
-		if (state === 'ready_to_process') return $t('collection.lock.readyToProcess');
-		return $t('collection.lock.readyToProcess');
-	}
-
 	function tabClass(pathPrefix: string) {
 		return currentPath.startsWith(pathPrefix) ? 'active' : '';
-	}
-
-	function handleLockedTabClick(event: MouseEvent) {
-		if (!downstreamUnlocked) {
-			event.preventDefault();
-		}
 	}
 
 	function formatDate(value?: string | null) {
@@ -163,7 +65,7 @@
 
 		try {
 			await deleteCollection(collectionId);
-			await goto('/');
+			await goto(resolve('/'));
 		} catch (err) {
 			deleteError = errorMessage(err);
 		} finally {
@@ -188,7 +90,7 @@
 		</div>
 	</div>
 	<div class="collection-actions" aria-label={$t('collection.actionsLabel')}>
-		<a class="btn btn--ghost" href="/">{$t('collection.backToCollections')}</a>
+		<a class="btn btn--ghost" href={resolve('/')}>{$t('collection.backToCollections')}</a>
 		<button
 			class="btn btn--danger"
 			type="button"
@@ -206,53 +108,37 @@
 
 <nav class="collection-tabs" aria-label={$t('collection.tabsLabel')}>
 	<a
-		href={`/collections/${collectionId}`}
+		href={resolve('/collections/[id]', { id: collectionId })}
 		class:active={$page.url.pathname === `/collections/${collectionId}`}
 	>
 		{$t('collection.tabs.overview')}
 	</a>
 	<a
 		href={resolve('/collections/[id]/objectives', { id: collectionId })}
-		class={`${tabClass(`/collections/${collectionId}/objectives`)} ${downstreamUnlocked ? '' : 'locked'}`}
-		aria-disabled={downstreamUnlocked ? undefined : 'true'}
-		tabindex={downstreamUnlocked ? undefined : -1}
-		title={downstreamUnlocked ? undefined : lockReason}
-		on:click={handleLockedTabClick}
+		class={tabClass(`/collections/${collectionId}/objectives`)}
 	>
 		{$t('collection.tabs.objectives')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/comparisons`}
-		class={`${tabClass(`/collections/${collectionId}/comparisons`)} ${downstreamUnlocked ? '' : 'locked'}`}
-		aria-disabled={downstreamUnlocked ? undefined : 'true'}
-		tabindex={downstreamUnlocked ? undefined : -1}
-		title={downstreamUnlocked ? undefined : lockReason}
-		on:click={handleLockedTabClick}
+		href={resolve('/collections/[id]/comparisons', { id: collectionId })}
+		class={tabClass(`/collections/${collectionId}/comparisons`)}
 	>
 		{$t('collection.tabs.comparisons')}
 	</a>
 	<a
 		href={resolve('/collections/[id]/graph', { id: collectionId })}
-		class={`${tabClass(`/collections/${collectionId}/graph`)} ${downstreamUnlocked ? '' : 'locked'}`}
-		aria-disabled={downstreamUnlocked ? undefined : 'true'}
-		tabindex={downstreamUnlocked ? undefined : -1}
-		title={downstreamUnlocked ? undefined : lockReason}
-		on:click={handleLockedTabClick}
+		class={tabClass(`/collections/${collectionId}/graph`)}
 	>
 		{$t('collection.tabs.graph')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/documents`}
-		class={`${tabClass(`/collections/${collectionId}/documents`)} ${downstreamUnlocked ? '' : 'locked'}`}
-		aria-disabled={downstreamUnlocked ? undefined : 'true'}
-		tabindex={downstreamUnlocked ? undefined : -1}
-		title={downstreamUnlocked ? undefined : lockReason}
-		on:click={handleLockedTabClick}
+		href={resolve('/collections/[id]/documents', { id: collectionId })}
+		class={tabClass(`/collections/${collectionId}/documents`)}
 	>
 		{$t('collection.tabs.papers')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/assistant`}
+		href={resolve('/collections/[id]/assistant', { id: collectionId })}
 		class={tabClass(`/collections/${collectionId}/assistant`)}
 	>
 		{$t('collection.tabs.assistant')}
@@ -260,16 +146,5 @@
 </nav>
 
 <div class="collection-panel">
-	{#if showLockedSurface}
-		<section class="collection-locked-surface" aria-labelledby="collection-locked-title">
-			<p class="collection-locked-surface__eyebrow">{$t('collection.lock.eyebrow')}</p>
-			<h2 id="collection-locked-title">{$t('collection.lock.title')}</h2>
-			<p>{lockReason}</p>
-			<a class="btn btn--primary" href={`/collections/${collectionId}`}>
-				{$t('collection.lock.backToWorkspace')}
-			</a>
-		</section>
-	{:else}
-		<slot />
-	{/if}
+	<slot />
 </div>

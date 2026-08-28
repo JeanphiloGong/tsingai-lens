@@ -7,46 +7,55 @@ from infra.persistence.postgres.finding_review_repository import (
     PostgresFindingReviewRepository,
 )
 from tests.integration.persistence.test_postgres_objectives import (
+    COLLECTION_ID,
+    OBJECTIVE_ID,
     _analysis_contributions,
     _analysis_evidence,
     _finding,
-    _prepare_studies,
     _queue_and_claim,
 )
 
 
-pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
-pytestmark = pytest.mark.anyio
+pytest_plugins = ("tests.integration.persistence.test_postgres_objectives",)
+pytestmark = [
+    pytest.mark.anyio,
+    pytest.mark.filterwarnings("error:DELETE statement has a cartesian product"),
+]
 
 
-async def test_finding_review_round_trips_versioned_identity(
-    source_repositories,
-) -> None:
-    source_repository, builds = source_repositories
-    objectives = await _prepare_studies(source_repository, builds)
-    _, analysis = await _queue_and_claim(objectives)
-    await objectives.publish_analysis(
-        "col_source",
-        "objective-1",
-        analysis.analysis_version,
-        contributions=_analysis_contributions(1),
-        evidence_records=_analysis_evidence(1),
-        findings=(_finding(1),),
+async def _publish_next_analysis(objective_repository):
+    _, analysis = await _queue_and_claim(objective_repository)
+    version = analysis.analysis_version
+    await objective_repository.publish_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        version,
+        contributions=_analysis_contributions(version),
+        evidence_records=_analysis_evidence(version),
+        findings=(_finding(version),),
     )
-    reviews = PostgresFindingReviewRepository(source_repository.session_factory)
+    return analysis
+
+
+async def test_finding_review_round_trips_published_analysis_identity(
+    objective_repository,
+) -> None:
+    analysis = await _publish_next_analysis(objective_repository)
+    reviews = PostgresFindingReviewRepository(objective_repository.session_factory)
+    finding = _finding(analysis.analysis_version)
 
     feedback = await reviews.upsert_feedback(
         FindingFeedback.from_mapping(
             {
                 "feedback_id": "feedback-1",
-                "collection_id": "col_source",
-                "objective_id": "objective-1",
-                "analysis_version": 1,
-                "finding_id": "finding-1",
+                "collection_id": COLLECTION_ID,
+                "objective_id": OBJECTIVE_ID,
+                "analysis_version": analysis.analysis_version,
+                "finding_id": finding.finding_id,
                 "review_status": "correct",
                 "issue_type": "none",
                 "reviewer": "expert-1",
-                "created_at": "2026-07-22T00:00:00+00:00",
+                "created_at": "2026-08-27T00:00:00+00:00",
             }
         )
     )
@@ -54,87 +63,69 @@ async def test_finding_review_round_trips_versioned_identity(
         FindingCuration.from_mapping(
             {
                 "curation_id": "curation-1",
-                "collection_id": "col_source",
-                "objective_id": "objective-1",
-                "analysis_version": 1,
-                "finding_id": "finding-1",
+                "collection_id": COLLECTION_ID,
+                "objective_id": OBJECTIVE_ID,
+                "analysis_version": analysis.analysis_version,
+                "finding_id": finding.finding_id,
                 "curated_status": "limited",
                 "curated_finding": {
-                    **_finding(1).to_record(),
+                    **finding.to_record(),
                     "statement": (
-                        "Temperature is associated with strength in this paper."
+                        "Higher laser power was associated with strength only "
+                        "within the reported process windows."
                     ),
                 },
-                "updated_at": "2026-07-22T00:00:00+00:00",
+                "updated_at": "2026-08-27T00:00:00+00:00",
             }
         )
     )
 
-    assert feedback.analysis_version == 1
-    assert curation.curated_finding.supporting_evidence_ids == (
-        "evidence-support-1",
-        "evidence-support-2",
-    )
     assert await reviews.list_feedback(
-        "col_source", "objective-1", 1, "finding-1"
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+        finding.finding_id,
     ) == (feedback,)
     assert await reviews.list_curations(
-        "col_source", "objective-1", 1, "finding-1"
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+        finding.finding_id,
     ) == (curation,)
 
 
-async def test_finding_and_contribution_ids_are_isolated_by_analysis_version(
-    source_repositories,
+async def test_publishing_new_analysis_preserves_prior_version_artifacts(
+    objective_repository,
 ) -> None:
-    source_repository, builds = source_repositories
-    objectives = await _prepare_studies(source_repository, builds)
-    _, first_analysis = await _queue_and_claim(objectives)
-    await objectives.publish_analysis(
-        "col_source",
-        "objective-1",
-        first_analysis.analysis_version,
-        contributions=_analysis_contributions(1),
-        evidence_records=_analysis_evidence(1),
-        findings=(_finding(1),),
+    first = await _publish_next_analysis(objective_repository)
+    second = await _publish_next_analysis(objective_repository)
+
+    first_evidence, first_total = await objective_repository.list_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        first.analysis_version,
     )
-    _, queued = await objectives.queue_analysis(
-        "col_source",
-        "objective-1",
-        pipeline_version="test.v2",
-        model_name="test-model",
-        prompt_versions={"finding": "v2"},
+    second_evidence, second_total = await objective_repository.list_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        second.analysis_version,
     )
-    second_analysis = await objectives.claim_analysis(
-        "col_source", "objective-1", queued.analysis_version
+    first_finding = await objective_repository.read_finding(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        first.analysis_version,
+        "finding-strength",
     )
-    assert second_analysis is not None
-    await objectives.publish_analysis(
-        "col_source",
-        "objective-1",
-        second_analysis.analysis_version,
-        contributions=_analysis_contributions(2),
-        evidence_records=_analysis_evidence(2),
-        findings=(_finding(2),),
+    second_finding = await objective_repository.read_finding(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        second.analysis_version,
+        "finding-strength",
     )
 
-    first_finding = await objectives.read_finding(
-        "col_source", "objective-1", 1, "finding-1"
-    )
-    second_finding = await objectives.read_finding(
-        "col_source", "objective-1", 2, "finding-1"
-    )
-
-    assert first_finding is not None
-    assert second_finding is not None
-    assert first_finding.analysis_version == 1
-    assert second_finding.analysis_version == 2
-    assert await objectives.list_contributions(
-        "col_source", "objective-1", 1
-    ) == tuple(
-        sorted(_analysis_contributions(1), key=lambda item: item.document_id)
-    )
-    assert await objectives.list_contributions(
-        "col_source", "objective-1", 2
-    ) == tuple(
-        sorted(_analysis_contributions(2), key=lambda item: item.document_id)
-    )
+    assert first_total == 2
+    assert second_total == 2
+    assert first_evidence == _analysis_evidence(first.analysis_version)
+    assert second_evidence == _analysis_evidence(second.analysis_version)
+    assert first_finding == _finding(first.analysis_version)
+    assert second_finding == _finding(second.analysis_version)

@@ -265,42 +265,23 @@ async def _collection_input_rows(
     collection_id: str,
 ) -> list[dict[str, Any]]:
     rows = []
-    for import_record in await collection_repository.list_collection_imports(collection_id):
-        for document in import_record.documents:
-            file_record = document.file
-            storage_key = file_record.storage_key.strip()
-            if not storage_key.lower().endswith(".pdf"):
-                continue
-            if storage_key != f"{collection_id}/input/{file_record.stored_filename}":
-                raise ValueError("invalid collection object key")
-            rows.append(
-                {
-                    "id": document.source_document_id,
-                    "title": file_record.original_filename or Path(storage_key).name,
-                    "creation_date": import_record.ingested_at,
-                    "source_path": storage_key,
-                    "storage_key": storage_key,
-                    "sha256": file_record.sha256,
-                    "source_type": "pdf",
-                }
-            )
-    if rows:
+    collection = await collection_repository.read_collection(collection_id)
+    if collection is None:
         return rows
-
-    for file_record in await collection_repository.list_collection_files(collection_id):
-        storage_key = file_record.storage_key.strip()
+    for document in collection.documents:
+        storage_key = document.storage_key.strip()
         if not storage_key.lower().endswith(".pdf"):
             continue
-        if storage_key != f"{collection_id}/input/{file_record.stored_filename}":
+        if storage_key != f"{collection_id}/input/{document.stored_filename}":
             raise ValueError("invalid collection object key")
         rows.append(
             {
-                "id": file_record.file_id,
-                "title": file_record.original_filename or Path(storage_key).name,
-                "creation_date": file_record.created_at,
+                "id": document.document_id,
+                "title": document.original_filename or Path(storage_key).name,
+                "creation_date": document.created_at,
                 "source_path": storage_key,
                 "storage_key": storage_key,
-                "sha256": file_record.sha256,
+                "sha256": document.sha256,
                 "source_type": "pdf",
             }
         )

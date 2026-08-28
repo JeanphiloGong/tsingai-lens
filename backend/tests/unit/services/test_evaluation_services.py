@@ -13,19 +13,16 @@ from application.evaluation.finding_feedback_service import (
 )
 from domain.core import (
     Finding,
-    MeasurementResult,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
-    PaperSkim,
+    PaperResearchMap,
     PaperStudyDisposition,
+    PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.core.paper_fact import PaperFactSet
 from domain.evaluation import FindingCuration, FindingFeedback
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.objective_repository import MemoryObjectiveRepository
-from tests.support.comparison_repository import MemoryComparisonRepository
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 
 pytestmark = pytest.mark.anyio
@@ -40,16 +37,18 @@ _TEMPERATURE_STRENGTH_RELATIONSHIP_ID = (
     "relationship-doc-1-temperature-strength"
 )
 _TEMPERATURE_STRENGTH_STUDY_ID = "study-doc-1-temperature-strength"
+_DOC_1_INPUT = PreparedDocumentInput(
+    document_id="doc-1",
+    preparation_fingerprint="fingerprint-doc-1",
+)
 
 
 class FakeCollectionService:
     def __init__(self, existing: set[str] | None = None) -> None:
         self.existing = existing or {"col-gold"}
-        self.files_by_collection = {
+        self.documents_by_collection = {
             "col-gold": [
                 {
-                    "file_id": "file-1",
-                    "source_document_id": "doc-1",
                     "document_id": "doc-1",
                     "original_filename": "paper-1.pdf",
                     "stored_filename": "paper-1.pdf",
@@ -61,30 +60,10 @@ class FakeCollectionService:
     async def get_collection(self, collection_id: str) -> dict:
         if collection_id not in self.existing:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return {"collection_id": collection_id, "name": "Gold collection"}
-
-    async def list_files(self, collection_id: str) -> list[dict]:
-        await self.get_collection(collection_id)
-        return list(self.files_by_collection.get(collection_id, []))
-
-    async def get_import_manifest(self, collection_id: str) -> dict:
-        await self.get_collection(collection_id)
         return {
-            "schema_version": 1,
             "collection_id": collection_id,
-            "handoffs": [],
-            "imports": [
-                {
-                    "documents": [
-                        {
-                            "source_document_id": "doc-1",
-                            "original_filename": "paper-1.pdf",
-                            "stored_filename": "paper-1.pdf",
-                            "storage_key": "col-gold/input/paper-1.pdf",
-                        }
-                    ]
-                }
-            ],
+            "name": "Gold collection",
+            "documents": list(self.documents_by_collection.get(collection_id, [])),
         }
 
 
@@ -287,7 +266,7 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
             "rank": 1,
         }
     )
-    skim = PaperSkim.from_mapping(
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "doc-1",
             "doc_role": "experimental",
@@ -322,10 +301,9 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
     )
     await repository.replace(
         "col-gold",
-        "build_test",
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
                 PaperStudyDisposition.from_mapping(
@@ -343,6 +321,7 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
     _, analysis = await repository.queue_analysis(
         "col-gold",
         "obj-1",
+        document_inputs=(_DOC_1_INPUT,),
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={},
@@ -468,9 +447,7 @@ def _prediction_snapshot_service(
     return (
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
-            paper_fact_repository=MemoryPaperFactRepository(),
             objective_repository=objective_repository,
-            comparison_repository=MemoryComparisonRepository(),
             evaluation_repository=evaluation_repository,
         ),
         evaluation_repository,
@@ -531,7 +508,7 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
             "rank": 1,
         }
     )
-    skim = PaperSkim.from_mapping(
+    skim = PaperResearchMap.from_mapping(
         {
             "document_id": "doc-1",
             "doc_role": "experimental",
@@ -568,7 +545,7 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
         "col-gold",
         ObjectiveFactSet(
             research_objectives_ready=True,
-            paper_skims=(skim,),
+            document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
                 PaperStudyDisposition.from_mapping(

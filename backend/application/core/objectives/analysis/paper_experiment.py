@@ -12,9 +12,11 @@ from application.core.objectives import property_matching
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
-from domain.core import PaperSkim, ResearchObjective
+from domain.core import ResearchObjective
 
 logger = logging.getLogger(__name__)
+
+PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v1"
 
 _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
@@ -55,14 +57,9 @@ def reconstruct_paper_experiments(
     *,
     collection_id: str,
     source_facts: tuple[ExtractedEvidenceDraft, ...],
-    paper_skims: tuple[PaperSkim, ...],
     objectives: tuple[ResearchObjective, ...],
 ) -> tuple[ExtractedEvidenceDraft, ...]:
-    enriched = _enrich_objective_scope_context(
-        source_facts,
-        paper_skims=paper_skims,
-    )
-    bound = _bind_objective_result_process_context(enriched)
+    bound = _bind_objective_result_process_context(source_facts)
     paper_facts = _merge_duplicate_paper_facts(bound)
     comparisons = _build_objective_pairwise_comparison_units(
         paper_facts,
@@ -75,38 +72,6 @@ def reconstruct_paper_experiments(
             len(comparisons),
         )
     return (*paper_facts, *comparisons)
-
-
-def _enrich_objective_scope_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
-    *,
-    paper_skims: tuple[PaperSkim, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
-    skim_by_document_id = {item.document_id: item for item in paper_skims}
-    enriched: list[ExtractedEvidenceDraft] = []
-    for unit in units:
-        if unit.selection_status == "failed":
-            enriched.append(unit)
-            continue
-        paper_skim = skim_by_document_id.get(unit.document_id)
-        context = unit.scientific_context.to_record()
-        if not context["material"]:
-            material_values = _paper_skim_source_values(
-                paper_skim,
-                unit=unit,
-                field_name="material_scope",
-            )
-            context["material"] = [
-                {"name": "material", "value": value, "unit": None}
-                for value in material_values
-            ]
-        if context == unit.scientific_context.to_record():
-            enriched.append(unit)
-            continue
-        record = unit.to_record()
-        record["scientific_context"] = context
-        enriched.append(ExtractedEvidenceDraft.from_mapping(record))
-    return tuple(enriched)
 
 
 def _dedupe_objective_source_refs(
@@ -1481,39 +1446,3 @@ def _coerce_number(value: Any) -> float | None:
     if match is None:
         return None
     return float(match.group(0))
-
-
-def _paper_skim_source_values(
-    paper_skim: PaperSkim | None,
-    *,
-    unit: ExtractedEvidenceDraft,
-    field_name: str,
-) -> tuple[str, ...]:
-    if paper_skim is None:
-        return ()
-    unit_source_refs = {
-        (unit.source_kind or "", unit.source_ref or ""),
-        *(
-            (
-                str(item.get("source_kind") or ""),
-                str(item.get("source_ref") or ""),
-            )
-            for item in unit.source_refs
-        ),
-    }
-    values: list[str] = []
-    seen: set[str] = set()
-    for study in paper_skim.studies:
-        if study.claim_scope != "current_work" or not any(
-            (source_ref.source_kind, source_ref.source_ref) in unit_source_refs
-            for relationship in study.relationships
-            for source_ref in relationship.source_refs
-        ):
-            continue
-        for value in getattr(study, field_name):
-            text = str(value or "").strip()
-            key = text.casefold()
-            if text and key not in seen:
-                seen.add(key)
-                values.append(text)
-    return tuple(values)

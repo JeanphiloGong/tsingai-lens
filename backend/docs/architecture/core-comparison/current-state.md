@@ -2,30 +2,29 @@
 
 ## Summary
 
-Comparable-result and comparison-row records remain only for offline evaluation
-and extraction-trace export. They are not maintained browser resources.
+Comparable-result and comparison-row persistence and projection code have been
+removed. They are not maintained runtime, evaluation, or browser resources.
 
 The product chain is:
 
 `Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`
 
-## Retained Offline Artifact Chain
+## Retired Artifact Chain
 
 ### Semantic Truth
 
 - `comparable_results`
-  reusable `ComparableResult` records for one collection build output
+  Former reusable normalized comparison records.
 
 ### Scope Truth
 
 - `collection_comparable_results`
-  current collection-scoped overlays with assessment and policy metadata
+  Former Collection overlays over comparable results.
 
 ### Deterministic Projection
 
 - `comparison_rows`
-  offline projection regenerated from semantic and scope artifacts; it is not
-  persisted
+  Former deterministic row projection.
 
 ## Product Read Path
 
@@ -36,29 +35,23 @@ comparison-semantics, or graph endpoint is registered.
 
 ## Current Ownership In Code
 
-- [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
-  accepted dataclasses, ids, assessments, and reassessment logic
-- [`../../../domain/core/comparison_assembly.py`](../../../domain/core/comparison_assembly.py)
-  materialization of comparable-result and scope artifacts
-- [`../../../domain/core/comparison_projection.py`](../../../domain/core/comparison_projection.py)
-  row projection from semantic artifacts
-- [`../../../infra/persistence/postgres/comparison_repository.py`](../../../infra/persistence/postgres/comparison_repository.py)
-  retained storage adapter used by offline evaluation and export tooling
-- [`../../../application/derived/core_fact_projection.py`](../../../application/derived/core_fact_projection.py)
-  retained legacy projection used by extraction-trace export tooling
+Objective analysis now owns comparison directly through its Evidence and
+Finding modules. The retired comparison domain helpers may remain as private
+scientific utilities only where directly imported by Objective analysis; there
+is no comparison repository or Core-fact projection service.
 
 ## Current Contract Notes
 
 - public API authority is [`../../specs/api.md`](../../specs/api.md)
-- workspace readiness is based on Source documents, DocumentProfiles, and
-  Objective candidates
+- readiness is per Document; selected ready Documents feed Objective discovery
+  and analysis
 - comparison records are not task artifacts or browser readiness signals
 
 ## Remaining Guardrails
 
 - do not reintroduce retired product routes or browser clients
 - do not rebuild Findings from comparison records
-- keep offline evaluation ownership isolated from the product read path
+- keep evaluation snapshots tied to published Objective Findings and Evidence
 
 ## Related Docs
 

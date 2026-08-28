@@ -3,168 +3,169 @@ import { requestJson } from './api';
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'partial_success' | 'failed';
 
 export type TaskStage =
-  | 'queued'
-  | 'source_artifacts_started'
-  | 'source_artifacts_completed'
-  | 'document_profiles_started'
-  | 'document_profiles_completed'
-  | 'objective_candidates_started'
-  | 'objective_candidates_completed'
-  | 'objective_paper_skim_started'
-  | 'objective_discovery_started'
-  | 'artifacts_ready'
-  | 'failed';
+	| 'queued'
+	| 'source_parsing'
+	| 'document_profile'
+	| 'paper_map'
+	| 'ready'
+	| 'failed';
 
 export type TaskProgressDetail = {
-  phase: string;
-  current?: number | null;
-  total?: number | null;
-  unit?: string | null;
-  message?: string | null;
-  active_document_id?: string | null;
-  active_objective_id?: string | null;
+	phase: string;
+	current?: number | null;
+	total?: number | null;
+	unit?: string | null;
+	message?: string | null;
+	active_document_id?: string | null;
+	active_objective_id?: string | null;
 };
 
 export type Task = {
-  task_id: string;
-  collection_id: string;
-  task_type: string;
-  status: TaskStatus;
-  current_stage: TaskStage;
-  progress_percent: number;
-  progress_detail?: TaskProgressDetail | null;
-  output_path?: string | null;
-  errors: string[];
-  warnings: string[];
-  created_at: string;
-  updated_at: string;
-  started_at?: string | null;
-  finished_at?: string | null;
+	task_id: string;
+	collection_id: string;
+	document_id: string | null;
+	task_type: string;
+	mode: string;
+	input_fingerprint: string | null;
+	status: TaskStatus;
+	current_stage: TaskStage;
+	progress_percent: number;
+	progress_detail?: TaskProgressDetail | null;
+	output_path?: string | null;
+	errors: string[];
+	warnings: string[];
+	created_at: string;
+	updated_at: string;
+	started_at?: string | null;
+	finished_at?: string | null;
 };
 
 export type TaskListResponse = {
-  collection_id: string;
-  count: number;
-  items: Task[];
-};
-
-export type CreateBuildTaskPayload = {
-  additionalContext?: Record<string, unknown> | null;
+	collection_id: string;
+	count: number;
+	items: Task[];
 };
 
 function normalizeTask(item: unknown): Task | null {
-  if (!item || typeof item !== 'object') return null;
-  const record = item as Record<string, unknown>;
-  const taskId = String(record.task_id ?? '').trim();
-  const collectionId = String(record.collection_id ?? '').trim();
-  if (!taskId || !collectionId) return null;
+	if (!item || typeof item !== 'object') return null;
+	const record = item as Record<string, unknown>;
+	const taskId = String(record.task_id ?? '').trim();
+	const collectionId = String(record.collection_id ?? '').trim();
+	if (!taskId || !collectionId) return null;
 
-  return {
-    task_id: taskId,
-    collection_id: collectionId,
-    task_type: String(record.task_type ?? 'build'),
-    status: String(record.status ?? 'queued') as TaskStatus,
-    current_stage: String(record.current_stage ?? 'queued') as TaskStage,
-    progress_percent:
-      typeof record.progress_percent === 'number'
-        ? record.progress_percent
-        : Number(record.progress_percent ?? 0),
-    progress_detail: normalizeProgressDetail(record.progress_detail),
-    output_path: typeof record.output_path === 'string' ? record.output_path : null,
-    errors: Array.isArray(record.errors) ? record.errors.map((item) => String(item)) : [],
-    warnings: Array.isArray(record.warnings) ? record.warnings.map((item) => String(item)) : [],
-    created_at: String(record.created_at ?? ''),
-    updated_at: String(record.updated_at ?? ''),
-    started_at: typeof record.started_at === 'string' ? record.started_at : null,
-    finished_at: typeof record.finished_at === 'string' ? record.finished_at : null
-  };
+	return {
+		task_id: taskId,
+		collection_id: collectionId,
+		document_id: typeof record.document_id === 'string' ? record.document_id : null,
+		task_type: String(record.task_type ?? 'document_preparation'),
+		mode: String(record.mode ?? 'standard'),
+		input_fingerprint:
+			typeof record.input_fingerprint === 'string' ? record.input_fingerprint : null,
+		status: String(record.status ?? 'queued') as TaskStatus,
+		current_stage: String(record.current_stage ?? 'queued') as TaskStage,
+		progress_percent:
+			typeof record.progress_percent === 'number'
+				? record.progress_percent
+				: Number(record.progress_percent ?? 0),
+		progress_detail: normalizeProgressDetail(record.progress_detail),
+		output_path: typeof record.output_path === 'string' ? record.output_path : null,
+		errors: Array.isArray(record.errors) ? record.errors.map((item) => String(item)) : [],
+		warnings: Array.isArray(record.warnings) ? record.warnings.map((item) => String(item)) : [],
+		created_at: String(record.created_at ?? ''),
+		updated_at: String(record.updated_at ?? ''),
+		started_at: typeof record.started_at === 'string' ? record.started_at : null,
+		finished_at: typeof record.finished_at === 'string' ? record.finished_at : null
+	};
 }
 
 function normalizeProgressDetail(value: unknown): TaskProgressDetail | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const phase = String(record.phase ?? '').trim();
-  if (!phase) return null;
-  return {
-    phase,
-    current: normalizeOptionalNumber(record.current),
-    total: normalizeOptionalNumber(record.total),
-    unit: typeof record.unit === 'string' ? record.unit : null,
-    message: typeof record.message === 'string' ? record.message : null,
-    active_document_id:
-      typeof record.active_document_id === 'string' ? record.active_document_id : null,
-    active_objective_id:
-      typeof record.active_objective_id === 'string' ? record.active_objective_id : null
-  };
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	const phase = String(record.phase ?? '').trim();
+	if (!phase) return null;
+	return {
+		phase,
+		current: normalizeOptionalNumber(record.current),
+		total: normalizeOptionalNumber(record.total),
+		unit: typeof record.unit === 'string' ? record.unit : null,
+		message: typeof record.message === 'string' ? record.message : null,
+		active_document_id:
+			typeof record.active_document_id === 'string' ? record.active_document_id : null,
+		active_objective_id:
+			typeof record.active_objective_id === 'string' ? record.active_objective_id : null
+	};
 }
 
 function normalizeOptionalNumber(value: unknown) {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+	if (value === null || value === undefined || value === '') return null;
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function isTaskActive(task: Task | null | undefined) {
-  if (!task) return false;
-  return task.status === 'queued' || task.status === 'running';
+	if (!task) return false;
+	return task.status === 'queued' || task.status === 'running';
 }
 
 export function isTaskFinished(task: Task | null | undefined) {
-  if (!task) return false;
-  return task.status === 'completed' || task.status === 'partial_success' || task.status === 'failed';
+	if (!task) return false;
+	return (
+		task.status === 'completed' || task.status === 'partial_success' || task.status === 'failed'
+	);
 }
 
-export async function createBuildTask(collectionId: string, payload: CreateBuildTaskPayload = {}) {
-  const body: Record<string, unknown> = {};
+export async function prepareCollectionDocument(
+	collectionId: string,
+	documentId: string,
+	mode: 'standard' | 'fast' = 'standard'
+) {
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/preparation`,
+		{
+			method: 'POST',
+			body: JSON.stringify({ mode })
+		}
+	);
 
-  if (payload.additionalContext !== undefined) {
-    body.additional_context = payload.additionalContext ?? null;
-  }
-
-  const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/tasks/build`, {
-    method: 'POST',
-    body: JSON.stringify(body)
-  });
-
-  const task = normalizeTask(data);
-  if (!task) {
-    throw new Error('Task response is missing task_id.');
-  }
-  return task;
+	const task = normalizeTask(data);
+	if (!task) {
+		throw new Error('Task response is missing task_id.');
+	}
+	return task;
 }
 
 export async function getTask(taskId: string) {
-  const data = await requestJson(`/tasks/${encodeURIComponent(taskId)}`, { method: 'GET' });
-  const task = normalizeTask(data);
-  if (!task) {
-    throw new Error('Task response is missing task_id.');
-  }
-  return task;
+	const data = await requestJson(`/tasks/${encodeURIComponent(taskId)}`, { method: 'GET' });
+	const task = normalizeTask(data);
+	if (!task) {
+		throw new Error('Task response is missing task_id.');
+	}
+	return task;
 }
 
 export async function listCollectionTasks(
-  collectionId: string,
-  options: { status?: string; limit?: number; offset?: number } = {}
+	collectionId: string,
+	options: { status?: string; limit?: number; offset?: number } = {}
 ) {
-  const params = new URLSearchParams();
-  if (options.status?.trim()) params.set('status', options.status.trim());
-  params.set('limit', String(options.limit ?? 20));
-  params.set('offset', String(options.offset ?? 0));
+	const params = new URLSearchParams();
+	if (options.status?.trim()) params.set('status', options.status.trim());
+	params.set('limit', String(options.limit ?? 20));
+	params.set('offset', String(options.offset ?? 0));
 
-  const data = await requestJson(
-    `/collections/${encodeURIComponent(collectionId)}/tasks?${params.toString()}`,
-    { method: 'GET' }
-  );
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/tasks?${params.toString()}`,
+		{ method: 'GET' }
+	);
 
-  const record = data as Record<string, unknown>;
-  const items = Array.isArray(record?.items)
-    ? record.items.map((item) => normalizeTask(item)).filter((item): item is Task => item !== null)
-    : [];
+	const record = data as Record<string, unknown>;
+	const items = Array.isArray(record?.items)
+		? record.items.map((item) => normalizeTask(item)).filter((item): item is Task => item !== null)
+		: [];
 
-  return {
-    collection_id: String(record?.collection_id ?? collectionId),
-    count: typeof record?.count === 'number' ? record.count : items.length,
-    items
-  } satisfies TaskListResponse;
+	return {
+		collection_id: String(record?.collection_id ?? collectionId),
+		count: typeof record?.count === 'number' ? record.count : items.length,
+		items
+	} satisfies TaskListResponse;
 }

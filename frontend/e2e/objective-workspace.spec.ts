@@ -35,7 +35,7 @@ function analysis(status: 'succeeded' | 'failed', version: number) {
 		collection_id: collectionId,
 		objective_id: objectiveId,
 		analysis_version: version,
-		source_build_id: 'build-1',
+		document_inputs: [{ document_id: documentId, preparation_fingerprint: 'fingerprint-doc-1' }],
 		pipeline_version: 'objective-analysis.v2',
 		model_name: 'model-1',
 		prompt_versions: {},
@@ -283,59 +283,8 @@ async function mockApis(page: Page) {
 					id: collectionId,
 					name: 'LPBF 316L objective set',
 					status: 'ready',
-					paper_count: 1
-				})
-			);
-		}
-		if (path === `/api/v1/collections/${collectionId}/workspace`) {
-			return route.fulfill(
-				json({
-					collection: {
-						collection_id: collectionId,
-						id: collectionId,
-						name: 'LPBF 316L objective set',
-						status: 'ready'
-					},
-					file_count: 1,
-					status_summary: 'ready',
-					workflow: {
-						documents: { status: 'ready', detail: 'Document profiles are available.' },
-						objectives: { status: 'ready', detail: 'Objective discovery is complete.' }
-					},
-					document_summary: {
-						total_documents: 1,
-						by_doc_type: { experimental: 1 }
-					},
-					artifacts: {
-						source_documents_ready: true,
-						document_profiles_ready: true,
-						objective_candidates_ready: true,
-						updated_at: '2026-05-14T00:00:00Z'
-					},
-					latest_task: {
-						task_id: 'task-2',
-						collection_id: collectionId,
-						task_type: 'build',
-						status: 'partial_success',
-						current_stage: 'artifacts_ready',
-						progress_percent: 100,
-						errors: ['A later build failed.'],
-						warnings: [],
-						created_at: null,
-						updated_at: null
-					},
-					recent_tasks: [],
-					capabilities: {
-						can_view_documents: true,
-						can_view_objectives: true,
-						can_view_comparisons: true
-					},
-					links: {
-						workspace: `/collections/${collectionId}`,
-						documents: `/collections/${collectionId}/documents`,
-						objectives: `/collections/${collectionId}/objectives`,
-						comparisons: `/collections/${collectionId}/comparisons`
-					}
+					paper_count: 1,
+					documents: [{ document_id: documentId, status: 'ready' }]
 				})
 			);
 		}

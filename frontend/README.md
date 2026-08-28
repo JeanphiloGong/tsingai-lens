@@ -1,8 +1,8 @@
 # TsingAI-Lens Frontend
 
 The frontend is a SvelteKit browser application for collection creation,
-workspace browsing, file upload, task polling, Objective analysis, published
-Finding comparison, Objective Evidence Map inspection, and exact Source
+independent paper preparation, ready-paper selection, Objective discovery and
+analysis, published Finding comparison, Objective Evidence Map inspection, and exact Source
 verification through the same-origin `/api/*` and `/api/v1/*` contract.
 
 This file is the frontend module entry page. Formal frontend docs live in
@@ -17,7 +17,7 @@ to code.
   Global Research Agent launcher; outside a collection it asks the user to
   select the collection that defines the research workspace.
 - `src/routes/collections/`
-  Collection workspace route family
+  Collection paper, Objective, Finding, Evidence Map, and Source route family
 - `src/routes/_shared/`
   Shared browser-side API clients, i18n, and route support code
 - `docs/frontend-plan.md`
@@ -32,7 +32,7 @@ to code.
 - [`docs/research-agent-chat.md`](docs/research-agent-chat.md)
   Collection-bound Research Agent Chat and approval presentation contract
 - [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
-  Maintained Lens v1 collection interface for workspace, Objectives, published
+  Maintained Lens v1 collection interface for papers, Objectives, published
   Findings, and Source documents
 - [`src/routes/collections/collection-ui-restructure-proposal.md`](src/routes/collections/collection-ui-restructure-proposal.md)
   Narrow proposal for collection UI information architecture, state machine,
@@ -40,7 +40,7 @@ to code.
 - [`src/routes/_shared/README.md`](src/routes/_shared/README.md)
   Shared route helper ownership and boundaries
 - [`src/routes/collections/README.md`](src/routes/collections/README.md)
-  Collection workspace route ownership and boundaries
+  Collection route ownership and boundaries
 
 ## Local Development
 
@@ -66,8 +66,13 @@ npm run test:e2e
 
 - Browser requests must stay on same-origin `/api/*` and `/api/v1/*`.
 - Research Agent Chat requires a collection but does not wait for Objective
-  discovery or collection analysis to finish. Data-backed capabilities report
+  discovery or every paper preparation to finish. Data-backed capabilities report
   unavailable collection artifacts explicitly while processing continues.
+- Upload and per-paper preparation remain available independently. Ready papers
+  may be selected for Objective discovery or analysis while other papers are
+  processing or failed.
+- Objective discovery and analysis send exact `document_ids`; the browser never
+  infers a hidden all-Collection scope.
 - Shared API helpers live under `src/routes/_shared/`.
 - The collection Evidence Map is a read-only projection of one published
   Objective analysis. It does not use the retired collection-wide Graph API or

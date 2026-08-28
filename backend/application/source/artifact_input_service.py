@@ -14,11 +14,9 @@ SourceRecord = dict[str, Any]
 async def load_collection_inputs(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> tuple[tuple[SourceRecord, ...], tuple[SourceRecord, ...] | None]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository, build_id=build_id
+        collection_id, source_artifact_repository
     )
     documents = _records(document.to_record() for document in source_documents)
     text_units = _records(
@@ -32,11 +30,9 @@ async def load_collection_inputs(
 async def load_blocks_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository, build_id=build_id
+        collection_id, source_artifact_repository
     )
     return _records(
         block.to_record()
@@ -48,11 +44,9 @@ async def load_blocks_artifact(
 async def load_table_rows_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository, build_id=build_id
+        collection_id, source_artifact_repository
     )
     return _records(
         row.to_record()
@@ -64,11 +58,9 @@ async def load_table_rows_artifact(
 async def load_table_cells_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository, build_id=build_id
+        collection_id, source_artifact_repository
     )
     return _records(
         cell.to_record()
@@ -90,11 +82,9 @@ async def load_figures_artifact(
 async def load_tables_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository, build_id=build_id
+        collection_id, source_artifact_repository
     )
     return _records(
         table.to_record()
@@ -107,36 +97,19 @@ async def load_document_tree(
     collection_id: str,
     document_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> SourceDocumentTree:
-    if build_id is None:
-        return await source_artifact_repository.read_document_tree(
-            collection_id,
-            document_id,
-        )
     return await source_artifact_repository.read_document_tree(
         collection_id,
         document_id,
-        build_id=build_id,
     )
 
 
 async def _load_source_documents(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
-    *,
-    build_id: str | None = None,
 ) -> tuple[SourceDocument, ...]:
-    documents = (
-        await source_artifact_repository.read_collection_documents(
-            collection_id,
-            build_id=build_id,
-        )
-        if build_id is not None
-        else await source_artifact_repository.read_collection_documents(
-            collection_id
-        )
+    documents = await source_artifact_repository.read_collection_documents(
+        collection_id
     )
     if not documents:
         raise FileNotFoundError(f"source artifacts not ready: {collection_id}")

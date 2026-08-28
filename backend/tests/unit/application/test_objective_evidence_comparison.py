@@ -21,7 +21,7 @@ from application.core.objectives.analysis.source_extraction import (
     extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from domain.core import ObjectiveAnalysis, ObjectiveEvidence
+from domain.core import ObjectiveAnalysis, ObjectiveEvidence, PreparedDocumentInput
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -742,7 +742,8 @@ def test_analysis_contributions_report_each_paper_evidence_disposition():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -865,7 +866,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition():
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
-        paper_skims=(),
+        paper_maps=(),
         frames=frames,
         routes=routes,
         evidence_records=evidence_records,
@@ -2042,7 +2043,8 @@ def test_table_material_and_cell_locators_bound_comparison_source():
         collection_id="col-test",
         objective_id="obj-density",
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -2078,7 +2080,8 @@ def test_analysis_evidence_preserves_distinct_claims_from_one_table_source():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -2359,7 +2362,8 @@ def test_analysis_evidence_uses_confirmed_objective_axis_names():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -2468,7 +2472,8 @@ def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -2559,7 +2564,8 @@ def test_analysis_evidence_marks_conflicting_axis_aliases_failed():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -2646,7 +2652,8 @@ def test_analysis_evidence_rejects_draft_without_resolvable_source():
         collection_id="col-test",
         objective_id=objective.objective_id,
         analysis_version=1,
-        source_build_id="build-1",
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"),),
+        total_document_count=1,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
@@ -3186,7 +3193,6 @@ def test_paper_reconstruction_merges_duplicate_reports_of_one_scientific_fact():
                 },
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 
@@ -3237,7 +3243,6 @@ def test_paper_reconstruction_does_not_bridge_conflicting_context_with_unknown()
                 {},
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 
@@ -3271,7 +3276,6 @@ def test_paper_reconstruction_requires_one_context_to_enrich_the_other():
                 },
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 
@@ -3298,7 +3302,6 @@ def test_paper_reconstruction_preserves_distinct_reported_values():
                 result_value="10",
             ),
         ),
-        paper_skims=(),
         objectives=(),
     )
 

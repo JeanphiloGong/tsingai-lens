@@ -18,8 +18,8 @@ projections cannot become a parallel conclusion identity.
 - Objective analysis owns scientific comparison and uncertainty.
 - Finding owns the published conclusion.
 - ObjectiveEvidence owns versioned support and Source traceback.
-- Legacy comparison records may remain in offline evaluation storage but are
-  not browser resources.
+- Legacy comparison records are removed rather than retained as a second
+  persistence model.
 
 ## Object Responsibilities
 
@@ -61,10 +61,8 @@ It owns:
 
 ### Row Projection
 
-`ComparisonRowRecord` remains for offline evaluation and export projections.
-
-It may be rebuilt from semantic and scope artifacts. It must not become a
-product conclusion or browser contract.
+`ComparisonRowRecord` is retired. Published Finding and ObjectiveEvidence
+records are the evaluation and export inputs.
 
 ## Identity Rules
 
@@ -79,8 +77,7 @@ product conclusion or browser contract.
 
 - domain invariants and comparison dataclasses stay in
   [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
-- offline comparison persistence remains isolated in
-  [`../../../infra/persistence/postgres/comparison_repository.py`](../../../infra/persistence/postgres/comparison_repository.py)
+- no comparison repository or compatibility read remains
 - current HTTP resources are defined only by
   [`../../specs/api.md`](../../specs/api.md)
 

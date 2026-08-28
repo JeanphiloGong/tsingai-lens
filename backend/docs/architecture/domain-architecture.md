@@ -2,289 +2,91 @@
 
 ## Purpose
 
-This document defines the target backend-local code organization for Lens v1
-implementation work.
+This document records the implemented backend domain boundaries. Code follows
+the research process rather than a collection-wide technical build graph.
 
-It answers:
+## Domain Map
 
-- how backend code should be grouped by business domain
-- what responsibilities belong in each backend domain
-- how the current flat `application/` layout should migrate
+### Source
 
-It does not redefine the root product boundary or artifact contracts.
+Owns Collection membership and one paper's preparation:
 
-## Why Change
+- create, read, and delete Collections;
+- upload and list current Documents;
+- prepare one Document into Source, Profile, and Paper Map;
+- expose per-document task status and failure;
+- provide exact Source content for verification.
 
-The current backend shape is workable for a small surface, but it is too flat
-for the Lens v1 direction.
+### Core
 
-The main problems are:
+Owns scientific records and decisions:
 
-- `application/` mixes collection lifecycle, task orchestration, workspace
-  assembly, and graph access in one flat namespace
-- transport-facing concerns and business-domain concerns are not clearly
-  separated
-- frontend-facing collection workflow semantics are not clearly mirrored in code
-  ownership
+- document triage and Paper Map construction;
+- Objective discovery from an explicit ready-paper selection;
+- Objective confirmation and versioned analysis;
+- per-paper framing, Source routing, extraction, and experiment binding;
+- grounded Evidence, comparability, and cross-paper Findings.
 
-For Lens v1, backend code should reflect the actual business loop:
-
-1. collections enter
-2. indexing runs
-3. documents are profiled
-4. evidence is extracted
-5. comparisons are generated
-6. graph remains a secondary derived surface
-
-## Architecture Rules
-
-- group code by business domain first, not by generic technical label
-- keep HTTP parsing thin and close to route ownership
-- keep use-case orchestration inside domain-local application packages
-- keep shared artifact contracts in root docs, not copied into ad hoc code
-- do not introduce a catch-all `services/` layer as a second junk drawer
-
-## Target Domain Map
-
-### Collections
-
-Owns collection lifecycle and file membership:
-
-- create collection
-- list collections
-- read collection metadata
-- upload and list files
-- delete collection
-
-### Indexing
-
-Owns background execution and task progression:
-
-- start indexing task
-- persist task status
-- expose task history
-- coordinate GraphRAG and parsing post-processing
-
-### Workspace
-
-Owns the collection-facing summary read model:
-
-- workspace overview
-- workflow readiness summary
-- collection-level warnings
-- navigation links into profiles, evidence, comparisons, and graph
+Paper Maps are scope/navigation artifacts. Only Objective analysis may publish
+Evidence and Findings.
 
 ### Chat
 
-Owns collection-bound Research Agent state and capability trajectory:
+Owns Research Agent sessions, ordered messages, typed capability calls,
+structured results, and exact approval decisions. It reads and invokes Source
+or Core application services; it does not persist another scientific model.
 
-- Chat session identity and ownership
-- user, assistant, and tool messages
-- typed capability calls and structured results
-- exact write-approval decisions
-- user-navigable resource references
+### Goal
 
-This domain models Agent interaction only. It may read Core records through
-bounded capabilities, but it must not become a second scientific fact model.
+Owns initial research brief intake and Objective-scoped experiment plans. Intake
+may create an empty Collection, but it does not manufacture evidence.
 
-### Documents
+### Derived views
 
-Owns document-level profiling:
+Frontend comparison and Evidence Map routes read published Objective Findings
+and Evidence. They are projections, not alternate conclusion identities.
 
-- `document_profiles`
-- document type classification
-- collection-level profile rollups
-
-### Evidence
-
-Owns claim-centered evidence extraction and retrieval:
-
-- `evidence_cards`
-- evidence traceback
-- evidence filters and inspection
-
-### Comparisons
-
-Owns comparison-semantic substrate plus collection-facing comparison views:
-
-- `comparable_results`
-- `collection_comparable_results`
-- `comparison_rows` projection
-- comparability judgments
-- comparison warnings
-- collection comparison filtering and sorting
-
-### Graph
-
-Owns graph browsing and exports as a retained secondary surface.
-
-## Target Package Layout
-
-The target direction is:
+## Package Shape
 
 ```text
-backend/
-  controllers/
-    collections/
-      router.py
-      schemas.py
-    indexing/
-      router.py
-      schemas.py
-    workspace/
-      router.py
-      schemas.py
-    documents/
-      router.py
-      schemas.py
-    evidence/
-      router.py
-      schemas.py
-    comparisons/
-      router.py
-      schemas.py
-    graph/
-      router.py
-      schemas.py
-  application/
-    collections/
-    indexing/
-    workspace/
-    documents/
-    evidence/
-    comparisons/
-    graph/
-  domain/
-    collections/
-    indexing/
-    workspace/
-    documents/
-    evidence/
-    comparisons/
-  infra/
-    persistence/
-    ingestion/
-    graphrag/
+controllers/
+  source/       Collection, Document, preparation task, Source reference
+  core/         Document reads, Objectives, Findings, Evidence, review
+  chat/         Research Agent sessions and approval
+  goal/         intake and experiment plans
+
+application/
+  source/       current Document preparation and Source use cases
+  core/         scientific interpretation and Objective analysis
+  chat/         Agent loop and capability handlers
+  goal/         research brief and plan use cases
+
+domain/
+  source/       Collection, Document, Source, Task
+  core/         Profile, Paper Map, Objective, Evidence, Finding
+  chat/         trajectory and approval records
+
+infra/
+  source/       parsers and Source runtime
+  persistence/  explicit PostgreSQL and test-memory repositories
 ```
 
-This is a target architecture, not a requirement to rename every file in one
-large refactor.
+## Boundary Rules
 
-## Controller Boundary Rules
-
-Each controller package should own one business-facing HTTP surface.
-
-That means:
-
-- route declaration stays with the domain package
-- HTTP request parsing stays with the domain package
-- HTTP response schema modules stay with the same domain package
-- controllers should call one domain-local application service or orchestrator,
-  not stitch together multiple unrelated domains inline
-
-Examples:
-
-- workspace routes should not manually assemble task, artifact, and collection
-  state
-- comparison routes should not reimplement evidence normalization logic
-
-## Application Boundary Rules
-
-Each application domain package should own use-case orchestration for its
-domain.
-
-Examples:
-
-- `application/workspace/`
-  collection-facing summary assembly
-- `application/documents/`
-  document profiling generation and retrieval
-- `application/evidence/`
-  evidence card extraction and retrieval
-- `application/comparisons/`
-  comparable-result assembly, collection overlays, and row projection retrieval
-- `application/indexing/`
-  task kickoff and indexing orchestration
-
-Application packages may depend on shared infrastructure and on upstream domain
-artifacts, but they should not collapse back into one flat utility namespace.
-
-## Immediate File Migration Shape
-
-The current flat files can move into domain packages in waves.
-
-### Wave 1: No-behavior-change packaging
-
-Create domain folders and relocate current files without changing behavior:
-
-- `application/collection_service.py`
-  -> `application/collections/service.py`
-- `application/task_service.py`
-  -> `application/indexing/task_service.py`
-- `application/pipeline/collection_build/service.py`
-  owns collection build workflow entry and sequencing
-- `application/index_run_mode_service.py`
-  -> `application/indexing/run_mode_service.py`
-- `application/workspace_service.py`
-  -> `application/workspace/service.py`
-- `application/artifact_registry_service.py`
-  -> `application/workspace/artifact_registry_service.py`
-- `application/graph_service.py`
-  -> `application/graph/service.py`
-### Wave 2: Add the Lens v1 backbone packages
-
-Introduce new domain-local packages that match the agreed Lens v1 backbone:
-
-- `application/documents/`
-- `application/evidence/`
-- `application/comparisons/`
-
-These should be added before secondary graph surfaces expand.
-
-### Wave 3: Rewire controllers by domain
-
-Move flat controller modules into domain packages, for example:
-
-- `controllers/workspace.py`
-  -> `controllers/workspace/router.py`
-- `controllers/schemas/workspace.py`
-  -> `controllers/workspace/schemas.py`
-
-The same pattern should apply to collections, indexing tasks, graph, and query.
-
-## Migration Safety Rules
-
-- do not mix packaging refactors with new behavior in the same first-wave move
-- prefer compatibility re-export shims while imports are being updated
-- preserve route paths during packaging refactors
-- preserve existing tests while packages move
-- add new documents, evidence, and comparison behavior only after domain seams
-  exist
-
-## Priority Order
-
-The recommended backend order is:
-
-1. freeze the v1 API contract
-2. carve out domain packages without changing behavior
-3. remove retired branch-specific payload baggage from the main API
-4. add `documents` domain support for `document_profiles`
-5. add `evidence` domain support for `evidence_cards`
-6. add `comparisons` domain support for `ComparableResult`,
-   `CollectionComparableResult`, and row projection
-7. keep graph behind the evidence-first backbone
-
-## Relationship To Root Docs
-
-This backend-local architecture exists to implement, not redefine:
-
-- Lens mission and positioning
-- Lens v1 definition
-- Lens v1 architecture boundary
-- Lens core artifact contracts
+- Controllers call owning application services; they do not assemble scientific
+  state from repository internals.
+- Collection groups Documents but does not own preparation readiness.
+- Document preparation performs no Objective-specific Evidence extraction.
+- Objective discovery and analysis accept explicit ready `document_ids`.
+- Analysis freezes preparation fingerprints and rejects stale inputs.
+- Agent writes stop for exact user approval and then call the same application
+  service as the HTTP flow.
+- Technical retry state remains separate from scientific absence or uncertainty.
+- Do not add compatibility shims or generic service layers.
 
 ## Related Docs
 
 - [`overview.md`](overview.md)
-- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)
-- [`../../../docs/contracts/lens-core-artifact-contracts.md`](../../../docs/contracts/lens-core-artifact-contracts.md)
+- [`persistence-model.md`](persistence-model.md)
+- [`goal-core-source-layering.md`](goal-core-source-layering.md)
+- [`../specs/api.md`](../specs/api.md)

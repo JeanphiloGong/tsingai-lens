@@ -432,7 +432,6 @@ class PipelineRun:
     warnings: tuple[str, ...]
     stats: ExecutionStats
     timestamps: ExecutionTimestamps
-    output_build_id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -491,7 +490,6 @@ class PipelineRun:
         scope_id: str,
         node_dependencies: Mapping[str, Iterable[str]],
         created_at: str,
-        output_build_id: str | None = None,
     ) -> "PipelineRun":
         return cls(
             pipeline_name=pipeline_name,
@@ -508,7 +506,6 @@ class PipelineRun:
             warnings=(),
             stats=ExecutionStats(),
             timestamps=ExecutionTimestamps(created_at=created_at),
-            output_build_id=output_build_id,
         )
 
     @classmethod
@@ -541,7 +538,6 @@ class PipelineRun:
             warnings=tuple(str(item) for item in payload.get("warnings") or ()),
             stats=ExecutionStats.from_mapping(payload.get("stats")),
             timestamps=ExecutionTimestamps.from_mapping(payload.get("timestamps")),
-            output_build_id=_optional_text(payload.get("output_build_id")),
         )
 
     def node(self, name: str) -> PipelineNodeRun:
@@ -619,7 +615,6 @@ class PipelineRun:
             "warnings": list(self.warnings),
             "stats": self.stats.to_record(),
             "timestamps": self.timestamps.to_record(),
-            "output_build_id": self.output_build_id,
         }
 
 

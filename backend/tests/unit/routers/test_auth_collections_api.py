@@ -33,18 +33,20 @@ def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
     from tests.support.experiment_plan_repository import (
         InMemoryExperimentPlanRepository,
     )
-    from tests.support.objective_repository import MemoryObjectiveRepository
+    from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
     from tests.support.objective_review_repository import (
         InMemoryObjectiveReviewRepository,
     )
-    from tests.support.paper_fact_repository import MemoryPaperFactRepository
-    from tests.support.source_artifact_repository import (
+    from infra.persistence.memory import (
+        MemoryDocumentProfileRepository,
+        MemoryPaperMapRepository,
         MemorySourceArtifactRepository,
     )
 
     return {
         "source_artifact_repository": MemorySourceArtifactRepository(),
-        "paper_fact_repository": MemoryPaperFactRepository(),
+        "document_profile_repository": MemoryDocumentProfileRepository(),
+        "paper_map_repository": MemoryPaperMapRepository(),
         "objective_repository": MemoryObjectiveRepository(),
         "finding_review_repository": InMemoryObjectiveReviewRepository(),
         "experiment_plan_repository": InMemoryExperimentPlanRepository(),
@@ -60,7 +62,7 @@ def _build_client(
     collection_service,
 ) -> Iterator[TestClient]:
     from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryBuildRepository
+    from infra.persistence.memory import MemoryTaskRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -72,7 +74,7 @@ def _build_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryBuildRepository()),
+            task_service=TaskService(MemoryTaskRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -145,7 +147,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
     collection_service,
 ) -> None:
     from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryBuildRepository
+    from infra.persistence.memory import MemoryTaskRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
@@ -155,20 +157,19 @@ def test_app_lifespan_composes_one_shared_collection_service(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryBuildRepository()),
+            task_service=TaskService(MemoryTaskRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
         state = client.app.state
         collection_service = state.collection_service
         collection_consumers = (
-            state.build_pipeline_service,
+            state.document_preparation_service,
             state.document_markdown_service,
             state.document_profile_service,
             state.goal_service,
             state.chat_session_service,
             state.research_objective_service,
-            state.workspace_service,
             state.objective_analysis_service.research_objective_service,
         )
 
@@ -180,6 +181,47 @@ def test_app_lifespan_composes_one_shared_collection_service(
             spec.name
             for spec in state.chat_session_service.runner.capabilities.specs
         }
+
+
+def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+) -> None:
+    from application.core.objectives.analysis_service import ObjectiveAnalysisService
+    from application.source.document_preparation_service import (
+        DocumentPreparationService,
+    )
+    from application.source.task_service import TaskService
+    from infra.persistence.memory import MemoryTaskRepository
+    from main import create_app
+
+    preparation_recovery = AsyncMock(return_value=0)
+    analysis_recovery = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        DocumentPreparationService,
+        "recover_interrupted_tasks",
+        preparation_recovery,
+    )
+    monkeypatch.setattr(
+        ObjectiveAnalysisService,
+        "recover_interrupted_analyses",
+        analysis_recovery,
+    )
+    monkeypatch.setattr("config.DATA_DIR", tmp_path)
+    monkeypatch.setattr("main.DATA_DIR", tmp_path)
+
+    with TestClient(
+        create_app(
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+            task_service=TaskService(MemoryTaskRepository()),
+            **_app_repository_dependencies(auth_session_service),
+        )
+    ):
+        preparation_recovery.assert_awaited_once_with()
+        analysis_recovery.assert_awaited_once_with()
 
 
 def test_collections_api_requires_login(
@@ -310,7 +352,7 @@ def test_collection_source_archive_downloads_selected_original_files(
         collection_id = created.json()["collection_id"]
         source_pdf = _valid_pdf_bytes()
         upload = client.post(
-            f"/api/v1/collections/{collection_id}/files",
+            f"/api/v1/collections/{collection_id}/documents",
             files={
                 "file": (
                     "failed.pdf",
@@ -319,11 +361,11 @@ def test_collection_source_archive_downloads_selected_original_files(
                 )
             },
         )
-        file_id = upload.json()["file_id"]
+        document_id = upload.json()["document_id"]
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": [file_id]},
+            json={"document_ids": [document_id]},
         )
 
         assert response.status_code == 200
@@ -331,8 +373,8 @@ def test_collection_source_archive_downloads_selected_original_files(
         assert response.headers["content-disposition"].startswith("attachment;")
         with ZipFile(BytesIO(response.content)) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["files"][0]["file_id"] == file_id
-            assert archive.read(manifest["files"][0]["archive_path"]) == source_pdf
+            assert manifest["documents"][0]["document_id"] == document_id
+            assert archive.read(manifest["documents"][0]["archive_path"]) == source_pdf
 
 
 def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
@@ -355,7 +397,7 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
         collection_id = created.json()["collection_id"]
 
         response = client.post(
-            f"/api/v1/collections/{collection_id}/files",
+            f"/api/v1/collections/{collection_id}/documents",
             files={
                 "file": (
                     "truncated.pdf",
@@ -369,9 +411,9 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
         assert response.json()["detail"] == (
             "PDF is damaged, incomplete, password-protected, or otherwise unreadable."
         )
-        files = client.get(f"/api/v1/collections/{collection_id}/files")
-        assert files.status_code == 200
-        assert files.json()["items"] == []
+        documents = client.get(f"/api/v1/collections/{collection_id}/documents")
+        assert documents.status_code == 200
+        assert documents.json()["items"] == []
 
 
 def test_collection_source_archive_is_scoped_to_authenticated_owner(
@@ -404,7 +446,7 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": ["file_private"]},
+            json={"document_ids": ["doc_private"]},
         )
 
         assert response.status_code == 404
@@ -412,11 +454,11 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
 
 
 @pytest.mark.parametrize(
-    "file_ids",
+    "document_ids",
     [
         [],
-        ["file_same", "file_same"],
-        [f"file_{index}" for index in range(101)],
+        ["doc_same", "doc_same"],
+        [f"doc_{index}" for index in range(101)],
     ],
 )
 def test_collection_source_archive_rejects_invalid_file_selection(
@@ -424,7 +466,7 @@ def test_collection_source_archive_rejects_invalid_file_selection(
     tmp_path,
     auth_session_service,
     collection_service,
-    file_ids,
+    document_ids,
 ):
     with _build_client(
         monkeypatch,
@@ -440,7 +482,7 @@ def test_collection_source_archive_rejects_invalid_file_selection(
 
         response = client.post(
             f"/api/v1/collections/{created.json()['collection_id']}/source-archives",
-            json={"file_ids": file_ids},
+            json={"document_ids": document_ids},
         )
 
         assert response.status_code == 422
@@ -467,15 +509,15 @@ def test_collection_source_archive_returns_bounded_missing_file_error(
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": ["file_missing"]},
+            json={"document_ids": ["doc_missing"]},
         )
 
         assert response.status_code == 404
         assert response.json()["detail"] == {
-            "code": "collection_source_file_not_found",
-            "message": "A requested source file does not exist in this collection.",
+            "code": "collection_source_document_not_found",
+            "message": "A requested source document does not exist in this collection.",
             "collection_id": collection_id,
-            "file_id": "file_missing",
+            "document_id": "doc_missing",
         }
 
 
@@ -499,13 +541,13 @@ def test_collection_source_archive_returns_413_for_oversized_selection(
         )
         collection_id = created.json()["collection_id"]
         upload = client.post(
-            f"/api/v1/collections/{collection_id}/files",
+            f"/api/v1/collections/{collection_id}/documents",
             files={"file": ("paper.pdf", _valid_pdf_bytes(), "application/pdf")},
         )
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
-            json={"file_ids": [upload.json()["file_id"]]},
+            json={"document_ids": [upload.json()["document_id"]]},
         )
 
         assert response.status_code == 413

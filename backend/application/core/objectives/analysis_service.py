@@ -68,14 +68,30 @@ class ObjectiveAnalysisService:
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
 
+    async def recover_interrupted_analyses(self) -> int:
+        interrupted_count = (
+            await self.objective_repository.interrupt_active_analyses()
+        )
+        if interrupted_count:
+            logger.warning(
+                "Recovered interrupted Objective analyses count=%s",
+                interrupted_count,
+            )
+        return interrupted_count
+
     async def start_analysis(
         self,
         collection_id: str,
         objective_id: str,
+        document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         """Confirm, queue, and asynchronously dispatch one canonical analysis."""
 
-        payload = await self.queue_analysis(collection_id, objective_id)
+        payload = await self.queue_analysis(
+            collection_id,
+            objective_id,
+            document_ids,
+        )
         analysis = payload.get("analysis")
         if analysis is None or analysis.status != "queued":
             return payload
@@ -111,10 +127,22 @@ class ObjectiveAnalysisService:
         task.add_done_callback(self._log_unexpected_analysis_failure)
         return payload
 
-    async def queue_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
+    async def queue_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_ids: tuple[str, ...],
+    ) -> dict[str, Any]:
+        document_inputs = (
+            await self.research_objective_service.resolve_prepared_document_inputs(
+                collection_id,
+                document_ids,
+            )
+        )
         objective, analysis = await self.objective_repository.queue_analysis(
             collection_id,
             objective_id,
+            document_inputs=document_inputs,
             pipeline_version=_PIPELINE_VERSION,
             model_name=None,
             prompt_versions={},
@@ -269,7 +297,8 @@ class ObjectiveAnalysisService:
         )
         profiles = await (
             self.research_objective_service.document_profile_service.read_document_profiles(
-                collection_id, build_id=analysis.source_build_id
+                collection_id,
+                tuple(item.document_id for item in analysis.document_inputs),
             )
         )
         return build_objective_evidence_map(
@@ -348,6 +377,7 @@ class ObjectiveAnalysisService:
                 capture_llm_usage() as usage,
                 capture_analysis_diagnostics() as diagnostics,
             ):
+                artifacts: ObjectiveAnalysisArtifacts | None = None
                 try:
                     artifacts = (
                         await self.research_objective_service.generate_objective_analysis_artifacts(
@@ -367,7 +397,11 @@ class ObjectiveAnalysisService:
                                 (perf_counter() - usage_started_at) * 1000
                             )
                         ),
-                        model_name=usage.model_name,
+                        model_name=(
+                            usage.model_name
+                            or (artifacts.model_name if artifacts is not None else None)
+                            or claimed.model_name
+                        ),
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )
@@ -458,6 +492,8 @@ class ObjectiveAnalysisService:
             collection_id,
             objective.objective_id,
         )
+        if active is not None and active.error_code == "analysis_interrupted":
+            active = None
         findings = ()
         paper_contributions = ()
         warnings: list[str] = []

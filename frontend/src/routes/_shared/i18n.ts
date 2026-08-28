@@ -659,6 +659,41 @@ const translations: Record<Language, Translations> = {
 		overview: {
 			title: 'Collection Overview',
 			lead: 'Start here to check whether the collection is ready, where processing stands, and which research view to open next.',
+			currentModel: {
+				title: 'Prepare and select papers',
+				lead: 'Each paper is prepared independently. Select only ready papers for the research question you want to form.',
+				summaryLabel: 'Current document scope',
+				total: 'papers',
+				ready: 'ready',
+				processing: 'processing',
+				selected: 'selected',
+				actionsTitle: 'Research scope',
+				actionsLead:
+					'You can add papers at any time. Preparing one paper does not rebuild the others.',
+				uploadSelected: 'Upload {count}',
+				uploadComplete: '{count} paper(s) uploaded.',
+				preparePending: 'Prepare {count} pending',
+				preparationQueued: '{count} paper preparation task(s) queued.',
+				discover: 'Discover objectives from {count}',
+				discovering: 'Discovering objectives...',
+				discoveryComplete: 'Objective discovery completed with {count} candidate(s).',
+				documentsTitle: 'Papers in this collection',
+				documentsLead:
+					'Readiness belongs to each paper. A failed paper does not block selection of the ready papers.',
+				selectAllReady: 'Select all ready papers',
+				selectDocument: 'Select paper for research scope',
+				empty: 'Upload papers to start this collection.',
+				prepare: 'Prepare',
+				retry: 'Retry',
+				objectiveCount: '{count} objective candidate(s) available.',
+				status: {
+					stored: 'Stored',
+					uploaded: 'Stored',
+					processing: 'Preparing',
+					ready: 'Ready',
+					failed: 'Failed'
+				}
+			},
 			loading: 'Loading workspace...',
 			readinessLabels: {
 				empty: 'No documents',
@@ -1927,15 +1962,10 @@ const translations: Record<Language, Translations> = {
 			stageUnknown: 'Unknown',
 			stage: {
 				queued: 'Queued',
-				source_artifacts_started: 'Source Artifacts Started',
-				source_artifacts_completed: 'Source Artifacts Completed',
-				document_profiles_started: 'Document Profiles Started',
-				document_profiles_completed: 'Document Profiles Completed',
-				objective_candidates_started: 'Objective Candidates Started',
-				objective_candidates_completed: 'Objective Candidates Completed',
-				objective_paper_skim_started: 'Scanning Papers',
-				objective_discovery_started: 'Discovering Objectives',
-				artifacts_ready: 'Artifacts Ready',
+				source_parsing: 'Parsing Sources',
+				document_profile: 'Classifying Paper',
+				paper_map: 'Mapping Research Scope',
+				ready: 'Ready',
 				failed: 'Failed'
 			},
 			progressUnit: {
@@ -2948,6 +2978,39 @@ const translations: Record<Language, Translations> = {
 		overview: {
 			title: '集合概览',
 			lead: '先在这里判断集合是否准备好、处理流程走到哪一步，以及下一步该进入哪个研究视图。',
+			currentModel: {
+				title: '准备并选择论文',
+				lead: '每篇论文独立准备。只选择已经就绪、且确实属于当前研究问题范围的论文。',
+				summaryLabel: '当前文献范围',
+				total: '篇论文',
+				ready: '篇就绪',
+				processing: '篇处理中',
+				selected: '篇已选择',
+				actionsTitle: '研究范围',
+				actionsLead: '可以随时继续添加论文；准备一篇论文不会重新处理其他论文。',
+				uploadSelected: '上传 {count} 篇',
+				uploadComplete: '已上传 {count} 篇论文。',
+				preparePending: '准备 {count} 篇待处理论文',
+				preparationQueued: '已启动 {count} 个论文准备任务。',
+				discover: '从 {count} 篇论文发现研究目标',
+				discovering: '正在发现研究目标...',
+				discoveryComplete: '研究目标发现完成，得到 {count} 个候选。',
+				documentsTitle: '集合中的论文',
+				documentsLead: '就绪状态属于每篇论文；一篇论文失败，不会阻塞已经就绪的论文。',
+				selectAllReady: '选择所有已就绪论文',
+				selectDocument: '选择论文作为研究范围',
+				empty: '先上传论文以开始这个集合。',
+				prepare: '准备',
+				retry: '重试',
+				objectiveCount: '当前有 {count} 个研究目标候选。',
+				status: {
+					stored: '已存储',
+					uploaded: '已存储',
+					processing: '准备中',
+					ready: '已就绪',
+					failed: '失败'
+				}
+			},
 			loading: '工作区加载中...',
 			readinessLabels: {
 				empty: '暂无文档',
@@ -4158,15 +4221,10 @@ const translations: Record<Language, Translations> = {
 			stageUnknown: '未知',
 			stage: {
 				queued: '排队中',
-				source_artifacts_started: '源产物生成中',
-				source_artifacts_completed: '源产物已完成',
-				document_profiles_started: '文档画像生成中',
-				document_profiles_completed: '文档画像已完成',
-				objective_candidates_started: '候选研究目标生成中',
-				objective_candidates_completed: '候选研究目标已生成',
-				objective_paper_skim_started: '扫描文献目标',
-				objective_discovery_started: '合并研究目标',
-				artifacts_ready: '产物已就绪',
+				source_parsing: '正在解析文献',
+				document_profile: '正在识别论文类型',
+				paper_map: '正在梳理研究范围',
+				ready: '已就绪',
 				failed: '失败'
 			},
 			progressUnit: {

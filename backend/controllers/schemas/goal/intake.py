@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 GoalIntent = Literal["explore", "compare", "design_experiment"]
 CoverageLevel = Literal["direct", "indirect", "sparse", "absent"]
 EntryMode = Literal["comparison", "exploratory"]
-GoalSeedHandoffStatus = Literal["awaiting_source_material"]
 
 
 class GoalIntakeRequest(BaseModel):
@@ -70,7 +69,7 @@ class CoverageAssessmentResponse(BaseModel):
 
 
 class SeedCollectionResponse(BaseModel):
-    """Collection-builder handoff result into Core."""
+    """Collection created for the research brief."""
 
     collection_id: str = Field(..., description="Target collection ID")
     name: str = Field(..., description="Collection name")
@@ -83,11 +82,6 @@ class SeedCollectionResponse(BaseModel):
     source_channels: list[str] = Field(
         default_factory=list,
         description="Candidate source channels",
-    )
-    handoff_id: str = Field(..., description="collection-builder handoff ID")
-    handoff_status: GoalSeedHandoffStatus = Field(
-        ...,
-        description="Current handoff status",
     )
 
 

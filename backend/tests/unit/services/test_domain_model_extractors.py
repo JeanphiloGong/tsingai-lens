@@ -50,12 +50,12 @@ from application.core.objectives.discovery.signal_reconciliation import (
     build_paper_signal_reconciliation_prompt,
 )
 from application.core.objectives.discovery.study_window import (
-    PaperStudyWindowExtractor,
+    PaperResearchMapExtractor,
     StructuredExperimentalPaperMap,
-    StructuredPaperSkim,
+    StructuredPaperResearchMap,
     StructuredPaperSourceSignalScreen,
     StructuredReviewPaperMap,
-    build_paper_skim_prompt,
+    build_paper_research_map_prompt,
     build_paper_source_signal_prompt,
 )
 from application.core.objectives.llm.structured_response import (
@@ -63,6 +63,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.core.paper_facts.prompts import build_table_matrix_repair_prompt
 from application.core.paper_facts.schemas import (
     StructuredExtractionBundle,
     StructuredTableBatchMentions,
@@ -72,7 +73,7 @@ from domain.pipeline import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
 
 
-def test_paper_skim_contract_bounds_model_output():
+def test_paper_research_map_contract_bounds_model_output():
     experimental_schema = StructuredExperimentalPaperMap.model_json_schema()
     schema = experimental_schema["properties"]
 
@@ -92,10 +93,11 @@ def test_paper_skim_contract_bounds_model_output():
     assert "test_context" not in study_schema
     assert "comparator" not in study_schema
     assert "fixed_conditions" not in study_schema
-    assert study_schema["relationships"]["maxItems"] == 4
+    assert study_schema["relationships"]["maxItems"] == 6
     assert relationship_schema["varied_factors"]["maxItems"] == 6
-    assert relationship_schema["source_unit_ids"]["minItems"] == 1
-    assert relationship_schema["source_unit_ids"]["maxItems"] == 4
+    assert "source_unit_ids" not in relationship_schema
+    assert relationship_schema["source_labels"]["minItems"] == 1
+    assert relationship_schema["source_labels"]["maxItems"] == 4
     signal_schema = experimental_schema["$defs"]["StructuredPaperMapSignal"][
         "properties"
     ]
@@ -104,18 +106,19 @@ def test_paper_skim_contract_bounds_model_output():
     assert signal_schema["process_context"]["items"]["maxLength"] == 160
     assert "sample_context" not in signal_schema
     assert "test_context" not in signal_schema
-    assert signal_schema["source_unit_ids"]["minItems"] == 1
-    assert signal_schema["source_unit_ids"]["maxItems"] == 4
+    assert "source_unit_ids" not in signal_schema
+    assert signal_schema["source_labels"]["minItems"] == 1
+    assert signal_schema["source_labels"]["maxItems"] == 4
     assert "source_unit_coverage" not in schema
     assert "review_synthesis" not in schema
     assert schema["warnings"]["items"]["maxLength"] == 240
 
     review_model_schema = StructuredReviewPaperMap.model_json_schema()
-    review_schema = review_model_schema["$defs"]["StructuredReviewSynthesisMap"][
+    review_schema = review_model_schema["$defs"]["StructuredReviewMapSynthesis"][
         "properties"
     ]
     review_item_schema = review_model_schema["$defs"][
-        "StructuredReviewKnowledgeItem"
+        "StructuredReviewMapKnowledgeItem"
     ]["properties"]
     assert "studies" not in review_model_schema["properties"]
     assert "unresolved_signals" not in review_model_schema["properties"]
@@ -124,8 +127,9 @@ def test_paper_skim_contract_bounds_model_output():
     assert review_schema["evidence_gaps"]["maxItems"] == 2
     assert review_schema["citation_leads"]["maxItems"] == 3
     assert review_item_schema["content"]["maxLength"] == 240
-    assert review_item_schema["source_unit_ids"]["minItems"] == 1
-    assert review_item_schema["source_unit_ids"]["maxItems"] == 4
+    assert "source_unit_ids" not in review_item_schema
+    assert review_item_schema["source_labels"]["minItems"] == 1
+    assert review_item_schema["source_labels"]["maxItems"] == 4
 
 
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
@@ -140,9 +144,10 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
     assert signal_schema["material_scope"]["maxItems"] == 4
     assert signal_schema["process_context"]["maxItems"] == 4
-    assert signal_schema["sample_context"]["maxItems"] == 4
-    assert signal_schema["test_context"]["maxItems"] == 4
-    assert signal_schema["fixed_conditions"]["maxItems"] == 4
+    assert "sample_context" not in signal_schema
+    assert "test_context" not in signal_schema
+    assert "comparator" not in signal_schema
+    assert "fixed_conditions" not in signal_schema
     assert "source_unit_ids" not in signal_schema
     assert "relationships" not in schema
     assert "studies" not in schema
@@ -152,11 +157,11 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     ("left_context", "right_context"),
     [
         ({"design_type": "experimental"}, {"design_type": "observational"}),
-        ({"comparator": "as-built"}, {"comparator": "heat-treated"}),
         (
-            {"fixed_conditions": ["room temperature"]},
-            {"fixed_conditions": ["400 C"]},
+            {"process_context": ["laser powder bed fusion"]},
+            {"process_context": ["heat treatment"]},
         ),
+        ({"experiment_label": "tensile"}, {"experiment_label": "hardness"}),
     ],
 )
 def test_paper_source_signal_identity_preserves_distinct_experiment_context(
@@ -293,13 +298,18 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
             }
         )
     )
-    extractor = PaperStudyWindowExtractor(_response_client(client))
+    extractor = PaperResearchMapExtractor(_response_client(client))
 
     skim = extractor.extract_source_signals(
         {
+            "collection_id": "collection-internal",
             "document_id": "review-paper",
             "window_id": "results-1.retry-left",
             "window_role": "results",
+            "document_profile": {
+                "doc_type": "review",
+                "parsing_warnings": ["parser internal warning"],
+            },
             "source_units": [
                 {
                     "source_unit_id": "source-unit-000071",
@@ -326,13 +336,20 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
         ["source-unit-000071"],
     ]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"label": "S1"' in request_text
+    for internal_value in (
+        "collection-internal",
+        "review-paper",
+        "results-1.retry-left",
+        "source-unit-000071",
+        "block-71",
+        "parser internal warning",
+    ):
+        assert internal_value not in request_text
 
 
-def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
-    sample_context = [
-        f"HIP condition {index}: temperature, pressure, and cooling schedule"
-        for index in range(1, 12)
-    ]
+def test_paper_research_map_contract_represents_bounded_preliminary_scope():
     varied_factors = [
         "HIP temperature",
         "HIP pressure",
@@ -340,13 +357,9 @@ def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
         "prior beta grain size",
         "alpha lath thickness",
         "alpha phase fraction",
-        "beta phase fraction",
-        "pore fraction",
-        "pore diameter",
-        "build orientation",
     ]
 
-    parsed = StructuredPaperSkim.model_validate(
+    parsed = StructuredPaperResearchMap.model_validate(
         {
             "studies": [
                 {
@@ -355,15 +368,6 @@ def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
                         "hot isostatic pressing",
                         "sandblasting",
                         "mechanical polishing",
-                        "chemical etching",
-                    ],
-                    "sample_context": sample_context,
-                    "test_context": [
-                        "room-temperature tensile testing",
-                        "optical microscopy",
-                        "scanning electron microscopy",
-                        "electron backscatter diffraction",
-                        "X-ray computed tomography",
                     ],
                     "relationships": [
                         {
@@ -377,7 +381,12 @@ def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
         }
     )
 
-    assert parsed.studies[0].sample_context == sample_context
+    assert parsed.studies[0].process_context == [
+        "laser powder bed fusion",
+        "hot isostatic pressing",
+        "sandblasting",
+        "mechanical polishing",
+    ]
     assert parsed.studies[0].relationships[0].varied_factors == varied_factors
 
 
@@ -447,8 +456,8 @@ def test_paper_signal_reconciliation_bounds_diagnostic_reason_text():
     assert len(parsed.unresolved_signals[0].reason) == 240
 
 
-def test_paper_skim_contract_bounds_diagnostic_warnings():
-    parsed = StructuredPaperSkim.model_validate(
+def test_paper_research_map_contract_bounds_diagnostic_warnings():
+    parsed = StructuredPaperResearchMap.model_validate(
         {"warnings": ["w" * 241, "second", "third"]}
     )
 
@@ -482,13 +491,13 @@ def test_paper_skim_contract_bounds_diagnostic_warnings():
         },
     ],
 )
-def test_paper_skim_contract_rejects_duplicate_source_unit_ids(payload):
+def test_paper_research_map_contract_rejects_duplicate_source_unit_ids(payload):
     with pytest.raises(ValidationError, match="source-unit ids must be unique"):
-        StructuredPaperSkim.model_validate(payload)
+        StructuredPaperResearchMap.model_validate(payload)
 
 
-def test_paper_skim_prompt_defines_lightweight_research_map_contract():
-    _, user_prompt = build_paper_skim_prompt(
+def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
+    _, user_prompt = build_paper_research_map_prompt(
         {
             "document_id": "paper-1",
             "title": "Density study",
@@ -513,29 +522,131 @@ def test_paper_skim_prompt_defines_lightweight_research_map_contract():
     assert "not full experiment reconstruction" in user_prompt
     assert "candidate scope, not proven Evidence" in user_prompt
     assert "fields are intentionally absent" in user_prompt
-    assert "`window_id` is this bounded window's identity" in user_prompt
+    assert "`window_role` describes this bounded reading view" in user_prompt
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
     assert "full jointly varied, compared, or modeled factor set" in user_prompt
-    assert "never label the cited study current_work" in user_prompt
+    assert "Never label a cited study current_work" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
-    assert "copy `source_unit_ids`" in user_prompt
-    assert "at most 4 unique `source_unit_ids`" in user_prompt
+    assert "Copy every directly supporting Source label" in user_prompt
+    assert "at most 4 unique `source_labels`" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 2 studies" in user_prompt
-    assert "up to 4 relationships per study" in user_prompt
+    assert "up to 6 relationships per study" in user_prompt
     assert "up to 4 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
+    assert "not relationship overflow" in user_prompt
     assert "neutral scientific axis" in user_prompt
     assert "at most 6 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
     assert "result direction, value, or comparison sentence" in user_prompt
+    assert "Do not promote causal explanations or intermediate mechanisms" in user_prompt
+    assert "Keep one study unless the Source explicitly names distinct experiments" in (
+        user_prompt
+    )
+    assert "optional experiment_label only when explicitly named" in user_prompt
     assert "source_unit_coverage" not in user_prompt
+
+
+def test_paper_research_map_prompt_exposes_science_without_backend_lineage():
+    _, user_prompt = build_paper_research_map_prompt(
+        {
+            "collection_id": "col-internal-123",
+            "document_id": "doc-internal-456",
+            "title": "Scientific title",
+            "window_id": "results-7.retry-left",
+            "window_role": "results",
+            "document_profile": {
+                "doc_type": "experimental",
+                "parsing_warnings": ["parser internal warning"],
+                "confidence": 0.84,
+            },
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000071",
+                    "source_kind": "table",
+                    "source_ref": "table-internal-71",
+                    "section_path": "Results / Porosity",
+                    "content": {
+                        "table_id": "table-internal-71",
+                        "row_id": "row-internal-3",
+                        "caption_text": "Porosity measurements",
+                        "column_headers": ["Power", "Porosity"],
+                        "row_text": "200 W | 0.7%",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert '"label": "S1"' in user_prompt
+    assert "Scientific title" in user_prompt
+    assert "Results / Porosity" in user_prompt
+    assert "Porosity measurements" in user_prompt
+    assert "200 W | 0.7%" in user_prompt
+    for internal_value in (
+        "col-internal-123",
+        "doc-internal-456",
+        "results-7.retry-left",
+        "source-unit-000071",
+        "table-internal-71",
+        "row-internal-3",
+        "parser internal warning",
+    ):
+        assert internal_value not in user_prompt
+
+
+def test_paper_research_map_rebinds_model_source_labels_to_backend_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "experimental",
+                "studies": [
+                    {
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "relationships": [
+                            {
+                                "varied_factors": ["laser power"],
+                                "outcome": "porosity",
+                                "source_labels": ["S1"],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+
+    paper_map = PaperResearchMapExtractor(_response_client(client)).extract(
+        {
+            "collection_id": "col-internal-123",
+            "document_id": "doc-internal-456",
+            "window_id": "results-7",
+            "window_role": "results",
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000071",
+                    "source_kind": "block",
+                    "source_ref": "block-internal-71",
+                    "section_path": "Results",
+                    "content": "Laser power was varied and porosity was measured.",
+                }
+            ],
+        }
+    )
+
+    relationship = paper_map.studies[0].relationships[0]
+    assert relationship.source_unit_ids == ["source-unit-000071"]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"label": "S1"' in request_text
+    assert "source-unit-000071" not in request_text
+    assert "block-internal-71" not in request_text
 
 
 def test_experimental_paper_map_schema_excludes_review_only_output():
@@ -553,7 +664,7 @@ def test_experimental_paper_map_schema_excludes_review_only_output():
         )
     )
 
-    PaperStudyWindowExtractor(_response_client(client)).extract(
+    PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "experimental-paper",
             "document_profile": {"doc_type": "experimental"},
@@ -569,8 +680,8 @@ def test_experimental_paper_map_schema_excludes_review_only_output():
     assert "StructuredReviewKnowledgeItem" not in request_text
 
 
-def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
-    _, user_prompt = build_paper_skim_prompt(
+def test_review_paper_research_map_prompt_extracts_synthesis_not_cited_experiments():
+    _, user_prompt = build_paper_research_map_prompt(
         {
             "document_id": "review-paper",
             "title": "Review of preheating in LPBF",
@@ -603,6 +714,11 @@ def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
     assert "evidence_gaps" in user_prompt
     assert "citation_leads" in user_prompt
     assert "never primary Evidence" in user_prompt
+    assert '"label": "S1"' in user_prompt
+    assert "review-paper" not in user_prompt
+    assert "unknown-1" not in user_prompt
+    assert "source-unit-000001" not in user_prompt
+    assert "block-1" not in user_prompt
 
 
 def test_review_paper_map_derives_candidate_relationship_without_duplicate_output():
@@ -617,7 +733,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
                             "content": "Preheating generally reduces residual stress.",
                             "variables": ["preheating condition"],
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.9,
                         }
                     ],
@@ -625,7 +741,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
                         {
                             "content": "Miranda et al. [20]",
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.8,
                         }
                     ],
@@ -638,7 +754,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
         )
     )
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "review-paper",
             "document_profile": {"doc_type": "review"},
@@ -659,7 +775,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
         client.chat.completions.calls[0]["messages"],
         ensure_ascii=False,
     )
-    assert "StructuredPaperStudy" not in request_text
+    assert "StructuredPaperResearchScope" not in request_text
     assert skim.studies[0].claim_scope == "synthesis"
     assert skim.studies[0].relationships[0].varied_factors == [
         "preheating condition"
@@ -668,7 +784,7 @@ def test_review_paper_map_derives_candidate_relationship_without_duplicate_outpu
     assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
 
 
-def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
+def test_review_paper_research_map_extractor_keeps_only_review_author_synthesis():
     source_unit_id = "source-unit-000001"
     client = _FakeOpenAIClient(
         json.dumps(
@@ -680,7 +796,7 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
                             "content": "Preheating generally reduces residual stress.",
                             "variables": ["preheating condition"],
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.9,
                         }
                     ],
@@ -688,7 +804,7 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
                         {
                             "content": "Miranda et al. [20]",
                             "outcomes": ["residual stress"],
-                            "source_unit_ids": [source_unit_id],
+                            "source_labels": ["S1"],
                             "confidence": 0.8,
                         }
                     ],
@@ -697,7 +813,7 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
         )
     )
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "review-paper",
             "document_profile": {"doc_type": "review"},
@@ -770,7 +886,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "pair classification" in user_prompt
     assert "`decisions` array" in user_prompt
     assert "every input pair" in user_prompt
-    assert "bounded PaperStudy observations" in user_prompt
+    assert "bounded PaperResearchScope observations" in user_prompt
     assert "co-occurrence is not equivalence evidence" in user_prompt
     assert "build orientation and laser speed" in user_prompt.casefold()
     assert "boolean `equivalent`" in user_prompt
@@ -781,6 +897,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "equivalent=false" in user_prompt
     assert "tensile strength and ultimate tensile strength" in user_prompt
     assert "surface hardness and hardness" in user_prompt
+    assert "collection-test" not in user_prompt
 
 
 def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
@@ -826,8 +943,8 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     assert "backend derives final whole-paper accounting" in user_prompt
     assert "Do not link signals merely because they occur in the same paper" in user_prompt
     assert "backend treats every omitted input signal as unresolved" in user_prompt
-    assert "never invent a reason merely to repeat an ID" in user_prompt
-    assert "copy only input `signal_id` values" in user_prompt
+    assert "never invent a reason merely to repeat a label" in user_prompt
+    assert "copy only input `signal_label` values" in user_prompt
     assert "same signal membership more than once" in user_prompt
     assert "Split high-level statement" in user_prompt
     assert "Different scopes" in user_prompt
@@ -982,7 +1099,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     objective_client = _FakeOpenAIClient(
         "unused",
-        parsed=StructuredFindingSynthesis(findings=[]),
+        parsed={"findings": []},
     )
 
     with capture_llm_usage() as usage:
@@ -1014,7 +1131,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v13",
+        "finding_synthesis": "finding_synthesis.v14",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -1174,7 +1291,7 @@ def test_response_client_does_not_generate_backend_owned_objective_lineage():
     assert not hasattr(StructuredResponseClient, "discover_research_objectives")
 
 
-def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
+def test_paper_research_map_prompt_token_estimate_counts_complete_schema_prompt():
     client = _FakeOpenAIClient("unused")
     extractor = StructuredResponseClient(
         client=client,
@@ -1197,7 +1314,7 @@ def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
         ],
     }
 
-    estimated_tokens = PaperStudyWindowExtractor(extractor).estimate_prompt_tokens(payload)
+    estimated_tokens = PaperResearchMapExtractor(extractor).estimate_prompt_tokens(payload)
 
     assert estimated_tokens > 1_000
     assert client.beta.chat.completions.calls == []
@@ -1250,7 +1367,7 @@ def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prom
     assert client.chat.completions.calls == []
 
 
-def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
+def test_paper_research_map_provider_length_finish_skips_whole_window_json_repair():
     completion = SimpleNamespace(
         usage=SimpleNamespace(completion_tokens=4096),
     )
@@ -1265,7 +1382,7 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
     )
 
     with pytest.raises(StructuredOutputSaturatedError):
-        PaperStudyWindowExtractor(extractor).extract(
+        PaperResearchMapExtractor(extractor).extract(
             {
                 "document_id": "paper-1",
                 "title": "Density study",
@@ -1279,7 +1396,7 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
     assert client.chat.completions.calls == []
 
 
-def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
+def test_paper_research_map_json_length_finish_skips_whole_window_json_repair():
     client = _FakeOpenAIClient('{"studies":[]}')
 
     def create_with_length_finish(**kwargs):
@@ -1301,7 +1418,7 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
     )
 
     with pytest.raises(StructuredOutputSaturatedError):
-        PaperStudyWindowExtractor(extractor).extract(
+        PaperResearchMapExtractor(extractor).extract(
             {
                 "document_id": "paper-1",
                 "title": "Density study",
@@ -1317,7 +1434,7 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
     assert trace["trace_status"] == "failed"
     assert trace["error_type"] == "StructuredOutputSaturatedError"
     assert trace["error"] == (
-        "PaperSkim JSON output reached the completion-token limit"
+        "PaperResearchMap JSON output reached the completion-token limit"
     )
     assert trace["raw_output"] == '{"studies":[]}'
     assert trace["attempts"] == [
@@ -1327,12 +1444,12 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
             "response_chars": len('{"studies":[]}'),
             "response_preview": '{"studies":[]}',
             "error_type": "StructuredOutputSaturatedError",
-            "error": "PaperSkim JSON output reached the completion-token limit",
+            "error": "PaperResearchMap JSON output reached the completion-token limit",
         }
     ]
 
 
-def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
+def test_paper_research_map_saturation_logs_bounded_source_trace(caplog):
     raw_output = '{"studies":[' + ('"repeated",' * 400) + "]}"
     client = _FakeOpenAIClient(raw_output)
 
@@ -1348,7 +1465,7 @@ def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
         )
 
     client.chat.completions.create = create_with_length_finish
-    extractor = PaperStudyWindowExtractor(
+    extractor = PaperResearchMapExtractor(
         StructuredResponseClient(
             client=client,
             model="fake-model",
@@ -1380,9 +1497,9 @@ def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
     trace_message = next(
         record.getMessage()
         for record in caplog.records
-        if "Paper skim saturation trace" in record.getMessage()
+        if "Paper research map saturation trace" in record.getMessage()
     )
-    assert "contract=paper_skim" in trace_message
+    assert "contract=paper_map" in trace_message
     assert "window_id=results-1" in trace_message
     assert 'source_unit_ids=["source-unit-000071"]' in trace_message
     assert f"input_chars={len(source_text)}" in trace_message
@@ -1432,7 +1549,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
 
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
     parsed = StructuredFindingSynthesis(findings=[])
-    client = _FakeOpenAIClient("unused", parsed=parsed)
+    client = _FakeOpenAIClient("unused", parsed={"findings": []})
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -1452,12 +1569,14 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
 
     assert result == parsed
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredFindingSynthesis
+    assert parse_call["response_format"].__name__ == (
+        "_StructuredModelFindingSynthesis"
+    )
     assert parse_call["max_completion_tokens"] == 1024
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v13"
+    assert trace["prompt_version"] == "finding_synthesis.v14"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -1616,15 +1735,102 @@ def test_finding_synthesis_prompt_assigns_backend_and_model_ownership():
     assert "primary_direction" in normalized_system_prompt
     assert "model decides only" in normalized_system_prompt
     assert "assertion_strength" in normalized_system_prompt
-    assert "context_evidence_ids" in normalized_system_prompt
+    assert "context_evidence_labels" in normalized_system_prompt
     assert "mechanisms" in normalized_system_prompt
     assert "result_set_id" not in user_prompt
     assert "statement" not in user_prompt
     assert "condition_boundary_evidence_ids" not in user_prompt
     assert "21" in user_prompt
-    assert "paper-1" in user_prompt
+    assert '"paper_label":"P1"' in user_prompt
+    assert "paper-1" not in user_prompt
     mechanism_schema = StructuredFindingMechanism.model_json_schema()
     assert "supporting_evidence_ids" in mechanism_schema["properties"]
+
+
+def test_finding_synthesis_rebinds_local_context_and_paper_labels():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "assertion_strength": "associative",
+                        "context_evidence_labels": ["C1"],
+                        "mechanisms": [
+                            {
+                                "source_term": "melt-pool stability",
+                                "relation_type": "associated_with",
+                                "target_term": "relative density",
+                                "assertion_strength": "associative",
+                                "supporting_context_labels": ["C1"],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    result = FindingAssertionJudge(_response_client(client)).judge_result_set(
+        {
+            "objective": {
+                "objective_id": "objective-internal",
+                "question": "How does energy density affect relative density?",
+            },
+            "result_set": {
+                "factors": ["energy density"],
+                "outcome": "relative density",
+                "primary_direction": "increase",
+                "result_evidence": [
+                    {
+                        "evidence_id": "result-evidence-internal",
+                        "document_id": "document-internal",
+                        "reported_result": {
+                            "outcome": "relative density",
+                            "direction": "increase",
+                        },
+                    }
+                ],
+                "document_evidence_summaries": [
+                    {
+                        "document_id": "document-internal",
+                        "evidence_count": 1,
+                    }
+                ],
+            },
+            "paper_contributions": [
+                {
+                    "document_id": "document-internal",
+                    "analysis_status": "analyzed",
+                }
+            ],
+            "context_evidence": [
+                {
+                    "evidence_id": "context-evidence-internal",
+                    "document_id": "document-internal",
+                    "evidence_role": "mechanism_context",
+                    "source_excerpt": (
+                        "Stable melt pools were associated with higher relative density."
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert result.findings[0].context_evidence_ids == [
+        "context-evidence-internal"
+    ]
+    assert result.findings[0].mechanisms[0].supporting_evidence_ids == [
+        "context-evidence-internal"
+    ]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"paper_label":"P1"' in request_text
+    assert '"context_label":"C1"' in request_text
+    for internal_value in (
+        "objective-internal",
+        "document-internal",
+        "result-evidence-internal",
+        "context-evidence-internal",
+    ):
+        assert internal_value not in request_text
 
 
 def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
@@ -1653,7 +1859,7 @@ def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
     assert "Semantic repair required:" in user_prompt
     assert payload["candidate_rejection"]["reason"] in user_prompt
     assert "previous_candidate" not in user_prompt
-    assert "Return only ids present in `context_evidence`" in user_prompt
+    assert "Return only labels present in `context_evidence`" in user_prompt
 
 
 def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
@@ -1685,7 +1891,7 @@ def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
     assert client.beta.chat.completions.calls == []
 
 
-def test_domain_model_extractors_validates_paper_skim_response():
+def test_domain_model_extractors_validates_paper_research_map_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -1701,7 +1907,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
                 {
                   "varied_factors": ["heat treatment"],
                       "outcome": "corrosion current density",
-                  "source_unit_ids": ["window-source-1"],
+                  "source_labels": ["S1"],
                   "confidence": 0.91
                 }
               ],
@@ -1717,7 +1923,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     )
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF 316L corrosion study",
@@ -1732,14 +1938,14 @@ def test_domain_model_extractors_validates_paper_skim_response():
         }
     )
 
-    assert isinstance(skim, StructuredPaperSkim)
+    assert isinstance(skim, StructuredPaperResearchMap)
     assert skim.doc_role == "experimental"
     assert skim.studies[0].material_scope == ["316L stainless steel"]
     assert skim.studies[0].relationships[0].outcome == "corrosion current density"
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
-def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_output():
+def test_paper_research_map_bounds_diagnostic_warnings_without_retrying_scientific_output():
     response = {
         "doc_role": "experimental",
         "studies": [],
@@ -1748,7 +1954,7 @@ def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_outpu
     }
     client = _FakeOpenAIClient(json.dumps(response))
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [],
@@ -1761,7 +1967,7 @@ def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_outpu
     assert skim.warnings[0].startswith("diagnostic diagnostic")
 
 
-def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings():
+def test_paper_research_map_downgrades_empty_factor_relationship_without_losing_siblings():
     response = {
         "doc_role": "experimental",
         "studies": [
@@ -1775,13 +1981,13 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
                     {
                         "varied_factors": ["laser power"],
                         "outcome": "porosity",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
                         "varied_factors": [],
                         "outcome": "microhardness",
-                        "source_unit_ids": ["window-source-2"],
+                        "source_labels": ["S2"],
                         "confidence": 0.84,
                     },
                 ],
@@ -1796,7 +2002,7 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     client = _FakeOpenAIClient(json.dumps(response))
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "source_units": [
@@ -1828,7 +2034,7 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     assert unresolved.source_unit_ids == ["window-source-2"]
 
 
-def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome():
+def test_paper_research_map_downgrades_descriptive_factor_clause_to_unresolved_outcome():
     response = {
         "doc_role": "experimental",
         "studies": [
@@ -1844,7 +2050,7 @@ def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome()
                             "pole figures"
                         ],
                         "outcome": "alpha phase fraction",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                     }
                 ],
             }
@@ -1853,7 +2059,7 @@ def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome()
     }
     client = _FakeOpenAIClient(json.dumps(response))
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -1875,7 +2081,7 @@ def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome()
     assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
 
 
-def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_siblings():
+def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_losing_siblings():
     response = {
         "doc_role": "experimental",
         "studies": [
@@ -1889,19 +2095,19 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
                     {
                         "varied_factors": ["annealing temperature"],
                         "outcome": "microstructure",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
                         "varied_factors": ["annealing temperature"],
                         "outcome": "strength and ductility of SLMed Ti-6Al-4V",
-                        "source_unit_ids": ["window-source-2"],
+                        "source_labels": ["S2"],
                         "confidence": 0.86,
                     },
                     {
                         "varied_factors": ["annealing temperature"],
                         "outcome": "mechanical property combination",
-                        "source_unit_ids": ["window-source-3"],
+                        "source_labels": ["S3"],
                         "confidence": 0.81,
                     },
                     {
@@ -1910,7 +2116,7 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
                             "microstructure (grain size, shape, phase fraction, "
                             "composition)"
                         ),
-                        "source_unit_ids": ["window-source-4"],
+                        "source_labels": ["S4"],
                         "confidence": 0.79,
                     },
                 ],
@@ -1924,7 +2130,7 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
     }
     client = _FakeOpenAIClient(json.dumps(response))
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -1962,12 +2168,12 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
         for signal in skim.unresolved_signals
     )
     prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "one specific outcome" in prompt
-    assert "compound outcome" in prompt
+    assert "one relationship per outcome" in prompt
+    assert "combines distinct measurements" in prompt
     assert "unresolved_signals" in prompt
 
 
-def test_structured_paper_skim_rejects_duplicate_study_identities():
+def test_structured_paper_research_map_rejects_duplicate_study_identities():
     study = {
         "experiment_label": "LPBF parameter study",
         "design_type": "experimental",
@@ -1984,14 +2190,14 @@ def test_structured_paper_skim_rejects_duplicate_study_identities():
     }
 
     with pytest.raises(ValidationError, match="duplicate study identities"):
-        StructuredPaperSkim.model_validate(
+        StructuredPaperResearchMap.model_validate(
             {
                 "studies": [study, study],
             }
         )
 
 
-def test_paper_skim_retries_duplicate_study_identities_before_returning():
+def test_paper_research_map_retries_duplicate_study_identities_before_returning():
     first_study = {
         "experiment_label": "LPBF parameter study",
         "design_type": "experimental",
@@ -2002,7 +2208,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
             {
                 "varied_factors": ["laser power"],
                 "outcome": "porosity",
-                "source_unit_ids": ["window-source-1"],
+                "source_labels": ["S1"],
             }
         ],
     }
@@ -2011,7 +2217,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
         "relationships": [
             {
                 **first_study["relationships"][0],
-                "source_unit_ids": ["window-source-2"],
+                "source_labels": ["S2"],
             }
         ],
     }
@@ -2031,9 +2237,9 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
                 "relationships": [
                     {
                         **first_study["relationships"][0],
-                        "source_unit_ids": [
-                            "window-source-1",
-                            "window-source-2",
+                        "source_labels": [
+                            "S1",
+                            "S2",
                         ],
                     }
                 ],
@@ -2043,7 +2249,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF parameter study",
@@ -2069,12 +2275,12 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     assert "duplicate study identities" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "at most 4 IDs" in client.chat.completions.calls[1]["messages"][-1][
+    assert "at most 4 labels" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
 
 
-def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
+def test_paper_research_map_repairs_unknown_source_labels_before_returning():
     invalid = {
         "doc_role": "experimental",
         "studies": [
@@ -2085,7 +2291,7 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
                     {
                         "varied_factors": ["HIP temperature"],
                         "outcome": "yield strength",
-                        "source_unit_ids": ["invented-source-unit"],
+                        "source_labels": ["S9"],
                     }
                 ],
             }
@@ -2099,7 +2305,7 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
                 "relationships": [
                     {
                         **invalid["studies"][0]["relationships"][0],
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                     }
                 ],
             }
@@ -2107,7 +2313,7 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -2126,23 +2332,23 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
     ]
     assert len(client.chat.completions.calls) == 2
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "invented-source-unit" in repair_prompt
-    assert "Copy only unique Source-unit IDs from the input" in repair_prompt
+    assert "S9" in repair_prompt
+    assert "Copy only unique Source labels from the input" in repair_prompt
     assert (
-        'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]'
+        'ALLOWED SOURCE LABELS: ["S1"]'
         in client.chat.completions.calls[0]["messages"][-1]["content"]
     )
-    assert 'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]' in repair_prompt
+    assert 'ALLOWED SOURCE LABELS: ["S1"]' in repair_prompt
 
 
-def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
+def test_paper_research_map_repairs_unknown_signal_source_labels_before_returning():
     invalid = {
         "doc_role": "experimental",
         "unresolved_signals": [
             {
                 "signal_type": "outcome",
                 "label": "elongation",
-                "source_unit_ids": ["invented-source-unit"],
+                "source_labels": ["S9"],
             }
         ],
     }
@@ -2151,13 +2357,13 @@ def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
         "unresolved_signals": [
             {
                 **invalid["unresolved_signals"][0],
-                "source_unit_ids": ["window-source-1"],
+                "source_labels": ["S1"],
             }
         ],
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
 
-    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
         {
             "document_id": "paper-ti64",
             "source_units": [
@@ -2173,12 +2379,12 @@ def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
 
     assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
     assert len(client.chat.completions.calls) == 2
-    assert "invented-source-unit" in client.chat.completions.calls[1]["messages"][
+    assert "S9" in client.chat.completions.calls[1]["messages"][
         -1
     ]["content"]
 
 
-def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):
+def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(monkeypatch):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
     first_study = {
         "experiment_label": "LPBF parameter study",
@@ -2190,7 +2396,7 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
             {
                 "varied_factors": ["laser power"],
                 "outcome": "porosity",
-                "source_unit_ids": ["window-source-1"],
+                "source_labels": ["S1"],
             }
         ],
     }
@@ -2199,7 +2405,7 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
         "relationships": [
             {
                 **first_study["relationships"][0],
-                "source_unit_ids": ["window-source-2"],
+                "source_labels": ["S2"],
             }
         ],
     }
@@ -2215,9 +2421,9 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
                 "relationships": [
                     {
                         **first_study["relationships"][0],
-                        "source_unit_ids": [
-                            "window-source-1",
-                            "window-source-2",
+                        "source_labels": [
+                            "S1",
+                            "S2",
                         ],
                     }
                 ],
@@ -2226,11 +2432,11 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     }
     client = _FakeOpenAIClient(
         json.dumps(valid),
-        parsed=StructuredPaperSkim.model_validate(invalid),
+        parsed=StructuredExperimentalPaperMap.model_validate(invalid),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF parameter study",
@@ -2258,7 +2464,7 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     )
 
 
-def test_paper_skim_preserves_multi_material_multi_outcome_study():
+def test_paper_research_map_preserves_multi_material_multi_outcome_study():
     client = _FakeOpenAIClient(
         json.dumps(
             {
@@ -2281,7 +2487,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
                                     "base plate preheating temperature"
                                 ],
                                 "outcome": outcome,
-                                "source_unit_ids": ["window-source-1"],
+                                "source_labels": ["S1"],
                                 "confidence": 0.92,
                             }
                             for outcome in (
@@ -2306,7 +2512,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
     )
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "Application of base plate preheating during selective laser melting",
@@ -2340,7 +2546,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
     assert len(skim.warnings[0]) <= 240
 
 
-def test_paper_skim_retries_oversized_study_without_truncating_relationships():
+def test_paper_research_map_retries_oversized_study_without_truncating_relationships():
     invalid = {
         "doc_role": "experimental",
         "studies": [
@@ -2353,7 +2559,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
                     {
                         "varied_factors": ["preheating temperature"],
                         "outcome": "density",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.8,
                     }
                 ],
@@ -2381,7 +2587,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
                     {
                         "varied_factors": ["scan speed"],
                         "outcome": "porosity",
-                        "source_unit_ids": ["window-source-1"],
+                        "source_labels": ["S1"],
                         "confidence": 0.75,
                     }
                 ],
@@ -2394,7 +2600,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
     )
     extractor = _response_client(client)
 
-    skim = PaperStudyWindowExtractor(extractor).extract(
+    skim = PaperResearchMapExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "Multi-material preheating study",
@@ -2425,10 +2631,7 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
                     {
                         "relationships": [
                             {
-                                "signal_ids": [
-                                    "signal-variable",
-                                    "signal-outcome",
-                                ],
+                                "signal_labels": ["V1", "O1"],
                                 "confidence": 0.89,
                             }
                         ]
@@ -2458,13 +2661,80 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
+def test_paper_signal_reconciliation_prompt_hides_backend_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "studies": [
+                    {
+                        "relationships": [
+                            {
+                                "signal_labels": ["V1", "O1"],
+                                "confidence": 0.89,
+                            }
+                        ]
+                    }
+                ],
+                "unresolved_signals": [],
+            }
+        )
+    )
+
+    reconciliation = PaperSignalReconciler(_response_client(client)).reconcile(
+        {
+            "document_id": "document-internal",
+            "signals": [
+                {
+                    "signal_id": "signal-variable-internal",
+                    "signal_type": "variable",
+                    "label": "laser power",
+                    "sources": [
+                        {
+                            "source_unit_id": "source-variable-internal",
+                            "section_path": "Methods",
+                            "excerpt": "Laser power was varied.",
+                        }
+                    ],
+                },
+                {
+                    "signal_id": "signal-outcome-internal",
+                    "signal_type": "outcome",
+                    "label": "porosity",
+                    "sources": [
+                        {
+                            "source_unit_id": "source-outcome-internal",
+                            "section_path": "Results",
+                            "excerpt": "Porosity decreased with laser power.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert reconciliation.studies[0].relationships[0].signal_ids == [
+        "signal-variable-internal",
+        "signal-outcome-internal",
+    ]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"signal_label":"V1"' in request_text
+    assert '"signal_label":"O1"' in request_text
+    assert "Laser power was varied." in request_text
+    for internal_value in (
+        "document-internal",
+        "signal-variable-internal",
+        "signal-outcome-internal",
+        "source-variable-internal",
+        "source-outcome-internal",
+    ):
+        assert internal_value not in request_text
+
+
 @pytest.mark.parametrize(
     ("context_field", "variable_context", "outcome_context"),
     [
         ("material_scope", ["316L stainless steel"], ["Ti-6Al-4V"]),
         ("process_context", ["laser powder bed fusion"], ["heat treatment"]),
-        ("sample_context", ["as-built specimen"], ["annealed specimen"]),
-        ("test_context", ["tensile test"], ["corrosion test"]),
     ],
 )
 def test_paper_signal_reconciliation_repairs_conflicting_contexts(
@@ -2477,7 +2747,7 @@ def test_paper_signal_reconciliation_repairs_conflicting_contexts(
             {
                 "relationships": [
                     {
-                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "signal_labels": ["V1", "O1"],
                         "confidence": 0.89,
                     }
                 ]
@@ -2489,11 +2759,11 @@ def test_paper_signal_reconciliation_repairs_conflicting_contexts(
         "studies": [],
         "unresolved_signals": [
             {
-                "signal_id": "signal-variable",
+                "signal_label": "V1",
                 "reason": "The signals describe different experimental contexts.",
             },
             {
-                "signal_id": "signal-outcome",
+                "signal_label": "O1",
                 "reason": "The signals describe different experimental contexts.",
             },
         ],
@@ -2531,28 +2801,26 @@ def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    invalid = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": ["signal-variable", "signal-outcome"],
-                            "confidence": 0.89,
-                        }
-                    ]
-                }
-            ]
-        }
-    )
+    invalid = {
+        "studies": [
+            {
+                "relationships": [
+                    {
+                        "signal_labels": ["V1", "O1"],
+                        "confidence": 0.89,
+                    }
+                ]
+            }
+        ]
+    }
     repaired = {
         "studies": [],
         "unresolved_signals": [
             {
-                "signal_id": signal_id,
+                "signal_label": signal_label,
                 "reason": "The signals describe different material contexts.",
             }
-            for signal_id in ("signal-variable", "signal-outcome")
+            for signal_label in ("V1", "O1")
         ],
     }
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
@@ -2591,14 +2859,11 @@ def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
             {
                 "relationships": [
                     {
-                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "signal_labels": ["V1", "O1"],
                         "confidence": 0.9,
                     },
                     {
-                        "signal_ids": [
-                            "signal-conflicting-variable",
-                            "signal-outcome",
-                        ],
+                        "signal_labels": ["V2", "O1"],
                         "confidence": 0.8,
                     },
                 ]
@@ -2768,8 +3033,8 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
           "changed_variables": ["heat treatment"],
           "measured_property_scope": ["corrosion"],
           "test_environment_scope": ["3.5 wt.% NaCl"],
-          "relevant_source_unit_ids": ["frame-section-results"],
-          "excluded_source_unit_ids": ["frame-table-2"]
+          "relevant_source_labels": ["S1"],
+          "excluded_source_labels": ["S2"]
         }
         """
     )
@@ -2817,8 +3082,8 @@ def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_id
                 "relevance": "high",
                 "paper_role": "primary_experiment",
                 "screening_note": "x" * 400,
-                "relevant_source_unit_ids": ["frame-section-results"],
-                "excluded_source_unit_ids": [],
+                "relevant_source_labels": ["S1"],
+                "excluded_source_labels": [],
             }
         )
     )
@@ -2853,16 +3118,16 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
         {
             "relevance": "high",
             "paper_role": "primary_experiment",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-unknown"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S-unknown"],
         }
     )
     repaired = json.dumps(
         {
             "relevance": "high",
             "paper_role": "primary_experiment",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-table-background"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S2"],
         }
     )
     client = _FakeOpenAIClient([invalid, repaired])
@@ -2892,22 +3157,19 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
     assert frame.source_accounting_origin == "repair"
-    assert "unknown_source_unit_ids=['frame-unknown']" in (
+    assert "unknown_source_labels=['S-unknown']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.chat.completions.calls) == 2
-    assert "account for every source-unit id" in client.chat.completions.calls[1][
+    assert "account for every Source label" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "frame-section-results" in client.chat.completions.calls[1]["messages"][-1][
-        "content"
-    ]
-    assert "frame-table-background" in client.chat.completions.calls[1]["messages"][
-        -1
-    ]["content"]
-    assert "frame-unknown" in client.chat.completions.calls[1]["messages"][-1][
-        "content"
-    ]
+    assert "S1" in client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "S2" in client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "S-unknown" in client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "frame-section-results" not in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
 
 
 def test_objective_paper_frame_repairs_omitted_source_unit():
@@ -2915,32 +3177,16 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
         {
             "relevance": "irrelevant",
             "paper_role": "irrelevant",
-            "relevant_source_unit_ids": [
-                "frame-section-1",
-                "frame-section-2",
-                "frame-section-3",
-                "frame-section-4",
-                "frame-section-5",
-                "frame-section-6",
-                "frame-section-7",
-            ],
-            "excluded_source_unit_ids": [],
+            "relevant_source_labels": ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
+            "excluded_source_labels": [],
         }
     )
     repaired = json.dumps(
         {
             "relevance": "uncertain",
             "paper_role": "uncertain",
-            "relevant_source_unit_ids": [
-                "frame-section-1",
-                "frame-section-2",
-                "frame-section-3",
-                "frame-section-4",
-                "frame-section-5",
-                "frame-section-6",
-                "frame-section-7",
-            ],
-            "excluded_source_unit_ids": ["frame-section-8"],
+            "relevant_source_labels": ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
+            "excluded_source_labels": ["S8"],
         }
     )
     client = _FakeOpenAIClient([incomplete, repaired])
@@ -2967,34 +3213,29 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
     assert frame.relevant_source_unit_ids == source_unit_ids[:-1]
     assert frame.excluded_source_unit_ids == [source_unit_ids[-1]]
     assert frame.source_accounting_origin == "repair"
-    assert "missing_source_unit_ids=['frame-section-8']" in (
+    assert "missing_source_labels=['S8']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.chat.completions.calls) == 2
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "missing_source_unit_ids=['frame-section-8']" in repair_prompt
+    assert "missing_source_labels=['S8']" in repair_prompt
+    assert "frame-section-8" not in repair_prompt
 
 
 @pytest.mark.parametrize(
     "invalid_partition",
     [
         {
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-unknown"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S-unknown"],
         },
         {
-            "relevant_source_unit_ids": [
-                "frame-section-results",
-                "frame-section-results",
-            ],
-            "excluded_source_unit_ids": ["frame-table-background"],
+            "relevant_source_labels": ["S1", "S1"],
+            "excluded_source_labels": ["S2"],
         },
         {
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": [
-                "frame-section-results",
-                "frame-table-background",
-            ],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S1", "S2"],
         },
     ],
     ids=["unknown", "duplicate", "overlap"],
@@ -3043,20 +3284,18 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    incomplete = StructuredPaperFrameBatch.model_validate(
-        {
-            "relevance": "irrelevant",
-            "paper_role": "irrelevant",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": [],
-        }
-    )
+    incomplete = {
+        "relevance": "irrelevant",
+        "paper_role": "irrelevant",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": [],
+    }
     repaired = json.dumps(
         {
             "relevance": "low",
             "paper_role": "supporting_background",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-table-background"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S2"],
         }
     )
     client = _FakeOpenAIClient(repaired, parsed=incomplete)
@@ -3087,7 +3326,7 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
     assert frame.source_accounting_origin == "repair"
-    assert "missing_source_unit_ids=['frame-table-background']" in (
+    assert "missing_source_labels=['S2']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.beta.chat.completions.calls) == 1
@@ -3098,19 +3337,17 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    invalid = StructuredPaperFrameBatch.model_validate(
-        {
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-unknown"],
-        }
-    )
+    invalid = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": ["S-unknown"],
+    }
     repaired = {
         "relevance": "high",
         "paper_role": "primary_experiment",
-        "relevant_source_unit_ids": ["frame-section-results"],
-        "excluded_source_unit_ids": ["frame-table-background"],
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": ["S2"],
     }
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
     extractor = StructuredResponseClient(client=client, model="fake-model")
@@ -3138,15 +3375,16 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
 
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
     assert frame.source_accounting_origin == "repair"
-    assert "unknown_source_unit_ids=['frame-unknown']" in (
+    assert "unknown_source_labels=['S-unknown']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.beta.chat.completions.calls) == 1
     assert len(client.chat.completions.calls) == 1
     repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "account for every source-unit id" in repair_prompt
-    assert "frame-section-results" in repair_prompt
-    assert "frame-table-background" in repair_prompt
+    assert "account for every Source label" in repair_prompt
+    assert "S1" in repair_prompt
+    assert "S2" in repair_prompt
+    assert "frame-section-results" not in repair_prompt
     assert (
         extractor.consume_last_trace()["extraction_mode"]
         == "provider_parse->json_text"
@@ -3172,18 +3410,175 @@ def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
 
     assert "bounded source-candidate classification" in user_prompt
     assert "one partial neighborhood" in user_prompt
-    assert "`collection_id`: backend scope identity" in user_prompt
-    assert "`document_profile`: backend document-type metadata" in user_prompt
-    assert "table-row chunks" in user_prompt
-    assert "Every input `source_unit_id`" in user_prompt
-    assert "relevant_source_unit_ids" in user_prompt
-    assert "excluded_source_unit_ids" in user_prompt
+    assert "`paper`: title and coarse document type" in user_prompt
+    assert "section or table chunks" in user_prompt
+    assert "Every input Source `label`" in user_prompt
+    assert "relevant_source_labels" in user_prompt
+    assert "excluded_source_labels" in user_prompt
     assert "Do not infer whole-paper irrelevance" in user_prompt
-    assert '"relevant_source_unit_ids":["unit-methods"]' in user_prompt
-    assert '"excluded_source_unit_ids":["unit-composition"]' in user_prompt
+    assert '"relevant_source_labels":["S1"]' in user_prompt
+    assert '"excluded_source_labels":["S2"]' in user_prompt
     assert '"paper_role":"uncertain"' in user_prompt
-    assert '"relevant_source_unit_ids":[]' in user_prompt
+    assert '"relevant_source_labels":[]' in user_prompt
     assert "This batch contains nominal composition only." in user_prompt
+
+
+def test_objective_paper_frame_prompt_exposes_science_without_backend_lineage():
+    _, user_prompt = build_objective_paper_frame_prompt(
+        {
+            "collection_id": "collection-internal",
+            "objective": {
+                "objective_id": "objective-internal",
+                "question": "How does heat treatment affect corrosion?",
+                "variables": ["heat treatment"],
+                "outcomes": ["corrosion resistance"],
+            },
+            "document": {
+                "document_id": "document-internal",
+                "title": "Heat treatment study",
+                "source_filename": "internal-name.pdf",
+            },
+            "document_profile": {
+                "doc_type": "experimental",
+                "parsing_warnings": ["parser internal warning"],
+            },
+            "paper_prior": {
+                "document_id": "prior-document-internal",
+                "doc_role": "experimental",
+                "evidence_density": "high",
+                "studies": [
+                    {
+                        "study_id": "prior-study-internal",
+                        "experiment_label": "Heat-treatment corrosion study",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["annealing"],
+                        "relationships": [
+                            {
+                                "relationship_id": "prior-relationship-internal",
+                                "varied_factors": ["heat treatment"],
+                                "outcome": "corrosion resistance",
+                                "source_unit_ids": ["prior-source-internal"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "block-internal",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                }
+            ],
+        }
+    )
+
+    assert '"label": "S1"' in user_prompt
+    assert "Heat treatment changed corrosion resistance." in user_prompt
+    assert "Heat-treatment corrosion study" in user_prompt
+    assert '"varied_factors": [' in user_prompt
+    assert '"outcome": "corrosion resistance"' in user_prompt
+    for internal_value in (
+        "collection-internal",
+        "objective-internal",
+        "document-internal",
+        "internal-name.pdf",
+        "parser internal warning",
+        "frame-section-results",
+        "block-internal",
+        "prior-document-internal",
+        "prior-study-internal",
+        "prior-relationship-internal",
+        "prior-source-internal",
+    ):
+        assert internal_value not in user_prompt
+
+
+def test_objective_paper_frame_rebinds_source_labels_to_backend_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "relevant_source_labels": ["S1"],
+                "excluded_source_labels": ["S2"],
+            }
+        )
+    )
+    extractor = _response_client(client)
+
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
+        {
+            "collection_id": "collection-internal",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results-internal",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-composition",
+                    "source_kind": "table",
+                    "source_ref": "table-internal",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-composition"]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"label": "S1"' in request_text
+    assert '"label": "S2"' in request_text
+    assert "frame-section-results" not in request_text
+    assert "frame-table-composition" not in request_text
+
+
+def test_table_matrix_repair_prompt_hides_backend_lineage_and_slice_offsets():
+    _system_prompt, user_prompt = build_table_matrix_repair_prompt(
+        {
+            "table_role": "current_experimental_evidence",
+            "repair_focus": ["repair parser-split cells"],
+            "source": {
+                "source_kind": "table",
+                "source_ref": "table-internal",
+                "document_id": "document-internal",
+                "page": 7,
+                "caption_text": "Mechanical properties.",
+                "heading_path": "Results",
+                "column_headers": ["Specimen", "Yield strength (MPa)"],
+                "table_markdown": (
+                    "| Specimen | Yield strength (MPa) |\n"
+                    "| --- | --- |\n"
+                    "| HT | 900 |"
+                ),
+                "table_slice": {
+                    "first_source_row_index": 4,
+                    "end_source_row_index": 5,
+                    "total_body_rows": 12,
+                },
+            },
+        }
+    )
+
+    assert "Mechanical properties." in user_prompt
+    assert "| HT | 900 |" in user_prompt
+    for internal_value in (
+        "table-internal",
+        "document-internal",
+        "first_source_row_index",
+        "end_source_row_index",
+        "total_body_rows",
+    ):
+        assert internal_value not in user_prompt
 
 
 def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():

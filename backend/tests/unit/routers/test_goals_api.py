@@ -57,9 +57,9 @@ async def test_goals_route_returns_goal_contract(goal_services):
     assert response.coverage_assessment.level == "direct"
     assert response.entry_recommendation.recommended_mode == "comparison"
     assert response.seed_collection.source_channels == ["upload"]
-    assert response.seed_collection.handoff_id.startswith("handoff_")
-    assert response.seed_collection.handoff_status == "awaiting_source_material"
+    assert response.seed_collection.seeded_document_count == 0
     assert collection["collection_id"] == response.seed_collection.collection_id
+    assert collection["documents"] == []
 
 
 async def test_goals_route_returns_400_for_empty_goal_signal(goal_services):

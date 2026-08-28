@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from application.pipeline.collection_build.service import (
-    CollectionBuildPreconditionError,
-)
 from controllers.schemas.source.task import (
-    ArtifactStatusResponse,
-    BuildTaskCreateRequest,
+    DocumentPreparationRequest,
     TaskListResponse,
     TaskResponse,
 )
@@ -16,26 +12,26 @@ router = APIRouter(tags=["tasks"])
 
 
 @router.post(
-    "/collections/{collection_id}/tasks/build",
+    "/collections/{collection_id}/documents/{document_id}/preparation",
     response_model=TaskResponse,
-    summary="Create a collection build task",
+    summary="Prepare one collection document",
 )
-async def create_build_task(
+async def prepare_collection_document(
     collection_id: str,
-    payload: BuildTaskCreateRequest,
+    document_id: str,
+    payload: DocumentPreparationRequest,
     request: Request,
 ) -> TaskResponse:
     try:
-        task = await request.app.state.build_pipeline_service.queue_build(
+        task = await request.app.state.document_preparation_service.queue_document(
             collection_id,
+            document_id,
             mode=payload.mode,
-            verbose=payload.verbose,
-            additional_context=payload.additional_context,
             request_id=getattr(request.state, "request_id", None),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CollectionBuildPreconditionError as exc:
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TaskResponse(**task)
 
@@ -76,21 +72,3 @@ async def get_task(task_id: str, request: Request) -> TaskResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return TaskResponse(**record)
-
-
-@router.get(
-    "/tasks/{task_id}/artifacts",
-    response_model=ArtifactStatusResponse,
-    summary="Get task artifact status",
-)
-async def get_task_artifacts(task_id: str, request: Request) -> ArtifactStatusResponse:
-    try:
-        await request.app.state.task_service.get_task(task_id)
-        artifacts = await request.app.state.artifact_registry_service.get_for_task(
-            task_id
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    payload = {"task_id": task_id, **artifacts}
-    return ArtifactStatusResponse(**payload)

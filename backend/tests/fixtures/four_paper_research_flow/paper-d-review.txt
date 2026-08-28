@@ -1,0 +1,11 @@
+Abstract
+This review surveys laser exposure, defect formation, and porosity in LPBF Ti-6Al-4V.
+
+Review Scope
+Published experiments use different feedstock, build states, stress-relief schedules, and porosity measurement methods.
+
+Evidence Gap
+Direct comparison requires primary experimental Sources with aligned material state and measurement context.
+
+References
+The cited primary studies should be inspected before making a quantitative claim.

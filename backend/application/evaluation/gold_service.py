@@ -67,34 +67,15 @@ class EvaluationGoldService:
 
     async def _collection_document_ids(self, collection_id: str) -> set[str]:
         keys: set[str] = set()
-        for record in await self.collection_service.list_files(collection_id):
+        collection = await self.collection_service.get_collection(collection_id)
+        for record in collection["documents"]:
             for field in (
                 "document_id",
-                "source_document_id",
-                "file_id",
                 "original_filename",
                 "stored_filename",
                 "storage_key",
             ):
                 self._add_document_key(keys, record.get(field))
-        manifest = await self.collection_service.get_import_manifest(collection_id)
-        for import_record in manifest.get("imports", []):
-            if not isinstance(import_record, Mapping):
-                continue
-            documents = import_record.get("documents")
-            if not isinstance(documents, list):
-                continue
-            for document in documents:
-                if not isinstance(document, Mapping):
-                    continue
-                for field in (
-                    "document_id",
-                    "source_document_id",
-                    "original_filename",
-                    "stored_filename",
-                    "storage_key",
-                ):
-                    self._add_document_key(keys, document.get(field))
         return keys
 
     def _validate_gold_item_documents(

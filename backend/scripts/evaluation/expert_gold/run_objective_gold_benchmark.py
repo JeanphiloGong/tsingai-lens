@@ -133,7 +133,6 @@ def run_objective_gold_benchmark(
         collection_id=collection_id,
         source_output_dir=source_output_dir,
         output_path=prediction_path,
-        fact_source="objective_first",
     )
     evaluation_report_path = evaluate_gold_vs_prediction.evaluate_gold_vs_prediction(
         gold_path=converted_gold_path,

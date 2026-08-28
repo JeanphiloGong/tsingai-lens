@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
 from openai import OpenAI
 from pydantic import BaseModel
-
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -72,6 +71,7 @@ class ResolvedRuntime:
     api_key: str
     temperature: float
     max_completion_tokens: int | None
+    reasoning_effort: str | None
     timeout_s: float
 
 
@@ -182,6 +182,12 @@ def resolve_runtime(
     timeout_s = float(getattr(args, "timeout_s", DEFAULT_TIMEOUT_S))
     if timeout_s <= 0:
         raise SystemExit("--timeout-s must be greater than 0")
+    reasoning_effort = _pick_first_non_empty(
+        getattr(args, "reasoning_effort", None),
+        os.getenv("LLM_REASONING_EFFORT"),
+        env_values.get("LLM_REASONING_EFFORT"),
+        None,
+    )
 
     return ResolvedRuntime(
         backend_root=backend_root,
@@ -192,6 +198,9 @@ def resolve_runtime(
         temperature=temperature,
         max_completion_tokens=(
             int(max_completion_tokens) if max_completion_tokens is not None else None
+        ),
+        reasoning_effort=(
+            str(reasoning_effort).strip() if reasoning_effort is not None else None
         ),
         timeout_s=timeout_s,
     )

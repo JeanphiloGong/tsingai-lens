@@ -193,28 +193,89 @@ class PostgresSourceArtifactRepository:
     ) -> tuple[SourceDocument, ...]:
         return await self._read_documents(collection_id)
 
+    async def read_documents(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[SourceDocument, ...]:
+        if not document_ids:
+            return ()
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("source document IDs must be unique")
+        documents = await self._read_documents(
+            collection_id,
+            document_ids=document_ids,
+        )
+        documents_by_id = {document.document_id: document for document in documents}
+        missing = tuple(
+            document_id
+            for document_id in document_ids
+            if document_id not in documents_by_id
+        )
+        if missing:
+            raise FileNotFoundError(
+                "source documents not found: " + ", ".join(missing)
+            )
+        return tuple(documents_by_id[document_id] for document_id in document_ids)
+
     async def _read_documents(
         self,
         collection_id: str,
         *,
         document_id: str | None = None,
+        document_ids: tuple[str, ...] | None = None,
     ) -> tuple[SourceDocument, ...]:
+        selected_document_ids = document_ids or (
+            (document_id,) if document_id is not None else None
+        )
         return assemble_source_documents(
-            documents=tuple(await self.list_documents(collection_id, document_id)),
-            text_units=tuple(await self.list_text_units(collection_id, document_id)),
-            blocks=tuple(await self.list_blocks(collection_id, document_id)),
-            tables=tuple(await self.list_tables(collection_id, document_id)),
+            documents=tuple(
+                await self.list_documents(
+                    collection_id,
+                    document_id,
+                    document_ids=selected_document_ids,
+                )
+            ),
+            text_units=tuple(
+                await self.list_text_units(
+                    collection_id,
+                    document_id,
+                    document_ids=selected_document_ids,
+                )
+            ),
+            blocks=tuple(
+                await self.list_blocks(
+                    collection_id,
+                    document_id,
+                    document_ids=selected_document_ids,
+                )
+            ),
+            tables=tuple(
+                await self.list_tables(
+                    collection_id,
+                    document_id,
+                    document_ids=selected_document_ids,
+                )
+            ),
             table_rows=tuple(
-                item
-                for item in await self.list_table_rows(collection_id)
-                if document_id is None or item.document_id == document_id
+                await self.list_table_rows(
+                    collection_id,
+                    document_ids=selected_document_ids,
+                )
             ),
             table_cells=tuple(
-                item
-                for item in await self.list_table_cells(collection_id)
-                if document_id is None or item.document_id == document_id
+                await self.list_table_cells(
+                    collection_id,
+                    document_ids=selected_document_ids,
+                )
             ),
-            figures=tuple(await self.list_figures(collection_id, document_id)),
+            figures=tuple(
+                await self.list_figures(
+                    collection_id,
+                    document_id,
+                    document_ids=selected_document_ids,
+                )
+            ),
         )
 
     async def read_document_tree(
@@ -263,6 +324,8 @@ class PostgresSourceArtifactRepository:
         self,
         collection_id: str,
         document_id: str | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceDocument]:
         async with self.session_factory() as session:
             statement = select(SourceDocumentRow).where(
@@ -271,6 +334,10 @@ class PostgresSourceArtifactRepository:
             if document_id is not None:
                 statement = statement.where(
                     SourceDocumentRow.source_document_id == document_id
+                )
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceDocumentRow.source_document_id.in_(document_ids)
                 )
             rows = await session.scalars(
                 statement.order_by(
@@ -296,12 +363,18 @@ class PostgresSourceArtifactRepository:
         self,
         collection_id: str,
         document_id: str | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTextUnit]:
         async with self.session_factory() as session:
             statement = self._source_statement(SourceTextUnitRow, collection_id)
             if document_id is not None:
                 statement = statement.where(
                     SourceTextUnitRow.source_document_id == document_id
+                )
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceTextUnitRow.source_document_id.in_(document_ids)
                 )
             rows = await session.scalars(
                 statement.order_by(
@@ -327,14 +400,23 @@ class PostgresSourceArtifactRepository:
         self,
         collection_id: str,
         document_id: str | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceBlock]:
         async with self.session_factory() as session:
             text_units_by_block = await self._text_units_by_block(
-                session, collection_id, document_id
+                session,
+                collection_id,
+                document_id,
+                document_ids,
             )
             statement = self._source_statement(SourceBlockRow, collection_id)
             if document_id is not None:
                 statement = statement.where(SourceBlockRow.source_document_id == document_id)
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceBlockRow.source_document_id.in_(document_ids)
+                )
             rows = await session.scalars(
                 statement.order_by(
                     SourceBlockRow.source_document_id,
@@ -365,11 +447,17 @@ class PostgresSourceArtifactRepository:
         self,
         collection_id: str,
         document_id: str | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTable]:
         async with self.session_factory() as session:
             statement = self._source_statement(SourceTableModel, collection_id)
             if document_id is not None:
                 statement = statement.where(SourceTableModel.source_document_id == document_id)
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceTableModel.source_document_id.in_(document_ids)
+                )
             rows = await session.scalars(
                 statement.order_by(
                     SourceTableModel.source_document_id,
@@ -400,11 +488,17 @@ class PostgresSourceArtifactRepository:
         self,
         collection_id: str,
         table_id: str | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTableRow]:
         async with self.session_factory() as session:
             statement = self._source_statement(SourceTableRowModel, collection_id)
             if table_id is not None:
                 statement = statement.where(SourceTableRowModel.table_id == table_id)
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceTableRowModel.source_document_id.in_(document_ids)
+                )
             rows = await session.scalars(
                 statement.order_by(
                     SourceTableRowModel.source_document_id,
@@ -433,6 +527,8 @@ class PostgresSourceArtifactRepository:
         collection_id: str,
         table_id: str | None = None,
         row_index: int | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTableCell]:
         async with self.session_factory() as session:
             statement = self._source_statement(SourceTableCellRow, collection_id)
@@ -440,6 +536,10 @@ class PostgresSourceArtifactRepository:
                 statement = statement.where(SourceTableCellRow.table_id == table_id)
             if row_index is not None:
                 statement = statement.where(SourceTableCellRow.row_index == row_index)
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceTableCellRow.source_document_id.in_(document_ids)
+                )
             rows = await session.scalars(
                 statement.order_by(
                     SourceTableCellRow.source_document_id,
@@ -475,11 +575,17 @@ class PostgresSourceArtifactRepository:
         self,
         collection_id: str,
         document_id: str | None = None,
+        *,
+        document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceFigure]:
         async with self.session_factory() as session:
             statement = self._source_statement(SourceFigureRow, collection_id)
             if document_id is not None:
                 statement = statement.where(SourceFigureRow.source_document_id == document_id)
+            if document_ids is not None:
+                statement = statement.where(
+                    SourceFigureRow.source_document_id.in_(document_ids)
+                )
             rows = await session.scalars(
                 statement.order_by(
                     SourceFigureRow.source_document_id,
@@ -558,15 +664,26 @@ class PostgresSourceArtifactRepository:
     async def read_collection_references(
         self,
         collection_id: str,
+        document_ids: tuple[str, ...] | None = None,
     ) -> SourceReferenceSet:
         async with self.session_factory() as session:
-            document_ids = select(SourceDocumentRow.source_document_id).where(
+            selected_document_ids = select(
+                SourceDocumentRow.source_document_id
+            ).where(
                 SourceDocumentRow.collection_id == collection_id
             )
+            if document_ids is not None:
+                selected_document_ids = selected_document_ids.where(
+                    SourceDocumentRow.source_document_id.in_(document_ids)
+                )
             entries = tuple(
                 await session.scalars(
                     select(SourceReferenceEntryRow)
-                    .where(SourceReferenceEntryRow.source_document_id.in_(document_ids))
+                    .where(
+                        SourceReferenceEntryRow.source_document_id.in_(
+                            selected_document_ids
+                        )
+                    )
                     .order_by(
                         SourceReferenceEntryRow.source_document_id,
                         SourceReferenceEntryRow.reference_index.asc().nulls_first(),
@@ -577,7 +694,11 @@ class PostgresSourceArtifactRepository:
             mentions = tuple(
                 await session.scalars(
                     select(SourceReferenceMentionRow)
-                    .where(SourceReferenceMentionRow.source_document_id.in_(document_ids))
+                    .where(
+                        SourceReferenceMentionRow.source_document_id.in_(
+                            selected_document_ids
+                        )
+                    )
                     .order_by(
                         SourceReferenceMentionRow.source_document_id,
                         SourceReferenceMentionRow.source_block_id.asc().nulls_first(),
@@ -628,6 +749,7 @@ class PostgresSourceArtifactRepository:
         session: AsyncSession,
         collection_id: str,
         document_id: str | None,
+        document_ids: tuple[str, ...] | None = None,
     ) -> dict[tuple[str, str], tuple[str, ...]]:
         statement = (
             select(
@@ -652,6 +774,10 @@ class PostgresSourceArtifactRepository:
         if document_id is not None:
             statement = statement.where(
                 SourceBlockTextUnit.source_document_id == document_id
+            )
+        if document_ids is not None:
+            statement = statement.where(
+                SourceBlockTextUnit.source_document_id.in_(document_ids)
             )
         rows = await session.execute(
             statement.order_by(

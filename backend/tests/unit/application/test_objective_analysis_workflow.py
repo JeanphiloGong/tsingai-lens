@@ -20,6 +20,7 @@ from application.core.objectives.analysis.source_screening import (
     StructuredPaperFrameBatch,
 )
 from application.core.objectives.research_objective_service import (
+    OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
     ObjectiveDocumentEvidenceArtifacts,
 )
 from domain.core import (
@@ -1073,13 +1074,23 @@ def test_document_evidence_fingerprint_covers_every_reuse_input(tmp_path) -> Non
         current_document_input=document_input,
         model_name="model-a",
         extraction_version="objective-document-evidence.v1",
+        scientific_versions=OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
     ) -> str:
         return service._document_evidence_input_fingerprint(
             objective=current_objective,
             document_input=current_document_input,
             model_name=model_name,
             extraction_version=extraction_version,
+            scientific_versions=scientific_versions,
         )
+
+    changed_scientific_versions = (
+        tuple(
+            (name, f"{version}.changed" if name == changed_name else version)
+            for name, version in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+        )
+        for changed_name, _version in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+    )
 
     fingerprints = {
         fingerprint(),
@@ -1108,6 +1119,53 @@ def test_document_evidence_fingerprint_covers_every_reuse_input(tmp_path) -> Non
         ),
         fingerprint(model_name="model-b"),
         fingerprint(extraction_version="objective-document-evidence.v2"),
+        *(
+            fingerprint(scientific_versions=versions)
+            for versions in changed_scientific_versions
+        ),
     }
 
-    assert len(fingerprints) == 7
+    assert len(OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS) == 6
+    assert len(fingerprints) == 13
+
+
+async def test_objective_source_loading_uses_one_exact_document_batch(tmp_path) -> None:
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        response_client=_ObjectiveExtractor(),
+    )
+    requested_inputs = (
+        PreparedDocumentInput("paper-2", "preparation-2"),
+        PreparedDocumentInput("paper-1", "preparation-1"),
+    )
+    expected_documents = source_documents_from_records(
+        documents=(
+            {"id": "paper-2", "title": "Paper 2", "text": "Result 2"},
+            {"id": "paper-1", "title": "Paper 1", "text": "Result 1"},
+        )
+    )
+
+    class BatchOnlySourceRepository:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def read_documents(self, collection_id, document_ids):
+            self.calls.append((collection_id, document_ids))
+            return expected_documents
+
+        async def read_document(self, *args, **kwargs):
+            raise AssertionError("Objective loading must not read documents one by one")
+
+    repository = BatchOnlySourceRepository()
+    service.source_artifact_repository = repository
+
+    documents = await service._load_source_documents(
+        "collection-1",
+        document_inputs=requested_inputs,
+    )
+
+    assert documents == expected_documents
+    assert repository.calls == [
+        ("collection-1", ("paper-2", "paper-1")),
+    ]

@@ -54,7 +54,7 @@ _OBJECTIVE_ROUTE_ROLES = {
 }
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _ROUTE_MAX_COMPLETION_TOKENS = 512
-_ROUTE_PROMPT_VERSION = "objective_evidence_route.v3"
+OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v3"
 _ROUTE_SYSTEM_PROMPT = """
 You are routing source units for one research objective in an evidence-backed literature comparison backend.
 
@@ -237,7 +237,7 @@ class ObjectiveEvidenceRouter:
             max_completion_tokens=_ROUTE_MAX_COMPLETION_TOKENS,
             force_json_text=True,
             task_type="objective_evidence_route",
-            prompt_version=_ROUTE_PROMPT_VERSION,
+            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceSelections):
             raise TypeError("unexpected objective evidence route response type")

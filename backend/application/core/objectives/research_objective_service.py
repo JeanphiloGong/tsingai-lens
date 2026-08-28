@@ -14,9 +14,11 @@ from application.core.document_profiles.service import (
 )
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_materialization import (
+    OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION,
     materialize_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import (
+    OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
     ObjectiveEvidenceRouter,
     route_sources,
 )
@@ -24,15 +26,21 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis.paper_experiment import (
+    PAPER_EXPERIMENT_RECONSTRUCTION_VERSION,
     reconstruct_paper_experiments,
 )
 from application.core.objectives.analysis.source_extraction import (
+    OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
     ObjectiveSourceExtractor,
     extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
+    OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
     ObjectiveSourceScreener,
     screen_sources,
+)
+from application.core.objectives.analysis.source_validation import (
+    OBJECTIVE_SOURCE_GROUNDING_VERSION,
 )
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
@@ -45,7 +53,6 @@ from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
-from application.source.artifact_input_service import load_document_tree
 from application.source.collection_service import CollectionService
 from domain.core import (
     Finding,
@@ -64,13 +71,25 @@ from domain.ports import (
     PaperMapRepository,
     SourceArtifactRepository,
 )
-from domain.source import SourceDocument
+from domain.source import (
+    SourceDocument,
+    SourceReferenceSet,
+    build_source_document_tree,
+)
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 _OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v1"
+OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
+    ("paper_framing", OBJECTIVE_PAPER_FRAME_PROMPT_VERSION),
+    ("evidence_routing", OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION),
+    ("source_extraction", OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION),
+    ("source_grounding", OBJECTIVE_SOURCE_GROUNDING_VERSION),
+    ("paper_experiment", PAPER_EXPERIMENT_RECONSTRUCTION_VERSION),
+    ("evidence_materialization", OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION),
+)
 _OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
 
 
@@ -223,9 +242,7 @@ class ResearchObjectiveService:
     ) -> ResearchObjective:
         """Persist one user-approved, explicitly untested research question."""
 
-        await self.collection_service.get_collection_for_user(
-            collection_id, user_id
-        )
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
         if len(outcomes) != 1:
             raise ValueError("chat-assisted objective requires exactly one outcome")
         objective = ResearchObjective.from_mapping(
@@ -249,9 +266,10 @@ class ResearchObjectiveService:
         if not is_question_shaped_objective(objective):
             raise ValueError("chat-assisted objective question is not question-shaped")
 
-        facts = await self.objective_repository.read(collection_id)
-        if not facts.research_objectives_ready:
-            raise ResearchObjectivesNotReadyError(collection_id)
+        for document_id in dict.fromkeys(
+            (*objective.seed_document_ids, *objective.excluded_document_ids)
+        ):
+            await self.collection_service.get_document(collection_id, document_id)
         objective = replace(
             objective,
             confidence=0,
@@ -506,6 +524,9 @@ class ResearchObjectiveService:
         document_input: PreparedDocumentInput,
         model_name: str,
         extraction_version: str,
+        scientific_versions: tuple[tuple[str, str], ...] = (
+            OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+        ),
     ) -> str:
         payload = {
             "objective": {
@@ -521,6 +542,7 @@ class ResearchObjectiveService:
             },
             "document": document_input.to_record(),
             "extraction_version": extraction_version,
+            "scientific_versions": dict(scientific_versions),
             "model_name": model_name,
         }
         return sha256(
@@ -703,16 +725,27 @@ class ResearchObjectiveService:
         except FileNotFoundError as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
-        # Load structural trees
-        # For every document, it loads a SourceDocumentTree
-        document_trees_by_document_id = {
-            document.document_id: await load_document_tree(
-                collection_id,
+        document_ids = tuple(document.document_id for document in documents)
+        references = await self.source_artifact_repository.read_collection_references(
+            collection_id,
+            document_ids,
+        )
+        document_trees_by_document_id = {}
+        for document in documents:
+            document_references = self._references_for_document(
+                references,
                 document.document_id,
-                self.source_artifact_repository,
             )
-            for document in documents
-        }
+            document_trees_by_document_id[document.document_id] = (
+                build_source_document_tree(
+                    collection_id=collection_id,
+                    document=document,
+                    blocks=document.blocks,
+                    tables=document.tables,
+                    figures=document.figures,
+                    references=document_references,
+                )
+            )
         return {
             "documents": documents,
             "profiles_by_document_id": {
@@ -750,17 +783,40 @@ class ResearchObjectiveService:
         *,
         document_inputs: tuple[PreparedDocumentInput, ...],
     ) -> tuple[SourceDocument, ...]:
-        documents: list[SourceDocument] = []
-        for item in document_inputs:
-            document = await self.source_artifact_repository.read_document(
-                collection_id,
-                item.document_id,
-            )
-            if document is not None:
-                documents.append(document)
-        if len(documents) != len(document_inputs):
+        document_ids = tuple(item.document_id for item in document_inputs)
+        documents = await self.source_artifact_repository.read_documents(
+            collection_id,
+            document_ids,
+        )
+        if tuple(document.document_id for document in documents) != document_ids:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return tuple(documents)
+        return documents
+
+    @staticmethod
+    def _references_for_document(
+        references: SourceReferenceSet,
+        document_id: str,
+    ) -> SourceReferenceSet:
+        entries = tuple(
+            item for item in references.entries if item.document_id == document_id
+        )
+        reference_ids = {item.reference_id for item in entries}
+        return SourceReferenceSet(
+            entries=entries,
+            mentions=tuple(
+                item for item in references.mentions if item.document_id == document_id
+            ),
+            resolutions=tuple(
+                item
+                for item in references.resolutions
+                if item.reference_id in reference_ids
+            ),
+            candidates=tuple(
+                item
+                for item in references.candidates
+                if item.reference_id in reference_ids
+            ),
+        )
 
     async def resolve_prepared_document_inputs(
         self,
@@ -814,6 +870,7 @@ class ResearchObjectiveService:
 
 
 __all__ = [
+    "OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS",
     "ResearchObjectiveService",
     "ResearchObjectivesNotReadyError",
 ]

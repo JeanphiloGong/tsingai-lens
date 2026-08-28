@@ -16,6 +16,8 @@ from domain.core import ResearchObjective
 
 logger = logging.getLogger(__name__)
 
+PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v1"
+
 _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _RESULT_SERIES_MEASUREMENT_PATTERN = re.compile(

@@ -178,6 +178,34 @@ async def test_source_repository_round_trips_each_current_document_independently
     )
 
 
+async def test_source_repository_batch_read_is_exact_ordered_and_complete(
+    source_repository,
+) -> None:
+    first = _source("doc_a", title="Paper A")
+    second = _source("doc_b", title="Paper B")
+    await source_repository.replace_document(COLLECTION_ID, first)
+    await source_repository.replace_document(COLLECTION_ID, second)
+
+    selected = await source_repository.read_documents(
+        COLLECTION_ID,
+        ("doc_b", "doc_a"),
+    )
+
+    assert selected == (second, first)
+    assert selected[0].table_rows == second.table_rows
+    assert selected[0].table_cells == second.table_cells
+    with pytest.raises(ValueError, match="must be unique"):
+        await source_repository.read_documents(
+            COLLECTION_ID,
+            ("doc_a", "doc_a"),
+        )
+    with pytest.raises(FileNotFoundError, match="doc_missing"):
+        await source_repository.read_documents(
+            COLLECTION_ID,
+            ("doc_a", "doc_missing"),
+        )
+
+
 async def test_replacing_one_document_source_does_not_rebuild_other_documents(
     source_repository,
 ) -> None:
@@ -247,6 +275,47 @@ async def test_source_repository_round_trips_document_references_and_tree(
         source.tables[0].table_id,
         source.figures[0].figure_id,
     }
+
+
+async def test_source_reference_batch_excludes_unselected_documents(
+    source_repository,
+) -> None:
+    first = _source("doc_a", title="Paper A")
+    second = _source("doc_b", title="Paper B")
+    await source_repository.replace_document(COLLECTION_ID, first)
+    await source_repository.replace_document(COLLECTION_ID, second)
+    await source_repository.replace_document_references(
+        "doc_a",
+        SourceReferenceSet(
+            entries=(
+                SourceReferenceEntry(
+                    reference_id="ref-a-1",
+                    document_id="doc_a",
+                    raw_reference="Reference A",
+                ),
+            ),
+        ),
+    )
+    second_references = SourceReferenceSet(
+        entries=(
+            SourceReferenceEntry(
+                reference_id="ref-b-1",
+                document_id="doc_b",
+                raw_reference="Reference B",
+            ),
+        ),
+    )
+    await source_repository.replace_document_references(
+        "doc_b",
+        second_references,
+    )
+
+    selected = await source_repository.read_collection_references(
+        COLLECTION_ID,
+        ("doc_b",),
+    )
+
+    assert selected == second_references
 
 
 async def test_source_repository_rejects_cross_document_children_and_references(

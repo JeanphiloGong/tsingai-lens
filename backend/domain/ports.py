@@ -188,6 +188,12 @@ class SourceArtifactRepository(Protocol):
         collection_id: str,
     ) -> tuple[SourceDocument, ...]: ...
 
+    async def read_documents(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[SourceDocument, ...]: ...
+
     async def read_document_tree(
         self,
         collection_id: str,
@@ -239,6 +245,7 @@ class SourceArtifactRepository(Protocol):
     async def read_collection_references(
         self,
         collection_id: str,
+        document_ids: tuple[str, ...] | None = None,
     ) -> SourceReferenceSet: ...
 
     async def list_figures(

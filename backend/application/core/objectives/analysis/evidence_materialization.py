@@ -25,6 +25,8 @@ from domain.core import (
     ResearchObjective,
 )
 
+OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v1"
+
 
 _CONTRIBUTION_SUMMARY_CHARS = 320
 _MATERIAL_SCOPE_DECISION_TRACE_LIMIT = 100

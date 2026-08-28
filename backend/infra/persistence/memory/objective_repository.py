@@ -147,21 +147,6 @@ class MemoryObjectiveRepository:
                     "authored candidate tool call already created a different objective"
                 )
             return existing
-        facts = self._facts.get(objective.collection_id)
-        if facts is None or not facts.research_objectives_ready:
-            raise FileNotFoundError(
-                f"research objectives not ready: {objective.collection_id}"
-            )
-        available = {item.document_id for item in facts.document_inputs}
-        requested = set(objective.seed_document_ids) | set(
-            objective.excluded_document_ids
-        )
-        missing = requested - available
-        if missing:
-            raise FileNotFoundError(
-                "authored candidate document not found: "
-                + ", ".join(sorted(missing))
-            )
         key = (objective.collection_id, objective.objective_id)
         existing = self._objectives.get(key)
         if existing is not None:

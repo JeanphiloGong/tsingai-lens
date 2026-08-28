@@ -87,6 +87,36 @@ stores uploaded and extracted bytes. Local files are disposable runtime scratch.
   scientific work and remains reusable. Provider, parsing, and execution errors
   are technical failure and remain retryable.
 
+## Restart Recovery And Scientific Versioning
+
+The process-local background workers are not durable queues. Before the API
+starts serving requests, startup recovery converts persisted work that no live
+worker can own into retryable state:
+
+- queued or running Document preparation tasks become `interrupted`; a Document
+  left in `processing` returns to `stored`, while already written Source,
+  DocumentProfile, and PaperMap artifacts remain available for fingerprinted
+  reuse;
+- queued or running Objective analyses become failed with
+  `analysis_interrupted`; an unpublished interrupted analysis is not projected
+  as active work, so the current state is `not_started` until the researcher
+  retries it; and
+- recovery never resumes a scientific operation from an unknown in-memory
+  position and never treats a restart as a scientific absence or conclusion.
+
+Published analyses are immutable readable snapshots. An interrupted or failed
+new analysis does not replace the published version. A retry uses the selected
+Documents' current preparation fingerprints and the current scientific logic,
+then atomically replaces the published version only after the complete analysis
+succeeds.
+
+Per-Document Objective Evidence checkpoints are reusable only when their input
+fingerprint matches the Objective, Document preparation, model, extraction
+version, and the six scientific stages: paper framing, evidence routing, Source
+extraction, Source grounding, paper experiment reconstruction, and Evidence
+materialization. Changing any of those stage versions invalidates the cached
+Evidence for new analysis without making an older published result unreadable.
+
 ## Related Docs
 
 - [`persistence-model.md`](persistence-model.md)

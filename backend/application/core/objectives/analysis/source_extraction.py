@@ -75,7 +75,7 @@ _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
 )
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 2048
-_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v7"
+OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v7"
 _SOURCE_EXTRACTION_ROLES = {
     "direct_result",
     "condition_context",
@@ -850,7 +850,7 @@ class ObjectiveSourceExtractor:
             include_schema_for_forced_json=False,
             json_text_parser=self._parse_json_response,
             task_type="objective_evidence_extraction",
-            prompt_version=_SOURCE_EXTRACTION_PROMPT_VERSION,
+            prompt_version=OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceExtractions):
             raise TypeError("unexpected objective evidence extraction response type")

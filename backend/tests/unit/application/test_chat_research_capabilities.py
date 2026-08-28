@@ -130,6 +130,19 @@ class _CollectionService:
             ],
         }
 
+    async def get_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SimpleNamespace:
+        if collection_id != "col-1" or document_id not in {"paper-1", "paper-2"}:
+            raise FileNotFoundError("document not found")
+        return SimpleNamespace(
+            document_id=document_id,
+            status="ready",
+            preparation_fingerprint=f"fingerprint-{document_id}",
+        )
+
 
 class _EmptyCollectionService(_CollectionService):
     async def get_collection_for_user(
@@ -1111,8 +1124,9 @@ async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence
     assert result.data["needs_inspection"][0]["reason"] == "citation_lead_only"
 
 
-async def test_core_authoring_persists_a_seedless_question_as_explicitly_untested() -> None:
+async def test_core_authoring_without_discovery_persists_a_seedless_question_as_untested() -> None:
     repository = _ObjectiveAuthoringRepository()
+    repository.facts = ObjectiveFactSet()
     service = ResearchObjectiveService(
         collection_service=_CollectionService(),
         source_artifact_repository=SimpleNamespace(),
@@ -1144,6 +1158,35 @@ async def test_core_authoring_persists_a_seedless_question_as_explicitly_unteste
         "User-approved untested research question; paper scope and Evidence "
         "support have not been established."
     )
+
+
+async def test_core_authoring_rejects_a_seed_document_outside_the_collection() -> None:
+    repository = _ObjectiveAuthoringRepository()
+    service = ResearchObjectiveService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=SimpleNamespace(),
+        paper_map_repository=SimpleNamespace(),
+        objective_repository=repository,
+        document_profile_service=SimpleNamespace(),
+        finding_synthesis_service=SimpleNamespace(),
+        objective_candidate_service=SimpleNamespace(),
+    )
+
+    with pytest.raises(FileNotFoundError, match="document not found"):
+        await service.create_chat_assisted_candidate(
+            collection_id="col-1",
+            user_id="user-1",
+            tool_call_id="call-unknown-seed",
+            question="How does oxygen content affect elongation?",
+            material_scope=["Ti-6Al-4V"],
+            variables=["oxygen content"],
+            outcomes=["elongation"],
+            mechanisms=[],
+            constraints=[],
+            requested_comparator=None,
+            seed_document_ids=["paper-outside-collection"],
+            excluded_document_ids=[],
+        )
 
 
 class _ObjectiveAnalysisCapabilityService:

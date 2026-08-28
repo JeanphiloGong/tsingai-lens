@@ -53,6 +53,23 @@ def _objective() -> ResearchObjective:
     )
 
 
+def _authored_objective() -> ResearchObjective:
+    return ResearchObjective.from_mapping(
+        {
+            "collection_id": COLLECTION_ID,
+            "question": "How does scan strategy affect yield strength?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["scan strategy"],
+            "outcomes": ["yield strength"],
+            "seed_document_ids": ["doc_a"],
+            "confidence": 0,
+            "origin": "chat_assisted",
+            "created_by_user_id": "user_source",
+            "created_by_tool_call_id": "call-authored-no-discovery",
+        }
+    )
+
+
 def _discovery() -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
@@ -242,6 +259,23 @@ async def test_objective_discovery_round_trips_exact_prepared_document_inputs(
     assert len(restored.research_objectives) == 1
     assert restored.research_objectives[0].question == _objective().question
     assert restored.research_objectives[0].seed_document_ids == ("doc_a", "doc_b")
+
+
+async def test_authored_candidate_persists_without_an_objective_discovery_row(
+    source_repository,
+) -> None:
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    objective = _authored_objective()
+
+    created = await repository.create_authored_candidate(
+        objective,
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-authored-no-discovery",
+    )
+
+    assert created.rank == 1
+    assert await repository.list_objectives(COLLECTION_ID) == (created,)
+    assert (await repository.read(COLLECTION_ID)).research_objectives_ready is False
 
 
 async def test_active_analysis_reuses_only_the_same_document_manifest(

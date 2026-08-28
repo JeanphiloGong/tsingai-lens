@@ -49,6 +49,29 @@ class MemorySourceArtifactRepository:
             if owner_collection_id == collection_id
         )
 
+    async def read_documents(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[SourceDocument, ...]:
+        if not document_ids:
+            return ()
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("source document IDs must be unique")
+        missing = tuple(
+            document_id
+            for document_id in document_ids
+            if (collection_id, document_id) not in self._documents
+        )
+        if missing:
+            raise FileNotFoundError(
+                "source documents not found: " + ", ".join(missing)
+            )
+        return tuple(
+            deepcopy(self._documents[(collection_id, document_id)])
+            for document_id in document_ids
+        )
+
     async def replace_document_references(
         self,
         document_id: str,
@@ -59,15 +82,18 @@ class MemorySourceArtifactRepository:
     async def read_collection_references(
         self,
         collection_id: str,
+        document_ids: tuple[str, ...] | None = None,
     ) -> SourceReferenceSet:
-        document_ids = {
+        collection_document_ids = {
             document_id
             for owner_collection_id, document_id in self._documents
             if owner_collection_id == collection_id
         }
+        if document_ids is not None:
+            collection_document_ids &= set(document_ids)
         reference_sets = [
             self._references[document_id]
-            for document_id in sorted(document_ids)
+            for document_id in sorted(collection_document_ids)
             if document_id in self._references
         ]
         return SourceReferenceSet(

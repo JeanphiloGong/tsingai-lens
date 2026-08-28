@@ -208,27 +208,6 @@ class PostgresObjectiveRepository:
                         "authored candidate tool call already created a different objective"
                     )
                 return existing
-            discovery = await session.get(
-                ObjectiveDiscoveryRecord,
-                objective.collection_id,
-            )
-            if discovery is None or not discovery.research_objectives_ready:
-                raise FileNotFoundError(
-                    f"research objectives not ready: {objective.collection_id}"
-                )
-            available = {
-                str(item.get("document_id") or "")
-                for item in discovery.document_inputs
-            }
-            requested = set(objective.seed_document_ids) | set(
-                objective.excluded_document_ids
-            )
-            missing = requested - available
-            if missing:
-                raise FileNotFoundError(
-                    "authored candidate document not found: "
-                    + ", ".join(sorted(missing))
-                )
             collision = await session.get(
                 ObjectiveResearchRecord,
                 (objective.collection_id, objective.objective_id),

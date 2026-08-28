@@ -13,11 +13,16 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    retains only explicit axes for bounded reconciliation. Review papers retain
    only synthesis explicitly authored by the review; individually cited
    experiments remain leads back to primary literature. The backend binds
-   Source identity.
+   Source identity. One high-level experimental study may retain up to six
+   explicitly linked factor-to-outcome relationships so that a dense abstract
+   or conclusion does not silently lose a stated research axis.
 2. `paper_research_map_service.py` in the parent package selects how a
    researcher reads before choosing a question: bounded abstract, conclusion or
    summary, overview, and table/figure caption Sources. Detailed Methods,
    Results text, and table rows do not enter this pre-Objective stage. The
+   paper map therefore records that a result axis exists without reconstructing
+   detailed table structure or values; those rows are read only after the
+   researcher confirms an Objective. The
    service groups the selected Sources by broad reading role, retries technical
    failures under one small per-paper budget, and consolidates the results into
    one paper map.

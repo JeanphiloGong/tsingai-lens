@@ -93,7 +93,7 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "test_context" not in study_schema
     assert "comparator" not in study_schema
     assert "fixed_conditions" not in study_schema
-    assert study_schema["relationships"]["maxItems"] == 4
+    assert study_schema["relationships"]["maxItems"] == 6
     assert relationship_schema["varied_factors"]["maxItems"] == 6
     assert "source_unit_ids" not in relationship_schema
     assert relationship_schema["source_labels"]["minItems"] == 1
@@ -526,24 +526,30 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
     assert "full jointly varied, compared, or modeled factor set" in user_prompt
-    assert "never label the cited study current_work" in user_prompt
+    assert "Never label a cited study current_work" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
-    assert "copy `source_labels`" in user_prompt
+    assert "Copy every directly supporting Source label" in user_prompt
     assert "at most 4 unique `source_labels`" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 2 studies" in user_prompt
-    assert "up to 4 relationships per study" in user_prompt
+    assert "up to 6 relationships per study" in user_prompt
     assert "up to 4 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
+    assert "not relationship overflow" in user_prompt
     assert "neutral scientific axis" in user_prompt
     assert "at most 6 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
     assert "result direction, value, or comparison sentence" in user_prompt
+    assert "Do not promote causal explanations or intermediate mechanisms" in user_prompt
+    assert "Keep one study unless the Source explicitly names distinct experiments" in (
+        user_prompt
+    )
+    assert "optional experiment_label only when explicitly named" in user_prompt
     assert "source_unit_coverage" not in user_prompt
 
 
@@ -2162,8 +2168,8 @@ def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_los
         for signal in skim.unresolved_signals
     )
     prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "one specific outcome" in prompt
-    assert "compound outcome" in prompt
+    assert "one relationship per outcome" in prompt
+    assert "combines distinct measurements" in prompt
     assert "unresolved_signals" in prompt
 
 

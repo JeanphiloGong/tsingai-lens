@@ -78,6 +78,7 @@ class InspectResearchProcessCapability:
             (
                 error
                 for task in latest_by_document.values()
+                if str(task.get("current_stage") or "") != "interrupted"
                 for error in task.get("errors") or ()
             ),
             limit=_VISIBLE_FAILURE_LIMIT,
@@ -119,13 +120,21 @@ class InspectResearchProcessCapability:
         task = latest_by_document.get(document_id)
         document_status = str(document.get("status") or "stored")
         task_status = str(task.get("status") or "") if task is not None else ""
-        status = {
-            "queued": "processing",
-            "running": "processing",
-            "completed": "ready",
-            "partial_success": "ready",
-            "failed": "failed",
-        }.get(task_status, document_status)
+        interrupted = (
+            task_status == "failed"
+            and str(task.get("current_stage") or "") == "interrupted"
+        )
+        status = (
+            document_status
+            if interrupted
+            else {
+                "queued": "processing",
+                "running": "processing",
+                "completed": "ready",
+                "partial_success": "ready",
+                "failed": "failed",
+            }.get(task_status, document_status)
+        )
         return {
             "document_id": document_id,
             "filename": str(document.get("original_filename") or "")[:300],

@@ -158,9 +158,22 @@ class DocumentPreparationService:
             document_id = task.get("document_id")
             if not document_id:
                 continue
+            try:
+                document = await self.collection_service.get_document(
+                    task["collection_id"],
+                    document_id,
+                )
+            except FileNotFoundError:
+                document = None
+            if document is not None and document.status == "processing":
+                await self.collection_service.update_document_preparation(
+                    task["collection_id"],
+                    document_id,
+                    status="stored",
+                )
             await self.task_service.finish_task(
                 task["task_id"],
-                status="interrupted",
+                status="failed",
                 current_stage="interrupted",
                 progress_percent=task.get("progress_percent", 0),
                 errors=[
@@ -168,20 +181,6 @@ class DocumentPreparationService:
                     "Document preparation was interrupted by a backend restart.",
                 ],
             )
-            try:
-                document = await self.collection_service.get_document(
-                    task["collection_id"],
-                    document_id,
-                )
-            except FileNotFoundError:
-                interrupted_count += 1
-                continue
-            if document.status == "processing":
-                await self.collection_service.update_document_preparation(
-                    task["collection_id"],
-                    document_id,
-                    status="stored",
-                )
             interrupted_count += 1
         if interrupted_count:
             logger.warning(

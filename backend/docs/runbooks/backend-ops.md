@@ -137,8 +137,9 @@ duplicate its destructive restore commands.
   uses awaited task-local `AsyncSession` transactions. There is no dedicated
   Objective executor queue or external task broker; persisted Objective
   analysis rows remain the status authority used by the polling API.
-- Startup marks orphaned queued or running Document preparation as interrupted
-  and returns affected `processing` Documents to `stored`. The next preparation
+- Startup marks orphaned queued or running Document preparation failed with the
+  `interrupted` stage and returns affected `processing` Documents to `stored`.
+  Research-facing status reports this as `not_started`. The next preparation
   request is a new attempt and may reuse fingerprint-matching Source and Profile
   artifacts.
 - Startup marks orphaned queued or running Objective analyses failed with

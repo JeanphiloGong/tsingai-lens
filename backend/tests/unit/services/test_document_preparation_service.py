@@ -145,7 +145,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
 
     interrupted = await task_service.get_task(task["task_id"])
     assert recovered == 1
-    assert interrupted["status"] == "interrupted"
+    assert interrupted["status"] == "failed"
     assert interrupted["current_stage"] == "interrupted"
     assert interrupted["finished_at"] is not None
     assert collection_service.document == replace(original, status="stored")
@@ -160,6 +160,55 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     )
     assert replacement_created is True
     assert replacement["task_id"] != task["task_id"]
+
+
+async def test_restart_keeps_preparation_active_when_document_reset_fails() -> None:
+    collection_id = "col_restart_retry"
+    document_id = "doc_restart_retry"
+    document = Document(
+        document_id=document_id,
+        original_filename="paper.pdf",
+        stored_filename="paper.pdf",
+        storage_key="col_restart_retry/inputs/paper.pdf",
+        sha256="c" * 64,
+        media_type="application/pdf",
+        status="processing",
+        size_bytes=100,
+        created_at="2026-08-28T01:00:00+00:00",
+    )
+
+    class CollectionService:
+        async def get_document(self, owner: str, selected: str) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            return document
+
+        async def update_document_preparation(self, *_args, **_fields) -> Document:
+            raise OSError("database temporarily unavailable")
+
+    task_service = TaskService(MemoryTaskRepository())
+    task, _created = await task_service.get_or_create_document_task(
+        collection_id=collection_id,
+        document_id=document_id,
+        task_type="document_preparation",
+        input_fingerprint="preparation-input",
+    )
+    await task_service.update_task(task["task_id"], status="running")
+    service = DocumentPreparationService(
+        collection_service=CollectionService(),
+        task_service=task_service,
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        document_profile_service=object(),
+        paper_map_repository=MemoryPaperMapRepository(),
+        paper_map_service=object(),
+        max_concurrency=1,
+    )
+
+    with pytest.raises(OSError, match="temporarily unavailable"):
+        await service.recover_interrupted_tasks()
+
+    still_active = await task_service.get_task(task["task_id"])
+    assert still_active["status"] == "running"
+    assert still_active["finished_at"] is None
 
 
 async def test_paper_map_change_reuses_current_source_and_profile() -> None:

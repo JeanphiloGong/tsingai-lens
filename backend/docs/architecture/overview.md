@@ -93,10 +93,11 @@ The process-local background workers are not durable queues. Before the API
 starts serving requests, startup recovery converts persisted work that no live
 worker can own into retryable state:
 
-- queued or running Document preparation tasks become `interrupted`; a Document
-  left in `processing` returns to `stored`, while already written Source,
-  DocumentProfile, and PaperMap artifacts remain available for fingerprinted
-  reuse;
+- queued or running Document preparation tasks become failed with the
+  `interrupted` stage; a Document left in `processing` returns to `stored`, while
+  already written Source, DocumentProfile, and PaperMap artifacts remain
+  available for fingerprinted reuse. Research-facing status projects this
+  technical interruption as `not_started` rather than a scientific failure;
 - queued or running Objective analyses become failed with
   `analysis_interrupted`; an unpublished interrupted analysis is not projected
   as active work, so the current state is `not_started` until the researcher

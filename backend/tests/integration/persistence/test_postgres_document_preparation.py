@@ -4,8 +4,20 @@ from dataclasses import replace
 
 import pytest
 
+from application.source.collection_service import CollectionService
+from application.source.document_preparation_service import (
+    DocumentPreparationService,
+)
+from application.source.task_service import TaskService
+from controllers.schemas.source.task import TaskResponse
 from domain.core import DocumentProfile, PaperResearchMap
 from domain.source import TaskRecord
+from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.memory import (
+    MemoryPaperMapRepository,
+    MemorySourceArtifactRepository,
+)
+from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
 )
@@ -131,3 +143,58 @@ async def test_document_task_reuses_active_and_matching_completed_work(
     changed_request = _task("task-changed-request", "fingerprint-b")
     created_task, created = await tasks.get_or_create_document_task(changed_request)
     assert (created_task, created) == (changed_request, True)
+
+
+async def test_postgres_restart_recovery_is_retryable_and_api_readable(
+    source_repository,
+    tmp_path,
+) -> None:
+    collection_service = CollectionService(
+        PostgresCollectionRepository(source_repository.session_factory),
+        FileCollectionWorkspace(tmp_path / "collections"),
+    )
+    await collection_service.update_document_preparation(
+        COLLECTION_ID,
+        "doc_a",
+        status="processing",
+    )
+    task_service = TaskService(
+        PostgresTaskRepository(source_repository.session_factory)
+    )
+    task, created = await task_service.get_or_create_document_task(
+        collection_id=COLLECTION_ID,
+        document_id="doc_a",
+        task_type="document_preparation",
+        input_fingerprint="restart-input",
+    )
+    assert created is True
+    await task_service.update_task(task["task_id"], status="running")
+    service = DocumentPreparationService(
+        collection_service=collection_service,
+        task_service=task_service,
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        document_profile_service=object(),
+        paper_map_repository=MemoryPaperMapRepository(),
+        paper_map_service=object(),
+        max_concurrency=1,
+    )
+
+    recovered = await service.recover_interrupted_tasks()
+
+    recovered_task = await task_service.get_task(task["task_id"])
+    assert recovered == 1
+    assert recovered_task["status"] == "failed"
+    assert recovered_task["current_stage"] == "interrupted"
+    assert TaskResponse(**recovered_task).status == "failed"
+    assert (await collection_service.get_document(COLLECTION_ID, "doc_a")).status == (
+        "stored"
+    )
+
+    retry, retry_created = await task_service.get_or_create_document_task(
+        collection_id=COLLECTION_ID,
+        document_id="doc_a",
+        task_type="document_preparation",
+        input_fingerprint="restart-input",
+    )
+    assert retry_created is True
+    assert retry["task_id"] != task["task_id"]

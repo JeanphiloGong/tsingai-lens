@@ -494,7 +494,7 @@ async def test_research_process_treats_interrupted_preparation_as_not_started() 
                 {
                     "task_id": "task-interrupted",
                     "document_id": "paper-1",
-                    "status": "interrupted",
+                    "status": "failed",
                     "current_stage": "interrupted",
                     "progress_percent": 68,
                     "warnings": [],
@@ -520,6 +520,7 @@ async def test_research_process_treats_interrupted_preparation_as_not_started() 
         "stored",
         "stored",
     ]
+    assert process["failures"] == []
 
 
 async def test_agent_starts_research_process_only_after_exact_user_approval() -> None:

@@ -45,6 +45,52 @@ def test_objective_evidence_route_prompt_uses_response_schema_field_name():
         assert '{"routes": []}' not in prompt
 
 
+def test_objective_evidence_route_prompt_hides_backend_lineage():
+    _system_prompt, user_prompt = (
+        evidence_routing.build_objective_evidence_route_prompt(
+            {
+                "collection_id": "collection-internal",
+                "objective": {
+                    "objective_id": "objective-internal",
+                    "question": "How does scan strategy affect residual stress?",
+                    "variables": ["scan strategy"],
+                    "outcomes": ["residual stress"],
+                },
+                "paper_frame": {
+                    "objective_id": "objective-internal",
+                    "document_id": "document-internal",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "changed_variables": ["scan strategy"],
+                },
+                "tree_position": {
+                    "node_id": "node-internal",
+                    "node_type": "paragraph",
+                    "section_path": ["Results"],
+                    "source_ref_id": "block-internal",
+                },
+                "current_source": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-internal",
+                    "section_label": "Results",
+                    "text_hint": "Residual stress depends on scan strategy.",
+                },
+            }
+        )
+    )
+
+    assert "Residual stress depends on scan strategy." in user_prompt
+    assert '"section_path": [' in user_prompt
+    for internal_value in (
+        "collection-internal",
+        "objective-internal",
+        "document-internal",
+        "node-internal",
+        "block-internal",
+    ):
+        assert internal_value not in user_prompt
+
+
 def test_research_objective_service_forces_extractable_objective_route_roles():
 
     assert evidence_routing._normalize_route_extractable(

@@ -5,7 +5,7 @@ from typing import Any
 
 PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION = "paper_fact_text_window.v1"
 PAPER_FACT_TABLE_BATCH_PROMPT_VERSION = "paper_fact_table_batch.v1"
-PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v3"
+PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v4"
 
 _COMMON_SYSTEM_PROMPT = """
 You are extracting structured research facts for a materials-literature backend.
@@ -365,9 +365,24 @@ def build_table_batch_mentions_prompt(payload: dict[str, Any]) -> tuple[str, str
 
 
 def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    model_payload = {
+        "table_role": payload.get("table_role"),
+        "repair_focus": list(payload.get("repair_focus") or ()),
+        "source": {
+            key: source[key]
+            for key in (
+                "caption_text",
+                "heading_path",
+                "column_headers",
+                "table_markdown",
+            )
+            if source.get(key) not in (None, "", [], {})
+        },
+    }
     user_prompt = (
         "Repair this parsed table matrix before objective evidence extraction.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
         "Return only schema-valid structured data with `repaired_table_matrix`, "
         "`repairs`, `confidence`, and `warnings`.\n"
         "Repair structure only. Do not extract measurements, comparisons, or "

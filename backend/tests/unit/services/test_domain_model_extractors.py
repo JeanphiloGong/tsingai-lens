@@ -63,6 +63,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.core.paper_facts.prompts import build_table_matrix_repair_prompt
 from application.core.paper_facts.schemas import (
     StructuredExtractionBundle,
     StructuredTableBatchMentions,
@@ -890,6 +891,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "equivalent=false" in user_prompt
     assert "tensile strength and ultimate tensile strength" in user_prompt
     assert "surface hardness and hardness" in user_prompt
+    assert "collection-test" not in user_prompt
 
 
 def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
@@ -935,8 +937,8 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     assert "backend derives final whole-paper accounting" in user_prompt
     assert "Do not link signals merely because they occur in the same paper" in user_prompt
     assert "backend treats every omitted input signal as unresolved" in user_prompt
-    assert "never invent a reason merely to repeat an ID" in user_prompt
-    assert "copy only input `signal_id` values" in user_prompt
+    assert "never invent a reason merely to repeat a label" in user_prompt
+    assert "copy only input `signal_label` values" in user_prompt
     assert "same signal membership more than once" in user_prompt
     assert "Split high-level statement" in user_prompt
     assert "Different scopes" in user_prompt
@@ -1091,7 +1093,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     objective_client = _FakeOpenAIClient(
         "unused",
-        parsed=StructuredFindingSynthesis(findings=[]),
+        parsed={"findings": []},
     )
 
     with capture_llm_usage() as usage:
@@ -1123,7 +1125,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v13",
+        "finding_synthesis": "finding_synthesis.v14",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -1541,7 +1543,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
 
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
     parsed = StructuredFindingSynthesis(findings=[])
-    client = _FakeOpenAIClient("unused", parsed=parsed)
+    client = _FakeOpenAIClient("unused", parsed={"findings": []})
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -1561,12 +1563,14 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
 
     assert result == parsed
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredFindingSynthesis
+    assert parse_call["response_format"].__name__ == (
+        "_StructuredModelFindingSynthesis"
+    )
     assert parse_call["max_completion_tokens"] == 1024
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v13"
+    assert trace["prompt_version"] == "finding_synthesis.v14"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -1725,15 +1729,102 @@ def test_finding_synthesis_prompt_assigns_backend_and_model_ownership():
     assert "primary_direction" in normalized_system_prompt
     assert "model decides only" in normalized_system_prompt
     assert "assertion_strength" in normalized_system_prompt
-    assert "context_evidence_ids" in normalized_system_prompt
+    assert "context_evidence_labels" in normalized_system_prompt
     assert "mechanisms" in normalized_system_prompt
     assert "result_set_id" not in user_prompt
     assert "statement" not in user_prompt
     assert "condition_boundary_evidence_ids" not in user_prompt
     assert "21" in user_prompt
-    assert "paper-1" in user_prompt
+    assert '"paper_label":"P1"' in user_prompt
+    assert "paper-1" not in user_prompt
     mechanism_schema = StructuredFindingMechanism.model_json_schema()
     assert "supporting_evidence_ids" in mechanism_schema["properties"]
+
+
+def test_finding_synthesis_rebinds_local_context_and_paper_labels():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "assertion_strength": "associative",
+                        "context_evidence_labels": ["C1"],
+                        "mechanisms": [
+                            {
+                                "source_term": "melt-pool stability",
+                                "relation_type": "associated_with",
+                                "target_term": "relative density",
+                                "assertion_strength": "associative",
+                                "supporting_context_labels": ["C1"],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    result = FindingAssertionJudge(_response_client(client)).judge_result_set(
+        {
+            "objective": {
+                "objective_id": "objective-internal",
+                "question": "How does energy density affect relative density?",
+            },
+            "result_set": {
+                "factors": ["energy density"],
+                "outcome": "relative density",
+                "primary_direction": "increase",
+                "result_evidence": [
+                    {
+                        "evidence_id": "result-evidence-internal",
+                        "document_id": "document-internal",
+                        "reported_result": {
+                            "outcome": "relative density",
+                            "direction": "increase",
+                        },
+                    }
+                ],
+                "document_evidence_summaries": [
+                    {
+                        "document_id": "document-internal",
+                        "evidence_count": 1,
+                    }
+                ],
+            },
+            "paper_contributions": [
+                {
+                    "document_id": "document-internal",
+                    "analysis_status": "analyzed",
+                }
+            ],
+            "context_evidence": [
+                {
+                    "evidence_id": "context-evidence-internal",
+                    "document_id": "document-internal",
+                    "evidence_role": "mechanism_context",
+                    "source_excerpt": (
+                        "Stable melt pools were associated with higher relative density."
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert result.findings[0].context_evidence_ids == [
+        "context-evidence-internal"
+    ]
+    assert result.findings[0].mechanisms[0].supporting_evidence_ids == [
+        "context-evidence-internal"
+    ]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"paper_label":"P1"' in request_text
+    assert '"context_label":"C1"' in request_text
+    for internal_value in (
+        "objective-internal",
+        "document-internal",
+        "result-evidence-internal",
+        "context-evidence-internal",
+    ):
+        assert internal_value not in request_text
 
 
 def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
@@ -1762,7 +1853,7 @@ def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
     assert "Semantic repair required:" in user_prompt
     assert payload["candidate_rejection"]["reason"] in user_prompt
     assert "previous_candidate" not in user_prompt
-    assert "Return only ids present in `context_evidence`" in user_prompt
+    assert "Return only labels present in `context_evidence`" in user_prompt
 
 
 def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
@@ -2534,10 +2625,7 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
                     {
                         "relationships": [
                             {
-                                "signal_ids": [
-                                    "signal-variable",
-                                    "signal-outcome",
-                                ],
+                                "signal_labels": ["V1", "O1"],
                                 "confidence": 0.89,
                             }
                         ]
@@ -2567,6 +2655,75 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
+def test_paper_signal_reconciliation_prompt_hides_backend_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "studies": [
+                    {
+                        "relationships": [
+                            {
+                                "signal_labels": ["V1", "O1"],
+                                "confidence": 0.89,
+                            }
+                        ]
+                    }
+                ],
+                "unresolved_signals": [],
+            }
+        )
+    )
+
+    reconciliation = PaperSignalReconciler(_response_client(client)).reconcile(
+        {
+            "document_id": "document-internal",
+            "signals": [
+                {
+                    "signal_id": "signal-variable-internal",
+                    "signal_type": "variable",
+                    "label": "laser power",
+                    "sources": [
+                        {
+                            "source_unit_id": "source-variable-internal",
+                            "section_path": "Methods",
+                            "excerpt": "Laser power was varied.",
+                        }
+                    ],
+                },
+                {
+                    "signal_id": "signal-outcome-internal",
+                    "signal_type": "outcome",
+                    "label": "porosity",
+                    "sources": [
+                        {
+                            "source_unit_id": "source-outcome-internal",
+                            "section_path": "Results",
+                            "excerpt": "Porosity decreased with laser power.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert reconciliation.studies[0].relationships[0].signal_ids == [
+        "signal-variable-internal",
+        "signal-outcome-internal",
+    ]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"signal_label":"V1"' in request_text
+    assert '"signal_label":"O1"' in request_text
+    assert "Laser power was varied." in request_text
+    for internal_value in (
+        "document-internal",
+        "signal-variable-internal",
+        "signal-outcome-internal",
+        "source-variable-internal",
+        "source-outcome-internal",
+    ):
+        assert internal_value not in request_text
+
+
 @pytest.mark.parametrize(
     ("context_field", "variable_context", "outcome_context"),
     [
@@ -2584,7 +2741,7 @@ def test_paper_signal_reconciliation_repairs_conflicting_contexts(
             {
                 "relationships": [
                     {
-                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "signal_labels": ["V1", "O1"],
                         "confidence": 0.89,
                     }
                 ]
@@ -2596,11 +2753,11 @@ def test_paper_signal_reconciliation_repairs_conflicting_contexts(
         "studies": [],
         "unresolved_signals": [
             {
-                "signal_id": "signal-variable",
+                "signal_label": "V1",
                 "reason": "The signals describe different experimental contexts.",
             },
             {
-                "signal_id": "signal-outcome",
+                "signal_label": "O1",
                 "reason": "The signals describe different experimental contexts.",
             },
         ],
@@ -2638,28 +2795,26 @@ def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    invalid = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": ["signal-variable", "signal-outcome"],
-                            "confidence": 0.89,
-                        }
-                    ]
-                }
-            ]
-        }
-    )
+    invalid = {
+        "studies": [
+            {
+                "relationships": [
+                    {
+                        "signal_labels": ["V1", "O1"],
+                        "confidence": 0.89,
+                    }
+                ]
+            }
+        ]
+    }
     repaired = {
         "studies": [],
         "unresolved_signals": [
             {
-                "signal_id": signal_id,
+                "signal_label": signal_label,
                 "reason": "The signals describe different material contexts.",
             }
-            for signal_id in ("signal-variable", "signal-outcome")
+            for signal_label in ("V1", "O1")
         ],
     }
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
@@ -2698,14 +2853,11 @@ def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
             {
                 "relationships": [
                     {
-                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "signal_labels": ["V1", "O1"],
                         "confidence": 0.9,
                     },
                     {
-                        "signal_ids": [
-                            "signal-conflicting-variable",
-                            "signal-outcome",
-                        ],
+                        "signal_labels": ["V2", "O1"],
                         "confidence": 0.8,
                     },
                 ]
@@ -2875,8 +3027,8 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
           "changed_variables": ["heat treatment"],
           "measured_property_scope": ["corrosion"],
           "test_environment_scope": ["3.5 wt.% NaCl"],
-          "relevant_source_unit_ids": ["frame-section-results"],
-          "excluded_source_unit_ids": ["frame-table-2"]
+          "relevant_source_labels": ["S1"],
+          "excluded_source_labels": ["S2"]
         }
         """
     )
@@ -2924,8 +3076,8 @@ def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_id
                 "relevance": "high",
                 "paper_role": "primary_experiment",
                 "screening_note": "x" * 400,
-                "relevant_source_unit_ids": ["frame-section-results"],
-                "excluded_source_unit_ids": [],
+                "relevant_source_labels": ["S1"],
+                "excluded_source_labels": [],
             }
         )
     )
@@ -2960,16 +3112,16 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
         {
             "relevance": "high",
             "paper_role": "primary_experiment",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-unknown"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S-unknown"],
         }
     )
     repaired = json.dumps(
         {
             "relevance": "high",
             "paper_role": "primary_experiment",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-table-background"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S2"],
         }
     )
     client = _FakeOpenAIClient([invalid, repaired])
@@ -2999,22 +3151,19 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
     assert frame.source_accounting_origin == "repair"
-    assert "unknown_source_unit_ids=['frame-unknown']" in (
+    assert "unknown_source_labels=['S-unknown']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.chat.completions.calls) == 2
-    assert "account for every source-unit id" in client.chat.completions.calls[1][
+    assert "account for every Source label" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "frame-section-results" in client.chat.completions.calls[1]["messages"][-1][
-        "content"
-    ]
-    assert "frame-table-background" in client.chat.completions.calls[1]["messages"][
-        -1
-    ]["content"]
-    assert "frame-unknown" in client.chat.completions.calls[1]["messages"][-1][
-        "content"
-    ]
+    assert "S1" in client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "S2" in client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "S-unknown" in client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "frame-section-results" not in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
 
 
 def test_objective_paper_frame_repairs_omitted_source_unit():
@@ -3022,32 +3171,16 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
         {
             "relevance": "irrelevant",
             "paper_role": "irrelevant",
-            "relevant_source_unit_ids": [
-                "frame-section-1",
-                "frame-section-2",
-                "frame-section-3",
-                "frame-section-4",
-                "frame-section-5",
-                "frame-section-6",
-                "frame-section-7",
-            ],
-            "excluded_source_unit_ids": [],
+            "relevant_source_labels": ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
+            "excluded_source_labels": [],
         }
     )
     repaired = json.dumps(
         {
             "relevance": "uncertain",
             "paper_role": "uncertain",
-            "relevant_source_unit_ids": [
-                "frame-section-1",
-                "frame-section-2",
-                "frame-section-3",
-                "frame-section-4",
-                "frame-section-5",
-                "frame-section-6",
-                "frame-section-7",
-            ],
-            "excluded_source_unit_ids": ["frame-section-8"],
+            "relevant_source_labels": ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
+            "excluded_source_labels": ["S8"],
         }
     )
     client = _FakeOpenAIClient([incomplete, repaired])
@@ -3074,34 +3207,29 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
     assert frame.relevant_source_unit_ids == source_unit_ids[:-1]
     assert frame.excluded_source_unit_ids == [source_unit_ids[-1]]
     assert frame.source_accounting_origin == "repair"
-    assert "missing_source_unit_ids=['frame-section-8']" in (
+    assert "missing_source_labels=['S8']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.chat.completions.calls) == 2
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "missing_source_unit_ids=['frame-section-8']" in repair_prompt
+    assert "missing_source_labels=['S8']" in repair_prompt
+    assert "frame-section-8" not in repair_prompt
 
 
 @pytest.mark.parametrize(
     "invalid_partition",
     [
         {
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-unknown"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S-unknown"],
         },
         {
-            "relevant_source_unit_ids": [
-                "frame-section-results",
-                "frame-section-results",
-            ],
-            "excluded_source_unit_ids": ["frame-table-background"],
+            "relevant_source_labels": ["S1", "S1"],
+            "excluded_source_labels": ["S2"],
         },
         {
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": [
-                "frame-section-results",
-                "frame-table-background",
-            ],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S1", "S2"],
         },
     ],
     ids=["unknown", "duplicate", "overlap"],
@@ -3150,20 +3278,18 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    incomplete = StructuredPaperFrameBatch.model_validate(
-        {
-            "relevance": "irrelevant",
-            "paper_role": "irrelevant",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": [],
-        }
-    )
+    incomplete = {
+        "relevance": "irrelevant",
+        "paper_role": "irrelevant",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": [],
+    }
     repaired = json.dumps(
         {
             "relevance": "low",
             "paper_role": "supporting_background",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-table-background"],
+            "relevant_source_labels": ["S1"],
+            "excluded_source_labels": ["S2"],
         }
     )
     client = _FakeOpenAIClient(repaired, parsed=incomplete)
@@ -3194,7 +3320,7 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
     assert frame.source_accounting_origin == "repair"
-    assert "missing_source_unit_ids=['frame-table-background']" in (
+    assert "missing_source_labels=['S2']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.beta.chat.completions.calls) == 1
@@ -3205,19 +3331,17 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    invalid = StructuredPaperFrameBatch.model_validate(
-        {
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "relevant_source_unit_ids": ["frame-section-results"],
-            "excluded_source_unit_ids": ["frame-unknown"],
-        }
-    )
+    invalid = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": ["S-unknown"],
+    }
     repaired = {
         "relevance": "high",
         "paper_role": "primary_experiment",
-        "relevant_source_unit_ids": ["frame-section-results"],
-        "excluded_source_unit_ids": ["frame-table-background"],
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": ["S2"],
     }
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
     extractor = StructuredResponseClient(client=client, model="fake-model")
@@ -3245,15 +3369,16 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
 
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
     assert frame.source_accounting_origin == "repair"
-    assert "unknown_source_unit_ids=['frame-unknown']" in (
+    assert "unknown_source_labels=['S-unknown']" in (
         frame.source_accounting_errors[0]
     )
     assert len(client.beta.chat.completions.calls) == 1
     assert len(client.chat.completions.calls) == 1
     repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "account for every source-unit id" in repair_prompt
-    assert "frame-section-results" in repair_prompt
-    assert "frame-table-background" in repair_prompt
+    assert "account for every Source label" in repair_prompt
+    assert "S1" in repair_prompt
+    assert "S2" in repair_prompt
+    assert "frame-section-results" not in repair_prompt
     assert (
         extractor.consume_last_trace()["extraction_mode"]
         == "provider_parse->json_text"
@@ -3279,18 +3404,175 @@ def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
 
     assert "bounded source-candidate classification" in user_prompt
     assert "one partial neighborhood" in user_prompt
-    assert "`collection_id`: backend scope identity" in user_prompt
-    assert "`document_profile`: backend document-type metadata" in user_prompt
-    assert "table-row chunks" in user_prompt
-    assert "Every input `source_unit_id`" in user_prompt
-    assert "relevant_source_unit_ids" in user_prompt
-    assert "excluded_source_unit_ids" in user_prompt
+    assert "`paper`: title and coarse document type" in user_prompt
+    assert "section or table chunks" in user_prompt
+    assert "Every input Source `label`" in user_prompt
+    assert "relevant_source_labels" in user_prompt
+    assert "excluded_source_labels" in user_prompt
     assert "Do not infer whole-paper irrelevance" in user_prompt
-    assert '"relevant_source_unit_ids":["unit-methods"]' in user_prompt
-    assert '"excluded_source_unit_ids":["unit-composition"]' in user_prompt
+    assert '"relevant_source_labels":["S1"]' in user_prompt
+    assert '"excluded_source_labels":["S2"]' in user_prompt
     assert '"paper_role":"uncertain"' in user_prompt
-    assert '"relevant_source_unit_ids":[]' in user_prompt
+    assert '"relevant_source_labels":[]' in user_prompt
     assert "This batch contains nominal composition only." in user_prompt
+
+
+def test_objective_paper_frame_prompt_exposes_science_without_backend_lineage():
+    _, user_prompt = build_objective_paper_frame_prompt(
+        {
+            "collection_id": "collection-internal",
+            "objective": {
+                "objective_id": "objective-internal",
+                "question": "How does heat treatment affect corrosion?",
+                "variables": ["heat treatment"],
+                "outcomes": ["corrosion resistance"],
+            },
+            "document": {
+                "document_id": "document-internal",
+                "title": "Heat treatment study",
+                "source_filename": "internal-name.pdf",
+            },
+            "document_profile": {
+                "doc_type": "experimental",
+                "parsing_warnings": ["parser internal warning"],
+            },
+            "paper_prior": {
+                "document_id": "prior-document-internal",
+                "doc_role": "experimental",
+                "evidence_density": "high",
+                "studies": [
+                    {
+                        "study_id": "prior-study-internal",
+                        "experiment_label": "Heat-treatment corrosion study",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["annealing"],
+                        "relationships": [
+                            {
+                                "relationship_id": "prior-relationship-internal",
+                                "varied_factors": ["heat treatment"],
+                                "outcome": "corrosion resistance",
+                                "source_unit_ids": ["prior-source-internal"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "block-internal",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                }
+            ],
+        }
+    )
+
+    assert '"label": "S1"' in user_prompt
+    assert "Heat treatment changed corrosion resistance." in user_prompt
+    assert "Heat-treatment corrosion study" in user_prompt
+    assert '"varied_factors": [' in user_prompt
+    assert '"outcome": "corrosion resistance"' in user_prompt
+    for internal_value in (
+        "collection-internal",
+        "objective-internal",
+        "document-internal",
+        "internal-name.pdf",
+        "parser internal warning",
+        "frame-section-results",
+        "block-internal",
+        "prior-document-internal",
+        "prior-study-internal",
+        "prior-relationship-internal",
+        "prior-source-internal",
+    ):
+        assert internal_value not in user_prompt
+
+
+def test_objective_paper_frame_rebinds_source_labels_to_backend_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "relevant_source_labels": ["S1"],
+                "excluded_source_labels": ["S2"],
+            }
+        )
+    )
+    extractor = _response_client(client)
+
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
+        {
+            "collection_id": "collection-internal",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results-internal",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-composition",
+                    "source_kind": "table",
+                    "source_ref": "table-internal",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-composition"]
+    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
+    assert '"label": "S1"' in request_text
+    assert '"label": "S2"' in request_text
+    assert "frame-section-results" not in request_text
+    assert "frame-table-composition" not in request_text
+
+
+def test_table_matrix_repair_prompt_hides_backend_lineage_and_slice_offsets():
+    _system_prompt, user_prompt = build_table_matrix_repair_prompt(
+        {
+            "table_role": "current_experimental_evidence",
+            "repair_focus": ["repair parser-split cells"],
+            "source": {
+                "source_kind": "table",
+                "source_ref": "table-internal",
+                "document_id": "document-internal",
+                "page": 7,
+                "caption_text": "Mechanical properties.",
+                "heading_path": "Results",
+                "column_headers": ["Specimen", "Yield strength (MPa)"],
+                "table_markdown": (
+                    "| Specimen | Yield strength (MPa) |\n"
+                    "| --- | --- |\n"
+                    "| HT | 900 |"
+                ),
+                "table_slice": {
+                    "first_source_row_index": 4,
+                    "end_source_row_index": 5,
+                    "total_body_rows": 12,
+                },
+            },
+        }
+    )
+
+    assert "Mechanical properties." in user_prompt
+    assert "| HT | 900 |" in user_prompt
+    for internal_value in (
+        "table-internal",
+        "document-internal",
+        "first_source_row_index",
+        "end_source_row_index",
+        "total_body_rows",
+    ):
+        assert internal_value not in user_prompt
 
 
 def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():

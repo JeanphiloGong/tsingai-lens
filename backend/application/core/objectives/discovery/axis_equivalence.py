@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v6"
+RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v7"
 
 _MAX_COMPLETION_TOKENS = 1024
 _SYSTEM_PROMPT = """
@@ -43,6 +43,13 @@ class StructuredAxisCanonicalizationPlan(_AxisEquivalenceResponse):
 def build_research_axis_canonicalization_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
+    model_payload = {
+        "axis_pairs": [
+            dict(pair)
+            for pair in payload.get("axis_pairs") or ()
+            if isinstance(pair, Mapping)
+        ]
+    }
     user_prompt = (
         "TASK MODEL\n"
         "Classify the relationship between each candidate pair of neutral scientific "
@@ -50,7 +57,6 @@ def build_research_axis_canonicalization_prompt(
         "causal interpretation, direct-comparability judgment, objective wording, or "
         "evidence synthesis.\n\n"
         "INPUT SCHEMA\n"
-        "- `collection_id` identifies the request and must not appear in output.\n"
         "- `axis_pairs` contains backend-selected possible aliases. Each item has an "
         "opaque `pair_id`, one `axis_type`, and exact `left` and `right` labels.\n"
         "- `material` pairs are material identities; `variable` pairs are changed "
@@ -61,7 +67,7 @@ def build_research_axis_canonicalization_prompt(
         "help disambiguate scientific meaning and processing stage. They are incomplete, "
         "and co-occurrence is not equivalence evidence; a context value need not describe the "
         "specific axis.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
         "1. Judge every pair independently within its supplied axis_type. For a variable "
         "pair, first identify the controlled quantity and processing or sample stage named "

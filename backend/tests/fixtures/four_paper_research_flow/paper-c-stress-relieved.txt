@@ -1,0 +1,11 @@
+Abstract
+This experiment examines laser exposure condition after stress-relief annealing of LPBF Ti-6Al-4V.
+
+Materials and Methods
+Ti-6Al-4V coupons were fabricated by LPBF and stress-relief annealed at 800 C before X-ray computed tomography.
+
+Results
+For the stress-relieved sample state after annealing at 800 C, changing laser exposure condition from low exposure to high exposure decreased porosity from 1.5% to 0.6% in Ti-6Al-4V measured by X-ray computed tomography.
+
+Conclusions
+The post-processed specimens require a separate comparison stratum from as-built material.

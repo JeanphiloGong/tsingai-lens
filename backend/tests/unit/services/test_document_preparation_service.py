@@ -2,7 +2,12 @@ from dataclasses import replace
 
 import pytest
 
+from application.core.objectives.discovery.study_window import (
+    PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
+)
 from application.source.document_preparation_service import (
+    DOCUMENT_ANALYSIS_VERSION,
+    PAPER_MAP_VERSION,
     DocumentPreparationService,
     paper_map_fingerprint,
     profile_fingerprint,
@@ -70,6 +75,11 @@ def test_document_preparation_fingerprints_invalidate_only_dependent_stages():
         source_fingerprint=source_v2,
         profile_version="document-profile.v1",
     )
+
+
+def test_document_preparation_versions_include_compact_paper_map_recovery() -> None:
+    assert PAPER_SOURCE_SIGNAL_PROMPT_VERSION in PAPER_MAP_VERSION
+    assert PAPER_SOURCE_SIGNAL_PROMPT_VERSION in DOCUMENT_ANALYSIS_VERSION
 
 
 async def test_paper_map_change_reuses_current_source_and_profile() -> None:

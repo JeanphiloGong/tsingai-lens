@@ -18,11 +18,13 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    or conclusion does not silently lose a stated research axis.
 2. `paper_research_map_service.py` in the parent package selects how a
    researcher reads before choosing a question: bounded abstract, conclusion or
-   summary, overview, and table/figure caption Sources. Detailed Methods,
-   Results text, and table rows do not enter this pre-Objective stage. The
-   paper map therefore records that a result axis exists without reconstructing
-   detailed table structure or values; those rows are read only after the
-   researcher confirms an Objective. The
+   summary, overview, and table/figure caption Sources. The initial pass excludes
+   detailed Methods, Results text, and table rows. If the map is incomplete, the
+   service may perform one bounded, targeted expansion over relevant Methods or
+   Results Sources and captions; it still does not reconstruct table rows or
+   experiment details. The paper map therefore records that a result axis exists
+   without reconstructing detailed table structure or values; those rows are read
+   only after the researcher confirms an Objective. The
    service groups the selected Sources by broad reading role, retries technical
    failures under one small per-paper budget, and consolidates the results into
    one paper map.

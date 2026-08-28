@@ -21,6 +21,7 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import (
     PAPER_RESEARCH_MAP_PROMPT_VERSION,
+    PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
     PaperResearchMapExtractor,
 )
 from application.core.objectives.llm.structured_response import (
@@ -51,10 +52,12 @@ logger = logging.getLogger(__name__)
 SOURCE_PARSER_VERSION = "source-runtime.v1"
 DOCUMENT_ANALYSIS_VERSION = (
     f"{DOCUMENT_PROFILE_PROMPT_VERSION}+{PAPER_RESEARCH_MAP_PROMPT_VERSION}+"
+    f"{PAPER_SOURCE_SIGNAL_PROMPT_VERSION}+"
     f"{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
 )
 PAPER_MAP_VERSION = (
-    f"{PAPER_RESEARCH_MAP_PROMPT_VERSION}+{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
+    f"{PAPER_RESEARCH_MAP_PROMPT_VERSION}+{PAPER_SOURCE_SIGNAL_PROMPT_VERSION}+"
+    f"{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
 )
 _DEFAULT_PREPARATION_CONCURRENCY = 10
 

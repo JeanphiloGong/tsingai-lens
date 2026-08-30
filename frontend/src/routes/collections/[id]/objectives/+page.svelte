@@ -15,19 +15,26 @@
 		type ObjectiveList,
 		type ObjectiveSummary
 	} from '../../../_shared/researchView';
+	import { t } from '../../../_shared/i18n';
+
+	const OBJECTIVE_PAGE_SIZE = 5;
+	const SCOPE_PAGE_SIZE = 8;
 
 	let objectiveList: ObjectiveList | null = null;
 	let readyDocuments: CollectionDocument[] = [];
+	let documentsLoaded = false;
 	let selectedDocumentIdsByObjective: Record<string, string[]> = {};
 	let analysisStates: Record<string, ObjectiveAnalysisState | null> = {};
-	let scopeEditorObjectiveId = '';
+	let scopeObjectiveId = '';
 	let scopeQuery = '';
 	let scopePage = 0;
+	let scopeLoading = false;
+	let scopeError = '';
+	let objectivePage = 0;
 	let loading = false;
 	let actionObjectiveId = '';
 	let error = '';
 	let loadedCollectionId = '';
-	const SCOPE_PAGE_SIZE = 8;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectives = objectiveList?.objectives ?? [];
@@ -37,6 +44,25 @@
 	$: publishedCount = objectives.filter(
 		(objective) => objective.published_analysis_version !== null
 	).length;
+	$: orderedObjectives = prioritizeObjectives(objectives);
+	$: objectivePageCount = Math.max(1, Math.ceil(orderedObjectives.length / OBJECTIVE_PAGE_SIZE));
+	$: if (objectivePage >= objectivePageCount) objectivePage = objectivePageCount - 1;
+	$: objectivePageRangeText = orderedObjectives.length
+		? $t('research.objectives.pageRange', {
+				start: objectivePage * OBJECTIVE_PAGE_SIZE + 1,
+				end: Math.min((objectivePage + 1) * OBJECTIVE_PAGE_SIZE, orderedObjectives.length),
+				total: orderedObjectives.length
+			})
+		: '';
+	$: visibleObjectives = orderedObjectives.slice(
+		objectivePage * OBJECTIVE_PAGE_SIZE,
+		(objectivePage + 1) * OBJECTIVE_PAGE_SIZE
+	);
+	$: scopeObjective =
+		objectives.find((objective) => objective.objective_id === scopeObjectiveId) ?? null;
+	$: selectedScopeIds = scopeObjective
+		? (selectedDocumentIdsByObjective[scopeObjective.objective_id] ?? [])
+		: [];
 	$: scopeMatches = readyDocuments.filter((document) =>
 		document.original_filename.toLocaleLowerCase().includes(scopeQuery.trim().toLocaleLowerCase())
 	);
@@ -51,45 +77,31 @@
 		void loadObjectives();
 	}
 
+	function prioritizeObjectives(items: ObjectiveSummary[]) {
+		const resumed = items.filter(
+			(objective) =>
+				objective.published_analysis_version !== null ||
+				objective.active_analysis_version !== null ||
+				objective.confirmation_status === 'confirmed'
+		);
+		const resumedIds = new Set(resumed.map((objective) => objective.objective_id));
+		return [...resumed, ...items.filter((objective) => !resumedIds.has(objective.objective_id))];
+	}
+
 	async function loadObjectives() {
 		loading = true;
 		error = '';
 		try {
-			const [objectivesResult, documentsResult] = await Promise.all([
-				fetchCollectionObjectives(collectionId),
-				listCollectionDocuments(collectionId)
-			]);
-			objectiveList = objectivesResult;
-			readyDocuments = documentsResult.items.filter((document) => document.status === 'ready');
+			objectiveList = await fetchCollectionObjectives(collectionId);
 			await refreshActiveAnalysisStates();
-			initializeObjectiveScopes();
+			objectivePage = 0;
 		} catch (err) {
 			objectiveList = null;
-			readyDocuments = [];
-			selectedDocumentIdsByObjective = {};
 			analysisStates = {};
 			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}
-	}
-
-	function initializeObjectiveScopes() {
-		const readyIds = new Set(readyDocuments.map((document) => document.document_id));
-		const next: Record<string, string[]> = {};
-		for (const objective of objectives) {
-			const existing = selectedDocumentIdsByObjective[objective.objective_id];
-			const failedInputs =
-				analysisStates[objective.objective_id]?.status === 'failed'
-					? (analysisStates[objective.objective_id]?.document_inputs.map(
-							(input) => input.document_id
-						) ?? [])
-					: [];
-			const initialIds =
-				existing ?? (failedInputs.length ? failedInputs : objective.seed_document_ids);
-			next[objective.objective_id] = initialIds.filter((documentId) => readyIds.has(documentId));
-		}
-		selectedDocumentIdsByObjective = next;
 	}
 
 	async function refreshActiveAnalysisStates() {
@@ -143,18 +155,112 @@
 	}
 
 	function actionLabel(objective: ObjectiveSummary) {
-		if (actionObjectiveId === objective.objective_id) return '正在启动...';
 		if (analysisStatus(objective) === 'failed') return '重试分析';
 		return objective.confirmation_status === 'candidate' ? '确认并分析' : '开始分析';
 	}
 
-	async function startAnalysis(objective: ObjectiveSummary) {
-		const selectedDocumentIds = selectedDocumentIdsByObjective[objective.objective_id] ?? [];
-		if (actionObjectiveId || !selectedDocumentIds.length) return;
-		actionObjectiveId = objective.objective_id;
-		error = '';
+	function previousObjectivePage() {
+		objectivePage = Math.max(0, objectivePage - 1);
+	}
+
+	function nextObjectivePage() {
+		if (objectivePage + 1 >= objectivePageCount) return;
+		objectivePage += 1;
+	}
+
+	function suggestedScope(objective: ObjectiveSummary) {
+		const existing = selectedDocumentIdsByObjective[objective.objective_id];
+		if (existing) return existing;
+		const failed = analysisStates[objective.objective_id];
+		if (failed?.status === 'failed') {
+			return failed.document_inputs.map((input) => input.document_id);
+		}
+		return objective.seed_document_ids;
+	}
+
+	async function loadReadyDocuments() {
+		if (documentsLoaded) return readyDocuments;
+		const response = await listCollectionDocuments(collectionId);
+		readyDocuments = response.items.filter((document) => document.status === 'ready');
+		documentsLoaded = true;
+		return readyDocuments;
+	}
+
+	async function openScopeReview(objective: ObjectiveSummary) {
+		scopeObjectiveId = objective.objective_id;
+		scopeQuery = '';
+		scopePage = 0;
+		scopeError = '';
+		selectedDocumentIdsByObjective = {
+			...selectedDocumentIdsByObjective,
+			[objective.objective_id]: [...suggestedScope(objective)]
+		};
+
+		if (documentsLoaded) {
+			filterScopeToReadyDocuments(objective.objective_id);
+			return;
+		}
+
+		scopeLoading = true;
 		try {
-			await runObjectiveAnalysis(collectionId, objective.objective_id, selectedDocumentIds);
+			await loadReadyDocuments();
+			filterScopeToReadyDocuments(objective.objective_id);
+		} catch (err) {
+			scopeError = errorMessage(err);
+		} finally {
+			scopeLoading = false;
+		}
+	}
+
+	function filterScopeToReadyDocuments(objectiveId: string) {
+		const readyIds = new Set(readyDocuments.map((document) => document.document_id));
+		selectedDocumentIdsByObjective = {
+			...selectedDocumentIdsByObjective,
+			[objectiveId]: selectedDocumentIds(objectiveId).filter((documentId) =>
+				readyIds.has(documentId)
+			)
+		};
+	}
+
+	function closeScopeReview() {
+		if (actionObjectiveId) return;
+		if (scopeObjectiveId) {
+			const nextSelections = { ...selectedDocumentIdsByObjective };
+			delete nextSelections[scopeObjectiveId];
+			selectedDocumentIdsByObjective = nextSelections;
+		}
+		scopeObjectiveId = '';
+		scopeError = '';
+	}
+
+	async function startRecommendedAnalysis(objective: ObjectiveSummary) {
+		const recommendedIds = suggestedScope(objective);
+		if (actionObjectiveId) return;
+		if (!recommendedIds.length) {
+			await openScopeReview(objective);
+			return;
+		}
+
+		actionObjectiveId = objective.objective_id;
+		scopeError = '';
+		scopeLoading = true;
+		try {
+			const documents = await loadReadyDocuments();
+			const readyIds = new Set(documents.map((document) => document.document_id));
+			const documentIds = recommendedIds.filter((documentId) => readyIds.has(documentId));
+			if (!documentIds.length) {
+				scopeObjectiveId = objective.objective_id;
+				scopeQuery = '';
+				scopePage = 0;
+				scopeError = '系统推荐范围中没有可分析的已准备论文，请调整范围。';
+				return;
+			}
+
+			selectedDocumentIdsByObjective = {
+				...selectedDocumentIdsByObjective,
+				[objective.objective_id]: documentIds
+			};
+			await runObjectiveAnalysis(collectionId, objective.objective_id, documentIds);
 			await goto(
 				resolve('/collections/[id]/objectives/[objective_id]', {
 					id: collectionId,
@@ -162,7 +268,31 @@
 				})
 			);
 		} catch (err) {
-			error = errorMessage(err);
+			scopeObjectiveId = objective.objective_id;
+			scopeQuery = '';
+			scopePage = 0;
+			scopeError = errorMessage(err);
+		} finally {
+			scopeLoading = false;
+			actionObjectiveId = '';
+		}
+	}
+
+	async function startAnalysis(objective: ObjectiveSummary) {
+		const documentIds = selectedDocumentIds(objective.objective_id);
+		if (actionObjectiveId || !documentIds.length) return;
+		actionObjectiveId = objective.objective_id;
+		scopeError = '';
+		try {
+			await runObjectiveAnalysis(collectionId, objective.objective_id, documentIds);
+			await goto(
+				resolve('/collections/[id]/objectives/[objective_id]', {
+					id: collectionId,
+					objective_id: objective.objective_id
+				})
+			);
+		} catch (err) {
+			scopeError = errorMessage(err);
 		} finally {
 			actionObjectiveId = '';
 		}
@@ -174,12 +304,6 @@
 
 	function selectedDocumentIds(objectiveId: string) {
 		return selectedDocumentIdsByObjective[objectiveId] ?? [];
-	}
-
-	function openScopeEditor(objectiveId: string) {
-		scopeEditorObjectiveId = scopeEditorObjectiveId === objectiveId ? '' : objectiveId;
-		scopeQuery = '';
-		scopePage = 0;
 	}
 
 	function updateScopeQuery(value: string) {
@@ -196,15 +320,22 @@
 				: [...selected, documentId]
 		};
 	}
+
+	function confirmActionLabel(objective: ObjectiveSummary, count: number) {
+		if (!count) return '选择论文后开始分析';
+		return analysisStatus(objective) === 'failed'
+			? `使用 ${count} 篇论文重新分析`
+			: `使用 ${count} 篇论文开始分析`;
+	}
 </script>
 
 <svelte:head><title>研究目标</title></svelte:head>
 
 <section class="objectives-page">
-	<header>
+	<header class="page-heading">
 		<div>
 			<h2>研究目标</h2>
-			<p>确认研究问题后，系统将逐篇文献提取证据并生成可审计的 Findings。</p>
+			<p>选择一个具体问题，审阅分析范围，再让系统逐篇提取并比较证据。</p>
 		</div>
 		<button class="btn btn--ghost" type="button" on:click={loadObjectives}>刷新</button>
 	</header>
@@ -242,7 +373,7 @@
 		</div>
 
 		<div class="objective-list">
-			{#each objectives as objective (objective.objective_id)}
+			{#each visibleObjectives as objective (objective.objective_id)}
 				<article>
 					<div class="heading">
 						<div>
@@ -270,42 +401,30 @@
 							<dd>{joined(objective.outcomes)}</dd>
 						</div>
 						<div>
-							<dt>机制</dt>
-							<dd>{joined(objective.mechanisms)}</dd>
-						</div>
-						<div>
-							<dt>约束</dt>
-							<dd>{joined(objective.constraints)}</dd>
-						</div>
-						<div>
-							<dt>文献范围</dt>
+							<dt>建议文献</dt>
 							<dd>{objective.seed_document_ids.length} 篇</dd>
 						</div>
 					</dl>
 					<div class="actions">
 						{#if canStartAnalysis(objective)}
-							<div class="scope-summary">
-								<strong
-									>{(selectedDocumentIdsByObjective[objective.objective_id] ?? []).length} 篇已选</strong
-								>
-								<button
-									class="btn btn--ghost btn--small"
-									type="button"
-									aria-expanded={scopeEditorObjectiveId === objective.objective_id}
-									aria-label={`编辑「${objective.question}」的论文范围`}
-									on:click={() => openScopeEditor(objective.objective_id)}
-								>
-									编辑范围
-								</button>
-							</div>
 							<button
 								class="btn btn--primary btn--small"
 								type="button"
-								disabled={Boolean(actionObjectiveId) ||
-									!(selectedDocumentIdsByObjective[objective.objective_id] ?? []).length}
-								on:click={() => startAnalysis(objective)}
+								disabled={Boolean(actionObjectiveId)}
+								on:click={() => void startRecommendedAnalysis(objective)}
 							>
-								{actionLabel(objective)}
+								{actionObjectiveId === objective.objective_id
+									? '正在准备...'
+									: actionLabel(objective)}
+							</button>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={Boolean(actionObjectiveId)}
+								title="默认使用系统推荐的文献范围"
+								on:click={() => void openScopeReview(objective)}
+							>
+								调整范围
 							</button>
 						{/if}
 						<a
@@ -318,67 +437,123 @@
 							{objective.published_analysis_version === null ? '查看状态' : '查看 Findings'}
 						</a>
 					</div>
-					{#if canStartAnalysis(objective) && !(selectedDocumentIdsByObjective[objective.objective_id] ?? []).length}
-						<p class="scope-warning">请先选择至少一篇已准备论文，再开始分析。</p>
-					{/if}
-					{#if scopeEditorObjectiveId === objective.objective_id}
-						<fieldset class="analysis-scope">
-							<legend>分析论文范围</legend>
-							<p>只会分析这里选中的已准备论文；启动后会冻结这次范围。</p>
-							<label class="scope-search">
-								<span>搜索可用论文</span>
-								<input
-									type="search"
-									value={scopeQuery}
-									on:input={(event) =>
-										updateScopeQuery((event.currentTarget as HTMLInputElement).value)}
-								/>
-							</label>
-							{#if visibleScopeDocuments.length}
-								<div class="scope-options">
-									{#each visibleScopeDocuments as document (document.document_id)}
-										<label>
-											<input
-												type="checkbox"
-												checked={(
-													selectedDocumentIdsByObjective[objective.objective_id] ?? []
-												).includes(document.document_id)}
-												on:change={() =>
-													toggleDocument(objective.objective_id, document.document_id)}
-											/>
-											<span>{document.original_filename}</span>
-										</label>
-									{/each}
-								</div>
-								<div class="scope-pagination" aria-label="论文范围分页">
-									<button
-										type="button"
-										disabled={scopePage === 0}
-										on:click={() => (scopePage -= 1)}
-									>
-										上一页
-									</button>
-									<span>第 {scopePage + 1}/{scopePageCount} 页</span>
-									<button
-										type="button"
-										disabled={scopePage + 1 >= scopePageCount}
-										on:click={() => (scopePage += 1)}
-									>
-										下一页
-									</button>
-								</div>
-							{:else if readyDocuments.length}
-								<p class="scope-empty">没有匹配的已准备论文。</p>
-							{:else}
-								<p class="scope-empty">还没有准备完成的论文。</p>
-							{/if}
-						</fieldset>
-					{/if}
 				</article>
 			{/each}
 		</div>
+		{#if objectivePageCount > 1}
+			<nav class="objective-pagination" aria-label={$t('research.objectives.paginationLabel')}>
+				<button
+					class="btn btn--ghost btn--small"
+					type="button"
+					disabled={objectivePage === 0}
+					on:click={previousObjectivePage}
+				>
+					{$t('research.objectives.previousPage')}
+				</button>
+				<span>{objectivePageRangeText}</span>
+				<button
+					class="btn btn--ghost btn--small"
+					type="button"
+					disabled={objectivePage + 1 >= objectivePageCount}
+					on:click={nextObjectivePage}
+				>
+					{$t('research.objectives.nextPage')}
+				</button>
+			</nav>
+		{/if}
 	{/if}
 </section>
+
+{#if scopeObjective}
+	<div class="dialog-backdrop">
+		<div class="scope-dialog" role="dialog" aria-modal="true" aria-labelledby="scope-dialog-title">
+			<header>
+				<div>
+					<span>分析前确认</span>
+					<h2 id="scope-dialog-title">确认分析论文范围</h2>
+				</div>
+				<button
+					class="close-button"
+					type="button"
+					aria-label="关闭论文范围"
+					on:click={closeScopeReview}>×</button
+				>
+			</header>
+
+			<div class="scope-question">
+				<strong>{scopeObjective.question}</strong>
+				<p>系统只会分析你在这里确认的论文；启动后，本次范围会被冻结以便结果追溯。</p>
+			</div>
+
+			<div class="scope-toolbar">
+				<label class="scope-search">
+					<span>搜索可用论文</span>
+					<input
+						type="search"
+						value={scopeQuery}
+						on:input={(event) => updateScopeQuery((event.currentTarget as HTMLInputElement).value)}
+					/>
+				</label>
+				<strong>已选择 {selectedScopeIds.length} 篇论文</strong>
+			</div>
+
+			{#if scopeLoading}
+				<p class="scope-state" aria-busy="true">正在加载可用论文...</p>
+			{:else if scopeError}
+				<p class="scope-state scope-state--error" role="alert">{scopeError}</p>
+			{:else if visibleScopeDocuments.length}
+				<div class="scope-options">
+					{#each visibleScopeDocuments as document (document.document_id)}
+						<label>
+							<input
+								type="checkbox"
+								checked={selectedScopeIds.includes(document.document_id)}
+								on:change={() => toggleDocument(scopeObjective.objective_id, document.document_id)}
+							/>
+							<span>{document.original_filename}</span>
+						</label>
+					{/each}
+				</div>
+				<nav class="scope-pagination" aria-label="论文范围分页">
+					<button type="button" disabled={scopePage === 0} on:click={() => (scopePage -= 1)}
+						>上一页</button
+					>
+					<span>第 {scopePage + 1}/{scopePageCount} 页</span>
+					<button
+						type="button"
+						disabled={scopePage + 1 >= scopePageCount}
+						on:click={() => (scopePage += 1)}
+					>
+						下一页
+					</button>
+				</nav>
+			{:else if readyDocuments.length}
+				<p class="scope-state">没有匹配的已准备论文。</p>
+			{:else}
+				<p class="scope-state">还没有可用于分析的已准备论文。</p>
+			{/if}
+
+			<footer>
+				{#if !selectedScopeIds.length && !scopeLoading}
+					<p>请选择至少一篇论文。</p>
+				{/if}
+				<div>
+					<button class="btn btn--ghost" type="button" on:click={closeScopeReview}>取消</button>
+					<button
+						class="btn btn--primary"
+						type="button"
+						disabled={!selectedScopeIds.length || scopeLoading || Boolean(actionObjectiveId)}
+						on:click={() => void startAnalysis(scopeObjective)}
+					>
+						{actionObjectiveId
+							? '正在启动...'
+							: confirmActionLabel(scopeObjective, selectedScopeIds.length)}
+					</button>
+				</div>
+			</footer>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.objectives-page {
@@ -387,69 +562,255 @@
 		display: grid;
 		gap: 20px;
 	}
-	header {
+
+	.page-heading,
+	.heading,
+	.actions,
+	.objective-pagination,
+	.scope-dialog header,
+	.scope-toolbar,
+	.scope-dialog footer,
+	.scope-dialog footer > div,
+	.scope-pagination {
 		display: flex;
-		justify-content: space-between;
-		gap: 20px;
-		align-items: flex-start;
-		border-bottom: 1px solid var(--border-default);
-		padding-bottom: 16px;
+		align-items: center;
 	}
+
+	.page-heading,
+	.heading,
+	.objective-pagination,
+	.scope-dialog header,
+	.scope-toolbar,
+	.scope-dialog footer,
+	.scope-pagination {
+		justify-content: space-between;
+	}
+
+	.page-heading {
+		align-items: flex-start;
+		gap: 20px;
+		padding-bottom: 16px;
+		border-bottom: 1px solid var(--border-default);
+	}
+
 	h2,
 	h3,
 	p {
 		margin: 0;
 	}
-	header p,
+
+	.page-heading p,
 	article p,
 	dt,
-	.summary span {
+	.summary span,
+	.scope-question p {
 		color: var(--text-secondary);
 	}
-	header p {
-		margin-top: 6px;
+
+	.page-heading p {
 		max-width: 720px;
+		margin-top: 6px;
 	}
-	.state {
+
+	.state,
+	.empty-state {
 		padding: 28px 0;
+	}
+
+	.state {
 		color: var(--text-secondary);
 	}
-	.state--error {
-		color: var(--danger, #b42318);
+
+	.state--error,
+	.scope-state--error,
+	.scope-dialog footer > p {
+		color: var(--danger-text, #b42318);
 	}
+
 	.empty-state {
 		display: grid;
 		gap: 10px;
-		padding: 28px 0;
 		border-bottom: 1px solid var(--border-default);
 	}
-	.analysis-scope {
-		margin: 0;
-		padding: 14px;
-		border: 1px solid var(--border-default);
-		background: var(--bg-subtle);
+
+	.empty-state p {
+		max-width: 720px;
+		color: var(--text-secondary);
+		line-height: 1.6;
 	}
-	.analysis-scope legend {
-		padding: 0;
+
+	.summary {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		border-block: 1px solid var(--border-default);
+	}
+
+	.summary div {
+		display: grid;
+		gap: 2px;
+		padding: 14px 18px;
+		border-right: 1px solid var(--border-default);
+	}
+
+	.summary div:last-child {
+		border-right: 0;
+	}
+
+	.summary strong {
+		font-size: 20px;
+	}
+
+	.objective-list {
+		display: grid;
+	}
+
+	article {
+		display: grid;
+		gap: 14px;
+		padding: 20px 0;
+		border-bottom: 1px solid var(--border-default);
+	}
+
+	.heading {
+		align-items: flex-start;
+		gap: 20px;
+	}
+
+	.heading h3 {
+		font-size: 17px;
+		line-height: 1.45;
+	}
+
+	.heading p {
+		margin-top: 5px;
+	}
+
+	.heading > span {
+		white-space: nowrap;
+		padding: 4px 8px;
+		border: 1px solid var(--border-default);
+		font-size: 12px;
+	}
+
+	.heading > span.published {
+		border-color: #3a7d5d;
+		color: #256346;
+	}
+
+	.heading > span.failed {
+		border-color: var(--danger-text, #b42318);
+		color: var(--danger-text, #b42318);
+	}
+
+	dl {
+		margin: 0;
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 14px;
+	}
+
+	dt {
+		margin-bottom: 4px;
+		font-size: 12px;
+	}
+
+	dd {
+		margin: 0;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
+	}
+
+	.actions,
+	.scope-dialog footer > div {
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.objective-pagination {
+		justify-content: space-between;
+		gap: 16px;
+		padding-top: 8px;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
+	.dialog-backdrop {
+		position: fixed;
+		z-index: 100;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		padding: 24px;
+		background: rgb(15 23 42 / 48%);
+	}
+
+	.scope-dialog {
+		width: min(760px, 100%);
+		max-height: min(760px, calc(100vh - 48px));
+		overflow: auto;
+		padding: 22px;
+		border: 1px solid var(--border-default);
+		border-radius: 8px;
+		background: var(--surface-card);
+		box-shadow: 0 18px 50px rgb(15 23 42 / 22%);
+	}
+
+	.scope-dialog > * + * {
+		margin-top: 18px;
+	}
+
+	.scope-dialog header {
+		align-items: flex-start;
+		gap: 20px;
+	}
+
+	.scope-dialog header span {
+		color: var(--text-secondary);
+		font-size: 12px;
 		font-weight: 700;
 	}
-	.analysis-scope > p {
+
+	.scope-dialog header h2 {
+		margin-top: 3px;
+		font-size: 20px;
+	}
+
+	.close-button {
+		width: 32px;
+		height: 32px;
+		border: 1px solid var(--border-default);
+		border-radius: 50%;
+		background: transparent;
+		color: var(--text-primary);
+		cursor: pointer;
+		font-size: 20px;
+		line-height: 1;
+	}
+
+	.scope-question {
+		padding: 14px 0;
+		border-block: 1px solid var(--border-default);
+	}
+
+	.scope-question p {
 		margin-top: 6px;
-		color: var(--text-secondary);
+		line-height: 1.5;
 	}
-	.scope-options {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 8px 16px;
-		margin-top: 14px;
+
+	.scope-toolbar {
+		align-items: flex-end;
+		gap: 20px;
 	}
+
 	.scope-search {
+		min-width: 0;
+		flex: 1;
 		display: grid;
 		gap: 5px;
-		margin-top: 12px;
 		font-size: 12px;
 		color: var(--text-secondary);
 	}
+
 	.scope-search input {
 		width: 100%;
 		min-height: 38px;
@@ -458,15 +819,37 @@
 		background: var(--surface-card);
 		color: var(--text-primary);
 	}
-	.scope-pagination {
+
+	.scope-toolbar > strong {
+		white-space: nowrap;
+		font-size: 13px;
+	}
+
+	.scope-options {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px 16px;
+	}
+
+	.scope-options label {
+		min-width: 0;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
+		align-items: flex-start;
+		gap: 8px;
+		padding: 7px 0;
+	}
+
+	.scope-options span {
+		overflow-wrap: anywhere;
+	}
+
+	.scope-pagination {
 		gap: 12px;
 		margin-top: 12px;
 		font-size: 12px;
 		color: var(--text-secondary);
 	}
+
 	.scope-pagination button {
 		min-height: 32px;
 		padding: 4px 10px;
@@ -474,151 +857,76 @@
 		background: var(--surface-card);
 		color: inherit;
 	}
-	.scope-empty {
-		margin-top: 12px;
+
+	.scope-state {
+		padding: 24px 0;
 		color: var(--text-secondary);
 	}
-	.scope-warning {
-		color: var(--warning-text);
-		font-size: 13px;
-	}
-	.scope-options label {
-		display: flex;
-		align-items: flex-start;
-		gap: 8px;
-		min-width: 0;
-	}
-	.scope-options span {
-		overflow-wrap: anywhere;
-	}
-	.empty-state p {
-		max-width: 720px;
-		color: var(--text-secondary);
-		line-height: 1.6;
-	}
-	.summary {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		border-block: 1px solid var(--border-default);
-	}
-	.summary div {
-		display: grid;
-		gap: 2px;
-		padding: 14px 18px;
-		border-right: 1px solid var(--border-default);
-	}
-	.summary div:last-child {
-		border-right: 0;
-	}
-	.summary strong {
-		font-size: 20px;
-	}
-	.objective-list {
-		display: grid;
-		gap: 10px;
-	}
-	article {
-		border-bottom: 1px solid var(--border-default);
-		padding: 18px 0;
-		display: grid;
+
+	.scope-dialog footer {
+		min-height: 40px;
 		gap: 16px;
+		padding-top: 16px;
+		border-top: 1px solid var(--border-default);
 	}
-	.heading {
-		display: flex;
-		justify-content: space-between;
-		gap: 20px;
-		align-items: flex-start;
-	}
-	.heading h3 {
-		font-size: 17px;
-		line-height: 1.45;
-	}
-	.heading p {
-		margin-top: 5px;
-	}
-	.heading > span {
-		white-space: nowrap;
-		padding: 4px 8px;
-		border: 1px solid var(--border-default);
-		font-size: 12px;
-	}
-	.heading > span.published {
-		border-color: #3a7d5d;
-		color: #256346;
-	}
-	.heading > span.failed {
-		border-color: var(--danger, #b42318);
-		color: var(--danger, #b42318);
-	}
-	dl {
-		margin: 0;
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 14px;
-	}
-	dt {
-		font-size: 12px;
-		margin-bottom: 4px;
-	}
-	dd {
-		margin: 0;
-		line-height: 1.45;
-		overflow-wrap: anywhere;
-	}
-	.actions {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-	.scope-summary {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
+
+	.scope-dialog footer > p {
 		font-size: 13px;
 	}
+
 	@media (max-width: 760px) {
 		.objectives-page {
-			gap: 8px;
+			gap: 12px;
 		}
-		header {
-			align-items: center;
-			padding-bottom: 4px;
-		}
-		header p {
-			display: none;
-		}
-		header .btn {
-			min-height: 32px;
-			padding: 0 12px;
-		}
-		.heading {
+
+		.page-heading,
+		.heading,
+		.objective-pagination,
+		.scope-toolbar,
+		.scope-dialog footer {
+			align-items: stretch;
 			flex-direction: column;
 		}
-		dl {
-			grid-template-columns: 1fr 1fr;
-		}
-		.scope-options {
-			grid-template-columns: 1fr;
-		}
-		.summary {
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-		}
+
 		.summary div {
-			justify-items: center;
-			padding: 4px;
-			border-right: 1px solid var(--border-default);
-			border-bottom: 0;
+			padding: 8px;
 			text-align: center;
 		}
-		.summary div:last-child {
-			border-right: 0;
+
+		dl,
+		.scope-options {
+			grid-template-columns: 1fr 1fr;
 		}
-		.summary span {
-			font-size: 11px;
+
+		.dialog-backdrop {
+			align-items: end;
+			padding: 0;
 		}
-		article {
-			padding: 10px 0;
+
+		.scope-dialog {
+			max-height: 92vh;
+			padding: 18px;
+			border-radius: 8px 8px 0 0;
+		}
+
+		.scope-toolbar > strong {
+			white-space: normal;
+		}
+
+		.scope-dialog footer > div,
+		.scope-dialog footer .btn {
+			width: 100%;
+		}
+
+		.scope-dialog footer .btn {
+			flex: 1;
+		}
+	}
+
+	@media (max-width: 480px) {
+		dl,
+		.scope-options {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

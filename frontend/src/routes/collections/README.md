@@ -5,8 +5,11 @@ This node owns the Collection route family.
 ## Primary Routes
 
 - `collections/[id]/+page.svelte`
-  Current papers, independent preparation/retry, ready-paper selection,
-  Objective discovery, warnings, and upload.
+  Research-first Collection readiness and next action. It summarizes current
+  papers, preparation, and Objective availability; ready papers stay out of the
+  main view, while papers requiring preparation or retry remain available in an
+  expandable attention section. Objective discovery uses the complete current
+  ready-paper set without restoring the retired Collection build contract.
 - `collections/[id]/objectives/+page.svelte`
   Candidate and confirmed research Objectives plus analysis progress/retry.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
@@ -57,13 +60,17 @@ Research Objective
 
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
-Before that command, each Objective initializes its own scope from exact ready
-seed papers. The researcher can open that Objective's compact searchable,
-paginated scope editor before analysis. The request sends only those reviewed
-`document_ids`; editing one Objective does not change another. Processing and
-failed papers cannot be selected and do not block ready papers. Retry reuses the
-failed analysis version's frozen paper IDs. A seedless Objective requires an
-explicit paper selection before analysis.
+Before that command, the Objective list prioritizes active, confirmed, and
+published work, then the highest-ranked candidates. Lower-ranked candidates are
+available through one disclosure instead of dominating the first view. Choosing
+to start or retry analysis uses the Objective's recommended ready seed papers by
+default and loads current Documents only when the command is chosen. The request
+sends only those exact ready `document_ids`; a small scope-adjustment action
+opens the separate confirmation dialog when the researcher wants to inspect or
+edit the recommendation. Editing one Objective does not change another.
+Processing and failed papers cannot be selected and do not block ready papers.
+Retry reuses the failed analysis version's frozen paper IDs. A seedless
+Objective requires an explicit paper selection before analysis.
 The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;
@@ -116,9 +123,10 @@ The Research Agent and experiment plans may consume published Findings, but
 they do not introduce a second conclusion identity.
 
 The Papers route reports the complete profiled collection size while rendering
-one bounded page. Its title/filename search is collection-wide, and page or
-search failures remain explicit instead of presenting one partial page as the
-whole collection.
+one bounded, compact page. Its title/filename search is collection-wide, and
+page or search failures remain explicit instead of presenting one partial page
+as the whole collection. Routine internal Document IDs stay out of the paper
+list; exact Source navigation continues through the canonical paper reader.
 
 ## Current Contract Docs
 

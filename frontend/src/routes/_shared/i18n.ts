@@ -325,6 +325,12 @@ const translations: Record<Language, Translations> = {
 			warnings: 'Warnings',
 			warningPaperCount: '{message} ({count} papers)',
 			warningOccurrenceCount: '{message} ({count} occurrences)',
+			objectives: {
+				pageRange: 'Objectives {start}–{end} of {total}',
+				paginationLabel: 'Objective pages',
+				previousPage: 'Previous',
+				nextPage: 'Next'
+			},
 			evidenceMap: {
 				pageTitle: 'Objective evidence map',
 				subtitle:
@@ -671,13 +677,46 @@ const translations: Record<Language, Translations> = {
 			title: 'Collection Overview',
 			lead: 'Start here to check whether the collection is ready, where processing stands, and which research view to open next.',
 			currentModel: {
-				title: 'Prepare and select papers',
-				lead: 'Each paper is prepared independently. Select only ready papers for the research question you want to form.',
-				summaryLabel: 'Current document scope',
+				title: 'Research overview',
+				lead: 'See what Lens understands, where research work stands, and the next decision that needs your attention.',
+				summaryLabel: 'Research progress',
 				total: 'papers',
 				ready: 'ready',
 				processing: 'processing',
 				selected: 'selected',
+				stateEyebrow: 'Current stage',
+				state: {
+					empty: {
+						title: 'Add papers to begin',
+						body: 'Upload papers for Lens to organize and prepare for research.'
+					},
+					attention: {
+						title: 'Some papers need preparation',
+						body: '{ready} paper(s) are ready and the remaining papers can be prepared or retried without rebuilding completed work.'
+					},
+					processing: {
+						title: 'Lens is understanding the papers',
+						body: '{processing} paper(s) are being parsed and classified. Ready papers remain available for research.'
+					},
+					ready: {
+						title: 'Ready to form research questions',
+						body: '{ready} prepared paper(s) can now be reviewed together to identify focused research Objectives.'
+					},
+					objectives: {
+						title: 'Research questions are ready to review',
+						body: '{objectives} Objective candidate(s) are available. Choose one question before deep Evidence analysis begins.'
+					}
+				},
+				progress: {
+					collected: 'Papers collected',
+					understood: 'Papers understood',
+					objectives: 'Questions formed',
+					analysis: 'Evidence analyzed'
+				},
+				openObjectives: 'Enter research objectives',
+				uploadReady: '{count} paper(s) selected for upload',
+				attentionTitle: '{count} paper(s) need attention',
+				attentionLead: 'Open only when you need to prepare or retry individual papers.',
 				actionsTitle: 'Research scope',
 				actionsLead:
 					'You can add papers at any time. Preparing one paper does not rebuild the others.',
@@ -2667,6 +2706,12 @@ const translations: Record<Language, Translations> = {
 			warnings: '警告',
 			warningPaperCount: '{message}（{count} 篇文献）',
 			warningOccurrenceCount: '{message}（{count} 次）',
+			objectives: {
+				pageRange: '第 {start}–{end} 个，共 {total} 个',
+				paginationLabel: '研究目标分页',
+				previousPage: '上一页',
+				nextPage: '下一页'
+			},
 			evidenceMap: {
 				pageTitle: '研究目标证据关系图',
 				subtitle: '从已发布 Finding 沿证据和精确 Source 回溯到原始论文。',
@@ -3001,13 +3046,46 @@ const translations: Record<Language, Translations> = {
 			title: '集合概览',
 			lead: '先在这里判断集合是否准备好、处理流程走到哪一步，以及下一步该进入哪个研究视图。',
 			currentModel: {
-				title: '准备并选择论文',
-				lead: '每篇论文独立准备。只选择已经就绪、且确实属于当前研究问题范围的论文。',
-				summaryLabel: '当前文献范围',
+				title: '研究概览',
+				lead: '查看 Lens 已理解的内容、当前研究进度，以及下一步需要你决定的事项。',
+				summaryLabel: '研究进度',
 				total: '篇论文',
 				ready: '篇就绪',
 				processing: '篇处理中',
 				selected: '篇已选择',
+				stateEyebrow: '当前阶段',
+				state: {
+					empty: {
+						title: '添加论文以开始研究',
+						body: '上传论文后，Lens 会整理并准备这些材料。'
+					},
+					attention: {
+						title: '部分论文需要准备',
+						body: '已有 {ready} 篇论文就绪；其余论文可以单独准备或重试，不会重新处理已完成的论文。'
+					},
+					processing: {
+						title: 'Lens 正在理解论文',
+						body: '正在解析和识别 {processing} 篇论文；已经就绪的论文仍可用于研究。'
+					},
+					ready: {
+						title: '可以开始形成研究问题',
+						body: '可共同审阅 {ready} 篇已准备论文，并从中形成聚焦的研究目标。'
+					},
+					objectives: {
+						title: '研究问题已准备好供审阅',
+						body: '当前有 {objectives} 个候选研究目标。选择一个问题后，系统才会开始深入证据分析。'
+					}
+				},
+				progress: {
+					collected: '收集论文',
+					understood: '理解论文',
+					objectives: '形成问题',
+					analysis: '分析证据'
+				},
+				openObjectives: '查看研究目标',
+				uploadReady: '已选择 {count} 篇待上传论文',
+				attentionTitle: '{count} 篇论文需要处理',
+				attentionLead: '仅在需要准备或重试单篇论文时展开。',
 				actionsTitle: '研究范围',
 				actionsLead: '可以随时继续添加论文；准备一篇论文不会重新处理其他论文。',
 				uploadSelected: '上传 {count} 篇',

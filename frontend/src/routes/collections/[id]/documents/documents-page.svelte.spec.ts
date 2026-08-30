@@ -108,7 +108,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('paper-a.pdf')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Experimental')).toBeInTheDocument();
+		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
 		await expect.element(browserPage.getByText('Missing publication year')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open paper' }).first())
@@ -118,7 +118,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		);
 	});
 
-	it('uses a short display identifier when title and filename are unavailable', async () => {
+	it('uses a neutral fallback without exposing internal identifiers', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				collection_id: 'col_123',
@@ -141,7 +141,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		render(Page);
 
 		await expect.element(browserPage.getByText('Paper 1')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('ID: abcdef123456')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('ID: abcdef123456')).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('abcdef1234567890abcdef1234567890'))
 			.not.toBeInTheDocument();
@@ -162,7 +162,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('131 paper(s)')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Papers 1–25 of 131').first()).toBeInTheDocument();
-		expect(document.querySelectorAll('article')).toHaveLength(25);
+		expect(document.querySelectorAll('[data-paper-row]')).toHaveLength(25);
 		expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
 			'/api/v1/collections/col_123/documents/profiles?offset=0&limit=25'
 		);

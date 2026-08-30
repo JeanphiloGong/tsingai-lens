@@ -113,12 +113,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 	});
 
 	it('shows an explicit empty state before Objective candidates exist', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
-			const path = new URL(String(input), 'http://localhost').pathname;
-			return path.endsWith('/documents')
-				? jsonResponse({ items: [] })
-				: jsonResponse({ collection_id: 'col_123', objectives: [] });
-		});
+		fetchMock.mockResolvedValue(jsonResponse({ collection_id: 'col_123', objectives: [] }));
 
 		render(Page);
 
@@ -132,9 +127,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: '检查文献' }))
 			.toHaveAttribute('href', '/collections/col_123/documents');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('confirms and queues analysis under the same Objective identity', async () => {
+	it('uses the recommended paper scope without opening the adjustment dialog', async () => {
 		const requests: Array<{ path: string; method: string }> = [];
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
@@ -187,9 +183,11 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				browserPage.getByRole('heading', { name: 'How does heat treatment affect strength?' })
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('2 篇已选')).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('checkbox')).not.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: '确认并分析' }).click();
+		await expect
+			.element(browserPage.getByRole('dialog', { name: '确认分析论文范围' }))
+			.not.toBeInTheDocument();
 
 		await vi.waitFor(() => {
 			expect(requests).toContainEqual({
@@ -241,16 +239,13 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 
 		render(Page);
-		await browserPage
-			.getByRole('button', { name: '编辑「How does heat treatment affect strength?」的论文范围' })
-			.click();
+		await browserPage.getByRole('button', { name: '调整范围' }).first().click();
 		await browserPage.getByLabelText('搜索可用论文').fill('laser');
 		await expect.element(browserPage.getByText('laser-review.pdf')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('strength.pdf')).not.toBeInTheDocument();
 		await browserPage.getByRole('checkbox', { name: 'laser-review.pdf' }).click();
-		await expect.element(browserPage.getByText('3 篇已选')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('1 篇已选')).toBeInTheDocument();
-		await browserPage.getByRole('button', { name: '确认并分析' }).first().click();
+		await expect.element(browserPage.getByText('已选择 3 篇论文')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '使用 3 篇论文开始分析' }).click();
 
 		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -297,8 +292,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 
 		render(Page);
-		await expect.element(browserPage.getByText('1 篇已选')).toBeInTheDocument();
 		await browserPage.getByRole('button', { name: '重试分析' }).click();
+		await expect
+			.element(browserPage.getByRole('dialog', { name: '确认分析论文范围' }))
+			.not.toBeInTheDocument();
 
 		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -324,20 +321,21 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 		render(Page);
 
-		await expect.element(browserPage.getByText('0 篇已选')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '确认并分析' }).click();
+		await expect.element(browserPage.getByText('已选择 0 篇论文')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('请选择至少一篇论文。')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('请先选择至少一篇已准备论文，再开始分析。'))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: '确认并分析' })).toBeDisabled();
-		await expect.element(browserPage.getByRole('checkbox')).not.toBeInTheDocument();
+			.element(browserPage.getByRole('button', { name: '选择论文后开始分析' }))
+			.toBeDisabled();
+		await browserPage.getByRole('checkbox', { name: 'available.pdf' }).click();
+		await expect
+			.element(browserPage.getByRole('button', { name: '使用 1 篇论文开始分析' }))
+			.toBeEnabled();
 	});
 
 	it('shows active analysis progress instead of offering confirmation again', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
-			if (current.path.endsWith('/documents') && current.method === 'GET') {
-				return jsonResponse({ items: [] });
-			}
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -374,9 +372,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 	});
 
 	it('shows the published version without a second result lookup', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
-			const path = new URL(String(input), 'http://localhost').pathname;
-			if (path.endsWith('/documents')) return jsonResponse({ items: [] });
+		fetchMock.mockImplementation(async () => {
 			return jsonResponse({
 				collection_id: 'col_123',
 				objectives: [
@@ -395,6 +391,35 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: '查看 Findings' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it('prioritizes resumed work and paginates lower-ranked candidates', async () => {
+		const candidates = Array.from({ length: 8 }, (_, index) =>
+			objective({
+				objective_id: `obj-${index + 1}`,
+				question: `Candidate question ${index + 1}?`,
+				seed_document_ids: [`paper-${index + 1}`]
+			})
+		);
+		const published = objective({
+			objective_id: 'obj-published',
+			question: 'Published research question?',
+			confirmation_status: 'confirmed',
+			active_analysis_version: 2,
+			published_analysis_version: 2
+		});
+		fetchMock.mockResolvedValue(
+			jsonResponse({ collection_id: 'col_123', objectives: [...candidates, published] })
+		);
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Published research question?')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Candidate question 5?')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Objectives 1–5 of 9')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Next' }).click();
+		await expect.element(browserPage.getByText('Candidate question 5?')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Objectives 6–9 of 9')).toBeInTheDocument();
 	});
 });

@@ -24,7 +24,9 @@ from application.chat.capabilities import (
     ProposeObjectiveDraftsArguments,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    StartObjectiveAnalysisArguments,
     StartObjectiveAnalysisCapability,
+    StartResearchProcessArguments,
     StartResearchProcessCapability,
 )
 from application.core.objectives.research_objective_service import (
@@ -634,6 +636,19 @@ async def test_start_research_process_reports_missing_papers_as_a_precondition()
         "Upload at least one paper before starting literature analysis."
     )
     assert preparation_service.calls == []
+
+
+def test_agent_write_contracts_accept_complete_scopes_beyond_one_hundred_documents() -> None:
+    document_ids = [f"paper-{index}" for index in range(1, 132)]
+
+    research_process = StartResearchProcessArguments(document_ids=document_ids)
+    objective_analysis = StartObjectiveAnalysisArguments(
+        objective_id="objective-agent",
+        document_ids=document_ids,
+    )
+
+    assert research_process.document_ids == document_ids
+    assert objective_analysis.document_ids == document_ids
 
 
 @pytest.mark.parametrize(

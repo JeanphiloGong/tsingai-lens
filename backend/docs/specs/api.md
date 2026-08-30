@@ -218,9 +218,11 @@ can be inspected.
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
-Discovery accepts `{"document_ids": [...]}` with one to 100 unique current
-Documents. Every selected Document must be `ready` with a preparation
-fingerprint. The command freezes the resolved `(document_id,
+Discovery accepts `{"document_ids": [...]}` with one or more unique current
+Documents. The explicit selection is not truncated or divided into independent
+discovery scopes, so candidate formation retains the complete cross-paper
+context. Every selected Document must be `ready` with a preparation fingerprint.
+The command freezes the resolved `(document_id,
 preparation_fingerprint)` values, lazily builds or reuses their current Paper
 Maps, reads the Profiles and maps, and replaces the current generated
 candidates. It does not silently include all Collection papers.

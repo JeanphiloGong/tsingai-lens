@@ -95,7 +95,7 @@ class PreparedDocumentInputResponse(BaseModel):
 class DocumentSelectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    document_ids: list[str] = Field(min_length=1, max_length=100)
+    document_ids: list[str] = Field(min_length=1)
 
 
 class ObjectiveDiscoveryResponse(BaseModel):

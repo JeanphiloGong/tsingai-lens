@@ -23,7 +23,7 @@ class StartObjectiveAnalysisArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
-    document_ids: list[str] = Field(min_length=1, max_length=100)
+    document_ids: list[str] = Field(min_length=1)
 
 
 class InspectObjectiveAnalysisArguments(BaseModel):

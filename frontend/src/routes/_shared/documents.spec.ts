@@ -7,9 +7,8 @@ vi.mock('./api', async (importActual) => ({
 	requestJson
 }));
 
-const { buildDocumentWorkbenchModel, fetchDocumentMarkdown, fetchDocumentProfiles } = await import(
-	'./documents'
-);
+const { buildDocumentWorkbenchModel, fetchDocumentMarkdown, fetchDocumentProfiles } =
+	await import('./documents');
 
 describe('documents shared helpers', () => {
 	beforeEach(() => requestJson.mockReset());
@@ -45,6 +44,23 @@ describe('documents shared helpers', () => {
 			doc_type: 'experimental',
 			confidence: 0.9
 		});
+	});
+
+	it('sends bounded profile pagination and a trimmed collection-wide query', async () => {
+		requestJson.mockResolvedValue({
+			collection_id: 'col_123',
+			total: 0,
+			count: 0,
+			summary: { total_documents: 131, by_doc_type: {}, warnings: [] },
+			items: []
+		});
+
+		await fetchDocumentProfiles('col_123', { offset: 25, limit: 25, query: '  laser  ' });
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/documents/profiles?offset=25&limit=25&query=laser',
+			{ method: 'GET' }
+		);
 	});
 
 	it('normalizes Markdown source mappings and rejects entries without stable anchors', async () => {
@@ -118,10 +134,7 @@ describe('documents shared helpers', () => {
 			}
 		});
 
-		expect(model.source_spans.map((span) => span.block_id)).toEqual([
-			'methods-1',
-			'results-1'
-		]);
+		expect(model.source_spans.map((span) => span.block_id)).toEqual(['methods-1', 'results-1']);
 		expect(model.pages.map((page) => page.page_number)).toEqual([2, 3]);
 		expect(model.source_anchors_by_span_id['source:results-1']).toMatchObject({
 			pageIndex: 2,

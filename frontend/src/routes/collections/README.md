@@ -57,9 +57,13 @@ Research Objective
 
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
-Before that command, the user selects exact ready papers. The request sends those
-`document_ids`; processing and failed papers cannot be selected and do not block
-ready papers. Retry reuses the failed analysis version's frozen paper IDs.
+Before that command, each Objective initializes its own scope from exact ready
+seed papers. The researcher can open that Objective's compact searchable,
+paginated scope editor before analysis. The request sends only those reviewed
+`document_ids`; editing one Objective does not change another. Processing and
+failed papers cannot be selected and do not block ready papers. Retry reuses the
+failed analysis version's frozen paper IDs. A seedless Objective requires an
+explicit paper selection before analysis.
 The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;
@@ -110,6 +114,11 @@ owns the single confirmation-and-analysis command; the Finding page owns expert
 review; the document reader owns Source verification.
 The Research Agent and experiment plans may consume published Findings, but
 they do not introduce a second conclusion identity.
+
+The Papers route reports the complete profiled collection size while rendering
+one bounded page. Its title/filename search is collection-wide, and page or
+search failures remain explicit instead of presenting one partial page as the
+whole collection.
 
 ## Current Contract Docs
 

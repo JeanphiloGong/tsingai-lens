@@ -16,7 +16,7 @@ from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 class StartResearchProcessArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    document_ids: list[str] = Field(default_factory=list, max_length=100)
+    document_ids: list[str] = Field(default_factory=list)
 
 
 class StartResearchProcessCapability:

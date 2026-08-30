@@ -218,9 +218,11 @@ can be inspected.
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
-Discovery accepts `{"document_ids": [...]}` with one to 100 unique current
-Documents. Every selected Document must be `ready` with a preparation
-fingerprint. The command freezes the resolved `(document_id,
+Discovery accepts `{"document_ids": [...]}` with one or more unique current
+Documents. The explicit selection is not truncated or divided into independent
+discovery scopes, so candidate formation retains the complete cross-paper
+context. Every selected Document must be `ready` with a preparation fingerprint.
+The command freezes the resolved `(document_id,
 preparation_fingerprint)` values, lazily builds or reuses their current Paper
 Maps, reads the Profiles and maps, and replaces the current generated
 candidates. It does not silently include all Collection papers.
@@ -461,6 +463,12 @@ The document reader shows parsed paper content and supports precise Source
 navigation. A Finding Evidence link names the owning document, stable
 `source_ref`, and page when available. Internal Source IDs are audit/navigation
 parameters, not visible paper titles.
+
+The document-profile list accepts `offset`, `limit`, and an optional `query`.
+`query` performs case-insensitive matching against the profile title and source
+filename before pagination. `total` is the number of matching profiles,
+`count` is the current page size, and `summary.total_documents` remains the
+complete profiled collection size.
 
 The browser comparison overview has no separate comparison aggregate endpoint.
 It reads the Objective list and each published Finding list described above.

@@ -205,6 +205,60 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
     assert item["doc_type"] == "experimental"
 
 
+async def test_document_profile_service_filters_before_paginating(tmp_path):
+    collection_service, profile_service = _build_profile_service(tmp_path)
+    collection = await collection_service.create_collection("Searchable Profiles")
+    collection_id = collection["collection_id"]
+    for row in (
+        {
+            "document_id": "doc-1",
+            "title": "Laser processing of Ti-6Al-4V",
+            "source_filename": "paper-one.pdf",
+        },
+        {
+            "document_id": "doc-2",
+            "title": "Mechanical response of titanium",
+            "source_filename": "laser-fatigue.pdf",
+        },
+        {
+            "document_id": "doc-3",
+            "title": "Stainless steel review",
+            "source_filename": "review.pdf",
+        },
+    ):
+        await profile_service.document_profile_repository.replace(
+            DocumentProfile.from_mapping(
+                {
+                    **row,
+                    "collection_id": collection_id,
+                    "doc_type": "experimental",
+                    "parsing_warnings": [],
+                    "confidence": 0.9,
+                }
+            )
+        )
+
+    first_page = await profile_service.list_document_profiles(
+        collection_id,
+        query=" LASER ",
+        offset=0,
+        limit=1,
+    )
+    second_page = await profile_service.list_document_profiles(
+        collection_id,
+        query="laser",
+        offset=1,
+        limit=1,
+    )
+
+    assert first_page["total"] == 2
+    assert first_page["count"] == 1
+    assert first_page["items"][0]["document_id"] == "doc-1"
+    assert second_page["total"] == 2
+    assert second_page["items"][0]["document_id"] == "doc-2"
+    assert first_page["summary"]["total_documents"] == 3
+
+
 async def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     class ExplodingExtractor:
         def extract_document_profile(self, payload):  # noqa: ANN001

@@ -190,6 +190,17 @@ class _Repository:
         return self.facts.research_objectives
 
 
+class _DiscoveryService:
+    def __init__(self) -> None:
+        self.discovery_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    async def discover_and_replace_objective_candidates(
+        self, collection_id, document_ids
+    ):
+        self.discovery_calls.append((collection_id, document_ids))
+        return _default_objective_facts()
+
+
 class _Service:
     def __init__(self, *, queued: bool = False) -> None:
         self.analysis_status = "queued" if queued else "succeeded"
@@ -358,11 +369,13 @@ def _client(
     service: _Service | None = None,
     *,
     repository: _Repository | None = None,
+    discovery_service: _DiscoveryService | None = None,
     raise_server_exceptions: bool = True,
 ) -> TestClient:
     app = FastAPI()
     app.state.objective_repository = repository or _Repository()
     app.state.objective_analysis_service = service or _Service()
+    app.state.research_objective_service = discovery_service or _DiscoveryService()
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -492,6 +505,34 @@ def test_start_analysis_uses_the_canonical_service_dispatch() -> None:
     assert response.status_code == 200
     assert response.json()["active_analysis"]["status"] == "queued"
     assert service.start_calls == [("col-1", "obj-1", ("paper-1",))]
+
+
+def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents() -> None:
+    document_ids = [f"paper-{index}" for index in range(1, 132)]
+    discovery_service = _DiscoveryService()
+    analysis_service = _Service(queued=True)
+    client = _client(
+        analysis_service,
+        discovery_service=discovery_service,
+    )
+
+    discovery_response = client.post(
+        "/collections/col-1/objective-discovery",
+        json={"document_ids": document_ids},
+    )
+    analysis_response = client.post(
+        "/collections/col-1/objectives/obj-1/analysis",
+        json={"document_ids": document_ids},
+    )
+
+    assert discovery_response.status_code == 200
+    assert analysis_response.status_code == 200
+    assert discovery_service.discovery_calls == [
+        ("col-1", tuple(document_ids)),
+    ]
+    assert analysis_service.start_calls == [
+        ("col-1", "obj-1", tuple(document_ids)),
+    ]
 
 
 def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:

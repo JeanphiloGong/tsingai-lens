@@ -4,18 +4,18 @@ This package owns scientific interpretation after one Document has parseable
 Source artifacts. It does not own Collection membership, file storage, task
 admission, or Agent conversation.
 
-## Document Preparation
+## Document-Level Scientific Triage
 
 For one Document:
 
 ```text
 SourceDocument
   -> DocumentProfile
-  -> PaperMap
+  -> (selected later) PaperMap
 ```
 
 `document_profiles/service.py` classifies the paper for research triage.
-`objectives/paper_research_map_service.py` creates one bounded
+`objectives/paper_research_map_service.py` lazily creates one bounded
 `PaperResearchMap` that describes paper role, material and process themes,
 variable-to-outcome research axes, review synthesis, gaps, Source lineage, and
 uncertainty. It cannot represent samples, tests, comparators, fixed conditions,
@@ -26,13 +26,14 @@ not proven Evidence.
 
 ```text
 explicit ready document_ids
+  -> lazily build or reuse their Paper Maps
   -> current Profiles and Paper Maps
   -> candidate Objectives
 ```
 
-Discovery never chooses hidden Collection scope and never prepares papers. The
-caller supplies the exact ready Documents. The stored discovery result records
-their `(document_id, preparation_fingerprint)` inputs.
+Discovery never chooses hidden Collection scope. The caller supplies the exact
+ready Documents; discovery maps only those Documents and records their
+`(document_id, preparation_fingerprint)` inputs.
 
 ## Objective Analysis
 

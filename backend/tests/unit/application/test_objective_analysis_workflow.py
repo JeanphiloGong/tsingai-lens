@@ -22,6 +22,7 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.research_objective_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
     ObjectiveDocumentEvidenceArtifacts,
+    _paper_map_input_fingerprint,
 )
 from domain.core import (
     ObjectiveAnalysis,
@@ -80,6 +81,49 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
         raise RuntimeError("frame model failed")
 
 
+class _RecordingPaperMapService:
+    def __init__(self) -> None:
+        self.document_ids: list[str] = []
+
+    def build_document_paper_map(self, collection_id: str, **kwargs):
+        document = kwargs["document"]
+        self.document_ids.append(document.document_id)
+        return PaperResearchMap.from_mapping(
+            {
+                "document_id": document.document_id,
+                "doc_role": "primary_experiment",
+                "studies": [],
+                "evidence_density": "low",
+                "confidence": 0.8,
+                "map_status": "insufficient_map",
+                "map_limitations": ["missing_outcome"],
+            }
+        )
+
+
+def _paper_map_loading_service(
+    paper_map_service: _RecordingPaperMapService,
+):
+    service = _build_research_objective_service(
+        collection_service=SimpleNamespace(),
+        paper_map_service=paper_map_service,
+    )
+    documents = source_documents_from_records(
+        documents=[
+            {"id": "paper-selected", "title": "Selected", "text": "Abstract"},
+            {"id": "paper-unselected", "title": "Unselected", "text": "Abstract"},
+        ],
+        blocks=[],
+        tables=[],
+    )
+    return service, {
+        "documents": (documents[0],),
+        "profiles_by_document_id": {"paper-selected": SimpleNamespace()},
+        "document_trees_by_document_id": {"paper-selected": None},
+        "response_client": SimpleNamespace(),
+    }
+
+
 def _ready_objective_facts(
     paper_map: PaperResearchMap,
     objective: ResearchObjective,
@@ -105,6 +149,67 @@ def _ready_objective_facts(
             for relationship in study.relationships
         ),
     )
+
+
+async def test_selected_document_builds_and_reuses_its_bound_paper_map() -> None:
+    paper_map_service = _RecordingPaperMapService()
+    service, source_inputs = _paper_map_loading_service(paper_map_service)
+
+    first = await service._load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=(
+            PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
+        ),
+        source_inputs=source_inputs,
+    )
+    second = await service._load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=(
+            PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
+        ),
+        source_inputs=source_inputs,
+    )
+    refreshed = await service._load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=(
+            PreparedDocumentInput("paper-selected", "profile-fingerprint-v2"),
+        ),
+        source_inputs=source_inputs,
+    )
+
+    assert paper_map_service.document_ids == ["paper-selected", "paper-selected"]
+    assert first[0].input_fingerprint
+    assert second == first
+    assert refreshed[0].input_fingerprint != first[0].input_fingerprint
+
+
+async def test_paper_map_rebuilds_when_its_scientific_logic_version_changes(
+    monkeypatch,
+) -> None:
+    paper_map_service = _RecordingPaperMapService()
+    service, source_inputs = _paper_map_loading_service(paper_map_service)
+    document_inputs = (
+        PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
+    )
+
+    first = await service._load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=document_inputs,
+        source_inputs=source_inputs,
+    )
+    monkeypatch.setattr(
+        "application.core.objectives.research_objective_service."
+        "PAPER_RESEARCH_MAP_POLICY_VERSION",
+        "paper_research_map_policy.changed",
+    )
+    refreshed = await service._load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=document_inputs,
+        source_inputs=source_inputs,
+    )
+
+    assert paper_map_service.document_ids == ["paper-selected", "paper-selected"]
+    assert first[0].input_fingerprint != refreshed[0].input_fingerprint
 
 
 def _ready_objective_facts_for_papers(
@@ -184,6 +289,9 @@ def _paper_map(
             "evidence_density": "high",
             "confidence": 0.9,
             "warnings": [],
+            "input_fingerprint": _paper_map_input_fingerprint(
+                f"fingerprint-{document_id}"
+            ),
         }
     )
 

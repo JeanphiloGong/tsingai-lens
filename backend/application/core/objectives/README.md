@@ -21,7 +21,9 @@ Findings.
 2. asks `PaperResearchMapExtractor` for paper role, material and process themes,
    variable-to-outcome research axes, review synthesis, gaps, and citation leads;
 3. consolidates the window outputs into one `PaperResearchMap`/Paper Map;
-4. expands once when a missing scientific scope element requires more reading;
+4. spends a bounded 24-Source expansion budget when unresolved scientific
+   signals require more reading, prioritizing concrete metric terms and stopping
+   early when a round adds no new scope;
 5. reconciles unresolved signals without inventing Source facts;
 6. records map status and limitations.
 
@@ -36,7 +38,7 @@ measurements.
 POST objective-discovery {document_ids}
   -> resolve ready Documents
   -> freeze PreparedDocumentInput values
-  -> load current Profiles and Paper Maps
+  -> load Profiles and build or reuse matching Paper Maps
   -> form and rank Objective candidates
   -> replace current discovered candidates
 ```

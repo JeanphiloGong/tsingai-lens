@@ -45,12 +45,24 @@ from application.core.objectives.analysis.source_validation import (
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
+from application.core.objectives.discovery.signal_reconciliation import (
+    PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
+    PaperSignalReconciler,
+)
+from application.core.objectives.discovery.study_window import (
+    PAPER_RESEARCH_MAP_PROMPT_VERSION,
+    PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
+    PaperResearchMapExtractor,
+)
 from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
     build_default_structured_response_client,
 )
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
+)
+from application.core.objectives.paper_research_map_service import (
+    PaperResearchMapService,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.source.collection_service import CollectionService
@@ -61,6 +73,7 @@ from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
+    PaperResearchMap,
     PreparedDocumentInput,
     ResearchObjective,
     is_question_shaped_objective,
@@ -91,6 +104,28 @@ OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
     ("evidence_materialization", OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION),
 )
 _OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
+_PAPER_MAP_DOCUMENT_MAX_CONCURRENCY = 10
+PAPER_RESEARCH_MAP_POLICY_VERSION = "+".join(
+    (
+        "paper_research_map_selection.v2",
+        PAPER_RESEARCH_MAP_PROMPT_VERSION,
+        PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
+        PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
+    )
+)
+
+
+def _paper_map_input_fingerprint(preparation_fingerprint: str) -> str:
+    return sha256(
+        json.dumps(
+            {
+                "preparation_fingerprint": preparation_fingerprint,
+                "paper_map_policy_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -140,6 +175,7 @@ class ResearchObjectiveService:
         document_profile_service: DocumentProfileService,
         finding_synthesis_service: FindingSynthesisService,
         objective_candidate_service: ObjectiveCandidateService,
+        paper_map_service: PaperResearchMapService,
         response_client: StructuredResponseClient | None = None,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None,
         objective_source_screener: ObjectiveSourceScreener | None = None,
@@ -160,6 +196,7 @@ class ResearchObjectiveService:
         self.document_profile_service = document_profile_service
         self.finding_synthesis_service = finding_synthesis_service
         self.objective_candidate_service = objective_candidate_service
+        self.paper_map_service = paper_map_service
 
     # define a main method for turning a completed collection build into candidate research objectives
     async def discover_and_replace_objective_candidates(
@@ -184,20 +221,15 @@ class ResearchObjectiveService:
             collection_id,
             document_ids,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        source_inputs = await self._load_objective_source_inputs(
             collection_id,
-            document_ids,
+            document_inputs=document_inputs,
         )
-        maps_by_document_id = {item.document_id: item for item in paper_maps}
-        missing_maps = [
-            document_id
-            for document_id in document_ids
-            if document_id not in maps_by_document_id
-        ]
-        if missing_maps:
-            raise ResearchObjectivesNotReadyError(collection_id)
-        paper_maps = tuple(
-            maps_by_document_id[document_id] for document_id in document_ids
+        paper_maps = await self._load_or_build_paper_maps(
+            collection_id,
+            document_inputs=document_inputs,
+            source_inputs=source_inputs,
+            progress_callback=progress_callback,
         )
         if self._axis_equivalence_classifier is None:
             self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
@@ -654,20 +686,74 @@ class ResearchObjectiveService:
             collection_id,
             document_inputs=document_inputs,
         )
+        paper_maps = await self._load_or_build_paper_maps(
+            collection_id,
+            document_inputs=document_inputs,
+            source_inputs=source_inputs,
+        )
+        return {
+            **source_inputs,
+            "paper_maps": paper_maps,
+        }
+
+    async def _load_or_build_paper_maps(
+        self,
+        collection_id: str,
+        *,
+        document_inputs: tuple[PreparedDocumentInput, ...],
+        source_inputs: dict[str, Any],
+        progress_callback: ProgressCallback | None = None,
+    ) -> tuple[PaperResearchMap, ...]:
         document_ids = tuple(item.document_id for item in document_inputs)
-        paper_maps = await self.paper_map_repository.list_collection(
+        existing_maps = await self.paper_map_repository.list_collection(
             collection_id,
             document_ids,
         )
-        maps_by_document_id = {item.document_id: item for item in paper_maps}
-        if any(document_id not in maps_by_document_id for document_id in document_ids):
-            raise ResearchObjectivesNotReadyError(collection_id)
-        return {
-            **source_inputs,
-            "paper_maps": tuple(
-                maps_by_document_id[document_id] for document_id in document_ids
-            ),
+        maps_by_document_id = {item.document_id: item for item in existing_maps}
+        inputs_by_document_id = {
+            item.document_id: item for item in document_inputs
         }
+        map_input_fingerprints = {
+            document_id: _paper_map_input_fingerprint(item.preparation_fingerprint)
+            for document_id, item in inputs_by_document_id.items()
+        }
+        documents_by_id = {
+            document.document_id: document
+            for document in source_inputs["documents"]
+        }
+        response_client = source_inputs["response_client"]
+        build_limit = Semaphore(_PAPER_MAP_DOCUMENT_MAX_CONCURRENCY)
+
+        async def build_map(document_id: str) -> None:
+            async with build_limit:
+                paper_map = await to_thread(
+                    self.paper_map_service.build_document_paper_map,
+                    collection_id,
+                    document=documents_by_id[document_id],
+                    profile=source_inputs["profiles_by_document_id"][document_id],
+                    document_tree=source_inputs["document_trees_by_document_id"][
+                        document_id
+                    ],
+                    paper_map_extractor=PaperResearchMapExtractor(response_client),
+                    signal_reconciler=PaperSignalReconciler(response_client),
+                    progress_callback=progress_callback,
+                )
+            paper_map = replace(
+                paper_map,
+                input_fingerprint=map_input_fingerprints[document_id],
+            )
+            await self.paper_map_repository.replace(collection_id, paper_map)
+            maps_by_document_id[document_id] = paper_map
+
+        stale_document_ids = tuple(
+            document_id
+            for document_id in document_ids
+            if maps_by_document_id.get(document_id) is None
+            or maps_by_document_id[document_id].input_fingerprint
+            != map_input_fingerprints[document_id]
+        )
+        await gather(*(build_map(document_id) for document_id in stale_document_ids))
+        return tuple(maps_by_document_id[document_id] for document_id in document_ids)
 
     # Define a helper that loads one exact prepared-document selection and
     # prepares the data structures shared by Objective discovery and analysis.

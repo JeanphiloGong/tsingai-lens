@@ -20,11 +20,13 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    researcher reads before choosing a question: bounded abstract, conclusion or
    summary, overview, and table/figure caption Sources. The initial pass excludes
    detailed Methods, Results text, and table rows. If the map is incomplete, the
-   service may perform one bounded, targeted expansion over relevant Methods or
-   Results Sources and captions; it still does not reconstruct table rows or
-   experiment details. The paper map therefore records that a result axis exists
-   without reconstructing detailed table structure or values; those rows are read
-   only after the researcher confirms an Objective. The
+   service spends a bounded 24-Source expansion budget over relevant Methods or
+   Results Sources and captions. It prioritizes Sources that mention unresolved
+   concrete metrics, repeats the highest-value reading step, and stops early
+   when a round adds no new scope. It still does not reconstruct table rows or
+   experiment details. The paper map therefore records that a result axis
+   exists without reconstructing detailed table structure or values; those
+   rows are read only after the researcher confirms an Objective. The
    service groups the selected Sources by broad reading role, retries technical
    failures under one small per-paper budget, and consolidates the results into
    one paper map.

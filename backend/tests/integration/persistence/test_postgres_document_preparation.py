@@ -174,8 +174,6 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
         task_service=task_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
-        paper_map_repository=MemoryPaperMapRepository(),
-        paper_map_service=object(),
         max_concurrency=1,
     )
 

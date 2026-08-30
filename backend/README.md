@@ -13,9 +13,9 @@ Collection
 Document
   -> SourceDocument
   -> DocumentProfile
-  -> PaperMap
 
 selected ready Documents
+  -> lightweight PaperMap (lazy, for discovery navigation)
   -> Objective candidates
 
 confirmed Objective + selected ready Documents
@@ -25,8 +25,10 @@ confirmed Objective + selected ready Documents
 ```
 
 A Collection groups papers. It does not own a generated snapshot. Each Document
-owns its current preparation status and current Source, Profile, and Paper Map.
-Adding or retrying one paper never rebuilds the others.
+owns its current preparation status and current Source and Profile. A Paper Map
+is a lazy, document-scoped navigation artifact built by Objective discovery or
+analysis for the explicitly selected ready Documents. Adding or retrying one
+paper never rebuilds unrelated papers or maps.
 Objective analysis likewise reuses completed inspection for unchanged papers and
 retries only papers whose inspection is missing, failed, or stale.
 

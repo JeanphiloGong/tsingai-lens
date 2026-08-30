@@ -529,6 +529,10 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "Never label a cited study current_work" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
+    assert "General statements of prevalence, use, importance, or motivation" in (
+        user_prompt
+    )
+    assert "Additive manufacturing is widely used in aerospace" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "Copy every directly supporting Source label" in user_prompt

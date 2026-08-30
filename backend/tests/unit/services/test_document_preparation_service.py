@@ -2,21 +2,16 @@ from dataclasses import replace
 
 import pytest
 
-from application.core.objectives.discovery.study_window import (
-    PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
-)
+from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
-    PAPER_MAP_VERSION,
     DocumentPreparationService,
-    paper_map_fingerprint,
     profile_fingerprint,
     source_fingerprint,
 )
-from domain.core import DocumentProfile, PaperResearchMap
+from domain.core import DocumentProfile
 from domain.source import Document, SourceDocument
 from infra.persistence.memory import (
-    MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
     MemoryTaskRepository,
 )
@@ -40,11 +35,6 @@ def test_document_preparation_fingerprints_invalidate_only_dependent_stages():
         source_fingerprint=source_v1,
         profile_version="document-profile.v1",
     )
-    paper_map_v1 = paper_map_fingerprint(
-        profile_fingerprint=profile_v1,
-        paper_map_version="paper-map.v1",
-    )
-
     assert source_v1 == source_fingerprint(
         sha256="a" * 64,
         parser_version="source-runtime.v1",
@@ -53,20 +43,11 @@ def test_document_preparation_fingerprints_invalidate_only_dependent_stages():
         source_fingerprint=source_v1,
         profile_version="document-profile.v1",
     )
-    assert paper_map_v1 != paper_map_fingerprint(
-        profile_fingerprint=profile_v1,
-        paper_map_version="paper-map.v2",
-    )
-
     profile_v2 = profile_fingerprint(
         source_fingerprint=source_v1,
         profile_version="document-profile.v2",
     )
     assert profile_v2 != profile_v1
-    assert paper_map_v1 != paper_map_fingerprint(
-        profile_fingerprint=profile_v2,
-        paper_map_version="paper-map.v1",
-    )
 
     source_v2 = source_fingerprint(
         sha256="a" * 64,
@@ -79,9 +60,8 @@ def test_document_preparation_fingerprints_invalidate_only_dependent_stages():
     )
 
 
-def test_document_preparation_versions_include_compact_paper_map_recovery() -> None:
-    assert PAPER_SOURCE_SIGNAL_PROMPT_VERSION in PAPER_MAP_VERSION
-    assert PAPER_SOURCE_SIGNAL_PROMPT_VERSION in DOCUMENT_ANALYSIS_VERSION
+def test_document_preparation_version_covers_only_profile_triage() -> None:
+    assert DOCUMENT_ANALYSIS_VERSION == DOCUMENT_PROFILE_PROMPT_VERSION
 
 
 async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts() -> None:
@@ -136,8 +116,6 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
         task_service=task_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
-        paper_map_repository=MemoryPaperMapRepository(),
-        paper_map_service=object(),
         max_concurrency=1,
     )
 
@@ -198,8 +176,6 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
         task_service=task_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
-        paper_map_repository=MemoryPaperMapRepository(),
-        paper_map_service=object(),
         max_concurrency=1,
     )
 
@@ -211,7 +187,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
     assert still_active["finished_at"] is None
 
 
-async def test_paper_map_change_reuses_current_source_and_profile() -> None:
+async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     collection_id = "col_test"
     document_id = "doc_test"
     base_document = Document(
@@ -225,8 +201,8 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
         size_bytes=100,
         created_at="2026-08-27T10:00:00+00:00",
     )
-    source_identity, profile_identity, preparation_identity = (
-        DocumentPreparationService.fingerprints_for(base_document)
+    source_identity, profile_identity = DocumentPreparationService.fingerprints_for(
+        base_document
     )
 
     class CollectionService:
@@ -278,22 +254,6 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
         async def build_document_profile(self, owner: str, selected: str):
             raise AssertionError("the current profile should be reused")
 
-    class PaperMapService:
-        calls = 0
-
-        def build_document_paper_map(self, owner: str, **kwargs) -> PaperResearchMap:
-            assert owner == collection_id
-            self.calls += 1
-            return PaperResearchMap.from_mapping(
-                {
-                    "document_id": document_id,
-                    "doc_role": "primary_experiment",
-                    "studies": [],
-                    "evidence_density": "low",
-                    "confidence": 0.7,
-                }
-            )
-
     async def fail_if_parsed(**kwargs):
         raise AssertionError("the current SourceDocument should be reused")
 
@@ -307,29 +267,12 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
             text="Methods and results",
         ),
     )
-    paper_maps = MemoryPaperMapRepository()
-    await paper_maps.replace(
-        collection_id,
-        PaperResearchMap.from_mapping(
-            {
-                "document_id": document_id,
-                "doc_role": "primary_experiment",
-                "studies": [],
-                "evidence_density": "low",
-                "confidence": 0.6,
-            }
-        ),
-    )
     collection_service = CollectionService()
-    paper_map_service = PaperMapService()
     service = DocumentPreparationService(
         collection_service=collection_service,
         task_service=TaskService(),
         source_artifact_repository=sources,
         document_profile_service=ProfileService(),
-        paper_map_repository=paper_maps,
-        paper_map_service=paper_map_service,
-        response_client=object(),
         source_artifact_builder=fail_if_parsed,
         max_concurrency=1,
     )
@@ -341,9 +284,93 @@ async def test_paper_map_change_reuses_current_source_and_profile() -> None:
     )
 
     assert result["status"] == "completed"
-    assert paper_map_service.calls == 1
     assert collection_service.document.status == "ready"
     assert (
         collection_service.document.preparation_fingerprint
-        == preparation_identity
+        == profile_identity
     )
+
+
+async def test_document_preparation_does_not_build_paper_map_before_objective_selection() -> None:
+    collection_id = "col_lazy_map"
+    document_id = "doc_lazy_map"
+    base_document = Document(
+        document_id=document_id,
+        original_filename="paper.pdf",
+        stored_filename="paper.pdf",
+        storage_key="col_lazy_map/inputs/paper.pdf",
+        sha256="d" * 64,
+        media_type="application/pdf",
+        status="stored",
+        size_bytes=100,
+        created_at="2026-08-28T10:00:00+00:00",
+    )
+    source_identity, _profile_identity = (
+        DocumentPreparationService.fingerprints_for(base_document)
+    )
+    base_document = replace(base_document, source_fingerprint=source_identity)
+
+    class CollectionService:
+        def __init__(self) -> None:
+            self.document = base_document
+
+        async def get_document(self, owner: str, selected: str) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            return self.document
+
+        async def update_document_preparation(
+            self,
+            owner: str,
+            selected: str,
+            **fields,
+        ) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            self.document = replace(self.document, **fields)
+            return self.document
+
+    class TaskService:
+        async def update_task(self, task_id: str, **fields):
+            return {"task_id": task_id, **fields}
+
+        async def finish_task(self, task_id: str, **fields):
+            return {"task_id": task_id, **fields}
+
+    class ProfileService:
+        async def read_document_profile(self, owner: str, selected: str):
+            return None
+
+        async def build_document_profile(self, owner: str, selected: str):
+            return DocumentProfile.from_mapping(
+                {
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "title": "Paper",
+                    "doc_type": "experimental",
+                    "parsing_warnings": [],
+                    "confidence": 0.9,
+                }
+            )
+
+    collection_service = CollectionService()
+    source_repository = MemorySourceArtifactRepository()
+    await source_repository.replace_document(
+        collection_id,
+        SourceDocument(
+            document_id=document_id,
+            document_order=0,
+            title="Paper",
+            text="Abstract",
+        ),
+    )
+    service = DocumentPreparationService(
+        collection_service=collection_service,
+        task_service=TaskService(),
+        source_artifact_repository=source_repository,
+        document_profile_service=ProfileService(),
+        max_concurrency=1,
+    )
+
+    result = await service.run_task("task_lazy_map", collection_id, document_id)
+
+    assert result["status"] == "completed"
+    assert collection_service.document.status == "ready"

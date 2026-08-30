@@ -49,10 +49,10 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 # Research-scope limits for the bounded pre-Objective reading rounds.
 _PAPER_MAP_INITIAL_SOURCE_LIMIT = 16
-_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE = 4
 _PAPER_MAP_VISUAL_SOURCE_LIMIT = 4
 _PAPER_MAP_EXPANSION_SOURCE_LIMIT = 8
 _PAPER_MAP_FALLBACK_SOURCE_LIMIT_PER_EDGE = 4
+_PAPER_MAP_EXPANSION_SOURCE_BUDGET = 24
 
 # Serialization limits that keep one selected Source from dominating a prompt.
 _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT = 4000
@@ -158,6 +158,12 @@ class _PaperExtractionBudget:
     recovery_calls: int = 0
     failure_kind: str | None = None
     _lock: Any = field(default_factory=Lock, repr=False)
+
+    def add_capacity(self, calls: int) -> None:
+        if calls <= 0:
+            return
+        with self._lock:
+            self.max_calls += calls
 
     def reserve(self, *, recovery: bool) -> bool:
         with self._lock:
@@ -293,12 +299,29 @@ class PaperResearchMapService:
                 window_maps,
                 profile=profiles_by_document_id.get(document.document_id),
             )
+            paper_map = self._drop_signals_resolved_by_relationships(paper_map)
             assessment = self._assess_paper_map(
                 paper_map,
                 signals=tuple(item.signal for item in paper_signals),
                 final=False,
             )
-            if assessment.expansion_focus is not None:
+            expansion_round = 0
+            remaining_expansion_sources = _PAPER_MAP_EXPANSION_SOURCE_BUDGET
+            while (
+                assessment.expansion_focus is not None
+                and remaining_expansion_sources > 0
+            ):
+                expansion_focus = assessment.expansion_focus
+                if expansion_round and expansion_focus == "outcome_specificity":
+                    expansion_focus = "missing_scope"
+                before_fact_count = (
+                    sum(
+                        len(study.relationships)
+                        for study in paper_map.studies
+                    )
+                    + len(paper_map.unresolved_signals)
+                    + len(paper_signals)
+                )
                 selected_source_keys = frozenset(
                     (
                         str(unit.get("source_kind") or ""),
@@ -320,9 +343,25 @@ class PaperResearchMapService:
                         document.document_id
                     ),
                     paper_map_extractor=paper_map_extractor,
-                    selection_focus=assessment.expansion_focus,
+                    selection_focus=expansion_focus,
+                    expansion_search_terms=self._paper_map_expansion_search_terms(
+                        paper_map,
+                        paper_signals,
+                    ),
+                    expansion_source_limit=min(
+                        _PAPER_MAP_EXPANSION_SOURCE_LIMIT,
+                        remaining_expansion_sources,
+                    ),
+                    reading_round=expansion_round + 2,
                     excluded_source_keys=selected_source_keys,
                 )
+                if not expansion_payloads:
+                    break
+                remaining_expansion_sources -= sum(
+                    len(payload.get("source_units") or ())
+                    for payload in expansion_payloads
+                )
+                extraction_budget.add_capacity(len(expansion_payloads))
                 for expansion_position, payload in enumerate(
                     expansion_payloads,
                     start=1,
@@ -334,8 +373,8 @@ class PaperResearchMapService:
                         total=document_count,
                         unit="documents",
                         message=(
-                            "Expanding the paper map for one missing scientific "
-                            "scope element."
+                            "Expanding the paper map for unresolved scientific "
+                            "scope."
                         ),
                         active_document_id=document.document_id,
                         active_document_title=getattr(document, "title", None),
@@ -343,7 +382,7 @@ class PaperResearchMapService:
                         active_window_position=expansion_position,
                         active_window_count=len(expansion_payloads),
                         active_window_role=(
-                            f"targeted_{assessment.expansion_focus}"
+                            f"targeted_{expansion_focus}"
                         ),
                     )
                 for batch_maps, batch_signals in self._extract_window_payloads(
@@ -361,6 +400,23 @@ class PaperResearchMapService:
                     window_maps,
                     profile=profiles_by_document_id.get(document.document_id),
                 )
+                paper_map = self._drop_signals_resolved_by_relationships(paper_map)
+                expansion_round += 1
+                after_fact_count = (
+                    sum(
+                        len(study.relationships)
+                        for study in paper_map.studies
+                    )
+                    + len(paper_map.unresolved_signals)
+                    + len(paper_signals)
+                )
+                if after_fact_count <= before_fact_count:
+                    break
+                assessment = self._assess_paper_map(
+                    paper_map,
+                    signals=tuple(item.signal for item in paper_signals),
+                    final=False,
+                )
             paper_map = self._reconcile_paper_signals(
                 paper_map,
                 paper_signals,
@@ -372,6 +428,7 @@ class PaperResearchMapService:
                 document_title=getattr(document, "title", None),
                 source_filename=source_filename,
             )
+            paper_map = self._drop_signals_resolved_by_relationships(paper_map)
             final_assessment = self._assess_paper_map(
                 paper_map,
                 signals=paper_map.unresolved_signals,
@@ -537,6 +594,9 @@ class PaperResearchMapService:
         document_tree: SourceDocumentTree | None = None,
         paper_map_extractor: PaperResearchMapExtractor,
         selection_focus: str | None = None,
+        expansion_search_terms: tuple[str, ...] = (),
+        expansion_source_limit: int = _PAPER_MAP_EXPANSION_SOURCE_LIMIT,
+        reading_round: int = 2,
         excluded_source_keys: frozenset[tuple[str, str]] = frozenset(),
     ) -> list[dict[str, Any]]:
         source_items = self._build_source_items(
@@ -562,6 +622,8 @@ class PaperResearchMapService:
             else self._select_paper_map_expansion_items(
                 available_items,
                 focus=selection_focus,
+                search_terms=expansion_search_terms,
+                limit=expansion_source_limit,
             )
         )
         bounded_items: list[_PaperMapSourceItem] = []
@@ -584,6 +646,8 @@ class PaperResearchMapService:
             else self._select_paper_map_expansion_items(
                 bounded_items,
                 focus=selection_focus,
+                search_terms=expansion_search_terms,
+                limit=expansion_source_limit,
             )
         )
         payloads: list[dict[str, Any]] = []
@@ -601,9 +665,11 @@ class PaperResearchMapService:
                     items=window_items,
                 )
                 if selection_focus is not None:
-                    payload["reading_round"] = 2
+                    payload["reading_round"] = reading_round
                     payload["expansion_focus"] = selection_focus
-                    payload["window_id"] = f"round-2.{payload['window_id']}"
+                    payload["window_id"] = (
+                        f"round-{reading_round}.{payload['window_id']}"
+                    )
                 payloads.extend(
                     self._fit_payload_to_prompt_limit(
                         payload,
@@ -674,31 +740,43 @@ class PaperResearchMapService:
             elif item.source_kind in {"block", "document"}:
                 fallback_items.append(item)
 
-        selected_text = [
-            *abstract_items[:_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE],
-            *conclusion_items[:_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE],
-            *overview_items[:_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE],
+        high_level_text = [
+            *abstract_items,
+            *conclusion_items,
+            *overview_items,
         ]
+        visual_items = [*table_items, *figure_items]
+        if (
+            high_level_text or visual_items
+        ) and len(high_level_text) + len(visual_items) <= _PAPER_MAP_INITIAL_SOURCE_LIMIT:
+            selected_ids = {id(item) for item in (*high_level_text, *visual_items)}
+            return [
+                cls._compact_paper_map_item_metadata(item)
+                for item in items
+                if id(item) in selected_ids
+            ]
+
+        visual_capacity = min(_PAPER_MAP_VISUAL_SOURCE_LIMIT, len(visual_items))
+        text_capacity = _PAPER_MAP_INITIAL_SOURCE_LIMIT - visual_capacity
+        selected_text = cls._select_balanced_items(
+            (abstract_items, conclusion_items, overview_items),
+            text_capacity,
+        )
         if not abstract_items and not conclusion_items and not overview_items:
             edge_count = _PAPER_MAP_FALLBACK_SOURCE_LIMIT_PER_EDGE
             selected_text.extend(fallback_items[:edge_count])
             selected_text.extend(fallback_items[-edge_count:])
 
-        visual_capacity = min(
-            _PAPER_MAP_VISUAL_SOURCE_LIMIT,
-            max(_PAPER_MAP_INITIAL_SOURCE_LIMIT - len(selected_text), 0),
+        selected_visuals = cls._select_balanced_items(
+            (table_items, figure_items),
+            min(
+                visual_capacity,
+                max(_PAPER_MAP_INITIAL_SOURCE_LIMIT - len(selected_text), 0),
+            ),
         )
-        if table_items and figure_items:
-            table_limit = visual_capacity // 2
-            figure_limit = visual_capacity - table_limit
-        elif table_items:
-            table_limit, figure_limit = visual_capacity, 0
-        else:
-            table_limit, figure_limit = 0, visual_capacity
         selected = [
             *selected_text,
-            *table_items[:table_limit],
-            *figure_items[:figure_limit],
+            *selected_visuals,
         ]
 
         selected_ids = {id(item) for item in selected}
@@ -708,12 +786,34 @@ class PaperResearchMapService:
             if id(item) in selected_ids
         ][:_PAPER_MAP_INITIAL_SOURCE_LIMIT]
 
+    @staticmethod
+    def _select_balanced_items(
+        groups: tuple[list[_PaperMapSourceItem], ...],
+        limit: int,
+    ) -> list[_PaperMapSourceItem]:
+        selected: list[_PaperMapSourceItem] = []
+        position = 0
+        while len(selected) < limit:
+            added = False
+            for group in groups:
+                if position < len(group):
+                    selected.append(group[position])
+                    added = True
+                    if len(selected) == limit:
+                        break
+            if not added:
+                break
+            position += 1
+        return selected
+
     @classmethod
     def _select_paper_map_expansion_items(
         cls,
         items: list[_PaperMapSourceItem],
         *,
         focus: str,
+        search_terms: tuple[str, ...] = (),
+        limit: int = _PAPER_MAP_EXPANSION_SOURCE_LIMIT,
     ) -> list[_PaperMapSourceItem]:
         selected: list[_PaperMapSourceItem] = []
         for item in items:
@@ -753,10 +853,61 @@ class PaperResearchMapService:
                 }
             if include:
                 selected.append(item)
+        if search_terms:
+            selected.sort(
+                key=lambda item: (
+                    -cls._paper_map_search_score(item, search_terms),
+                    item.order,
+                )
+            )
         return [
             cls._compact_paper_map_item_metadata(item)
-            for item in selected[:_PAPER_MAP_EXPANSION_SOURCE_LIMIT]
+            for item in selected[:limit]
         ]
+
+    @staticmethod
+    def _paper_map_search_score(
+        item: _PaperMapSourceItem,
+        search_terms: tuple[str, ...],
+    ) -> int:
+        content = (
+            json.dumps(item.content, ensure_ascii=False)
+            if isinstance(item.content, Mapping)
+            else str(item.content or "")
+        )
+        return sum(
+            1
+            for term in search_terms
+            if property_matching.source_text_mentions_axis(content, term)
+        )
+
+    @staticmethod
+    def _paper_map_expansion_search_terms(
+        paper_map: PaperResearchMap,
+        signals: Iterable[_PaperSignalInput],
+    ) -> tuple[str, ...]:
+        terms: list[str] = []
+        seen: set[str] = set()
+        visible_signals = (
+            *(item.signal for item in signals),
+            *paper_map.unresolved_signals,
+        )
+        for signal in visible_signals:
+            if signal.signal_type != "outcome":
+                continue
+            normalized = property_matching.normalize_property_label(signal.label)
+            candidates = (
+                signal.label,
+                normalized,
+                *property_matching.broad_outcome_expansions(normalized),
+            )
+            for candidate in candidates:
+                term = " ".join(str(candidate or "").strip().split())
+                key = term.casefold()
+                if term and key not in seen:
+                    seen.add(key)
+                    terms.append(term)
+        return tuple(terms)
 
     @staticmethod
     def _normalized_section_path(section_path: str) -> str:
@@ -2308,6 +2459,127 @@ class PaperResearchMapService:
         )
 
     @classmethod
+    def _drop_signals_resolved_by_relationships(
+        cls,
+        paper_map: PaperResearchMap,
+    ) -> PaperResearchMap:
+        unresolved_signals = tuple(
+            signal
+            for signal in paper_map.unresolved_signals
+            if not cls._signal_is_resolved_by_relationships(paper_map, signal)
+        )
+        if unresolved_signals == paper_map.unresolved_signals:
+            return paper_map
+        return replace(paper_map, unresolved_signals=unresolved_signals)
+
+    @classmethod
+    def _signals_unresolved_for_discovery(
+        cls,
+        paper_map: PaperResearchMap,
+        signals: Iterable[PaperResearchSignal],
+    ) -> tuple[PaperResearchSignal, ...]:
+        unresolved: list[PaperResearchSignal] = []
+        seen: set[str] = set()
+        for signal in signals:
+            if signal.signal_id in seen:
+                continue
+            seen.add(signal.signal_id)
+            if not cls._signal_is_resolved_by_relationships(paper_map, signal):
+                unresolved.append(signal)
+        return tuple(unresolved)
+
+    @staticmethod
+    def _signal_is_resolved_by_relationships(
+        paper_map: PaperResearchMap,
+        signal: PaperResearchSignal,
+    ) -> bool:
+        signal_sources = {
+            (source.source_kind, source.source_ref)
+            for source in signal.source_refs
+        }
+        broad_outcome = (
+            signal.signal_type == "outcome"
+            and property_matching.outcome_label_requires_resolution(signal.label)
+        )
+        for study in paper_map.studies:
+            if (
+                signal.claim_scope != "uncertain"
+                and study.claim_scope != signal.claim_scope
+            ):
+                continue
+            for relationship in study.relationships:
+                relationship_sources = {
+                    (source.source_kind, source.source_ref)
+                    for source in relationship.source_refs
+                }
+                sources_overlap = bool(signal_sources & relationship_sources)
+                if signal.signal_type == "variable" and sources_overlap and any(
+                    property_matching.axis_values_match(signal.label, factor)
+                    for factor in relationship.varied_factors
+                ):
+                    return True
+                if signal.signal_type != "outcome":
+                    continue
+                exact_match = property_matching.axis_values_match(
+                    signal.label,
+                    relationship.outcome,
+                )
+                family_match = property_matching.source_text_mentions_axis(
+                    relationship.outcome,
+                    signal.label,
+                )
+                expanded_match = broad_outcome and any(
+                    property_matching.axis_values_match(
+                        relationship.outcome,
+                        expanded_axis,
+                    )
+                    or property_matching.source_text_mentions_axis(
+                        relationship.outcome,
+                        expanded_axis,
+                    )
+                    for expanded_axis in property_matching.broad_outcome_expansions(
+                        signal.label
+                    )
+                )
+                if sources_overlap and (
+                    exact_match or family_match or expanded_match
+                ):
+                    return True
+                if broad_outcome and (
+                    expanded_match
+                    or PaperResearchMapService._outcome_family_matches(
+                        signal.label,
+                        relationship.outcome,
+                    )
+                ):
+                    return True
+                # A broad paper-level theme may be stated in an Abstract and
+                # resolved by a concrete, independently sourced Results axis.
+                # Specific unlinked signals remain visible because they may
+                # belong to another experiment or comparison in the paper.
+                if broad_outcome and family_match:
+                    return True
+        return False
+
+    @staticmethod
+    def _outcome_family_matches(left: str, right: str) -> bool:
+        left_key = property_matching.normalize_property_label(left) or ""
+        right_key = property_matching.normalize_property_label(right) or ""
+        left_words = set(left_key.split())
+        right_words = set(right_key.split())
+        if "mechanical" in left_words and "mechanical" in right_words:
+            return bool(left_words & {"property", "properties"}) and bool(
+                right_words & {"property", "properties"}
+            )
+        if any(token.startswith("microstructur") for token in left_words):
+            return any(
+                token.startswith("microstructur")
+                or token.startswith(("grain", "martensite", "lamella", "phase"))
+                for token in right_words
+            )
+        return False
+
+    @classmethod
     def _claim_scope_for_document(
         cls,
         *,
@@ -2948,8 +3220,9 @@ class PaperResearchMapService:
             ),
         )
 
-    @staticmethod
+    @classmethod
     def _assess_paper_map(
+        cls,
         paper_map: PaperResearchMap,
         *,
         signals: tuple[PaperResearchSignal, ...],
@@ -2974,17 +3247,36 @@ class PaperResearchMapService:
                 paper_map.review_synthesis.evidence_gaps,
             )
         )
-        if owned_relationships or has_review_judgment:
+        visible_signals = cls._signals_unresolved_for_discovery(
+            paper_map,
+            (*signals, *paper_map.unresolved_signals),
+        )
+        has_unresolved_broad_outcome = any(
+            signal.signal_type == "outcome"
+            and property_matching.outcome_label_requires_resolution(signal.label)
+            for signal in visible_signals
+        )
+        has_unresolved_outcome = any(
+            signal.signal_type == "outcome" for signal in visible_signals
+        )
+        has_blocking_unresolved_outcome = (
+            has_unresolved_broad_outcome
+            or (not final and has_unresolved_outcome)
+        )
+        if (
+            (owned_relationships or has_review_judgment)
+            and not has_blocking_unresolved_outcome
+            and paper_map.coverage_complete
+        ):
             return _PaperMapAssessment(
                 status="sufficient",
                 limitations=tuple(limitations),
             )
 
-        visible_signals = tuple((*signals, *paper_map.unresolved_signals))
-        has_variable = any(
+        has_variable = bool(owned_relationships) or any(
             signal.signal_type == "variable" for signal in visible_signals
         )
-        has_outcome = any(
+        has_outcome = bool(owned_relationships) or any(
             signal.signal_type == "outcome" for signal in visible_signals
         )
         has_broad_outcome = any(
@@ -2994,7 +3286,7 @@ class PaperResearchMapService:
         )
         has_unowned_relationship = any(
             study.relationships
-            and study.claim_scope not in {"current_work", "synthesis"}
+            and study.claim_scope == "uncertain"
             for study in paper_map.studies
         )
 

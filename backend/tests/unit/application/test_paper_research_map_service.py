@@ -898,7 +898,6 @@ def test_paper_map_groups_bounded_sources_by_reading_role():
     extractor = _WindowExtractor()
 
     _build_skims(artifacts, tree, extractor)
-
     assert [payload["section_paths"] for payload in extractor.payloads] == [[
         "Materials and Methods",
         "Validation Methods",
@@ -907,6 +906,33 @@ def test_paper_map_groups_bounded_sources_by_reading_role():
         [unit["source_ref"] for unit in payload["source_units"]]
         for payload in extractor.payloads
     ] == [["method-a", "method-b"]]
+
+
+def test_sparse_high_level_sources_are_all_read_before_quota_is_applied():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            *[
+                _paragraph(
+                    f"abstract-{position:02d}",
+                    f"ABSTRACT_SCOPE_{position}",
+                    position + 2,
+                    "Abstract",
+                )
+                for position in range(6)
+            ],
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    _build_skims(artifacts, tree, extractor)
+
+    mapped_refs = [
+        unit["source_ref"]
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    ]
+    assert mapped_refs == [f"abstract-{position:02d}" for position in range(6)]
 
 
 def test_complete_prompt_token_preflight_splits_before_model_execution():
@@ -1769,7 +1795,7 @@ def test_paper_map_expands_once_to_results_when_high_level_scope_lacks_outcome()
     assert skim.map_limitations == ()
 
 
-def test_paper_map_stops_after_one_targeted_expansion_and_records_insufficiency():
+def test_paper_map_stops_when_targeted_expansion_adds_no_new_scope():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("abstract", "Abstract", 1),
@@ -3193,7 +3219,9 @@ def test_complete_candidate_survives_signal_reconciliation_failure():
 
     assert len(skim.studies) == 1
     assert skim.studies[0].relationships[0].varied_factors == ("laser power",)
-    assert len(skim.unresolved_signals) == 2
+    assert [signal.label for signal in skim.unresolved_signals] == [
+        "relative density"
+    ]
 
 
 def test_one_signal_role_is_retained_without_a_reconciliation_call():

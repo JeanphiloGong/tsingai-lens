@@ -11,6 +11,9 @@ from application.core.objectives.analysis.finding_synthesis import (
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
+from application.core.objectives.paper_research_map_service import (
+    PaperResearchMapService,
+)
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
@@ -92,6 +95,7 @@ def build_research_objective_service(
         document_profile_service=document_profile_service,
         finding_synthesis_service=finding_synthesis_service,
         objective_candidate_service=ObjectiveCandidateService(),
+        paper_map_service=kwargs.pop("paper_map_service", PaperResearchMapService()),
         **kwargs,
     )
 

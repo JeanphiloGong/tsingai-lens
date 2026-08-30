@@ -54,6 +54,14 @@ def test_only_multi_measurement_outcome_families_require_resolution(
     )
 
 
+@pytest.mark.parametrize(
+    "outcome",
+    ("anisotropic mechanical properties", "microstructural anisotropy"),
+)
+def test_modified_broad_outcome_families_require_resolution(outcome: str) -> None:
+    assert property_matching.outcome_label_requires_resolution(outcome)
+
+
 def test_density_match_ignores_energy_density_phrase() -> None:
     assert not property_matching.source_text_mentions_axis(
         "The volumetric energy density was 80 J/mm3.",

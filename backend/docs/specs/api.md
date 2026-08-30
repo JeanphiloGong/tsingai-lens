@@ -47,18 +47,21 @@ login.
 - `GET /api/v1/tasks/{task_id}`
 
 A Collection groups current Documents. Each Document independently owns its
-preparation status, current Source structure, current DocumentProfile, and
-current Paper Map. The preparation command queues only the named Document; it
-does not prepare other Collection members or discover Objectives. Task
+preparation status, current Source structure, and current DocumentProfile. The
+preparation command queues only the named Document; it does not prepare other
+Collection members or discover Objectives. Paper Map construction is a lazy
+Objective-core operation over an explicit ready-document selection. Task
 responses expose `document_id`, input fingerprint, current stage, progress,
 terminal error, and retry-appropriate status.
 
 At most one `document_preparation` task may be queued or running for a Document.
 Repeated requests reuse that active task. A completed task is reusable only when
 its input fingerprint still matches the current document bytes, parser version,
-Profile version, and Paper Map version. Source, Profile, and final preparation
-fingerprints are tracked separately so a downstream logic change resumes from
-the latest still-valid stage. Different Documents may prepare concurrently.
+and Profile version. Source and Profile fingerprints are tracked separately so
+a downstream Profile change resumes from the latest still-valid stage. Different
+Documents may prepare concurrently. Paper Map reuse has its own fingerprint,
+which includes the selected Document preparation fingerprint and Paper Map
+policy/prompt versions.
 One failed or processing Document does not block upload, preparation, Objective
 discovery, or analysis over other ready Documents.
 
@@ -66,8 +69,10 @@ PDF uploads are opened with the Source PDF engine before persistence. A damaged,
 incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
 not added to the collection. This check establishes parser readability only;
 scientific structure extraction happens during that Document's preparation.
-A later parser, profile, or Paper Map failure sets only that Document and task to
-`failed`. The failure stays technical; it does not claim scientific absence.
+A later parser or Profile failure sets only that Document and task to `failed`.
+Paper Map failures belong to Objective discovery/analysis and do not change the
+Document preparation task. All such failures stay technical; they do not claim
+scientific absence.
 
 The source archive request accepts between one and 100 unique collection
 `document_id` values with at most 256 MiB of persisted source bytes and returns an
@@ -145,10 +150,10 @@ The production Research Agent currently exposes these automatic capabilities:
 - `start_research_process` is a `write` capability. After exact-argument
   approval, it queues independent preparation for the supplied `document_ids`,
   or for all current Documents when the list is empty. It returns the per-paper
-  task records immediately. Preparation parses paper content, classifies paper
-  type and role, and creates a lightweight Paper Map; it does not discover or
-  confirm an Objective, run Objective-specific Evidence extraction, or publish
-  a Finding. Unknown IDs fail before any task is created. A Collection with no
+  task records immediately. Preparation parses paper content and classifies
+  paper type and role. It does not build a Paper Map, discover or confirm an
+  Objective, run Objective-specific Evidence extraction, or publish a Finding.
+  Unknown IDs fail before any task is created. A Collection with no
   uploaded papers returns `collection_has_no_papers`;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
@@ -216,9 +221,9 @@ can be inspected.
 Discovery accepts `{"document_ids": [...]}` with one to 100 unique current
 Documents. Every selected Document must be `ready` with a preparation
 fingerprint. The command freezes the resolved `(document_id,
-preparation_fingerprint)` values, reads their current Profiles and Paper Maps,
-and replaces the current generated candidates. It does not silently include all
-Collection papers and does not prepare papers.
+preparation_fingerprint)` values, lazily builds or reuses their current Paper
+Maps, reads the Profiles and maps, and replaces the current generated
+candidates. It does not silently include all Collection papers.
 
 A Paper Map is preliminary scope metadata: paper type, material and process
 themes, variable-to-outcome axes, review synthesis, Source lineage, coverage,

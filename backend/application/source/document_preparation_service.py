@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asyncio import CancelledError, Semaphore, Task, create_task, to_thread
+from asyncio import CancelledError, Semaphore, Task, create_task
 from dataclasses import replace
 from hashlib import sha256 as hash_sha256
 import json
@@ -15,26 +15,12 @@ import pandas as pd
 
 from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.discovery.signal_reconciliation import (
-    PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
-    PaperSignalReconciler,
-)
-from application.core.objectives.discovery.study_window import (
-    PAPER_RESEARCH_MAP_PROMPT_VERSION,
-    PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
-    PaperResearchMapExtractor,
-)
-from application.core.objectives.llm.structured_response import (
-    StructuredResponseClient,
-    build_default_structured_response_client,
-)
-from application.core.objectives.paper_research_map_service import PaperResearchMapService
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from application.source.task_service import TaskService
-from domain.ports import PaperMapRepository, SourceArtifactRepository
+from domain.ports import SourceArtifactRepository
 from domain.source import Document, SourceDocument
 from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.config.source_runtime_config import (
@@ -50,15 +36,7 @@ from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 logger = logging.getLogger(__name__)
 
 SOURCE_PARSER_VERSION = "source-runtime.v1"
-DOCUMENT_ANALYSIS_VERSION = (
-    f"{DOCUMENT_PROFILE_PROMPT_VERSION}+{PAPER_RESEARCH_MAP_PROMPT_VERSION}+"
-    f"{PAPER_SOURCE_SIGNAL_PROMPT_VERSION}+"
-    f"{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
-)
-PAPER_MAP_VERSION = (
-    f"{PAPER_RESEARCH_MAP_PROMPT_VERSION}+{PAPER_SOURCE_SIGNAL_PROMPT_VERSION}+"
-    f"{PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION}"
-)
+DOCUMENT_ANALYSIS_VERSION = DOCUMENT_PROFILE_PROMPT_VERSION
 _DEFAULT_PREPARATION_CONCURRENCY = 10
 
 SourceArtifactBuilder = Callable[..., Awaitable[list[Any]]]
@@ -97,20 +75,8 @@ def profile_fingerprint(
     )
 
 
-def paper_map_fingerprint(
-    *,
-    profile_fingerprint: str,
-    paper_map_version: str,
-) -> str:
-    return _stage_fingerprint(
-        "paper_map",
-        profile_fingerprint=str(profile_fingerprint),
-        paper_map_version=str(paper_map_version),
-    )
-
-
 class DocumentPreparationService:
-    """Own parsing, triage, and bounded Paper Map creation for one document."""
+    """Own parsing and paper-level triage for one document."""
 
     def __init__(
         self,
@@ -119,9 +85,6 @@ class DocumentPreparationService:
         task_service: TaskService,
         source_artifact_repository: SourceArtifactRepository,
         document_profile_service: DocumentProfileService,
-        paper_map_repository: PaperMapRepository,
-        paper_map_service: PaperResearchMapService,
-        response_client: StructuredResponseClient | None = None,
         source_artifact_builder: SourceArtifactBuilder | None = None,
         max_concurrency: int | None = None,
     ) -> None:
@@ -129,9 +92,6 @@ class DocumentPreparationService:
         self.task_service = task_service
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
-        self.paper_map_repository = paper_map_repository
-        self.paper_map_service = paper_map_service
-        self._response_client = response_client
         self._source_artifact_builder = source_artifact_builder
         resolved_concurrency = max_concurrency or int(
             os.getenv(
@@ -239,9 +199,8 @@ class DocumentPreparationService:
                 collection_id,
                 document_id,
             )
-            source_identity, profile_identity, fingerprint = self.fingerprints_for(
-                document
-            )
+            source_identity, profile_identity = self.fingerprints_for(document)
+            fingerprint = profile_identity
             await self.task_service.update_task(
                 task_id,
                 status="running",
@@ -314,36 +273,6 @@ class DocumentPreparationService:
                         status="processing",
                         profile_fingerprint=profile_identity,
                     )
-                await self.task_service.update_task(
-                    task_id,
-                    current_stage="paper_map",
-                    progress_percent=65,
-                    progress_detail={
-                        "phase": "paper_map",
-                        "unit": "document",
-                        "message": "Mapping the paper's research scope.",
-                    },
-                )
-                paper_map = await self.paper_map_repository.read(
-                    collection_id, document_id
-                )
-                if paper_map is None or document.preparation_fingerprint != fingerprint:
-                    response_client = self._get_response_client()
-                    paper_map = await to_thread(
-                        self.paper_map_service.build_document_paper_map,
-                        collection_id,
-                        document=source_document,
-                        profile=profile,
-                        document_tree=(
-                            await self.source_artifact_repository.read_document_tree(
-                                collection_id,
-                                document_id,
-                            )
-                        ),
-                        paper_map_extractor=PaperResearchMapExtractor(response_client),
-                        signal_reconciler=PaperSignalReconciler(response_client),
-                    )
-                    await self.paper_map_repository.replace(collection_id, paper_map)
                 await self.collection_service.update_document_preparation(
                     collection_id,
                     document_id,
@@ -393,10 +322,10 @@ class DocumentPreparationService:
 
     @staticmethod
     def fingerprint_for(document: Document) -> str:
-        return DocumentPreparationService.fingerprints_for(document)[2]
+        return DocumentPreparationService.fingerprints_for(document)[1]
 
     @staticmethod
-    def fingerprints_for(document: Document) -> tuple[str, str, str]:
+    def fingerprints_for(document: Document) -> tuple[str, str]:
         source_identity = source_fingerprint(
             sha256=document.sha256,
             parser_version=SOURCE_PARSER_VERSION,
@@ -405,14 +334,7 @@ class DocumentPreparationService:
             source_fingerprint=source_identity,
             profile_version=DOCUMENT_PROFILE_PROMPT_VERSION,
         )
-        return (
-            source_identity,
-            profile_identity,
-            paper_map_fingerprint(
-                profile_fingerprint=profile_identity,
-                paper_map_version=PAPER_MAP_VERSION,
-            ),
-        )
+        return source_identity, profile_identity
 
     async def _parse_document(
         self,
@@ -516,11 +438,6 @@ class DocumentPreparationService:
             self._source_artifact_builder = build_source_artifacts
         return self._source_artifact_builder
 
-    def _get_response_client(self) -> StructuredResponseClient:
-        if self._response_client is None:
-            self._response_client = build_default_structured_response_client()
-        return self._response_client
-
     @staticmethod
     def _log_unexpected_failure(task: Task[dict[str, Any]]) -> None:
         try:
@@ -534,9 +451,7 @@ class DocumentPreparationService:
 __all__ = [
     "DOCUMENT_ANALYSIS_VERSION",
     "DocumentPreparationService",
-    "PAPER_MAP_VERSION",
     "SOURCE_PARSER_VERSION",
-    "paper_map_fingerprint",
     "profile_fingerprint",
     "source_fingerprint",
 ]

@@ -13,6 +13,11 @@
 	let loading = false;
 	let error = '';
 	let loadedCollectionId = '';
+	let searchInput = '';
+	let appliedQuery = '';
+	let offset = 0;
+	let requestSequence = 0;
+	const PAGE_SIZE = 25;
 
 	$: collectionId = $page.params.id ?? '';
 	$: if (collectionId && collectionId !== loadedCollectionId) {
@@ -20,30 +25,49 @@
 		void loadProfiles();
 	}
 
-	async function loadProfiles() {
+	async function loadProfiles(nextOffset = offset, nextQuery = appliedQuery) {
+		const requestId = ++requestSequence;
 		loading = true;
 		error = '';
 		try {
-			profiles = await fetchDocumentProfiles(collectionId);
+			const result = await fetchDocumentProfiles(collectionId, {
+				offset: nextOffset,
+				limit: PAGE_SIZE,
+				query: nextQuery
+			});
+			if (requestId !== requestSequence) return;
+			profiles = result;
+			offset = nextOffset;
+			appliedQuery = nextQuery;
 		} catch (err) {
+			if (requestId !== requestSequence) return;
 			profiles = null;
 			error = errorMessage(err);
 		} finally {
-			loading = false;
+			if (requestId === requestSequence) loading = false;
 		}
 	}
 
-	function paperHref(profile: DocumentProfile) {
-		return resolve('/collections/[id]/documents/[document_id]', {
-			id: collectionId,
-			document_id: profile.document_id
-		});
+	function submitSearch() {
+		void loadProfiles(0, searchInput.trim());
+	}
+
+	function clearSearch() {
+		searchInput = '';
+		void loadProfiles(0, '');
+	}
+
+	function previousPage() {
+		void loadProfiles(Math.max(0, offset - PAGE_SIZE), appliedQuery);
+	}
+
+	function nextPage() {
+		if (!profiles || offset + profiles.count >= profiles.total) return;
+		void loadProfiles(offset + PAGE_SIZE, appliedQuery);
 	}
 
 	function shortId(profile: DocumentProfile) {
-		return profile.document_id.length > 12
-			? profile.document_id.slice(0, 12)
-			: profile.document_id;
+		return profile.document_id.length > 12 ? profile.document_id.slice(0, 12) : profile.document_id;
 	}
 
 	function displayTitle(profile: DocumentProfile, index: number) {
@@ -60,6 +84,15 @@
 		const translated = $t(key);
 		return translated === key ? profile.doc_type : translated;
 	}
+
+	function pageRange() {
+		if (!profiles?.count) return '';
+		return $t('research.documents.pageRange', {
+			start: offset + 1,
+			end: offset + profiles.count,
+			total: profiles.total
+		});
+	}
 </script>
 
 <svelte:head><title>{$t('collection.tabs.papers')}</title></svelte:head>
@@ -71,9 +104,31 @@
 			<p>{$t('research.documents.profileLead')}</p>
 		</div>
 		{#if profiles}
-			<span>{$t('research.documents.documentCount', { count: profiles.items.length })}</span>
+			<span
+				>{$t('research.documents.documentCount', { count: profiles.summary.total_documents })}</span
+			>
 		{/if}
 	</header>
+
+	<form class="paper-search" role="search" on:submit|preventDefault={submitSearch}>
+		<label for="paper-search">{$t('research.documents.searchLabel')}</label>
+		<div>
+			<input
+				id="paper-search"
+				type="search"
+				bind:value={searchInput}
+				placeholder={$t('research.documents.searchPlaceholder')}
+			/>
+			<button class="btn btn--primary btn--small" type="submit">
+				{$t('research.documents.searchAction')}
+			</button>
+			{#if appliedQuery}
+				<button class="btn btn--ghost btn--small" type="button" on:click={clearSearch}>
+					{$t('research.documents.clearSearch')}
+				</button>
+			{/if}
+		</div>
+	</form>
 
 	{#if loading}
 		<p class="page-state" aria-busy="true">{$t('research.documents.profileLoading')}</p>
@@ -81,22 +136,34 @@
 		<section class="page-state page-state--error" role="alert">
 			<h3>{$t('research.documents.profileErrorTitle')}</h3>
 			<p>{error}</p>
-			<button class="btn btn--ghost btn--small" type="button" on:click={loadProfiles}>
+			<button class="btn btn--ghost btn--small" type="button" on:click={() => loadProfiles()}>
 				{$t('research.comparison.retry')}
 			</button>
 		</section>
 	{:else if !profiles?.items.length}
 		<section class="page-state">
-			<h3>{$t('research.documents.profileEmptyTitle')}</h3>
-			<p>{$t('research.documents.profileEmptyBody')}</p>
+			{#if appliedQuery}
+				<h3>{$t('research.documents.searchEmptyTitle')}</h3>
+				<p>{$t('research.documents.searchEmptyBody', { query: appliedQuery })}</p>
+			{:else}
+				<h3>{$t('research.documents.profileEmptyTitle')}</h3>
+				<p>{$t('research.documents.profileEmptyBody')}</p>
+			{/if}
 		</section>
 	{:else}
+		<div class="paper-results-status" aria-live="polite">
+			<span>
+				{appliedQuery
+					? $t('research.documents.searchCount', { count: profiles.total })
+					: pageRange()}
+			</span>
+		</div>
 		<div class="paper-list">
 			{#each profiles.items as profile, index (profile.document_id)}
 				<article class="paper-row">
 					<div class="paper-row__identity">
 						<span class="paper-type">{documentTypeLabel(profile)}</span>
-						<h3>{displayTitle(profile, index)}</h3>
+						<h3>{displayTitle(profile, offset + index)}</h3>
 						{#if profile.source_filename && profile.source_filename !== profile.title}
 							<p>{profile.source_filename}</p>
 						{/if}
@@ -108,12 +175,22 @@
 							<span>{$t('research.documents.pageCount', { count: profile.page_count })}</span>
 						{/if}
 						{#if profile.confidence !== null}
-							<span>{$t('research.documents.profileConfidence', { value: Math.round(profile.confidence * 100) })}</span>
+							<span
+								>{$t('research.documents.profileConfidence', {
+									value: Math.round(profile.confidence * 100)
+								})}</span
+							>
 						{/if}
 					</div>
 
 					<div class="paper-row__action">
-						<a class="btn btn--ghost btn--small" href={paperHref(profile)}>
+						<a
+							class="btn btn--ghost btn--small"
+							href={resolve('/collections/[id]/documents/[document_id]', {
+								id: collectionId,
+								document_id: profile.document_id
+							})}
+						>
 							{$t('research.documents.openPaper')}
 						</a>
 					</div>
@@ -128,6 +205,25 @@
 				</article>
 			{/each}
 		</div>
+		<nav class="paper-pagination" aria-label={$t('research.documents.paginationLabel')}>
+			<button
+				class="btn btn--ghost btn--small"
+				type="button"
+				disabled={offset === 0 || loading}
+				on:click={previousPage}
+			>
+				{$t('research.documents.previousPage')}
+			</button>
+			<span>{pageRange()}</span>
+			<button
+				class="btn btn--ghost btn--small"
+				type="button"
+				disabled={offset + profiles.count >= profiles.total || loading}
+				on:click={nextPage}
+			>
+				{$t('research.documents.nextPage')}
+			</button>
+		</nav>
 	{/if}
 </section>
 
@@ -170,6 +266,38 @@
 	}
 
 	.papers-header > span {
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
+	.paper-search {
+		display: grid;
+		gap: 6px;
+	}
+
+	.paper-search > label {
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.paper-search > div {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.paper-search input {
+		width: min(520px, 100%);
+		min-height: 38px;
+		padding: 7px 10px;
+		border: 1px solid var(--border-default);
+		background: var(--surface-card);
+		color: var(--text-primary);
+	}
+
+	.paper-results-status {
+		display: flex;
+		justify-content: space-between;
 		color: var(--text-secondary);
 		font-size: 13px;
 	}
@@ -247,6 +375,16 @@
 		line-height: 19px;
 	}
 
+	.paper-pagination {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding-top: 8px;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
 	@media (max-width: 720px) {
 		.papers-header {
 			align-items: flex-start;
@@ -259,6 +397,20 @@
 
 		.paper-row__action {
 			justify-self: start;
+		}
+
+		.paper-search > div {
+			align-items: stretch;
+			flex-wrap: wrap;
+		}
+
+		.paper-search input {
+			width: 100%;
+		}
+
+		.paper-pagination {
+			align-items: stretch;
+			flex-direction: column;
 		}
 	}
 </style>

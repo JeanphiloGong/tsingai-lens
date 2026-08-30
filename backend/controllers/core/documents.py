@@ -121,12 +121,20 @@ async def list_collection_document_profiles(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=500, description="Number to return")] = 50,
     offset: Annotated[int, Query(ge=0, description="Result offset")] = 0,
+    query: Annotated[
+        str,
+        Query(
+            max_length=200,
+            description="Case-insensitive title or source filename search",
+        ),
+    ] = "",
 ) -> DocumentProfileListResponse:
     try:
         payload = await request.app.state.document_profile_service.list_document_profiles(
             collection_id,
             offset=offset,
             limit=limit,
+            query=query,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

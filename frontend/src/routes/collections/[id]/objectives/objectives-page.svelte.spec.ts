@@ -155,6 +155,13 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 							status: 'ready',
 							size_bytes: 100,
 							created_at: '2026-08-27T00:00:00Z'
+						},
+						{
+							document_id: 'paper-3',
+							original_filename: 'unrelated-paper.pdf',
+							status: 'ready',
+							size_bytes: 100,
+							created_at: '2026-08-27T00:00:00Z'
 						}
 					]
 				});
@@ -175,6 +182,13 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 
 		render(Page);
+		await expect
+			.element(
+				browserPage.getByRole('heading', { name: 'How does heat treatment affect strength?' })
+			)
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('2 篇已选')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('checkbox')).not.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: '确认并分析' }).click();
 
 		await vi.waitFor(() => {
@@ -189,6 +203,133 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
 			document_ids: ['paper-1', 'paper-2']
 		});
+	});
+
+	it('edits only one Objective paper scope with searchable bounded results', async () => {
+		const secondObjective = objective({
+			objective_id: 'obj_heat_ductility',
+			question: 'How does heat treatment affect ductility?',
+			seed_document_ids: ['paper-2']
+		});
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/documents') && current.method === 'GET') {
+				return jsonResponse({
+					items: [
+						{ document_id: 'paper-1', original_filename: 'strength.pdf', status: 'ready' },
+						{ document_id: 'paper-2', original_filename: 'ductility.pdf', status: 'ready' },
+						{ document_id: 'paper-3', original_filename: 'laser-review.pdf', status: 'ready' }
+					]
+				});
+			}
+			if (current.path.endsWith('/objectives') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [objective(), secondObjective]
+				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: objective(),
+					active_analysis: null,
+					published_analysis: null,
+					warnings: []
+				});
+			}
+			throw new Error(`unexpected request: ${current.method} ${current.path}`);
+		});
+
+		render(Page);
+		await browserPage
+			.getByRole('button', { name: '编辑「How does heat treatment affect strength?」的论文范围' })
+			.click();
+		await browserPage.getByLabelText('搜索可用论文').fill('laser');
+		await expect.element(browserPage.getByText('laser-review.pdf')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('strength.pdf')).not.toBeInTheDocument();
+		await browserPage.getByRole('checkbox', { name: 'laser-review.pdf' }).click();
+		await expect.element(browserPage.getByText('3 篇已选')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 篇已选')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '确认并分析' }).first().click();
+
+		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
+		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+			document_ids: ['paper-1', 'paper-2', 'paper-3']
+		});
+	});
+
+	it('uses failed analysis frozen inputs as the retry scope', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/documents') && current.method === 'GET') {
+				return jsonResponse({
+					items: [
+						{ document_id: 'paper-1', original_filename: 'seed.pdf', status: 'ready' },
+						{ document_id: 'paper-3', original_filename: 'frozen.pdf', status: 'ready' }
+					]
+				});
+			}
+			if (current.path.endsWith('/objectives') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [objective({ confirmation_status: 'confirmed', active_analysis_version: 1 })]
+				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
+					active_analysis: {
+						...analysisState('failed'),
+						document_inputs: [
+							{ document_id: 'paper-3', preparation_fingerprint: 'fingerprint-paper-3' }
+						]
+					},
+					published_analysis: null,
+					warnings: []
+				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
+				return jsonResponse({ collection_id: 'col_123', warnings: [] });
+			}
+			throw new Error(`unexpected request: ${current.method} ${current.path}`);
+		});
+
+		render(Page);
+		await expect.element(browserPage.getByText('1 篇已选')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '重试分析' }).click();
+
+		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
+		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({ document_ids: ['paper-3'] });
+	});
+
+	it('requires explicit selection for a seedless Objective', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/documents') && current.method === 'GET') {
+				return jsonResponse({
+					items: [{ document_id: 'paper-1', original_filename: 'available.pdf', status: 'ready' }]
+				});
+			}
+			if (current.path.endsWith('/objectives') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [objective({ seed_document_ids: [] })]
+				});
+			}
+			throw new Error(`unexpected request: ${current.method} ${current.path}`);
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('0 篇已选')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('请先选择至少一篇已准备论文，再开始分析。'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: '确认并分析' })).toBeDisabled();
+		await expect.element(browserPage.getByRole('checkbox')).not.toBeInTheDocument();
 	});
 
 	it('shows active analysis progress instead of offering confirmation again', async () => {

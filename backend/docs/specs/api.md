@@ -464,6 +464,12 @@ navigation. A Finding Evidence link names the owning document, stable
 `source_ref`, and page when available. Internal Source IDs are audit/navigation
 parameters, not visible paper titles.
 
+The document-profile list accepts `offset`, `limit`, and an optional `query`.
+`query` performs case-insensitive matching against the profile title and source
+filename before pagination. `total` is the number of matching profiles,
+`count` is the current page size, and `summary.total_documents` remains the
+complete profiled collection size.
+
 The browser comparison overview has no separate comparison aggregate endpoint.
 It reads the Objective list and each published Finding list described above.
 Legacy research-view, Materials, comparable-result, Evidence-card, and

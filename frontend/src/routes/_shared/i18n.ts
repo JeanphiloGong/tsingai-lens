@@ -612,7 +612,18 @@ const translations: Record<Language, Translations> = {
 				documentCount: '{count} paper(s)',
 				shortId: 'Short ID',
 				untitledPaper: 'Paper {number}',
-				openPaper: 'Open paper'
+				openPaper: 'Open paper',
+				searchLabel: 'Search papers',
+				searchPlaceholder: 'Title or source filename',
+				searchAction: 'Search',
+				clearSearch: 'Clear',
+				searchCount: '{count} matching paper(s)',
+				searchEmptyTitle: 'No matching papers',
+				searchEmptyBody: 'No paper title or filename matches “{query}”.',
+				pageRange: 'Papers {start}–{end} of {total}',
+				paginationLabel: 'Paper pages',
+				previousPage: 'Previous',
+				nextPage: 'Next'
 			},
 			comparison: {
 				eyebrow: 'Published analysis',
@@ -2934,7 +2945,18 @@ const translations: Record<Language, Translations> = {
 				documentCount: '{count} 篇文献',
 				shortId: '短 ID',
 				untitledPaper: '文献 {number}',
-				openPaper: '打开文献'
+				openPaper: '打开文献',
+				searchLabel: '搜索论文',
+				searchPlaceholder: '输入标题或源文件名',
+				searchAction: '搜索',
+				clearSearch: '清除',
+				searchCount: '找到 {count} 篇匹配论文',
+				searchEmptyTitle: '没有匹配的论文',
+				searchEmptyBody: '没有标题或文件名匹配“{query}”的论文。',
+				pageRange: '第 {start}–{end} 篇，共 {total} 篇',
+				paginationLabel: '论文分页',
+				previousPage: '上一页',
+				nextPage: '下一页'
 			},
 			comparison: {
 				eyebrow: '已发布分析',

@@ -135,6 +135,61 @@ async def test_documents_route_returns_404_for_missing_collection(document_servi
     assert "collection not found" in str(exc.detail)
 
 
+async def test_documents_route_forwards_profile_search_and_pagination(document_services):
+    (
+        collection_service,
+        document_profile_service,
+        _markdown_service,
+    ) = document_services
+    record = await collection_service.create_collection(name="Searchable Collection")
+    collection_id = record["collection_id"]
+    await _store_document_profiles(
+        document_profile_service,
+        collection_id,
+        [
+            {
+                "document_id": "paper-1",
+                "collection_id": collection_id,
+                "title": "Laser paper one",
+                "source_filename": "one.pdf",
+                "doc_type": "experimental",
+                "parsing_warnings": [],
+                "confidence": 0.91,
+            },
+            {
+                "document_id": "paper-2",
+                "collection_id": collection_id,
+                "title": "Laser paper two",
+                "source_filename": "two.pdf",
+                "doc_type": "experimental",
+                "parsing_warnings": [],
+                "confidence": 0.89,
+            },
+            {
+                "document_id": "paper-3",
+                "collection_id": collection_id,
+                "title": "Unrelated review",
+                "source_filename": "review.pdf",
+                "doc_type": "review",
+                "parsing_warnings": [],
+                "confidence": 0.8,
+            },
+        ],
+    )
+
+    payload = await documents_controller.list_collection_document_profiles(
+        collection_id,
+        _document_request(document_services),
+        limit=1,
+        offset=1,
+        query="laser",
+    )
+
+    assert payload.total == 2
+    assert payload.count == 1
+    assert payload.items[0].document_id == "paper-2"
+
+
 async def test_document_profile_route_returns_single_profile(document_services):
     (
         collection_service,

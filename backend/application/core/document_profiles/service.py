@@ -106,16 +106,32 @@ class DocumentProfileService:
         collection_id: str,
         offset: int = 0,
         limit: int = 51,
+        query: str | None = None,
     ) -> dict[str, Any]:
         profiles = await self.read_document_profiles(collection_id)
         summary = self.summarize_document_profiles(profiles)
+        normalized_query = str(query or "").strip().casefold()
+        matched_profiles = (
+            tuple(
+                profile
+                for profile in profiles
+                if normalized_query
+                in " ".join(
+                    value
+                    for value in (profile.title, profile.source_filename)
+                    if value
+                ).casefold()
+            )
+            if normalized_query
+            else profiles
+        )
         items = [
             profile.to_record()
-            for profile in profiles[offset : offset + limit]
+            for profile in matched_profiles[offset : offset + limit]
         ]
         return {
             "collection_id": collection_id,
-            "total": len(profiles),
+            "total": len(matched_profiles),
             "count": len(items),
             "summary": summary,
             "items": items,

@@ -131,12 +131,7 @@ export type DocumentWorkbenchModel = {
 	source_anchors_by_span_id: Record<string, SourceAnchor>;
 };
 
-const DOCUMENT_TYPES = new Set<DocumentType>([
-	'experimental',
-	'review',
-	'mixed',
-	'uncertain'
-]);
+const DOCUMENT_TYPES = new Set<DocumentType>(['experimental', 'review', 'mixed', 'uncertain']);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === 'object' && !Array.isArray(value)
@@ -149,7 +144,12 @@ function optionalText(value: unknown) {
 }
 
 function stringList(value: unknown) {
-	return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+	return Array.isArray(value)
+		? value
+				.map(String)
+				.map((item) => item.trim())
+				.filter(Boolean)
+		: [];
 }
 
 function finiteNumber(value: unknown, fallback = 0) {
@@ -314,7 +314,9 @@ export function buildDocumentWorkbenchModel({
 	const pages = Array.from(pageNumbers)
 		.sort((left, right) => left - right)
 		.map((pageNumber): WorkbenchPdfPage => {
-			const pageBlocks = blocks.filter((block) => (block.page && block.page > 0 ? block.page : 1) === pageNumber);
+			const pageBlocks = blocks.filter(
+				(block) => (block.page && block.page > 0 ? block.page : 1) === pageNumber
+			);
 			return {
 				page_number: pageNumber,
 				label: `Page ${pageNumber}`,
@@ -349,9 +351,24 @@ export function buildDocumentWorkbenchModel({
 	};
 }
 
-export async function fetchDocumentProfiles(collectionId: string): Promise<DocumentProfilesResponse> {
+export type DocumentProfileListOptions = {
+	offset?: number;
+	limit?: number;
+	query?: string;
+};
+
+export async function fetchDocumentProfiles(
+	collectionId: string,
+	options: DocumentProfileListOptions = {}
+): Promise<DocumentProfilesResponse> {
+	const search = new URLSearchParams();
+	if (options.offset !== undefined) search.set('offset', String(options.offset));
+	if (options.limit !== undefined) search.set('limit', String(options.limit));
+	const query = options.query?.trim();
+	if (query) search.set('query', query);
+	const queryString = search.toString();
 	const data = (await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/profiles`,
+		`/collections/${encodeURIComponent(collectionId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,
 		{ method: 'GET' }
 	)) as Record<string, unknown>;
 	const items = Array.isArray(data.items)

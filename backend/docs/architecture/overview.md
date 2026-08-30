@@ -10,11 +10,11 @@ then performs research only over papers the researcher explicitly selects.
 For a materials researcher comparing how a process variable affects an outcome:
 
 1. Add candidate papers to a Collection.
-2. Prepare each paper independently into readable Source structure, a coarse
-   DocumentProfile, and a bounded PaperMap.
+2. Prepare each paper independently into readable Source structure and a coarse
+   DocumentProfile.
 3. Inspect readiness and select the papers relevant to the current question.
-4. Discover candidate Objectives from that exact ready-paper selection, or use
-   a researcher-authored Objective.
+4. Build or reuse a bounded PaperMap only for that exact ready-paper selection,
+   then discover candidate Objectives, or use a researcher-authored Objective.
 5. Confirm an Objective and select the ready papers to analyze.
 6. Extract Source-backed facts within each paper, reconstruct experiments, and
    preserve missing, failed, and non-comparable cases.
@@ -34,7 +34,7 @@ Document
   -> one active preparation task at most
   -> current SourceDocument
   -> current DocumentProfile
-  -> current PaperMap
+  -> optional current PaperMap (lazy, selected by Objective work)
 
 Objective discovery
   -> exact selected ready Documents
@@ -95,7 +95,7 @@ worker can own into retryable state:
 
 - queued or running Document preparation tasks become failed with the
   `interrupted` stage; a Document left in `processing` returns to `stored`, while
-  already written Source, DocumentProfile, and PaperMap artifacts remain
+  already written Source and DocumentProfile artifacts remain
   available for fingerprinted reuse. Research-facing status projects this
   technical interruption as `not_started` rather than a scientific failure;
 - queued or running Objective analyses become failed with

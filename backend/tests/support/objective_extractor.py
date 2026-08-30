@@ -73,7 +73,11 @@ class FakeObjectiveExtractor:
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
 
-    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
+    def estimate_prompt_tokens(
+        self,
+        payload: dict[str, Any] | None = None,
+        **_: Any,
+    ) -> int:
         return 0
 
     def extract_document_profile(

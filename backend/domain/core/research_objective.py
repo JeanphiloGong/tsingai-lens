@@ -745,6 +745,7 @@ class PaperResearchMap:
     map_status: str = "unknown"
     map_limitations: tuple[str, ...] = ()
     review_synthesis: ReviewSynthesisMap = field(default_factory=ReviewSynthesisMap)
+    input_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if not self.document_id.strip():
@@ -826,6 +827,7 @@ class PaperResearchMap:
                 if isinstance(payload.get("review_synthesis"), Mapping)
                 else None
             ),
+            input_fingerprint=_text(payload.get("input_fingerprint")) or None,
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -845,6 +847,7 @@ class PaperResearchMap:
             "map_status": self.map_status,
             "map_limitations": list(self.map_limitations),
             "review_synthesis": self.review_synthesis.to_record(),
+            "input_fingerprint": self.input_fingerprint,
         }
 
 

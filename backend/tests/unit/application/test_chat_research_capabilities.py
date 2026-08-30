@@ -1136,6 +1136,7 @@ async def test_core_authoring_without_discovery_persists_a_seedless_question_as_
         document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
         objective_candidate_service=SimpleNamespace(),
+        paper_map_service=SimpleNamespace(),
     )
 
     created = await service.create_chat_assisted_candidate(
@@ -1171,6 +1172,7 @@ async def test_core_authoring_rejects_a_seed_document_outside_the_collection() -
         document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
         objective_candidate_service=SimpleNamespace(),
+        paper_map_service=SimpleNamespace(),
     )
 
     with pytest.raises(FileNotFoundError, match="document not found"):
@@ -1528,6 +1530,7 @@ async def test_core_authoring_keeps_seed_documents_as_untested_scope_hypotheses(
         document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
         objective_candidate_service=SimpleNamespace(),
+        paper_map_service=SimpleNamespace(),
     )
 
     created = await service.create_chat_assisted_candidate(

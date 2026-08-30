@@ -260,8 +260,6 @@ async def build_application_runtime(
             task_service=task_service,
             source_artifact_repository=source_artifact_repository,
             document_profile_service=document_profile_service,
-            paper_map_repository=paper_map_repository,
-            paper_map_service=paper_map_service,
         )
         finding_synthesis_service = FindingSynthesisService()
         finding_feedback_service = FindingFeedbackService(
@@ -276,6 +274,7 @@ async def build_application_runtime(
             document_profile_service=document_profile_service,
             finding_synthesis_service=finding_synthesis_service,
             objective_candidate_service=ObjectiveCandidateService(),
+            paper_map_service=paper_map_service,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,

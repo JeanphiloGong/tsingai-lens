@@ -25,7 +25,7 @@ Document
   -> Task history
   -> current SourceDocument
   -> current DocumentProfile
-  -> current PaperMap
+  -> optional current PaperMap (built lazily by Objective work)
 
 Objective discovery
   -> current selected PreparedDocumentInputs
@@ -66,14 +66,17 @@ Profile fingerprint
   = SHA-256(Source fingerprint + Profile version)
 
 Preparation fingerprint
-  = SHA-256(Profile fingerprint + Paper Map version)
+  = Profile fingerprint
 ```
 
-Changing Paper Map logic therefore reuses Source and Profile; changing Profile
-logic reuses Source; changing document bytes or parser logic invalidates all
-dependent stages. The final preparation fingerprint identifies the exact ready
-state used by discovery or analysis. These values are not user-visible versions
-and do not create a snapshot hierarchy.
+Changing Paper Map logic reuses Source and Profile because Paper Maps are built
+by Objective work. Changing Profile logic reuses Source; changing document bytes
+or parser logic invalidates all dependent preparation stages. The preparation
+fingerprint identifies the exact ready Source/Profile state used by discovery or
+analysis. Paper Map rows store a separate input fingerprint containing that
+preparation fingerprint plus the current Paper Map policy and prompt versions.
+These values are not user-visible versions and do not create a snapshot
+hierarchy.
 
 ### Task
 
@@ -162,8 +165,9 @@ erDiagram
 
 ## Replacement And Deletion
 
-- Re-preparing a Document replaces its current Source, Profile, and Paper Map
-  only after the owning step succeeds; task history remains observable.
+- Re-preparing a Document replaces its current Source and Profile only after the
+  owning step succeeds; a later Objective operation rebuilds its Paper Map when
+  the stored map fingerprint is stale. Task history remains observable.
 - Uploading another Document adds a peer and does not touch prepared peers.
 - Deleting a Collection cascades its Documents, prepared artifacts, tasks,
   Objectives, analyses, and downstream records.

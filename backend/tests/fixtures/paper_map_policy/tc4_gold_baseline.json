@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "source_annotation": "/src/users/lens/date/2026/aug/week4/18,Tue/TC4/paper_map_gold_annotations.json",
+  "purpose": "Compact semantic baseline derived from the TC4 paper annotations. Source text is synthetic and contains no paper text.",
+  "scenarios": [
+    {
+      "id": "multi_axis_experiment",
+      "document_role": "experimental",
+      "source_units": [
+        {"source_ref": "abstract", "section": "Abstract", "text": "AXIS_POROSITY VARIABLE_SIGNAL MICRO_SIGNAL TENSILE_SIGNAL"},
+        {"source_ref": "results-microstructure", "section": "Results", "text": "AXIS_MICROSTRUCTURE"},
+        {"source_ref": "results-tensile", "section": "Results", "text": "AXIS_TENSILE"},
+        {"source_ref": "methods", "section": "Materials and Methods", "text": "METHOD_CONTEXT"}
+      ],
+      "gold_relationships": [
+        {"variable": "laser energy", "outcome": "porosity", "source_refs": ["abstract"]},
+        {"variable": "laser energy", "outcome": "grain morphology", "source_refs": ["abstract", "results-microstructure"]},
+        {"variable": "laser energy", "outcome": "tensile strength", "source_refs": ["abstract", "results-tensile"]}
+      ],
+      "current_baseline": {
+        "relationships": [
+          {"variable": "laser energy", "outcome": "porosity", "source_refs": ["abstract"]}
+        ],
+        "map_status": "sufficient",
+        "expansion_count": 0,
+        "uncovered_gold_outcomes": ["grain morphology", "tensile strength"]
+      },
+      "expected_after_policy_change": {
+        "minimum_relationship_outcomes": ["porosity", "grain morphology", "tensile strength"],
+        "must_read_source_refs": ["results-microstructure", "results-tensile"]
+      }
+    },
+    {
+      "id": "review_synthesis",
+      "document_role": "review",
+      "source_units": [
+        {"source_ref": "abstract", "section": "Abstract", "text": "REVIEW_SYNTHESIS_SCOPE"},
+        {"source_ref": "outlook", "section": "Conclusions and Outlooks", "text": "REVIEW_GAP_NO_UNIVERSAL_MODEL REVIEW_GAP_CRACKS"}
+      ],
+      "gold_synthesis": {
+        "claims": ["process parameters affect microstructure and defects", "no universal optimization model"],
+        "evidence_gaps": ["cracks remain difficult to eliminate"],
+        "cited_experiments_are_not_current_work": true
+      },
+      "current_baseline": {
+        "document_role": "review",
+        "current_work_relationships": 0,
+        "synthesis_claims_at_least": 2
+      }
+    },
+    {
+      "id": "abstract_only_partial_map",
+      "document_role": "experimental",
+      "source_units": [
+        {"source_ref": "abstract", "section": "Abstract", "text": "VISIBLE_PROCESS_SCOPE VISIBLE_PORE_SCOPE VISIBLE_GRAIN_SCOPE VISIBLE_MECHANICAL_SCOPE"}
+      ],
+      "source_availability": "abstract_only",
+      "gold_scope": {
+        "variables": ["laser power", "scan speed"],
+        "outcomes": ["pore structure", "grain features", "tensile properties", "microhardness"],
+        "status": "partial_map"
+      },
+      "do_not_infer": ["exact parameter levels", "sample state", "table values", "unseen Methods details"]
+    }
+  ]
+}

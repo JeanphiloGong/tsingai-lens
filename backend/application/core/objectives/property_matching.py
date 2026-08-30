@@ -23,6 +23,40 @@ _BROAD_OUTCOME_EXPANSIONS = {
         "elongation",
         "microhardness",
     ),
+    "tensile properties": (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+    ),
+    "tensile property": (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+    ),
+    "anisotropic mechanical properties": (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+        "microhardness",
+    ),
+    "anisotropic mechanical property": (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+        "microhardness",
+    ),
+    "mechanical property anisotropy": (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+        "microhardness",
+    ),
+    "microstructural anisotropy": (
+        "cellular structure",
+        "grain morphology",
+        "grain orientation",
+        "grain structure",
+    ),
     "corrosion properties": (
         "corrosion potential",
         "pitting potential",
@@ -72,8 +106,18 @@ _BROAD_OUTCOME_EXPANSIONS = {
         "cellular structure",
         "cellular-dendritic microstructure",
         "crystallographic texture",
+        "grain arrangement",
         "grain morphology",
+        "grain orientation",
+        "grain size",
         "grain structure",
+        "lamellae width",
+        "lamellar structure",
+        "martensite decomposition",
+        "martensite lamellae thickness",
+        "phase composition",
+        "phase fraction",
+        "phase transformation",
     ),
     "fatigue strength": (
         "fatigue limit",
@@ -87,6 +131,10 @@ _MULTI_MEASUREMENT_OUTCOME_FAMILIES = frozenset(
     {
         "mechanical properties",
         "mechanical property",
+        "tensile properties",
+        "tensile property",
+        "anisotropic mechanical properties",
+        "anisotropic mechanical property",
         "corrosion properties",
         "corrosion property",
         "corrosion resistance",
@@ -314,17 +362,22 @@ def outcome_label_requires_resolution(value: Any) -> bool:
     normalized = normalize_property_label(outcome) or outcome
     if normalized in _MULTI_MEASUREMENT_OUTCOME_FAMILIES:
         return True
+    words = set(normalized.split())
+    if "mechanical" in words and words & {"property", "properties"}:
+        return True
+    if any(token.startswith("microstructur") for token in words):
+        return True
     if re.search(r"\b(?:and|versus)\b|\s[&/]\s", outcome):
         return True
     if re.search(r"\([^)]*(?:,|;|\band\b)[^)]*\)", outcome):
         return True
-    words = normalized.split()
-    return words[-1] in {
+    word_list = normalized.split()
+    return word_list[-1] in {
         "combination",
         "performance",
         "properties",
         "property",
-    } or words[0] in {"combined", "comprehensive", "overall"}
+    } or word_list[0] in {"combined", "comprehensive", "overall"}
 
 
 def objective_outcomes(objective: ResearchObjective) -> tuple[str, ...]:

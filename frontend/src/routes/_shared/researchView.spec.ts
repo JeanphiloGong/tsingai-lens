@@ -13,6 +13,8 @@ import {
 	fetchObjectiveEvidenceMap,
 	fetchObjectiveFinding,
 	fetchObjectiveFindings,
+	fetchObjectiveScope,
+	normalizeObjectiveScope,
 	runObjectiveAnalysis
 } from './researchView';
 
@@ -143,6 +145,57 @@ describe('objective Finding API', () => {
 		expect(request).toHaveBeenCalledWith('/collections/col_123/objective-discovery', {
 			method: 'POST',
 			body: JSON.stringify({ document_ids: ['paper-1', 'paper-3'] })
+		});
+	});
+
+	it('normalizes and fetches the complete Objective scope preview', async () => {
+		const payload = {
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			counts: {
+				likely_relevant: 2,
+				needs_inspection: 1,
+				confidently_out_of_scope: 1
+			},
+			recommended_document_ids: ['paper-1', 'paper-3'],
+			review_document_ids: ['paper-2'],
+			excluded_document_ids: ['paper-4'],
+			decisions: [
+				{
+					document_id: 'paper-1',
+					classification: 'likely_relevant',
+					reason: 'mapped_research_scope',
+					doc_role: 'experimental',
+					map_status: 'sufficient',
+					map_limitations: [],
+					support_basis: ['relationship-1'],
+					is_seed: true
+				},
+				{ document_id: '', classification: 'likely_relevant' },
+				{ document_id: 'paper-invalid', classification: 'maybe' }
+			],
+			support_is_evidence: false
+		};
+		request.mockResolvedValue(payload);
+
+		const result = await fetchObjectiveScope('col_123', 'obj_1');
+
+		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/scope');
+		expect(result.recommended_document_ids).toEqual(['paper-1', 'paper-3']);
+		expect(result.review_document_ids).toEqual(['paper-2']);
+		expect(result.decisions).toHaveLength(1);
+		expect(result.decisions[0]).toMatchObject({
+			document_id: 'paper-1',
+			classification: 'likely_relevant',
+			is_seed: true
+		});
+		expect(result.support_is_evidence).toBe(false);
+		expect(normalizeObjectiveScope(null, 'col_fallback', 'obj_fallback')).toMatchObject({
+			collection_id: 'col_fallback',
+			objective_id: 'obj_fallback',
+			recommended_document_ids: [],
+			decisions: [],
+			support_is_evidence: false
 		});
 	});
 

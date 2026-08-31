@@ -61,16 +61,25 @@ Research Objective
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
 Before that command, the Objective list prioritizes active, confirmed, and
-published work, then the highest-ranked candidates. Lower-ranked candidates are
-available through one disclosure instead of dominating the first view. Choosing
-to start or retry analysis uses the Objective's recommended ready seed papers by
-default and loads current Documents only when the command is chosen. The request
-sends only those exact ready `document_ids`; a small scope-adjustment action
-opens the separate confirmation dialog when the researcher wants to inspect or
-edit the recommendation. Editing one Objective does not change another.
+published work, then the highest-ranked candidates. Five Objectives are shown
+at a time in that order, with local pagination over the complete loaded list.
+Seed papers are labeled as the sources from which the question was formed; they
+are not treated as its complete analysis recommendation. Choosing to start a new
+analysis loads the Objective's collection-wide scope preview and uses all
+current `recommended_document_ids` that are ready. A small scope-adjustment
+action opens the separate confirmation dialog, where system recommendations are
+selected, `needs_inspection` papers are visible but unselected, and current
+exclusions remain unselected. The request sends only those exact ready
+`document_ids`. Editing one Objective does not change another.
 Processing and failed papers cannot be selected and do not block ready papers.
-Retry reuses the failed analysis version's frozen paper IDs. A seedless
-Objective requires an explicit paper selection before analysis.
+Retry reuses the failed analysis version's frozen paper IDs without recalculating
+the scope. An Objective with no recommended papers requires an explicit paper
+selection before analysis.
+Objective search matches the question, material scope, variables, and outcomes
+across the complete loaded list, then paginates matching results five at a time.
+Workflow-state filtering distinguishes pending, active, published, and failed
+analysis; changing a filter resets to the first page so no matching Objective is
+hidden by a stale page position.
 The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;
@@ -123,10 +132,12 @@ The Research Agent and experiment plans may consume published Findings, but
 they do not introduce a second conclusion identity.
 
 The Papers route reports the complete profiled collection size while rendering
-one bounded, compact page. Its title/filename search is collection-wide, and
-page or search failures remain explicit instead of presenting one partial page
-as the whole collection. Routine internal Document IDs stay out of the paper
-list; exact Source navigation continues through the canonical paper reader.
+one bounded, compact page. Its title/filename search, document-type filter, and
+parsing-warning filter are collection-wide and run before pagination. Page,
+search, or filter failures remain explicit instead of presenting one partial
+page as the whole collection. Routine internal Document IDs stay out of the
+paper list; exact Source navigation continues through the canonical paper
+reader.
 
 ## Current Contract Docs
 

@@ -21,10 +21,13 @@ This node owns browser-side helpers shared across frontend routes.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated
-  versioned Evidence. Its analysis command atomically confirms candidate
-  Objectives and queues analysis over exact selected ready `document_ids`
-  through the same endpoint. Objective discovery also receives exact selected
-  ready IDs. It also reads the
+  versioned Evidence. It also reads one Objective's complete deterministic
+  collection Paper Map scope. Seed IDs remain question provenance; only the
+  returned recommended IDs are the default analysis selection, while papers
+  requiring inspection remain a user decision. Its analysis command atomically
+  confirms candidate Objectives and queues analysis over exact selected ready
+  `document_ids` through the same endpoint. Objective discovery also receives
+  exact selected ready IDs. It also reads the
   deterministic Evidence Map for one Objective's published analysis; that read
   model does not create a second research identity. Feedback, curation, and
   dataset export use only

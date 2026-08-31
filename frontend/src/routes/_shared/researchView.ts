@@ -80,6 +80,30 @@ export type FindingDatasetFilters = {
 
 export type ObjectiveConfirmationStatus = 'candidate' | 'confirmed';
 export type ObjectiveAnalysisStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type ObjectiveScopeClassification =
+	| 'likely_relevant'
+	| 'needs_inspection'
+	| 'confidently_out_of_scope';
+export type ObjectiveScopeDecision = {
+	document_id: string;
+	classification: ObjectiveScopeClassification;
+	reason: string;
+	doc_role: string;
+	map_status: string;
+	map_limitations: string[];
+	support_basis: string[];
+	is_seed: boolean;
+};
+export type ObjectiveScope = {
+	collection_id: string;
+	objective_id: string;
+	counts: Record<ObjectiveScopeClassification, number>;
+	recommended_document_ids: string[];
+	review_document_ids: string[];
+	excluded_document_ids: string[];
+	decisions: ObjectiveScopeDecision[];
+	support_is_evidence: boolean;
+};
 export type ObjectiveEvidenceAttributionScope =
 	| 'isolated_effect'
 	| 'joint_effect'
@@ -488,10 +512,65 @@ export function normalizeObjectiveList(value: unknown, collectionId: string): Ob
 	};
 }
 
+export function normalizeObjectiveScope(
+	value: unknown,
+	collectionId: string,
+	objectiveId: string
+): ObjectiveScope {
+	const record = asRecord(value);
+	const counts = asRecord(record?.counts);
+	const classifications: ObjectiveScopeClassification[] = [
+		'likely_relevant',
+		'needs_inspection',
+		'confidently_out_of_scope'
+	];
+	const decisions = asArray(record?.decisions)
+		.map((item) => {
+			const decision = asRecord(item);
+			const documentId = toText(decision?.document_id);
+			const classification = toText(decision?.classification) as ObjectiveScopeClassification;
+			if (!documentId || !classifications.includes(classification)) return null;
+			return {
+				document_id: documentId,
+				classification,
+				reason: toText(decision?.reason),
+				doc_role: toText(decision?.doc_role, 'uncertain'),
+				map_status: toText(decision?.map_status, 'unknown'),
+				map_limitations: toStringList(decision?.map_limitations),
+				support_basis: toStringList(decision?.support_basis),
+				is_seed: decision?.is_seed === true
+			} satisfies ObjectiveScopeDecision;
+		})
+		.filter((item): item is ObjectiveScopeDecision => item !== null);
+	return {
+		collection_id: toText(record?.collection_id, collectionId),
+		objective_id: toText(record?.objective_id, objectiveId),
+		counts: {
+			likely_relevant: Math.max(0, toNumber(counts?.likely_relevant)),
+			needs_inspection: Math.max(0, toNumber(counts?.needs_inspection)),
+			confidently_out_of_scope: Math.max(0, toNumber(counts?.confidently_out_of_scope))
+		},
+		recommended_document_ids: toStringList(record?.recommended_document_ids),
+		review_document_ids: toStringList(record?.review_document_ids),
+		excluded_document_ids: toStringList(record?.excluded_document_ids),
+		decisions,
+		support_is_evidence: record?.support_is_evidence === true
+	};
+}
+
 export async function fetchCollectionObjectives(collectionId: string): Promise<ObjectiveList> {
 	const encoded = encodeURIComponent(collectionId);
 	const data = await requestJson(`/collections/${encoded}/objectives`);
 	return normalizeObjectiveList(data, collectionId);
+}
+
+export async function fetchObjectiveScope(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveScope> {
+	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/scope`;
+	const data = await requestJson(path);
+	return normalizeObjectiveScope(data, collectionId, objectiveId);
 }
 
 export async function discoverCollectionObjectives(

@@ -102,6 +102,63 @@ function analysisState(status: 'queued' | 'running' | 'succeeded' | 'failed') {
 	};
 }
 
+function scopePreview({
+	recommended = ['paper-1', 'paper-3'],
+	review = [],
+	excluded = []
+}: {
+	recommended?: string[];
+	review?: string[];
+	excluded?: string[];
+} = {}) {
+	const decisions = [
+		...recommended.map((documentId) => ({
+			document_id: documentId,
+			classification: 'likely_relevant',
+			reason: 'mapped_research_scope',
+			doc_role: 'experimental',
+			map_status: 'sufficient',
+			map_limitations: [],
+			support_basis: [`relationship-${documentId}`],
+			is_seed: ['paper-1', 'paper-2'].includes(documentId)
+		})),
+		...review.map((documentId) => ({
+			document_id: documentId,
+			classification: 'needs_inspection',
+			reason: 'paper_map_incomplete',
+			doc_role: 'review',
+			map_status: 'insufficient_map',
+			map_limitations: ['Outcome coverage is incomplete.'],
+			support_basis: [],
+			is_seed: ['paper-1', 'paper-2'].includes(documentId)
+		})),
+		...excluded.map((documentId) => ({
+			document_id: documentId,
+			classification: 'confidently_out_of_scope',
+			reason: 'no_mapped_scope_match',
+			doc_role: 'experimental',
+			map_status: 'sufficient',
+			map_limitations: [],
+			support_basis: [],
+			is_seed: ['paper-1', 'paper-2'].includes(documentId)
+		}))
+	];
+	return {
+		collection_id: 'col_123',
+		objective_id: 'obj_heat_strength',
+		counts: {
+			likely_relevant: recommended.length,
+			needs_inspection: review.length,
+			confidently_out_of_scope: excluded.length
+		},
+		recommended_document_ids: recommended,
+		review_document_ids: review,
+		excluded_document_ids: excluded,
+		decisions,
+		support_is_evidence: false
+	};
+}
+
 describe('collections/[id]/objectives/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -165,6 +222,9 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({ collection_id: 'col_123', objectives: [objective()] });
 			}
+			if (current.path.endsWith('/obj_heat_strength/scope') && current.method === 'GET') {
+				return jsonResponse(scopePreview());
+			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -199,7 +259,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
 		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
-			document_ids: ['paper-1', 'paper-2']
+			document_ids: ['paper-1', 'paper-3']
 		});
 	});
 
@@ -226,6 +286,11 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objectives: [objective(), secondObjective]
 				});
 			}
+			if (current.path.endsWith('/obj_heat_strength/scope') && current.method === 'GET') {
+				return jsonResponse(
+					scopePreview({ recommended: ['paper-1', 'paper-2'], review: ['paper-3'] })
+				);
+			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -242,6 +307,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await browserPage.getByRole('button', { name: '调整范围' }).first().click();
 		await browserPage.getByLabelText('搜索可用论文').fill('laser');
 		await expect.element(browserPage.getByText('laser-review.pdf')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('待人工确认', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('strength.pdf')).not.toBeInTheDocument();
 		await browserPage.getByRole('checkbox', { name: 'laser-review.pdf' }).click();
 		await expect.element(browserPage.getByText('已选择 3 篇论文')).toBeInTheDocument();
@@ -315,6 +381,9 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					collection_id: 'col_123',
 					objectives: [objective({ seed_document_ids: [] })]
 				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/scope') && current.method === 'GET') {
+				return jsonResponse(scopePreview({ recommended: [], review: ['paper-1'] }));
 			}
 			throw new Error(`unexpected request: ${current.method} ${current.path}`);
 		});
@@ -420,6 +489,47 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Objectives 1–5 of 9')).toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Next' }).click();
 		await expect.element(browserPage.getByText('Candidate question 5?')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Objectives 6–9 of 9')).toBeInTheDocument();
+		await expect.element(browserPage.getByText(/Objectives 6/)).toBeInTheDocument();
+		await browserPage.getByLabelText('搜索研究目标').fill('Candidate question');
+		await expect.element(browserPage.getByText('Objectives 1–5 of 8')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Candidate question 1?')).toBeInTheDocument();
+	});
+
+	it('filters the complete Objective list by scientific text and workflow status', async () => {
+		const candidates = Array.from({ length: 7 }, (_, index) =>
+			objective({
+				objective_id: `obj-candidate-${index + 1}`,
+				question: `Candidate question ${index + 1}?`,
+				material_scope: index === 5 ? ['Ti-6Al-4V'] : ['316L'],
+				outcomes: index === 5 ? ['fatigue life'] : ['yield strength']
+			})
+		);
+		const published = objective({
+			objective_id: 'obj-published-fatigue',
+			question: 'How does heat treatment affect fatigue life?',
+			material_scope: ['Ti-6Al-4V'],
+			outcomes: ['fatigue life'],
+			confirmation_status: 'confirmed',
+			active_analysis_version: 2,
+			published_analysis_version: 2
+		});
+		fetchMock.mockResolvedValue(
+			jsonResponse({ collection_id: 'col_123', objectives: [...candidates, published] })
+		);
+
+		render(Page);
+		await browserPage.getByLabelText('搜索研究目标').fill('fatigue');
+		await browserPage.getByLabelText('分析状态').selectOptions('published');
+
+		await expect
+			.element(browserPage.getByText('How does heat treatment affect fatigue life?'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Candidate question 6?')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('找到 1 个研究目标')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '下一页' }))
+			.not.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '清除筛选' }).click();
+		await expect.element(browserPage.getByText('Candidate question 1?')).toBeInTheDocument();
 	});
 });

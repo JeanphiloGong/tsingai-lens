@@ -143,12 +143,6 @@ export type PreparedDocumentInput = {
 	document_id: string;
 	preparation_fingerprint: string;
 };
-export type ObjectiveDiscovery = {
-	collection_id: string;
-	document_inputs: PreparedDocumentInput[];
-	objectives: ObjectiveSummary[];
-};
-
 export type ObjectiveSummary = {
 	collection_id: string;
 	objective_id: string;
@@ -571,17 +565,6 @@ export async function fetchObjectiveScope(
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/scope`;
 	const data = await requestJson(path);
 	return normalizeObjectiveScope(data, collectionId, objectiveId);
-}
-
-export async function discoverCollectionObjectives(
-	collectionId: string,
-	documentIds: string[]
-): Promise<ObjectiveDiscovery> {
-	const encoded = encodeURIComponent(collectionId);
-	return requestJson(`/collections/${encoded}/objective-discovery`, {
-		method: 'POST',
-		body: JSON.stringify({ document_ids: documentIds })
-	}) as Promise<ObjectiveDiscovery>;
 }
 
 function normalizeObjectiveAnalysis(value: unknown, collectionId: string): ObjectiveAnalysis {

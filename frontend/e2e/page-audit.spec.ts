@@ -447,6 +447,47 @@ test.describe('page interaction audit', () => {
 			});
 		}
 	});
+
+	test('shows Objective analysis progress inline without a status button', async ({ page }) => {
+		const consoleErrors: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'error') consoleErrors.push(message.text());
+		});
+		page.on('pageerror', (error) => consoleErrors.push(error.message));
+
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`/collections/${collectionId}/objectives?audit_state=objective-running`);
+
+		await expect(page.getByRole('progressbar', { name: '研究目标分析进度' })).toHaveAttribute(
+			'aria-valuenow',
+			'33'
+		);
+		await expect(page.getByText('论文进度 2 / 6')).toBeVisible();
+		await expect(page.getByText('正在逐篇提取相关证据')).toBeVisible();
+		await expect(page.getByRole('link', { name: '查看状态' })).toHaveCount(0);
+		await expect(
+			page.getByRole('link', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })
+		).toHaveAttribute('href', `/collections/${collectionId}/objectives/${objectiveId}`);
+		expect(await visibleElementsFitViewport(page, '.analysis-progress')).toBe(true);
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'objective-analysis-progress-desktop.png'),
+				fullPage: true
+			});
+		}
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(page.getByRole('progressbar', { name: '研究目标分析进度' })).toBeVisible();
+		expect(await visibleElementsFitViewport(page, '.analysis-progress')).toBe(true);
+		expect(consoleErrors).toEqual([]);
+
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'objective-analysis-progress-mobile.png'),
+				fullPage: true
+			});
+		}
+	});
 });
 
 async function isElementBottomExposed(page: Page, selector: string) {
@@ -617,10 +658,10 @@ async function mockApis(page: Page) {
 			return route.fulfill({ status: 204, body: '' });
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
-			return route.fulfill(json(objectives()));
+			return route.fulfill(json(objectives(auditState)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/analysis`) {
-			return route.fulfill(json(objectiveView()));
+			return route.fulfill(json(objectiveView(auditState)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
 			return route.fulfill(json(objectiveView()));
@@ -1098,7 +1139,8 @@ function documentMarkdown() {
 	};
 }
 
-function objectives() {
+function objectives(auditState?: string | null) {
+	const isRunning = auditState === 'objective-running';
 	return {
 		collection_id: collectionId,
 		objectives: [
@@ -1118,7 +1160,7 @@ function objectives() {
 				reason: null,
 				confirmation_status: 'confirmed',
 				active_analysis_version: 1,
-				published_analysis_version: 1,
+				published_analysis_version: isRunning ? null : 1,
 				created_at: now(),
 				updated_at: now()
 			}
@@ -1126,18 +1168,19 @@ function objectives() {
 	};
 }
 
-function objectiveView() {
-	const objective = objectives().objectives[0];
+function objectiveView(auditState?: string | null) {
+	const objective = objectives(auditState).objectives[0];
+	const isRunning = auditState === 'objective-running';
 	return {
 		collection_id: collectionId,
 		objective,
-		active_analysis: objectiveAnalysis(),
-		published_analysis: objectiveAnalysis(),
+		active_analysis: objectiveAnalysis(isRunning),
+		published_analysis: isRunning ? null : objectiveAnalysis(),
 		warnings: []
 	};
 }
 
-function objectiveAnalysis() {
+function objectiveAnalysis(isRunning = false) {
 	return {
 		collection_id: collectionId,
 		objective_id: objectiveId,
@@ -1146,17 +1189,17 @@ function objectiveAnalysis() {
 		pipeline_version: 'objective-analysis.v2',
 		model_name: 'model-1',
 		prompt_versions: {},
-		status: 'succeeded',
-		phase: 'succeeded',
-		processed_document_count: 1,
-		total_document_count: 1,
-		current_document_id: null,
-		progress_message: null,
+		status: isRunning ? 'running' : 'succeeded',
+		phase: isRunning ? 'objective_evidence_extraction_started' : 'succeeded',
+		processed_document_count: isRunning ? 2 : 1,
+		total_document_count: isRunning ? 6 : 1,
+		current_document_id: isRunning ? documentId : null,
+		progress_message: isRunning ? 'Extracting objective evidence from selected sources.' : null,
 		error_code: null,
 		error_message: null,
 		created_at: now(),
 		started_at: now(),
-		completed_at: now()
+		completed_at: isRunning ? null : now()
 	};
 }
 

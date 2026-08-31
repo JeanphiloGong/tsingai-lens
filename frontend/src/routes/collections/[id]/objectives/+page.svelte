@@ -157,11 +157,7 @@
 	function statusLabel(objective: ObjectiveSummary) {
 		const active = analysisStates[objective.objective_id];
 		if (active?.status === 'queued') return '等待分析';
-		if (active?.status === 'running') {
-			return active.total_document_count > 0
-				? `分析中 · ${active.processed_document_count}/${active.total_document_count}`
-				: '分析中';
-		}
+		if (active?.status === 'running') return '分析中';
 		if (active?.status === 'failed') return '分析失败';
 		if (objective.published_analysis_version !== null) {
 			return `结果 v${objective.published_analysis_version}`;
@@ -177,6 +173,34 @@
 	function actionLabel(objective: ObjectiveSummary) {
 		if (analysisStatus(objective) === 'failed') return '重试分析';
 		return objective.confirmation_status === 'candidate' ? '确认并分析' : '开始分析';
+	}
+
+	function isAnalysisProcessing(analysis: ObjectiveAnalysisState | null) {
+		return analysis?.status === 'queued' || analysis?.status === 'running';
+	}
+
+	function analysisProgressPercent(analysis: ObjectiveAnalysisState) {
+		if (analysis.total_document_count <= 0) return 0;
+		const processed = Math.max(
+			0,
+			Math.min(analysis.processed_document_count, analysis.total_document_count)
+		);
+		return Math.round((processed / analysis.total_document_count) * 100);
+	}
+
+	function analysisPhaseLabel(analysis: ObjectiveAnalysisState) {
+		if (analysis.status === 'queued') return '等待系统开始分析';
+		const phase = analysis.phase.toLocaleLowerCase();
+		if (phase.includes('framing') || phase.includes('routing')) {
+			return '正在定位与研究问题相关的论文内容';
+		}
+		if (phase.includes('evidence') || phase.includes('extraction')) {
+			return '正在逐篇提取相关证据';
+		}
+		if (phase.includes('finding') || phase.includes('synthesis')) {
+			return '正在比较跨论文证据并形成 Findings';
+		}
+		return '正在分析已确认的论文范围';
 	}
 
 	function objectiveWorkflowStatus(
@@ -491,10 +515,15 @@
 		{:else}
 			<div class="objective-list">
 				{#each visibleObjectives as objective (objective.objective_id)}
+					{@const activeAnalysis = analysisStates[objective.objective_id] ?? null}
+					{@const objectiveHref = resolve('/collections/[id]/objectives/[objective_id]', {
+						id: collectionId,
+						objective_id: objective.objective_id
+					})}
 					<article>
 						<div class="heading">
 							<div>
-								<h3>{objective.question}</h3>
+								<h3><a href={objectiveHref}>{objective.question}</a></h3>
 								<p>{objective.requested_comparator || '尚未设置比较意图'}</p>
 							</div>
 							<span
@@ -522,6 +551,32 @@
 								<dd>{objective.seed_document_ids.length} 篇</dd>
 							</div>
 						</dl>
+						{#if activeAnalysis && isAnalysisProcessing(activeAnalysis)}
+							{@const progressPercent = analysisProgressPercent(activeAnalysis)}
+							<div class="analysis-progress" role="status" aria-live="polite">
+								<div class="analysis-progress__header">
+									<strong>{analysisPhaseLabel(activeAnalysis)}</strong>
+									{#if activeAnalysis.total_document_count > 0}
+										<span
+											>论文进度 {activeAnalysis.processed_document_count} / {activeAnalysis.total_document_count}</span
+										>
+									{/if}
+								</div>
+								{#if activeAnalysis.total_document_count > 0}
+									<div
+										class="analysis-progress__track"
+										role="progressbar"
+										aria-label="研究目标分析进度"
+										aria-valuemin="0"
+										aria-valuemax="100"
+										aria-valuenow={progressPercent}
+										aria-valuetext={`论文进度 ${activeAnalysis.processed_document_count} / ${activeAnalysis.total_document_count}`}
+									>
+										<span style={`width: ${progressPercent}%`}></span>
+									</div>
+								{/if}
+							</div>
+						{/if}
 						<div class="actions">
 							{#if canStartAnalysis(objective)}
 								<button
@@ -544,15 +599,11 @@
 									调整范围
 								</button>
 							{/if}
-							<a
-								class="btn btn--ghost btn--small"
-								href={resolve('/collections/[id]/objectives/[objective_id]', {
-									id: collectionId,
-									objective_id: objective.objective_id
-								})}
-							>
-								{objective.published_analysis_version === null ? '查看状态' : '查看 Findings'}
-							</a>
+							{#if objective.published_analysis_version !== null}
+								<a class="btn btn--ghost btn--small" href={objectiveHref}>查看 Findings</a>
+							{:else if activeAnalysis?.status === 'failed'}
+								<a class="btn btn--ghost btn--small" href={objectiveHref}>查看失败详情</a>
+							{/if}
 						</div>
 					</article>
 				{/each}
@@ -862,11 +913,27 @@
 		line-height: 1.45;
 	}
 
+	.heading h3 a {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.heading h3 a:hover {
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.heading h3 a:focus-visible {
+		outline: 2px solid var(--accent-primary, #2563eb);
+		outline-offset: 3px;
+	}
+
 	.heading p {
 		margin-top: 5px;
 	}
 
 	.heading > span {
+		align-self: flex-start;
 		white-space: nowrap;
 		padding: 4px 8px;
 		border: 1px solid var(--border-default);
@@ -899,6 +966,43 @@
 		margin: 0;
 		line-height: 1.45;
 		overflow-wrap: anywhere;
+	}
+
+	.analysis-progress {
+		max-width: 680px;
+		display: grid;
+		gap: 8px;
+		padding: 12px 14px;
+		border-left: 3px solid #3676a8;
+		background: var(--surface-subtle);
+	}
+
+	.analysis-progress__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		font-size: 13px;
+	}
+
+	.analysis-progress__header span {
+		color: var(--text-secondary);
+		white-space: nowrap;
+	}
+
+	.analysis-progress__track {
+		height: 7px;
+		overflow: hidden;
+		border-radius: 4px;
+		background: var(--border-default);
+	}
+
+	.analysis-progress__track span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: var(--accent-primary, #2563eb);
+		transition: width 180ms ease;
 	}
 
 	.actions,
@@ -1085,6 +1189,7 @@
 
 		.page-heading,
 		.heading,
+		.analysis-progress__header,
 		.objective-filters,
 		.objective-pagination,
 		.scope-toolbar,

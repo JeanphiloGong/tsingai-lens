@@ -88,7 +88,9 @@ The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;
 - confirmed without analysis: start analysis;
-- queued/running: poll and show current phase/document progress;
+- queued/running: show the current research phase and document progress inline;
+  command buttons do not stand in for status, while the Objective question
+  remains the ordinary link to its live detail view;
 - failed without a published result: retry;
 - failed with a published result: identify both the displayed published version
   and failed retry version, keep the prior Findings visible, and offer retry;

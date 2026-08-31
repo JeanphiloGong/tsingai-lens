@@ -433,11 +433,20 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 		render(Page);
 
-		await expect.element(browserPage.getByText('分析中 · 2/6')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('progressbar', { name: '研究目标分析进度' }))
+			.toHaveAttribute('aria-valuenow', '33');
+		await expect.element(browserPage.getByText('论文进度 2 / 6')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('正在逐篇提取相关证据')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '确认并分析' }))
 			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('link', { name: '查看状态' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: '查看状态' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'How does heat treatment affect strength?' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
 	});
 
 	it('shows the published version without a second result lookup', async () => {

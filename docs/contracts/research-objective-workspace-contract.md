@@ -38,7 +38,8 @@ Owns:
 
 - research question;
 - material, process, property, and comparison scope;
-- included and excluded document IDs;
+- seed document IDs identifying where the question came from;
+- explicit document exclusions;
 - candidate/confirmed state;
 - active and published analysis-version pointers.
 
@@ -47,6 +48,9 @@ embedded child arrays.
 
 Candidate discovery and analysis never infer all Collection papers. Their
 commands receive an explicit non-empty ready `document_ids` selection.
+After a candidate exists, deterministic Objective scope screening evaluates
+every current Collection Paper Map. Seed papers do not define the recommended
+analysis scope.
 
 ### PreparedDocumentInput
 
@@ -198,6 +202,7 @@ All routes are under `/api/v1/collections/{collection_id}`.
 
 - `POST /objective-discovery`
 - `GET /objectives`
+- `GET /objectives/{objective_id}/scope`
 - `POST /objectives/{objective_id}/analysis`
 - `GET /objectives/{objective_id}/analysis`
 
@@ -210,6 +215,22 @@ Discovery and analysis POST bodies are:
 Every selected Document must be current and ready. Processing and failed papers
 do not block research over another explicitly selected ready subset.
 
+`GET .../scope` returns a complete, read-only classification of current
+Collection Paper Maps for one Objective:
+
+- `likely_relevant`: mapped material, variables, and outcome establish that the
+  paper should enter deep inspection;
+- `needs_inspection`: the map is incomplete or only partially/broadly/citation
+  related, so a researcher must decide;
+- `confidently_out_of_scope`: the sufficient map conflicts or has no matching
+  research scope, including an explicit Objective exclusion.
+
+Its `recommended_document_ids` contain only `likely_relevant` papers.
+`review_document_ids` are visible but unselected by default. Every decision
+retains its Paper Map reason and whether it was a seed paper.
+`support_is_evidence=false` is invariant: screening decides what deserves
+inspection and cannot establish a scientific result.
+
 The analysis-state and command responses contain `objective`,
 `active_analysis`, `published_analysis`, and warnings. They never embed all
 Findings or Evidence.
@@ -219,6 +240,9 @@ candidate Objective, it atomically freezes the accepted definition as
 `confirmed`, freezes the selected PreparedDocumentInputs, and queues analysis
 version 1. For an already confirmed Objective, it creates or reuses the
 appropriate active version. There is no separate confirmation command.
+The browser uses complete scope-screening recommendations by default, lets the
+researcher edit that Objective-local set, and never treats seed papers as a
+fallback recommendation. Retry reuses the failed version's frozen IDs.
 
 ### Published result reads
 
@@ -264,6 +288,10 @@ or curation event controls review and training status.
 The Collection page allows upload and independent prepare/retry while other
 papers run. Objective discovery and analysis controls expose ready-paper
 selection; disabled processing or failed papers do not create a global lock.
+The Objective list labels seed papers as question sources. Starting a new
+analysis fetches the complete recommended scope; adjusting scope distinguishes
+system recommendations, papers requiring human inspection, and current
+exclusions without exposing internal matching terms.
 
 The first Finding is selected deterministically when no selection exists.
 Selecting another Finding loads that Finding detail and Evidence page together;

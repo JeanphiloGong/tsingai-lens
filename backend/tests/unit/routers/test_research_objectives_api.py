@@ -6,6 +6,14 @@ from fastapi.testclient import TestClient
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
+from application.core.objectives.research_objective_service import (
+    ObjectiveScopeNotReadyError,
+    ResearchObjectiveNotFoundError,
+)
+from application.core.objectives.scope_screening import (
+    ObjectiveScopeDecision,
+    ObjectiveScopePreview,
+)
 from controllers.core.research_objectives import router
 from domain.core import (
     Finding,
@@ -191,14 +199,45 @@ class _Repository:
 
 
 class _DiscoveryService:
-    def __init__(self) -> None:
+    def __init__(self, *, scope_error: Exception | None = None) -> None:
         self.discovery_calls: list[tuple[str, tuple[str, ...]]] = []
+        self.scope_calls: list[tuple[str, str]] = []
+        self.scope_error = scope_error
 
     async def discover_and_replace_objective_candidates(
         self, collection_id, document_ids
     ):
         self.discovery_calls.append((collection_id, document_ids))
         return _default_objective_facts()
+
+    async def preview_objective_scope(self, collection_id, objective_id):
+        self.scope_calls.append((collection_id, objective_id))
+        if self.scope_error is not None:
+            raise self.scope_error
+        return ObjectiveScopePreview(
+            decisions=(
+                ObjectiveScopeDecision(
+                    document_id="paper-1",
+                    classification="likely_relevant",
+                    reason="mapped_research_scope",
+                    doc_role="experimental",
+                    map_status="sufficient",
+                    map_limitations=(),
+                    support_basis=("relationship-1",),
+                    is_seed=True,
+                ),
+                ObjectiveScopeDecision(
+                    document_id="paper-2",
+                    classification="needs_inspection",
+                    reason="paper_map_incomplete",
+                    doc_role="experimental",
+                    map_status="insufficient_map",
+                    map_limitations=("Outcome was not visible.",),
+                    support_basis=(),
+                    is_seed=False,
+                ),
+            )
+        )
 
 
 class _Service:
@@ -492,6 +531,83 @@ def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     assert response.status_code == 200
     assert response.json()["objectives"] == []
     assert response.json()["total"] == 0
+
+
+def test_objective_scope_returns_complete_analysis_ids_and_decisions() -> None:
+    service = _DiscoveryService()
+
+    response = _client(discovery_service=service).get(
+        "/collections/col-1/objectives/obj-1/scope"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "collection_id": "col-1",
+        "objective_id": "obj-1",
+        "counts": {
+            "likely_relevant": 1,
+            "needs_inspection": 1,
+            "confidently_out_of_scope": 0,
+        },
+        "recommended_document_ids": ["paper-1"],
+        "review_document_ids": ["paper-2"],
+        "excluded_document_ids": [],
+        "decisions": [
+            {
+                "document_id": "paper-1",
+                "classification": "likely_relevant",
+                "reason": "mapped_research_scope",
+                "doc_role": "experimental",
+                "map_status": "sufficient",
+                "map_limitations": [],
+                "support_basis": ["relationship-1"],
+                "is_seed": True,
+            },
+            {
+                "document_id": "paper-2",
+                "classification": "needs_inspection",
+                "reason": "paper_map_incomplete",
+                "doc_role": "experimental",
+                "map_status": "insufficient_map",
+                "map_limitations": ["Outcome was not visible."],
+                "support_basis": [],
+                "is_seed": False,
+            },
+        ],
+        "support_is_evidence": False,
+    }
+    assert service.scope_calls == [("col-1", "obj-1")]
+
+
+def test_objective_scope_returns_404_when_objective_does_not_exist() -> None:
+    service = _DiscoveryService(
+        scope_error=ResearchObjectiveNotFoundError("col-1", "obj-missing")
+    )
+
+    response = _client(discovery_service=service).get(
+        "/collections/col-1/objectives/obj-missing/scope"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "research_objective_not_found"
+
+
+def test_objective_scope_returns_409_when_paper_maps_are_not_ready() -> None:
+    service = _DiscoveryService(
+        scope_error=ObjectiveScopeNotReadyError("col-1")
+    )
+
+    response = _client(discovery_service=service).get(
+        "/collections/col-1/objectives/obj-1/scope"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "objective_scope_not_ready",
+        "message": "objective paper scope not ready: col-1",
+        "collection_id": "col-1",
+        "objective_id": "obj-1",
+    }
 
 
 def test_start_analysis_uses_the_canonical_service_dispatch() -> None:

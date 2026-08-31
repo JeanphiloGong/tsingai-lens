@@ -1172,8 +1172,8 @@ async def test_core_authoring_without_discovery_persists_a_seedless_question_as_
     assert created.seed_document_ids == ()
     assert created.confidence == 0
     assert created.reason == (
-        "User-approved untested research question; paper scope and Evidence "
-        "support have not been established."
+        "User-approved untested research question; no question-source paper was "
+        "recorded and analysis has not tested Evidence support."
     )
 
 
@@ -1535,7 +1535,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
     assert completed.messages[-1].content.startswith("Evidence analysis is running")
 
 
-async def test_core_authoring_keeps_seed_documents_as_untested_scope_hypotheses() -> None:
+async def test_core_authoring_keeps_seed_documents_as_question_provenance() -> None:
     repository = _ObjectiveAuthoringRepository()
     service = ResearchObjectiveService(
         collection_service=_CollectionService(),
@@ -1568,8 +1568,8 @@ async def test_core_authoring_keeps_seed_documents_as_untested_scope_hypotheses(
     assert created.confirmation_status == "candidate"
     assert repository.created[0]["objective"].source_relationship_ids == ()
     assert created.reason == (
-        "User-approved untested research question with 1 paper scope hypothesis(es); "
-        "Paper Map scope is not Evidence and analysis has not tested support."
+        "User-approved untested research question with 1 question-source paper(s); "
+        "question provenance is not Evidence and analysis has not tested support."
     )
 
     unsupported = await service.create_chat_assisted_candidate(

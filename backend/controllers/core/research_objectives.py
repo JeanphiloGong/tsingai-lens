@@ -5,6 +5,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
+from application.core.objectives.research_objective_service import (
+    ObjectiveScopeNotReadyError,
+)
 
 from controllers.schemas.core.research_objectives import (
     FindingDetailResponse,
@@ -14,6 +17,7 @@ from controllers.schemas.core.research_objectives import (
     ObjectiveEvidenceListResponse,
     ObjectiveEvidenceMapResponse,
     ObjectiveDiscoveryResponse,
+    ObjectiveScopeResponse,
     PaginatedObjectiveListResponse,
 )
 
@@ -76,6 +80,40 @@ async def list_collection_objectives(
         offset=offset,
         limit=limit,
         total=len(ranked_objectives),
+    )
+
+
+@router.get(
+    "/{collection_id}/objectives/{objective_id}/scope",
+    response_model=ObjectiveScopeResponse,
+    summary="Preview the collection paper scope for one research objective",
+)
+async def preview_collection_objective_scope(
+    collection_id: str,
+    objective_id: str,
+    request: Request,
+) -> ObjectiveScopeResponse:
+    try:
+        preview = await request.app.state.research_objective_service.preview_objective_scope(
+            collection_id,
+            objective_id,
+        )
+    except FileNotFoundError as exc:
+        raise _objective_not_found(collection_id, objective_id, exc) from exc
+    except ObjectiveScopeNotReadyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "objective_scope_not_ready",
+                "message": str(exc),
+                "collection_id": collection_id,
+                "objective_id": objective_id,
+            },
+        ) from exc
+    return ObjectiveScopeResponse(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        **preview.to_record(),
     )
 
 

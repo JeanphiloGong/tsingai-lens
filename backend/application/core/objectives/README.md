@@ -52,6 +52,32 @@ paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,
 states, methods, or broad outcome families into a directly comparable question.
 
+The resulting `seed_document_ids` record the papers whose mapped relationships
+caused the question to be formed. They are question provenance, not the complete
+set of papers that should enter deep Objective analysis.
+
+## Objective Scope Screening
+
+```text
+GET objectives/{objective_id}/scope
+  -> load the persisted Objective
+  -> screen every current Collection Paper Map exactly once
+  -> return likely-relevant, needs-inspection, and confidently-out-of-scope papers
+```
+
+`scope_screening.py` performs this read-only decision deterministically. It
+does not call an LLM, inspect Sources, persist state, or create Evidence.
+Explicit material/variable/outcome matches are `likely_relevant`. Incomplete
+maps, partial matches, umbrella-variable uncertainty, and review citation leads
+remain `needs_inspection`; they are never silently excluded or selected.
+Sufficient maps with a specific material conflict or no mapped scope match are
+`confidently_out_of_scope`. An Objective's explicit exclusions remain excluded.
+
+The response includes every mapped paper decision and complete document-ID sets;
+it is never truncated for analysis. Chat may render a bounded subset, but the
+browser analysis command uses the complete `recommended_document_ids` and lets
+the researcher review `review_document_ids` before changing the scope.
+
 ## Analysis Command
 
 ```text
@@ -155,6 +181,7 @@ state through the public API.
 
 - `paper_research_map_service.py`: one Document's lightweight Paper Map.
 - `objective_candidate_service.py`: candidate formation from selected maps.
+- `scope_screening.py`: collection-wide deterministic scope for one Objective.
 - `research_objective_service.py`: selected-input loading and scientific
   orchestration.
 - `analysis_service.py`: versioning, dispatch, progress, retry, and publication.

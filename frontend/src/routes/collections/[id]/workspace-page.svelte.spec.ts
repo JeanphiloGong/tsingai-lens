@@ -114,6 +114,10 @@ describe('current collection document workflow', () => {
 
 		await expect.element(browserPage.getByText('Parsing paper.')).toBeInTheDocument();
 		await expect
+			.element(browserPage.getByRole('progressbar'))
+			.toHaveAttribute('aria-valuenow', '55');
+		await expect.element(browserPage.getByText('1 / 2 papers ready')).toBeInTheDocument();
+		await expect
 			.element(browserPage.getByRole('button', { name: 'Upload documents' }))
 			.not.toBeDisabled();
 	});

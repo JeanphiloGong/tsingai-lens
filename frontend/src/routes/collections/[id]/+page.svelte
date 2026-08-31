@@ -37,6 +37,14 @@
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let collectionId = '';
 
+	type PreparationProgressSummary = {
+		ready: number;
+		total: number;
+		active: number;
+		percent: number;
+		message: string;
+	};
+
 	$: readyDocuments = documents.filter((document) => document.status === 'ready');
 	$: activeTasks = tasks.filter(isTaskActive);
 	$: activeDocumentIds = new Set(
@@ -62,7 +70,7 @@
 				: readyDocuments.length
 					? 'ready'
 					: 'empty';
-	$: progressTask = activeTasks[0] ?? null;
+	$: preparationProgress = buildPreparationProgress(documents, activeTasks);
 
 	const unsubscribePage = page.subscribe((currentPage) => {
 		const nextCollectionId = currentPage.params.id ?? '';
@@ -197,9 +205,36 @@
 		return translated === key ? document.status : translated;
 	}
 
-	function progressMessage(task: Task | null) {
-		if (!task) return '';
-		return task.progress_detail?.message || `${task.progress_percent}%`;
+	function buildPreparationProgress(
+		items: CollectionDocument[],
+		active: Task[]
+	): PreparationProgressSummary | null {
+		if (!active.length) return null;
+
+		const activeDocumentIds = new Set(
+			active
+				.map((task) => task.document_id)
+				.filter((documentId): documentId is string => Boolean(documentId))
+		);
+		const ready = items.filter(
+			(document) => document.status === 'ready' && !activeDocumentIds.has(document.document_id)
+		).length;
+		const total = Math.max(items.length, ready + active.length);
+		const activeProgress = active.reduce(
+			(sum, task) => sum + Math.max(0, Math.min(100, Number(task.progress_percent) || 0)) / 100,
+			0
+		);
+		const percent = Math.round(((ready + activeProgress) / total) * 100);
+		const message =
+			active.find((task) => task.progress_detail?.message)?.progress_detail?.message ?? '';
+
+		return {
+			ready,
+			total,
+			active: active.length,
+			percent: Math.max(0, Math.min(100, percent)),
+			message
+		};
 	}
 </script>
 
@@ -261,10 +296,41 @@
 					objectives: objectiveCount
 				})}
 			</p>
-			{#if progressTask}
-				<div class="active-progress">
-					<span>{progressMessage(progressTask)}</span>
-					<strong>{Math.round(progressTask.progress_percent)}%</strong>
+			{#if preparationProgress}
+				<div
+					class="active-progress"
+					role="status"
+					aria-label={$t('overview.currentModel.preparationProgressTitle')}
+				>
+					<div class="active-progress__header">
+						<span>{$t('overview.currentModel.preparationProgressTitle')}</span>
+						<strong>{preparationProgress.percent}%</strong>
+					</div>
+					<div
+						class="active-progress__track"
+						role="progressbar"
+						aria-label={$t('overview.currentModel.preparationProgressTitle')}
+						aria-valuemin="0"
+						aria-valuemax="100"
+						aria-valuenow={preparationProgress.percent}
+						aria-valuetext={`${preparationProgress.percent}%`}
+					>
+						<span style={`width: ${preparationProgress.percent}%`}></span>
+					</div>
+					<div class="active-progress__meta">
+						<span>
+							{$t('overview.currentModel.preparationProgressReady', {
+								ready: preparationProgress.ready,
+								total: preparationProgress.total
+							})}
+						</span>
+						<span>
+							{$t('overview.currentModel.preparationProgressActive', {
+								count: preparationProgress.active
+							})}
+						</span>
+					</div>
+					{#if preparationProgress.message}<small>{preparationProgress.message}</small>{/if}
 				</div>
 			{/if}
 		</div>
@@ -507,13 +573,56 @@
 	}
 
 	.active-progress {
-		max-width: 520px;
-		justify-content: space-between;
-		gap: 16px;
+		max-width: 560px;
+		display: grid;
+		gap: 8px;
 		margin-top: 16px;
 		padding-top: 12px;
 		border-top: 1px solid var(--border-default);
 		font-size: 13px;
+	}
+
+	.active-progress__header,
+	.active-progress__meta {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		min-width: 0;
+	}
+
+	.active-progress__meta {
+		flex-wrap: wrap;
+	}
+
+	.active-progress__header strong {
+		color: var(--text-primary);
+		font-size: 15px;
+	}
+
+	.active-progress__track {
+		height: 8px;
+		overflow: hidden;
+		border-radius: 4px;
+		background: var(--border-default);
+	}
+
+	.active-progress__track span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: var(--accent-primary, #2563eb);
+		transition: width 180ms ease;
+	}
+
+	.active-progress__meta,
+	.active-progress small {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.active-progress small {
+		overflow-wrap: anywhere;
 	}
 
 	.research-progress {

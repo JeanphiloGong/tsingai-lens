@@ -719,6 +719,9 @@ const translations: Record<Language, Translations> = {
 					objectives: 'Questions formed',
 					analysis: 'Evidence analyzed'
 				},
+				preparationProgressTitle: 'Paper preparation progress',
+				preparationProgressReady: '{ready} / {total} papers ready',
+				preparationProgressActive: '{count} processing',
 				openObjectives: 'Enter research objectives',
 				uploadReady: '{count} paper(s) selected for upload',
 				attentionTitle: '{count} paper(s) need attention',
@@ -3094,6 +3097,9 @@ const translations: Record<Language, Translations> = {
 					objectives: '形成问题',
 					analysis: '分析证据'
 				},
+				preparationProgressTitle: '论文准备进度',
+				preparationProgressReady: '{ready} / {total} 篇论文已就绪',
+				preparationProgressActive: '{count} 篇处理中',
 				openObjectives: '查看研究目标',
 				uploadReady: '已选择 {count} 篇待上传论文',
 				attentionTitle: '{count} 篇论文需要处理',

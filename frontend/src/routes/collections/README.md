@@ -10,6 +10,10 @@ This node owns the Collection route family.
   main view, while papers requiring preparation or retry remain available in an
   expandable attention section. Objective discovery uses the complete current
   ready-paper set without restoring the retired Collection build contract.
+  The overview keeps a persistent four-stage research strip and, while paper
+  preparation tasks are queued or running, adds an aggregate progress bar with
+  ready/total papers, active task count, and weighted task completion. It does
+  not present one task as the progress of the entire collection.
 - `collections/[id]/objectives/+page.svelte`
   Candidate and confirmed research Objectives plus analysis progress/retry.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`

@@ -232,10 +232,24 @@ Discovery accepts `{"document_ids": [...]}` with one or more unique current
 Documents. The explicit selection is not truncated or divided into independent
 discovery scopes, so candidate formation retains the complete cross-paper
 context. Every selected Document must be `ready` with a preparation fingerprint.
-The command freezes the resolved `(document_id,
-preparation_fingerprint)` values, lazily builds or reuses their current Paper
-Maps, reads the Profiles and maps, and replaces the current generated
-candidates. It does not silently include all Collection papers.
+The command freezes the resolved `(document_id, preparation_fingerprint)`
+values in one collection-scoped `objective_discovery` Task and returns that
+Task immediately. At most one discovery Task may be `queued` or `running` for
+a Collection; a repeated command returns the active Task without scheduling a
+second worker, even when another request reaches a different backend process.
+Clients restore and poll its state through the ordinary Collection Task and
+Task-detail endpoints. On completion they read the replaced candidate set from
+`GET .../objectives`; on failure the terminal Task error remains visible and a
+new command creates a retry Task. A backend restart marks an interrupted Task
+failed rather than leaving it permanently active.
+
+The background worker lazily builds or reuses the selected Documents' current
+Paper Maps, reads their Profiles and maps, and replaces the current generated
+candidates. It does not silently include all Collection papers. This is
+research-question formation, not Objective Evidence analysis: analysis still
+requires the later, explicit Objective command. The worker is process-local,
+while admission, progress, completion, and failure are persisted; the Task
+record is observable execution state rather than an external durable queue.
 
 A Paper Map is preliminary scope metadata: paper type, material and process
 themes, variable-to-outcome axes, review synthesis, Source lineage, coverage,

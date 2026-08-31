@@ -21,7 +21,7 @@
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文档：`GET|POST /api/v1/collections/{collection_id}/documents`
 - 单篇文档准备：`POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation`
-- 从明确选择的已就绪文档发现目标：`POST /api/v1/collections/{collection_id}/objective-discovery`
+- 从明确选择的已就绪文档形成研究问题：`POST /api/v1/collections/{collection_id}/objective-discovery`
 - 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、
@@ -35,7 +35,10 @@
   `document_ids`。`POST .../analysis` 是唯一的确认并分析命令：候选 Objective
   会在同一事务中固化为 `confirmed`，并冻结所选文档的
   `document_id + preparation_fingerprint` 后进入排队状态；已确认 Objective
-  则直接创建或复用分析版本。
+  则直接创建或复用分析版本。Objective discovery 立即返回持久化的
+  `objective_discovery` Task；集合页通过 Task 接口恢复和轮询状态，不能用页面本地
+  loading 作为运行事实。分析命令返回后，Objective 列表在当前行展示并轮询进度，
+  不自动跳转到详情页。
 
 - 查询文档准备任务：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`
 - 文档与 Source 核验：`GET /api/v1/collections/{collection_id}/documents/profiles`、

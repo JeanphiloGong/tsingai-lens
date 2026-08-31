@@ -9,13 +9,23 @@ This node owns the Collection route family.
   papers, preparation, and Objective availability; ready papers stay out of the
   main view, while papers requiring preparation or retry remain available in an
   expandable attention section. Objective discovery uses the complete current
-  ready-paper set without restoring the retired Collection build contract.
+  ready-paper set without restoring the retired Collection build contract. The
+  action is named research-question formation and returns a persisted
+  collection Task; queued/running progress survives navigation or refresh,
+  disables duplicate submission, and refreshes Objectives at completion. A
+  failed Task exposes its error and restores the retry action. This phase does
+  not claim that Objective Evidence analysis has started.
   The overview keeps a persistent four-stage research strip and, while paper
   preparation tasks are queued or running, adds an aggregate progress bar with
   ready/total papers, active task count, and weighted task completion. It does
-  not present one task as the progress of the entire collection.
+  not present one task as the progress of the entire collection, and it does
+  not count collection-level Objective discovery as paper preparation.
 - `collections/[id]/objectives/+page.svelte`
   Candidate and confirmed research Objectives plus analysis progress/retry.
+  Confirming or restarting analysis updates that Objective row immediately and
+  polls it in place; it does not navigate to a separate status screen. Published
+  completion exposes Findings, while failure keeps its explanation and retry on
+  the same row.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
   Published Finding list and one selected Finding detail.
 - `collections/[id]/comparisons/+page.svelte`
@@ -25,11 +35,14 @@ This node owns the Collection route family.
   shows deterministic Finding, Evidence, exact Source, paper, and coverage
   relationships without restoring the retired collection-wide Graph contract.
 - `collections/[id]/documents/*`
-  Parsed-paper reading and exact Source verification.
+  Parsed-paper reading and exact Source verification. A researcher may hand one
+  stable Source block to the same Collection's Agent for explanation or draft
+  formation; the handoff creates no Objective, Evidence, or Finding.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
-  write approval.
+  write approval. A pending Source from the document reader is reviewable and
+  removable before submission, then persists on the sent user message.
   Its research-process capability projects the same current Documents and
   persisted per-paper preparation tasks used by the Collection page; Chat does
   not own a second progress model or expose model reasoning and retry internals.
@@ -90,7 +103,8 @@ The page handles these states explicitly:
 - confirmed without analysis: start analysis;
 - queued/running: show the current research phase and document progress inline;
   command buttons do not stand in for status, while the Objective question
-  remains the ordinary link to its live detail view;
+  remains the ordinary link to its live detail view; starting the command does
+  not navigate away from the list;
 - failed without a published result: retry;
 - failed with a published result: identify both the displayed published version
   and failed retry version, keep the prior Findings visible, and offer retry;

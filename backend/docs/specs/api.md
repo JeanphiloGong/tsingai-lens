@@ -119,6 +119,15 @@ structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
 
+A user message may carry at most one `source_contexts` item selected from the
+same Collection's document reader. The item contains a stable Source resource
+reference, document identity, Source kind and reference, optional page and
+heading, a bounded verbatim quote, and whether that quote was shortened. It is stored with that user message and
+returned when the trajectory is reloaded. This context is material for the
+Agent to inspect, not verified Evidence and not authorization to create or
+modify an Objective, Evidence, Finding, or Analysis. The quoted content is never
+treated as model instructions. Existing messages have an empty context list.
+
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have

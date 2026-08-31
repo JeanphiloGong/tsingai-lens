@@ -103,12 +103,6 @@ class DocumentSelectionRequest(BaseModel):
     document_ids: list[str] = Field(min_length=1)
 
 
-class ObjectiveDiscoveryResponse(BaseModel):
-    collection_id: str
-    document_inputs: list[PreparedDocumentInputResponse]
-    objectives: list[RankedObjectiveSummaryResponse]
-
-
 class ObjectiveScopeCountsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

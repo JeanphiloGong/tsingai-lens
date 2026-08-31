@@ -1,11 +1,23 @@
 from __future__ import annotations
 
-from asyncio import Semaphore, gather, to_thread
+from asyncio import (
+    CancelledError,
+    Semaphore,
+    Task,
+    create_task,
+    gather,
+    get_running_loop,
+    run_coroutine_threadsafe,
+    to_thread,
+    wrap_future,
+)
+from collections.abc import Coroutine
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import logging
+from threading import Lock
 from typing import Any, Callable
 
 from application.core.document_profiles.service import (
@@ -70,6 +82,7 @@ from application.core.objectives.scope_screening import (
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.source.collection_service import CollectionService
+from application.source.task_service import TaskService
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
@@ -194,6 +207,8 @@ class ResearchObjectiveService:
         objective_evidence_router: ObjectiveEvidenceRouter | None = None,
         objective_source_extractor: ObjectiveSourceExtractor | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
+        task_service: TaskService | None = None,
+        task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
         self.collection_service = collection_service
         self._response_client = response_client
@@ -209,6 +224,247 @@ class ResearchObjectiveService:
         self.finding_synthesis_service = finding_synthesis_service
         self.objective_candidate_service = objective_candidate_service
         self.paper_map_service = paper_map_service
+        self.task_service = task_service
+        self._task_factory = task_factory
+        self._discovery_tasks: set[Any] = set()
+
+    async def recover_interrupted_discoveries(self) -> int:
+        """Make persisted discovery tasks retryable after a backend restart."""
+
+        task_service = self._require_task_service()
+        active_tasks = [
+            *await task_service.list_tasks(status="queued"),
+            *await task_service.list_tasks(status="running"),
+        ]
+        interrupted_count = 0
+        for task in active_tasks:
+            if task.get("task_type") != "objective_discovery":
+                continue
+            await task_service.finish_task(
+                task["task_id"],
+                status="failed",
+                current_stage="interrupted",
+                progress_percent=task.get("progress_percent", 0),
+                errors=[
+                    *task.get("errors", ()),
+                    "Research question formation was interrupted by a backend restart.",
+                ],
+                progress_detail={
+                    "phase": "interrupted",
+                    "unit": "documents",
+                    "message": "Research question formation was interrupted. Retry it.",
+                },
+            )
+            interrupted_count += 1
+        if interrupted_count:
+            logger.warning(
+                "Recovered interrupted Objective Discovery tasks count=%s",
+                interrupted_count,
+            )
+        return interrupted_count
+
+    async def start_objective_discovery(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Queue or reuse one collection-level Objective Discovery task."""
+
+        document_inputs = await self.resolve_prepared_document_inputs(
+            collection_id,
+            document_ids,
+        )
+        task_service = self._require_task_service()
+        task, created = await task_service.get_or_create_collection_task(
+            collection_id=collection_id,
+            task_type="objective_discovery",
+            input_fingerprint=self._objective_discovery_fingerprint(document_inputs),
+            details={
+                "document_ids": [item.document_id for item in document_inputs],
+            },
+        )
+        if not created:
+            return task
+
+        coroutine = self.run_objective_discovery_task(
+            task["task_id"],
+            collection_id,
+            tuple(item.document_id for item in document_inputs),
+        )
+        try:
+            background = self._task_factory(coroutine)
+        except Exception as exc:  # noqa: BLE001
+            coroutine.close()
+            await task_service.finish_task(
+                task["task_id"],
+                status="failed",
+                current_stage="dispatch_failed",
+                progress_percent=0,
+                errors=["Research question formation could not be scheduled."],
+            )
+            raise RuntimeError(
+                "Research question formation could not be scheduled. Retry it."
+            ) from exc
+        self._discovery_tasks.add(background)
+        background.add_done_callback(self._discovery_tasks.discard)
+        background.add_done_callback(self._log_unexpected_discovery_failure)
+        return task
+
+    async def run_objective_discovery_task(
+        self,
+        task_id: str,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Execute one admitted Objective Discovery task and persist its state."""
+
+        task_service = self._require_task_service()
+        await task_service.update_task(
+            task_id,
+            status="running",
+            current_stage="paper_map",
+            progress_percent=5,
+            progress_detail={
+                "phase": "paper_map",
+                "current": 0,
+                "total": len(document_ids),
+                "unit": "documents",
+                "message": "Mapping the selected papers before forming research questions.",
+            },
+        )
+        pending_progress_updates = []
+        progress_callback = self._build_discovery_progress_callback(
+            task_id,
+            pending_progress_updates,
+        )
+        try:
+            facts = await self.discover_and_replace_objective_candidates(
+                collection_id,
+                document_ids,
+                progress_callback=progress_callback,
+            )
+            if pending_progress_updates:
+                await gather(
+                    *(wrap_future(item) for item in pending_progress_updates),
+                    return_exceptions=True,
+                )
+            return await task_service.finish_task(
+                task_id,
+                status="completed",
+                current_stage="objectives_ready",
+                progress_percent=100,
+                progress_detail={
+                    "phase": "objectives_ready",
+                    "current": len(document_ids),
+                    "total": len(document_ids),
+                    "unit": "documents",
+                    "message": "Candidate research questions are ready for review.",
+                    "objective_count": len(facts.research_objectives),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Objective Discovery failed collection_id=%s task_id=%s",
+                collection_id,
+                task_id,
+            )
+            if pending_progress_updates:
+                await gather(
+                    *(wrap_future(item) for item in pending_progress_updates),
+                    return_exceptions=True,
+                )
+            await task_service.finish_task(
+                task_id,
+                status="failed",
+                current_stage="failed",
+                progress_percent=100,
+                errors=[str(exc)],
+                progress_detail={
+                    "phase": "failed",
+                    "unit": "documents",
+                    "message": "Research question formation failed. Retry it.",
+                },
+            )
+            raise
+
+    def _build_discovery_progress_callback(
+        self,
+        task_id: str,
+        pending_updates: list[Any],
+    ) -> ProgressCallback:
+        loop = get_running_loop()
+        progress_lock = Lock()
+        last_percent = 5
+
+        def update(progress: dict[str, Any]) -> None:
+            nonlocal last_percent
+            current = self._safe_progress_int(progress.get("current"))
+            total = self._safe_progress_int(progress.get("total"))
+            phase = str(progress.get("phase") or "running")
+            fraction = (
+                max(0.0, min(1.0, current / total))
+                if current is not None and total
+                else 0.0
+            )
+            if phase.startswith("paper_"):
+                percent = 5 + round(60 * fraction)
+            elif phase.startswith("objective_discovery"):
+                percent = 70 + round(25 * fraction)
+            else:
+                percent = 10 + round(85 * fraction)
+            with progress_lock:
+                last_percent = max(last_percent, min(95, percent))
+                pending_updates.append(
+                    run_coroutine_threadsafe(
+                        self._require_task_service().update_task(
+                            task_id,
+                            current_stage=phase,
+                            progress_percent=last_percent,
+                            progress_detail=dict(progress),
+                        ),
+                        loop,
+                    )
+                )
+
+        return update
+
+    def _require_task_service(self) -> TaskService:
+        if self.task_service is None:
+            raise RuntimeError("Objective Discovery task service is not configured")
+        return self.task_service
+
+    @staticmethod
+    def _objective_discovery_fingerprint(
+        document_inputs: tuple[PreparedDocumentInput, ...],
+    ) -> str:
+        return sha256(
+            json.dumps(
+                {
+                    "document_inputs": [
+                        item.to_record() for item in document_inputs
+                    ],
+                    "paper_map_policy_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _safe_progress_int(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _log_unexpected_discovery_failure(task: Task[dict[str, Any]]) -> None:
+        try:
+            task.result()
+        except CancelledError:
+            logger.info("Objective Discovery task cancelled during backend shutdown")
+        except Exception:  # noqa: BLE001
+            logger.exception("Objective Discovery task crashed after scheduling")
 
     # define a main method for turning a completed collection build into candidate research objectives
     async def discover_and_replace_objective_candidates(
@@ -754,8 +1010,24 @@ class ResearchObjectiveService:
         }
         response_client = source_inputs["response_client"]
         build_limit = Semaphore(_PAPER_MAP_DOCUMENT_MAX_CONCURRENCY)
+        completed_map_count = 0
 
         async def build_map(document_id: str) -> None:
+            nonlocal completed_map_count
+
+            def report_document_progress(detail: dict[str, Any]) -> None:
+                if progress_callback is None:
+                    return
+                progress_callback(
+                    {
+                        **detail,
+                        "current": completed_map_count,
+                        "total": len(stale_document_ids),
+                        "unit": "documents",
+                        "active_document_id": document_id,
+                    }
+                )
+
             async with build_limit:
                 paper_map = await to_thread(
                     self.paper_map_service.build_document_paper_map,
@@ -767,7 +1039,7 @@ class ResearchObjectiveService:
                     ],
                     paper_map_extractor=PaperResearchMapExtractor(response_client),
                     signal_reconciler=PaperSignalReconciler(response_client),
-                    progress_callback=progress_callback,
+                    progress_callback=report_document_progress,
                 )
             paper_map = replace(
                 paper_map,
@@ -775,6 +1047,18 @@ class ResearchObjectiveService:
             )
             await self.paper_map_repository.replace(collection_id, paper_map)
             maps_by_document_id[document_id] = paper_map
+            completed_map_count += 1
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "phase": "paper_research_map_completed",
+                        "current": completed_map_count,
+                        "total": len(stale_document_ids),
+                        "unit": "documents",
+                        "message": "Mapped one selected paper for research question formation.",
+                        "active_document_id": document_id,
+                    }
+                )
 
         stale_document_ids = tuple(
             document_id

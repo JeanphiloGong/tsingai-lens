@@ -204,11 +204,34 @@ class _DiscoveryService:
         self.scope_calls: list[tuple[str, str]] = []
         self.scope_error = scope_error
 
-    async def discover_and_replace_objective_candidates(
+    async def start_objective_discovery(
         self, collection_id, document_ids
     ):
         self.discovery_calls.append((collection_id, document_ids))
-        return _default_objective_facts()
+        return {
+            "task_id": "task-discovery-1",
+            "collection_id": collection_id,
+            "document_id": None,
+            "task_type": "objective_discovery",
+            "mode": "standard",
+            "input_fingerprint": "scope-fingerprint",
+            "status": "queued",
+            "current_stage": "queued",
+            "progress_percent": 0,
+            "progress_detail": {
+                "phase": "queued",
+                "unit": "documents",
+                "total": len(document_ids),
+                "message": "Research question formation is queued.",
+            },
+            "output_path": None,
+            "errors": [],
+            "warnings": [],
+            "created_at": "2026-08-31T00:00:00+00:00",
+            "updated_at": "2026-08-31T00:00:00+00:00",
+            "started_at": None,
+            "finished_at": None,
+        }
 
     async def preview_objective_scope(self, collection_id, objective_id):
         self.scope_calls.append((collection_id, objective_id))
@@ -643,6 +666,9 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
     assert discovery_response.status_code == 200
     assert analysis_response.status_code == 200
+    assert discovery_response.json()["task_id"] == "task-discovery-1"
+    assert discovery_response.json()["task_type"] == "objective_discovery"
+    assert discovery_response.json()["status"] == "queued"
     assert discovery_service.discovery_calls == [
         ("col-1", tuple(document_ids)),
     ]

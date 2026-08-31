@@ -16,10 +16,10 @@ from controllers.schemas.core.research_objectives import (
     ObjectiveAnalysisResponse,
     ObjectiveEvidenceListResponse,
     ObjectiveEvidenceMapResponse,
-    ObjectiveDiscoveryResponse,
     ObjectiveScopeResponse,
     PaginatedObjectiveListResponse,
 )
+from controllers.schemas.source.task import TaskResponse
 
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
@@ -27,16 +27,16 @@ router = APIRouter(prefix="/collections", tags=["research-objectives"])
 
 @router.post(
     "/{collection_id}/objective-discovery",
-    response_model=ObjectiveDiscoveryResponse,
-    summary="Discover research objectives from selected ready documents",
+    response_model=TaskResponse,
+    summary="Queue research question formation from selected ready documents",
 )
 async def discover_collection_objectives(
     collection_id: str,
     payload: DocumentSelectionRequest,
     request: Request,
-) -> ObjectiveDiscoveryResponse:
+) -> TaskResponse:
     try:
-        facts = await request.app.state.research_objective_service.discover_and_replace_objective_candidates(
+        task = await request.app.state.research_objective_service.start_objective_discovery(
             collection_id,
             tuple(payload.document_ids),
         )
@@ -44,11 +44,7 @@ async def discover_collection_objectives(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return ObjectiveDiscoveryResponse(
-        collection_id=collection_id,
-        document_inputs=[item.to_record() for item in facts.document_inputs],
-        objectives=[item.to_record() for item in facts.research_objectives],
-    )
+    return TaskResponse(**task)
 
 
 @router.get(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from domain.ports import TaskRepository
@@ -54,6 +54,29 @@ class TaskService:
                 task_type=task_type,
                 mode=mode,
                 input_fingerprint=input_fingerprint,
+            )
+        )
+        return await self._project_task(record), created
+
+    async def get_or_create_collection_task(
+        self,
+        *,
+        collection_id: str,
+        task_type: str,
+        input_fingerprint: str,
+        mode: str = "standard",
+        details: Mapping[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        if not str(input_fingerprint).strip():
+            raise ValueError("collection task requires an input fingerprint")
+        record, created = await self.repository.get_or_create_collection_task(
+            self._new_task(
+                collection_id=collection_id,
+                document_id=None,
+                task_type=task_type,
+                mode=mode,
+                input_fingerprint=input_fingerprint,
+                details=details,
             )
         )
         return await self._project_task(record), created
@@ -141,6 +164,7 @@ class TaskService:
         task_type: str,
         mode: str,
         input_fingerprint: str | None,
+        details: Mapping[str, Any] | None = None,
     ) -> TaskRecord:
         now = _now_iso()
         return TaskRecord(
@@ -163,6 +187,7 @@ class TaskService:
             updated_at=now,
             started_at=None,
             finished_at=None,
+            details=dict(details or {}),
         )
 
     async def _project_task(

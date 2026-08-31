@@ -92,3 +92,37 @@ async def test_task_service_exposes_its_document_execution_identity() -> None:
     assert stored["collection_id"] == "col_a"
     assert stored["document_id"] == "doc_a"
     assert stored["input_fingerprint"] == "fingerprint-a"
+
+
+async def test_task_service_reuses_only_an_active_collection_task() -> None:
+    task_service = TaskService(MemoryTaskRepository())
+
+    first, first_created = await task_service.get_or_create_collection_task(
+        collection_id="col_a",
+        task_type="objective_discovery",
+        input_fingerprint="scope-a",
+        details={"document_ids": ["doc_a"]},
+    )
+    duplicate, duplicate_created = await task_service.get_or_create_collection_task(
+        collection_id="col_a",
+        task_type="objective_discovery",
+        input_fingerprint="scope-b",
+        details={"document_ids": ["doc_b"]},
+    )
+
+    assert first_created is True
+    assert duplicate_created is False
+    assert duplicate["task_id"] == first["task_id"]
+    assert duplicate["document_ids"] == ["doc_a"]
+
+    await task_service.finish_task(first["task_id"], status="failed")
+    retry, retry_created = await task_service.get_or_create_collection_task(
+        collection_id="col_a",
+        task_type="objective_discovery",
+        input_fingerprint="scope-b",
+        details={"document_ids": ["doc_b"]},
+    )
+
+    assert retry_created is True
+    assert retry["task_id"] != first["task_id"]
+    assert retry["document_ids"] == ["doc_b"]

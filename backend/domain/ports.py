@@ -87,6 +87,11 @@ class CollectionRepository(Protocol):
 class TaskRepository(Protocol):
     async def add_task(self, record: TaskRecord) -> TaskRecord: ...
 
+    async def get_or_create_collection_task(
+        self,
+        record: TaskRecord,
+    ) -> tuple[TaskRecord, bool]: ...
+
     async def get_or_create_document_task(
         self,
         record: TaskRecord,

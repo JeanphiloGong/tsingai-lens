@@ -275,6 +275,7 @@ async def build_application_runtime(
             finding_synthesis_service=finding_synthesis_service,
             objective_candidate_service=ObjectiveCandidateService(),
             paper_map_service=paper_map_service,
+            task_service=task_service,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,
@@ -406,6 +407,7 @@ def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
         try:
             install_application_runtime(application, runtime)
             await runtime.document_preparation_service.recover_interrupted_tasks()
+            await runtime.research_objective_service.recover_interrupted_discoveries()
             await runtime.objective_analysis_service.recover_interrupted_analyses()
             yield
         finally:

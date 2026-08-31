@@ -135,7 +135,7 @@ async def test_documents_route_returns_404_for_missing_collection(document_servi
     assert "collection not found" in str(exc.detail)
 
 
-async def test_documents_route_forwards_profile_search_and_pagination(document_services):
+async def test_documents_route_forwards_profile_search_filters_and_pagination(document_services):
     (
         collection_service,
         document_profile_service,
@@ -153,7 +153,7 @@ async def test_documents_route_forwards_profile_search_and_pagination(document_s
                 "title": "Laser paper one",
                 "source_filename": "one.pdf",
                 "doc_type": "experimental",
-                "parsing_warnings": [],
+                "parsing_warnings": ["classification_uncertain"],
                 "confidence": 0.91,
             },
             {
@@ -171,7 +171,7 @@ async def test_documents_route_forwards_profile_search_and_pagination(document_s
                 "title": "Unrelated review",
                 "source_filename": "review.pdf",
                 "doc_type": "review",
-                "parsing_warnings": [],
+                "parsing_warnings": ["insufficient_content"],
                 "confidence": 0.8,
             },
         ],
@@ -181,13 +181,15 @@ async def test_documents_route_forwards_profile_search_and_pagination(document_s
         collection_id,
         _document_request(document_services),
         limit=1,
-        offset=1,
+        offset=0,
         query="laser",
+        doc_type="experimental",
+        has_warnings=True,
     )
 
-    assert payload.total == 2
+    assert payload.total == 1
     assert payload.count == 1
-    assert payload.items[0].document_id == "paper-2"
+    assert payload.items[0].document_id == "paper-1"
 
 
 async def test_document_profile_route_returns_single_profile(document_services):

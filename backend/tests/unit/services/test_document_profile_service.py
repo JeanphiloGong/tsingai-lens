@@ -205,7 +205,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
     assert item["doc_type"] == "experimental"
 
 
-async def test_document_profile_service_filters_before_paginating(tmp_path):
+async def test_document_profile_service_combines_filters_before_paginating(tmp_path):
     collection_service, profile_service = _build_profile_service(tmp_path)
     collection = await collection_service.create_collection("Searchable Profiles")
     collection_id = collection["collection_id"]
@@ -214,16 +214,29 @@ async def test_document_profile_service_filters_before_paginating(tmp_path):
             "document_id": "doc-1",
             "title": "Laser processing of Ti-6Al-4V",
             "source_filename": "paper-one.pdf",
+            "doc_type": "experimental",
+            "parsing_warnings": [],
         },
         {
             "document_id": "doc-2",
             "title": "Mechanical response of titanium",
             "source_filename": "laser-fatigue.pdf",
+            "doc_type": "review",
+            "parsing_warnings": ["classification_uncertain"],
         },
         {
             "document_id": "doc-3",
             "title": "Stainless steel review",
             "source_filename": "review.pdf",
+            "doc_type": "review",
+            "parsing_warnings": ["insufficient_content"],
+        },
+        {
+            "document_id": "doc-4",
+            "title": "Laser review without warnings",
+            "source_filename": "clean-review.pdf",
+            "doc_type": "review",
+            "parsing_warnings": [],
         },
     ):
         await profile_service.document_profile_repository.replace(
@@ -231,32 +244,24 @@ async def test_document_profile_service_filters_before_paginating(tmp_path):
                 {
                     **row,
                     "collection_id": collection_id,
-                    "doc_type": "experimental",
-                    "parsing_warnings": [],
                     "confidence": 0.9,
                 }
             )
         )
 
-    first_page = await profile_service.list_document_profiles(
+    filtered = await profile_service.list_document_profiles(
         collection_id,
         query=" LASER ",
         offset=0,
         limit=1,
-    )
-    second_page = await profile_service.list_document_profiles(
-        collection_id,
-        query="laser",
-        offset=1,
-        limit=1,
+        doc_type="review",
+        has_warnings=True,
     )
 
-    assert first_page["total"] == 2
-    assert first_page["count"] == 1
-    assert first_page["items"][0]["document_id"] == "doc-1"
-    assert second_page["total"] == 2
-    assert second_page["items"][0]["document_id"] == "doc-2"
-    assert first_page["summary"]["total_documents"] == 3
+    assert filtered["total"] == 1
+    assert filtered["count"] == 1
+    assert filtered["items"][0]["document_id"] == "doc-2"
+    assert filtered["summary"]["total_documents"] == 4
 
 
 async def test_document_profile_service_short_circuits_insufficient_content(tmp_path):

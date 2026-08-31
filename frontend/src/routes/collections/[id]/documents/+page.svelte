@@ -5,7 +5,8 @@
 	import {
 		fetchDocumentProfiles,
 		type DocumentProfile,
-		type DocumentProfilesResponse
+		type DocumentProfilesResponse,
+		type DocumentType
 	} from '../../../_shared/documents';
 	import { t } from '../../../_shared/i18n';
 
@@ -15,6 +16,10 @@
 	let loadedCollectionId = '';
 	let searchInput = '';
 	let appliedQuery = '';
+	let documentTypeInput: DocumentType | '' = '';
+	let appliedDocumentType: DocumentType | '' = '';
+	let warningsOnlyInput = false;
+	let appliedWarningsOnly = false;
 	let offset = 0;
 	let requestSequence = 0;
 	const PAGE_SIZE = 25;
@@ -25,7 +30,14 @@
 		void loadProfiles();
 	}
 
-	async function loadProfiles(nextOffset = offset, nextQuery = appliedQuery) {
+	$: filtersActive = Boolean(appliedQuery || appliedDocumentType || appliedWarningsOnly);
+
+	async function loadProfiles(
+		nextOffset = offset,
+		nextQuery = appliedQuery,
+		nextDocumentType = appliedDocumentType,
+		nextWarningsOnly = appliedWarningsOnly
+	) {
 		const requestId = ++requestSequence;
 		loading = true;
 		error = '';
@@ -33,12 +45,16 @@
 			const result = await fetchDocumentProfiles(collectionId, {
 				offset: nextOffset,
 				limit: PAGE_SIZE,
-				query: nextQuery
+				query: nextQuery,
+				docType: nextDocumentType || undefined,
+				hasWarnings: nextWarningsOnly ? true : undefined
 			});
 			if (requestId !== requestSequence) return;
 			profiles = result;
 			offset = nextOffset;
 			appliedQuery = nextQuery;
+			appliedDocumentType = nextDocumentType;
+			appliedWarningsOnly = nextWarningsOnly;
 		} catch (err) {
 			if (requestId !== requestSequence) return;
 			profiles = null;
@@ -48,13 +64,15 @@
 		}
 	}
 
-	function submitSearch() {
-		void loadProfiles(0, searchInput.trim());
+	function applyFilters() {
+		void loadProfiles(0, searchInput.trim(), documentTypeInput, warningsOnlyInput);
 	}
 
-	function clearSearch() {
+	function clearFilters() {
 		searchInput = '';
-		void loadProfiles(0, '');
+		documentTypeInput = '';
+		warningsOnlyInput = false;
+		void loadProfiles(0, '', '', false);
 	}
 
 	function previousPage() {
@@ -106,21 +124,37 @@
 		{/if}
 	</header>
 
-	<form class="paper-search" role="search" on:submit|preventDefault={submitSearch}>
-		<label for="paper-search">{$t('research.documents.searchLabel')}</label>
-		<div>
+	<form class="paper-filters" role="search" on:submit|preventDefault={applyFilters}>
+		<label class="filter-field" for="paper-search">
+			<span>{$t('research.documents.searchLabel')}</span>
 			<input
 				id="paper-search"
 				type="search"
 				bind:value={searchInput}
 				placeholder={$t('research.documents.searchPlaceholder')}
 			/>
+		</label>
+		<label class="filter-field" for="paper-type-filter">
+			<span>{$t('research.documents.paperType')}</span>
+			<select id="paper-type-filter" bind:value={documentTypeInput}>
+				<option value="">{$t('research.documents.allPaperTypes')}</option>
+				<option value="experimental">{$t('overview.docTypeExperimental')}</option>
+				<option value="review">{$t('overview.docTypeReview')}</option>
+				<option value="mixed">{$t('overview.docTypeMixed')}</option>
+				<option value="uncertain">{$t('overview.docTypeUncertain')}</option>
+			</select>
+		</label>
+		<label class="warning-filter">
+			<input type="checkbox" bind:checked={warningsOnlyInput} />
+			<span>{$t('research.documents.hasWarnings')}</span>
+		</label>
+		<div class="filter-actions">
 			<button class="btn btn--primary btn--small" type="submit">
-				{$t('research.documents.searchAction')}
+				{$t('research.documents.applyFilters')}
 			</button>
-			{#if appliedQuery}
-				<button class="btn btn--ghost btn--small" type="button" on:click={clearSearch}>
-					{$t('research.documents.clearSearch')}
+			{#if filtersActive}
+				<button class="btn btn--ghost btn--small" type="button" on:click={clearFilters}>
+					{$t('research.documents.clearFilters')}
 				</button>
 			{/if}
 		</div>
@@ -138,9 +172,9 @@
 		</section>
 	{:else if !profiles?.items.length}
 		<section class="page-state">
-			{#if appliedQuery}
+			{#if filtersActive}
 				<h3>{$t('research.documents.searchEmptyTitle')}</h3>
-				<p>{$t('research.documents.searchEmptyBody', { query: appliedQuery })}</p>
+				<p>{$t('research.documents.filterEmptyBody')}</p>
 			{:else}
 				<h3>{$t('research.documents.profileEmptyTitle')}</h3>
 				<p>{$t('research.documents.profileEmptyBody')}</p>
@@ -149,7 +183,7 @@
 	{:else}
 		<div class="paper-results-status" aria-live="polite">
 			<span>
-				{appliedQuery
+				{filtersActive
 					? $t('research.documents.searchCount', { count: profiles.total })
 					: pageRange()}
 			</span>
@@ -265,24 +299,37 @@
 		font-size: 13px;
 	}
 
-	.paper-search {
+	.paper-filters {
 		display: grid;
-		gap: 6px;
+		grid-template-columns: minmax(260px, 1fr) minmax(180px, 240px) auto auto;
+		align-items: end;
+		gap: 12px;
 	}
 
-	.paper-search > label {
+	.filter-field {
+		display: grid;
+		gap: 6px;
+		min-width: 0;
 		font-size: 13px;
 		font-weight: 700;
 	}
 
-	.paper-search > div {
+	.warning-filter,
+	.filter-actions {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 	}
 
-	.paper-search input {
-		width: min(520px, 100%);
+	.warning-filter {
+		min-height: 38px;
+		font-size: 13px;
+		white-space: nowrap;
+	}
+
+	.filter-field input,
+	.filter-field select {
+		width: 100%;
 		min-height: 38px;
 		padding: 7px 10px;
 		border: 1px solid var(--border-default);
@@ -395,13 +442,17 @@
 			text-align: left;
 		}
 
-		.paper-search > div {
+		.paper-filters {
+			grid-template-columns: 1fr;
+		}
+
+		.filter-actions {
 			align-items: stretch;
 			flex-wrap: wrap;
 		}
 
-		.paper-search input {
-			width: 100%;
+		.filter-actions .btn {
+			flex: 1;
 		}
 
 		.paper-pagination {

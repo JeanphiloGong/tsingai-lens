@@ -355,6 +355,8 @@ export type DocumentProfileListOptions = {
 	offset?: number;
 	limit?: number;
 	query?: string;
+	docType?: DocumentType;
+	hasWarnings?: boolean;
 };
 
 export async function fetchDocumentProfiles(
@@ -366,6 +368,10 @@ export async function fetchDocumentProfiles(
 	if (options.limit !== undefined) search.set('limit', String(options.limit));
 	const query = options.query?.trim();
 	if (query) search.set('query', query);
+	if (options.docType) search.set('doc_type', options.docType);
+	if (options.hasWarnings !== undefined) {
+		search.set('has_warnings', String(options.hasWarnings));
+	}
 	const queryString = search.toString();
 	const data = (await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,

@@ -17,7 +17,7 @@ const routes = [
 	['/', 'Lens Workbench'],
 	['/docs', 'Using Lens'],
 	['/system', 'System'],
-	[`/collections/${collectionId}`, 'Prepare and select papers'],
+	[`/collections/${collectionId}`, 'Research questions are ready to review'],
 	[`/collections/${collectionId}/documents`, 'Papers'],
 	[`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`, 'Paper A'],
 	[`/collections/${collectionId}/objectives`, '研究目标'],
@@ -278,7 +278,12 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { name: '研究目标' })).toBeVisible();
-		await expect(page.getByText('还没有准备完成的论文，请先返回集合概览准备论文。')).toBeVisible();
+		await expect(
+			page.getByRole('heading', {
+				name: 'How does heat treatment affect LPBF 316L tensile strength?'
+			})
+		).toBeVisible();
+		await expect(page.getByRole('link', { name: '查看 Findings' })).toBeVisible();
 		expect(objectiveRequests).toEqual([`/api/v1/collections/${collectionId}/objectives`]);
 	});
 

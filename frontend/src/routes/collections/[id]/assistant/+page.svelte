@@ -385,6 +385,8 @@
 		switch (toolName) {
 			case 'get_collection_context':
 				return $t('researchAgent.capability.collection');
+			case 'inspect_document_sources':
+				return $t('researchAgent.capability.documentSources');
 			case 'inspect_research_process':
 				return $t('researchAgent.capability.researchProcess');
 			case 'start_research_process':
@@ -452,6 +454,11 @@
 			return $t('researchAgent.capability.paperCount', {
 				papers,
 				objectives: numberValue(result.data, 'objective_count')
+			});
+		}
+		if (name === 'inspect_document_sources') {
+			return $t('researchAgent.capability.documentSourceCount', {
+				count: numberValue(result.data, 'match_total')
 			});
 		}
 		if (name === 'inspect_research_process') {

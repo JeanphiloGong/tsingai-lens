@@ -152,6 +152,10 @@ approve or reject the exact pending action before starting another turn.
 The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
+- `inspect_document_sources` reads one prepared Document's parsed paragraphs,
+  complete table Markdown, and figure captions through exact or focused,
+  paginated Source filters. It returns canonical Document and Source links;
+  matched content remains inspection material rather than verified Evidence;
 - `inspect_research_process` reads each current Document and its latest
   preparation task. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,

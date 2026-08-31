@@ -8,6 +8,10 @@ from application.chat.capabilities.collection_context import (
     GetCollectionContextArguments,
     GetCollectionContextCapability,
 )
+from application.chat.capabilities.document_sources import (
+    InspectDocumentSourcesArguments,
+    InspectDocumentSourcesCapability,
+)
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
     ProposeObjectiveDraftsArguments,
@@ -50,6 +54,8 @@ __all__ = [
     "CreateObjectiveCandidateCapability",
     "GetCollectionContextArguments",
     "GetCollectionContextCapability",
+    "InspectDocumentSourcesArguments",
+    "InspectDocumentSourcesCapability",
     "InspectObjectiveAnalysisArguments",
     "InspectObjectiveAnalysisCapability",
     "InspectResearchProcessArguments",

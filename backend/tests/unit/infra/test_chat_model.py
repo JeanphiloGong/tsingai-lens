@@ -67,7 +67,7 @@ def _message() -> ChatMessage:
 
 
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v9"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v10"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -80,6 +80,8 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "验证研究判断" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "研究方案生成和验证闭环仍在开发中" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "insufficient map" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "inspect that paper's Sources" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "it is not verified Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert (
         "Creating a research question and starting its analysis"
         in RESEARCH_AGENT_SYSTEM_PROMPT

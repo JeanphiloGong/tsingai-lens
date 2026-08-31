@@ -18,6 +18,7 @@ from application.chat import (
 from application.chat.capabilities import (
     CreateObjectiveCandidateCapability,
     GetCollectionContextCapability,
+    InspectDocumentSourcesCapability,
     InspectObjectiveAnalysisCapability,
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
@@ -301,6 +302,10 @@ async def build_application_runtime(
                             GetCollectionContextCapability(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
+                            ),
+                            InspectDocumentSourcesCapability(
+                                collection_service=collection_service,
+                                source_artifact_repository=source_artifact_repository,
                             ),
                             InspectResearchProcessCapability(
                                 collection_service=collection_service,

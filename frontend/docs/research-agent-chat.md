@@ -110,6 +110,7 @@ answer. The result panel shows:
 
 - the named Lens capability;
 - a bounded human-readable summary;
+- bounded paper Source match counts and canonical Source links;
 - structured Objective drafts when present;
 - the observable research stages and active paper when process status is read;
 - per-paper stored, processing, ready, and failed states;

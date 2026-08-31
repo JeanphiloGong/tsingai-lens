@@ -1,6 +1,6 @@
 import { page as browserPage } from 'vitest/browser';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'vitest-browser-svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render } from 'vitest-browser-svelte';
 
 type ObjectivesPageState = {
 	params: { id: string };
@@ -35,6 +35,8 @@ vi.mock('$app/navigation', () => ({ goto }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
+
+afterEach(cleanup);
 
 function jsonResponse(body: unknown) {
 	return new Response(JSON.stringify(body), {
@@ -229,7 +231,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				return jsonResponse({
 					collection_id: 'col_123',
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
-					active_analysis: null,
+					active_analysis: analysisState('queued'),
 					published_analysis: null,
 					warnings: []
 				});
@@ -255,8 +257,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				method: 'POST'
 			});
 			expect(requests.filter((item) => item.method === 'POST')).toHaveLength(1);
-			expect(goto).toHaveBeenCalledWith('/collections/col_123/objectives/obj_heat_strength');
+			expect(goto).not.toHaveBeenCalled();
 		});
+		await expect.element(browserPage.getByText('等待系统开始分析')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('progressbar', { name: '研究目标分析进度' }))
+			.toHaveAttribute('aria-valuenow', '0');
+		await expect
+			.element(browserPage.getByRole('button', { name: '确认并分析' }))
+			.not.toBeInTheDocument();
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
 		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
 			document_ids: ['paper-1', 'paper-3']
@@ -294,8 +303,8 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
 				return jsonResponse({
 					collection_id: 'col_123',
-					objective: objective(),
-					active_analysis: null,
+					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
+					active_analysis: analysisState('queued'),
 					published_analysis: null,
 					warnings: []
 				});
@@ -313,7 +322,11 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect.element(browserPage.getByText('已选择 3 篇论文')).toBeInTheDocument();
 		await browserPage.getByRole('button', { name: '使用 3 篇论文开始分析' }).click();
 
-		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
+		await vi.waitFor(() => expect(goto).not.toHaveBeenCalled());
+		await expect
+			.element(browserPage.getByRole('dialog', { name: '确认分析论文范围' }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('等待系统开始分析')).toBeInTheDocument();
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
 		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
 			document_ids: ['paper-1', 'paper-2', 'paper-3']
@@ -352,7 +365,13 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				});
 			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
-				return jsonResponse({ collection_id: 'col_123', warnings: [] });
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 2 }),
+					active_analysis: { ...analysisState('queued'), analysis_version: 2 },
+					published_analysis: null,
+					warnings: []
+				});
 			}
 			throw new Error(`unexpected request: ${current.method} ${current.path}`);
 		});
@@ -363,7 +382,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			.element(browserPage.getByRole('dialog', { name: '确认分析论文范围' }))
 			.not.toBeInTheDocument();
 
-		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
+		await vi.waitFor(() => expect(goto).not.toHaveBeenCalled());
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
 		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({ document_ids: ['paper-3'] });
 	});
@@ -447,6 +466,50 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'How does heat treatment affect strength?' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
+	});
+
+	it('polls an active list row until Findings are published', async () => {
+		let analysisReads = 0;
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/objectives') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [
+						objective({ confirmation_status: 'confirmed', active_analysis_version: 1 })
+					]
+				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'GET') {
+				analysisReads += 1;
+				const completed = analysisReads > 1;
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: objective({
+						confirmation_status: 'confirmed',
+						active_analysis_version: 1,
+						published_analysis_version: completed ? 1 : null
+					}),
+					active_analysis: analysisState(completed ? 'succeeded' : 'running'),
+					published_analysis: completed ? analysisState('succeeded') : null,
+					warnings: []
+				});
+			}
+			throw new Error(`unexpected request: ${current.method} ${current.path}`);
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('正在逐篇提取相关证据')).toBeInTheDocument();
+		await new Promise((resolve) => setTimeout(resolve, 2700));
+		await expect.element(browserPage.getByText('结果 v1')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: '查看 Findings' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
+		const completedReadCount = analysisReads;
+		expect(completedReadCount).toBeGreaterThanOrEqual(2);
+		await new Promise((resolve) => setTimeout(resolve, 2700));
+		expect(analysisReads).toBe(completedReadCount);
 	});
 
 	it('shows the published version without a second result lookup', async () => {

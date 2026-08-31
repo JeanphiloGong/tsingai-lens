@@ -18,6 +18,7 @@ from application.chat.capabilities import (
     CreateObjectiveCandidateArguments,
     CreateObjectiveCandidateCapability,
     GetCollectionContextCapability,
+    InspectDocumentSourcesCapability,
     InspectObjectiveAnalysisCapability,
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
@@ -40,6 +41,7 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.source import SourceBlock, SourceDocument, SourceFigure, SourceTable
 
 pytestmark = pytest.mark.anyio
 
@@ -223,6 +225,74 @@ class _PaperMapRepository:
             for item in self.paper_maps
             if selected is None or item.document_id in selected
         )
+
+
+class _SourceArtifactRepository:
+    def __init__(self) -> None:
+        self.document = SourceDocument(
+            document_id="paper-1",
+            document_order=0,
+            title="Energy input and tensile response",
+            text="",
+            blocks=(
+                SourceBlock(
+                    block_id="block-introduction",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text="Laser power and scan speed define the energy input.",
+                    block_order=1,
+                    page=1,
+                    heading_path="Introduction",
+                ),
+                SourceBlock(
+                    block_id="block-result",
+                    document_id="paper-1",
+                    block_type="paragraph",
+                    text="Elongation decreased as the combined energy input increased.",
+                    block_order=2,
+                    page=5,
+                    heading_path="Results / Tensile properties",
+                ),
+            ),
+            tables=(
+                SourceTable(
+                    table_id="table-2",
+                    document_id="paper-1",
+                    table_order=1,
+                    caption_text="Elongation under the tested process conditions",
+                    caption_block_id=None,
+                    page=5,
+                    heading_path="Results / Tensile properties",
+                    column_headers=("Condition", "Elongation (%)"),
+                    table_matrix=(("Low energy", "10.1"), ("High energy", "7.8")),
+                ),
+            ),
+            figures=(
+                SourceFigure(
+                    figure_id="figure-3",
+                    document_id="paper-1",
+                    figure_order=1,
+                    figure_label="Figure 3",
+                    caption_text="Elongation response for all samples.",
+                    caption_block_id=None,
+                    page=6,
+                    heading_path="Results / Tensile properties",
+                    image_path=None,
+                    image_mime_type=None,
+                    image_width=None,
+                    image_height=None,
+                    asset_sha256=None,
+                ),
+            ),
+        )
+
+    async def read_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SourceDocument | None:
+        assert collection_id == "col-1"
+        return self.document if document_id == self.document.document_id else None
 
 
 class _StartResearchProcessModel:
@@ -410,6 +480,47 @@ async def test_collection_context_is_bounded_and_uses_canonical_resource_refs() 
     assert result.resource_refs[0].resource_type == "collection"
     assert result.resource_refs[0].resource_id == "col-1"
     assert result.warnings == ("3 additional Objectives were omitted from this bounded result.",)
+
+
+async def test_document_source_inspection_returns_bounded_traceable_matches() -> None:
+    capability = InspectDocumentSourcesCapability(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceArtifactRepository(),
+    )
+
+    result = await capability.execute(
+        _context(),
+        capability.spec.input_model(
+            document_id="paper-1",
+            query="elongation",
+            offset=1,
+            limit=2,
+        ),
+    )
+
+    assert result.status.value == "succeeded"
+    assert result.data["document"] == {
+        "document_id": "paper-1",
+        "title": "Energy input and tensile response",
+    }
+    assert result.data["match_total"] == 3
+    assert result.data["offset"] == 1
+    assert result.data["limit"] == 2
+    assert result.data["next_offset"] is None
+    assert result.data["support_is_evidence"] is False
+    assert [item["source_ref"] for item in result.data["sources"]] == [
+        "table-2",
+        "figure-3",
+    ]
+    assert result.data["sources"][0]["content"].startswith(
+        "| Condition | Elongation (%) |"
+    )
+    assert [ref.resource_type for ref in result.resource_refs] == [
+        "document",
+        "source",
+        "source",
+    ]
+    assert "source_ref=table-2" in (result.resource_refs[1].href or "")
 
 
 async def test_research_process_projects_canonical_task_without_retry_internals() -> None:

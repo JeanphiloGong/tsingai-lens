@@ -6,6 +6,19 @@ export type ChatResourceRef = {
 	href: string | null;
 };
 
+export type ChatSourceContext = {
+	resource_ref: ChatResourceRef;
+	collection_id: string;
+	document_id: string;
+	document_title: string;
+	source_kind: string;
+	source_ref: string;
+	page: number | null;
+	quote: string;
+	heading_path: string | null;
+	quote_truncated: boolean;
+};
+
 export type ChatToolResult = {
 	tool_call_id: string;
 	status: 'succeeded' | 'queued' | 'failed';
@@ -26,6 +39,7 @@ export type ChatMessage = {
 	tool_name: string | null;
 	tool_arguments: Record<string, unknown> | null;
 	tool_result: ChatToolResult | null;
+	source_contexts: ChatSourceContext[];
 };
 
 export type ChatSession = {
@@ -98,7 +112,8 @@ export async function fetchChatTrajectory(sessionId: string) {
 export async function streamChatMessage(
 	sessionId: string,
 	message: string,
-	onTextDelta: (content: string) => void
+	onTextDelta: (content: string) => void,
+	sourceContexts: ChatSourceContext[] = []
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		method: 'POST',
@@ -107,7 +122,10 @@ export async function streamChatMessage(
 			Accept: 'text/event-stream',
 			'Content-Type': 'application/json'
 		},
-		body: JSON.stringify({ message })
+		body: JSON.stringify({
+			message,
+			...(sourceContexts.length ? { source_contexts: sourceContexts } : {})
+		})
 	});
 	if (!response.ok) await throwApiError(response);
 	if (!response.body) throw new Error('The research response stream is unavailable.');
@@ -161,6 +179,65 @@ export async function streamChatMessage(
 	if (buffer.trim()) consume(buffer);
 	if (turn === null) throw new Error('The research response ended before completion.');
 	return turn;
+}
+
+function sourceContextStorageKey(collectionId: string) {
+	return `lens.chatSourceContext.${collectionId}`;
+}
+
+export function storePendingChatSourceContext(context: ChatSourceContext) {
+	if (typeof window === 'undefined') return;
+	window.sessionStorage.setItem(
+		sourceContextStorageKey(context.collection_id),
+		JSON.stringify(context)
+	);
+}
+
+export function readPendingChatSourceContext(collectionId: string): ChatSourceContext | null {
+	if (typeof window === 'undefined') return null;
+	try {
+		const raw = window.sessionStorage.getItem(sourceContextStorageKey(collectionId));
+		const value = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+		const resource = value?.resource_ref as Record<string, unknown> | undefined;
+		if (
+			!value ||
+			value.collection_id !== collectionId ||
+			resource?.resource_type !== 'source' ||
+			typeof resource.resource_id !== 'string' ||
+			typeof value.document_id !== 'string' ||
+			typeof value.document_title !== 'string' ||
+			typeof value.source_kind !== 'string' ||
+			typeof value.source_ref !== 'string' ||
+			typeof value.quote !== 'string'
+		) {
+			clearPendingChatSourceContext(collectionId);
+			return null;
+		}
+		return {
+			resource_ref: {
+				resource_type: 'source',
+				resource_id: resource.resource_id,
+				href: typeof resource.href === 'string' ? resource.href : null
+			},
+			collection_id: collectionId,
+			document_id: value.document_id,
+			document_title: value.document_title,
+			source_kind: value.source_kind,
+			source_ref: value.source_ref,
+			page: typeof value.page === 'number' && value.page >= 1 ? value.page : null,
+			quote: value.quote,
+			heading_path: typeof value.heading_path === 'string' ? value.heading_path : null,
+			quote_truncated: value.quote_truncated === true
+		};
+	} catch {
+		clearPendingChatSourceContext(collectionId);
+		return null;
+	}
+}
+
+export function clearPendingChatSourceContext(collectionId: string) {
+	if (typeof window === 'undefined') return;
+	window.sessionStorage.removeItem(sourceContextStorageKey(collectionId));
 }
 
 export async function decideChatToolCall(

@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatSessionNotFoundError,
+    ChatSourceContextError,
 )
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
@@ -24,6 +25,7 @@ from controllers.schemas.chat.session import (
     ChatTurnRequest,
     ChatTurnResponse,
 )
+from domain.chat import ChatSourceContext
 
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
@@ -123,6 +125,7 @@ async def post_chat_message(
                 session_id,
                 user_id,
                 message=payload.message,
+                source_contexts=_source_contexts(payload),
             )
             return StreamingResponse(
                 _chat_event_stream(events),
@@ -136,6 +139,7 @@ async def post_chat_message(
             session_id,
             user_id,
             message=payload.message,
+            source_contexts=_source_contexts(payload),
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
@@ -148,7 +152,25 @@ async def post_chat_message(
                 "tool_call_id": exc.tool_call_id,
             },
         ) from exc
+    except ChatSourceContextError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "chat_source_context_invalid",
+                "message": str(exc),
+            },
+        ) from exc
     return _turn_response(turn)
+
+
+def _source_contexts(payload: ChatTurnRequest) -> tuple[ChatSourceContext, ...]:
+    try:
+        return tuple(
+            ChatSourceContext.from_mapping(item.model_dump())
+            for item in payload.source_contexts
+        )
+    except ValueError as exc:
+        raise ChatSourceContextError("selected Source context is invalid") from exc
 
 
 async def _chat_event_stream(

@@ -5,13 +5,16 @@
 	import { errorMessage } from '../../../_shared/api';
 	import {
 		createChatSession,
+		clearPendingChatSourceContext,
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
+		readPendingChatSourceContext,
 		streamChatMessage,
 		type ChatMessage,
 		type ChatResourceRef,
 		type ChatSession,
+		type ChatSourceContext,
 		type ChatToolCall,
 		type ChatTurn
 	} from '../../../_shared/chatSessions';
@@ -55,6 +58,7 @@
 	let error = '';
 	let notice = '';
 	let input = '';
+	let pendingSourceContext: ChatSourceContext | null = null;
 	let loadedCollectionId = '';
 
 	$: collectionId = $page.params.id ?? '';
@@ -151,6 +155,7 @@
 		error = '';
 		notice = '';
 		pendingApproval = null;
+		pendingSourceContext = readPendingChatSourceContext(activeCollectionId);
 		if (!requestedSessionId) clearLegacySessionStorage();
 		history = readHistory();
 
@@ -212,10 +217,12 @@
 		const text = nextText.trim();
 		if (!session || !text || sending || deciding || pendingApproval) return;
 		const activeSession = session;
+		const activeCollectionId = collectionId;
 		const previousMessageCount = messages.length;
 		const optimisticId = `local-${Date.now()}`;
 		const streamingId = `local-stream-${Date.now()}`;
 		const createdAt = new Date().toISOString();
+		const sourceContexts = pendingSourceContext ? [pendingSourceContext] : [];
 		const optimisticMessage: ChatMessage = {
 			message_id: optimisticId,
 			session_id: activeSession.session_id,
@@ -225,7 +232,8 @@
 			tool_call_id: null,
 			tool_name: null,
 			tool_arguments: null,
-			tool_result: null
+			tool_result: null,
+			source_contexts: sourceContexts
 		};
 		const streamingMessage: ChatMessage = {
 			...optimisticMessage,
@@ -239,14 +247,23 @@
 		error = '';
 		notice = '';
 		try {
-			const turn = await streamChatMessage(activeSession.session_id, text, (content) => {
-				messages = messages.map((message) =>
-					message.message_id === streamingId
-						? { ...message, content: `${message.content}${content}` }
-						: message
-				);
-			});
+			const turn = await streamChatMessage(
+				activeSession.session_id,
+				text,
+				(content) => {
+					messages = messages.map((message) =>
+						message.message_id === streamingId
+							? { ...message, content: `${message.content}${content}` }
+							: message
+					);
+				},
+				sourceContexts
+			);
 			applyTurn(turn, [optimisticId, streamingId]);
+			if (sourceContexts.length) {
+				clearPendingChatSourceContext(activeCollectionId);
+				pendingSourceContext = null;
+			}
 		} catch (err) {
 			try {
 				const trajectory = await fetchChatTrajectory(activeSession.session_id);
@@ -269,6 +286,11 @@
 		} finally {
 			sending = false;
 		}
+	}
+
+	function removePendingSourceContext() {
+		clearPendingChatSourceContext(collectionId);
+		pendingSourceContext = null;
 	}
 
 	function applyTurn(
@@ -593,6 +615,14 @@
 		);
 	}
 
+	function sourceContextHref(source: ChatSourceContext): `/collections/${string}` {
+		const documentPath = `/collections/${source.collection_id}/documents/${source.document_id}`;
+		const href = source.resource_ref.href;
+		return href?.startsWith(documentPath)
+			? (href as `/collections/${string}`)
+			: (documentPath as `/collections/${string}`);
+	}
+
 	function resourceLabel(resourceType: string) {
 		switch (resourceType) {
 			case 'collection':
@@ -796,6 +826,22 @@
 							<article class="user-message">
 								<div>
 									<time>{formatTime(message.created_at)}</time>
+									{#if message.source_contexts.length}
+										{#each message.source_contexts as source (`${source.document_id}:${source.source_ref}`)}
+											<a class="message-source" href={resolve(sourceContextHref(source))}>
+												<strong>{source.document_title}</strong>
+												<small>
+													{source.heading_path ?? source.source_kind}
+													{#if source.page}
+														· {$t('workbench.pageLabel', { page: source.page })}{/if}
+												</small>
+												{#if source.quote_truncated}
+													<small>{$t('researchAgent.sourceContext.truncated')}</small>
+												{/if}
+												<span>{source.quote}</span>
+											</a>
+										{/each}
+									{/if}
 									<p>{message.content}</p>
 								</div>
 							</article>
@@ -975,6 +1021,29 @@
 		</div>
 
 		<form class="composer" on:submit|preventDefault={() => sendMessage()}>
+			{#if pendingSourceContext}
+				<div class="source-context-preview" data-testid="pending-source-context">
+					<div>
+						<strong>{pendingSourceContext.document_title}</strong>
+						<small>
+							{pendingSourceContext.heading_path ?? pendingSourceContext.source_kind}
+							{#if pendingSourceContext.page}
+								· {$t('workbench.pageLabel', { page: pendingSourceContext.page })}{/if}
+						</small>
+						{#if pendingSourceContext.quote_truncated}
+							<small>{$t('researchAgent.sourceContext.truncated')}</small>
+						{/if}
+						<p>{pendingSourceContext.quote}</p>
+					</div>
+					<button
+						type="button"
+						class="remove-source-context"
+						aria-label={$t('researchAgent.sourceContext.remove')}
+						title={$t('researchAgent.sourceContext.remove')}
+						on:click={removePendingSourceContext}>×</button
+					>
+				</div>
+			{/if}
 			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
 			<textarea
 				id="research-agent-message"
@@ -1326,6 +1395,34 @@
 		overflow-wrap: anywhere;
 	}
 
+	.message-source {
+		display: grid;
+		gap: 3px;
+		margin-bottom: 7px;
+		padding: 10px 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		text-align: left;
+		text-decoration: none;
+	}
+
+	.message-source small {
+		color: var(--text-tertiary);
+	}
+
+	.message-source span {
+		display: -webkit-box;
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+	}
+
 	.assistant-message {
 		display: grid;
 		grid-template-columns: 36px minmax(0, 1fr);
@@ -1664,6 +1761,59 @@
 		font: inherit;
 		line-height: 22px;
 		resize: vertical;
+	}
+
+	.source-context-preview {
+		display: grid;
+		grid-column: 1 / -1;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 12px;
+		padding: 10px 12px;
+		border: 1px solid var(--brand-border);
+		border-radius: 6px;
+		background: var(--brand-soft);
+	}
+
+	.source-context-preview > div {
+		min-width: 0;
+	}
+
+	.source-context-preview strong,
+	.source-context-preview small {
+		display: block;
+	}
+
+	.source-context-preview small {
+		margin-top: 2px;
+		color: var(--text-tertiary);
+	}
+
+	.source-context-preview p {
+		display: -webkit-box;
+		margin: 5px 0 0;
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+	}
+
+	.composer .remove-source-context {
+		width: 30px;
+		height: 30px;
+		min-width: 30px;
+		min-height: 30px;
+		align-self: start;
+		padding: 0;
+		border: 1px solid var(--border-default);
+		border-radius: 50%;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 20px;
+		font-weight: 400;
+		line-height: 1;
 	}
 
 	.composer textarea:focus {

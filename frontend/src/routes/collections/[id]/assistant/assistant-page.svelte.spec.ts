@@ -117,6 +117,7 @@ function message(
 		tool_name: null,
 		tool_arguments: null,
 		tool_result: null,
+		source_contexts: [],
 		...overrides
 	};
 }
@@ -199,11 +200,114 @@ async function send(text: string) {
 describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
 		localStorage.clear();
+		sessionStorage.clear();
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
+	});
+
+	it('reviews a document Source context before sending it with the user message', async () => {
+		const sourceContext = {
+			resource_ref: {
+				resource_type: 'source',
+				resource_id: 'doc_1:results',
+				href: '/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=results&page=3'
+			},
+			collection_id: 'col_123',
+			document_id: 'doc_1',
+			document_title: 'Paper A',
+			source_kind: 'paragraph',
+			source_ref: 'results',
+			page: 3,
+			quote: 'Conductivity improved to 12 mS/cm under EIS.',
+			heading_path: 'Results',
+			quote_truncated: true
+		};
+		sessionStorage.setItem('lens.chatSourceContext.col_123', JSON.stringify(sourceContext));
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_source_user', 'user', 'What does this result support?', {
+						source_contexts: [sourceContext]
+					}),
+					message('msg_source_answer', 'assistant', 'It reports a measured conductivity result.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		const composer = await renderReady();
+		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Excerpt shortened · open the Source for the complete content')
+			)
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input as string | URL | Request).endsWith('/messages') &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toHaveLength(0);
+
+		await composer.fill('What does this result support?');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect
+			.poll(() => {
+				const call = fetchMock.mock.calls.find(
+					([input, init]) =>
+						requestPath(input as string | URL | Request).endsWith('/messages') &&
+						requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+				);
+				return call ? requestBody(call[0], call[1]) : null;
+			})
+			.toEqual({
+				message: 'What does this result support?',
+				source_contexts: [sourceContext]
+			});
+		await expect
+			.element(browserPage.getByText('It reports a measured conductivity result.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		expect(sessionStorage.getItem('lens.chatSourceContext.col_123')).toBeNull();
+	});
+
+	it('lets the researcher remove handed-off Source context before sending', async () => {
+		sessionStorage.setItem(
+			'lens.chatSourceContext.col_123',
+			JSON.stringify({
+				resource_ref: {
+					resource_type: 'source',
+					resource_id: 'doc_1:results',
+					href: '/collections/col_123/documents/doc_1?source_ref=results'
+				},
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'Paper A',
+				source_kind: 'paragraph',
+				source_ref: 'results',
+				page: 3,
+				quote: 'Conductivity improved to 12 mS/cm under EIS.',
+				heading_path: 'Results',
+				quote_truncated: false
+			})
+		);
+		installApi();
+
+		await renderReady();
+		await browserPage.getByRole('button', { name: 'Remove source context' }).click();
+
+		await expect.element(browserPage.getByText('Paper A', { exact: true })).not.toBeInTheDocument();
+		expect(sessionStorage.getItem('lens.chatSourceContext.col_123')).toBeNull();
 	});
 
 	it('handles ordinary conversation without showing capability activity', async () => {

@@ -9,6 +9,7 @@ import json
 from typing import Any, Mapping
 
 from domain.chat.tool_call import ChatToolResult, _arguments, _required_text
+from domain.chat.source_context import ChatSourceContext
 
 
 class ChatMessageRole(StrEnum):
@@ -28,6 +29,7 @@ class ChatMessage:
     tool_name: str | None = None
     tool_arguments: Mapping[str, Any] | None = None
     tool_result: ChatToolResult | None = None
+    source_contexts: tuple[ChatSourceContext, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -42,6 +44,9 @@ class ChatMessage:
         )
         content = str(self.content or "").strip()
         object.__setattr__(self, "content", content)
+        object.__setattr__(self, "source_contexts", tuple(self.source_contexts))
+        if self.role is not ChatMessageRole.USER and self.source_contexts:
+            raise ValueError("only user messages may carry source contexts")
         if self.role is ChatMessageRole.USER and not content:
             raise ValueError("user message content cannot be empty")
         if self.role is ChatMessageRole.ASSISTANT:
@@ -66,8 +71,16 @@ class ChatMessage:
         session_id: str,
         content: str,
         created_at: str,
+        source_contexts: tuple[ChatSourceContext, ...] = (),
     ) -> "ChatMessage":
-        return cls(message_id, session_id, ChatMessageRole.USER, content, created_at)
+        return cls(
+            message_id,
+            session_id,
+            ChatMessageRole.USER,
+            content,
+            created_at,
+            source_contexts=source_contexts,
+        )
 
     @classmethod
     def assistant(
@@ -143,6 +156,10 @@ class ChatMessage:
                 if isinstance(result_payload, Mapping)
                 else None
             ),
+            source_contexts=tuple(
+                ChatSourceContext.from_mapping(item)
+                for item in payload.get("source_contexts") or ()
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -162,6 +179,7 @@ class ChatMessage:
             "tool_result": (
                 self.tool_result.to_record() if self.tool_result is not None else None
             ),
+            "source_contexts": [item.to_record() for item in self.source_contexts],
         }
 
 

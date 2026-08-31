@@ -8,9 +8,14 @@
 		type DocumentContentResponse,
 		type DocumentMarkdownResponse,
 		type DocumentMarkdownSourceMapItem,
+		type DocumentSourceSelection,
 		type DocumentWorkbenchModel,
 		type SourceAnchor
 	} from '../../../../_shared/documents';
+	import {
+		storePendingChatSourceContext,
+		type ChatSourceContext
+	} from '../../../../_shared/chatSessions';
 	import { t } from '../../../../_shared/i18n';
 	import MarkdownPaperReader from './_components/MarkdownPaperReader.svelte';
 	import PaperReader from './_components/PaperReader.svelte';
@@ -81,7 +86,8 @@
 		});
 		if (!content && !markdown?.markdown) {
 			const failure = contentResult.status === 'rejected' ? contentResult.reason : markdownResult;
-			loadError = failure instanceof Error ? failure.message : $t('workbench.sourceContentUnavailableBody');
+			loadError =
+				failure instanceof Error ? failure.message : $t('workbench.sourceContentUnavailableBody');
 		}
 		applyRequestedSource();
 		appliedRequestKey = requestKey;
@@ -137,6 +143,37 @@
 
 	function showPdfPreview() {
 		readerMode = 'pdf-preview';
+	}
+
+	function handSourceToResearchAgent(selection: DocumentSourceSelection) {
+		if (!browser || !model) return;
+		const sourceRef = selection.source_ref.trim();
+		const sourceQuote = selection.quote.trim();
+		if (!sourceRef || !sourceQuote) return;
+		const sourceUrl = new URL(
+			`/collections/${collectionId}/documents/${documentId}`,
+			window.location.origin
+		);
+		sourceUrl.searchParams.set('view', 'parsed-paper');
+		sourceUrl.searchParams.set('source_ref', sourceRef);
+		if (selection.page) sourceUrl.searchParams.set('page', String(selection.page));
+		const context: ChatSourceContext = {
+			resource_ref: {
+				resource_type: 'source',
+				resource_id: `${documentId}:${sourceRef}`,
+				href: `${sourceUrl.pathname}${sourceUrl.search}`
+			},
+			collection_id: collectionId,
+			document_id: documentId,
+			document_title: model.title,
+			source_kind: selection.source_kind,
+			source_ref: sourceRef,
+			page: selection.page,
+			quote: sourceQuote.slice(0, 6000),
+			heading_path: selection.heading_path,
+			quote_truncated: sourceQuote.length > 6000
+		};
+		storePendingChatSourceContext(context);
 	}
 
 	function positivePageParam(rawValue: string | null) {
@@ -257,11 +294,13 @@
 			<section class="reader-surface">
 				{#if readerMode === 'parsed-paper' && hasMarkdown}
 					<MarkdownPaperReader
-						markdown={markdown}
+						{markdown}
 						sourceFileUrl={model.sourceFileUrl}
 						activeSourceRef={requestedSourceRef}
 						activeSourceQuote={requestedSourceQuote}
 						activeSourceSpan={selectedSourceSpan}
+						{collectionId}
+						onAskSource={handSourceToResearchAgent}
 						onShowPdf={showPdfPreview}
 					/>
 				{:else}
@@ -274,6 +313,8 @@
 						activeSourceSpanId={selectedSourceSpanId}
 						activeSourceAnchor={selectedSourceAnchor}
 						{sourceJumpToken}
+						{collectionId}
+						onAskSource={handSourceToResearchAgent}
 						onSelectSourceSpan={selectSourceSpan}
 					/>
 				{/if}

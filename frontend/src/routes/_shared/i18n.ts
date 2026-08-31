@@ -229,6 +229,10 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
 			sending: 'Sending...',
+			sourceContext: {
+				remove: 'Remove source context',
+				truncated: 'Excerpt shortened · open the Source for the complete content'
+			},
 			suggestions: {
 				overview: 'What does this collection contain?',
 				findings: 'What published findings are available?',
@@ -1888,6 +1892,7 @@ const translations: Record<Language, Translations> = {
 			fitWidth: 'Fit width',
 			searchSource: 'Search source',
 			downloadSource: 'Download source',
+			askResearchAgent: 'Ask research assistant',
 			pdfLoading: 'Loading PDF pages...',
 			pdfLoadFailed: 'The PDF could not be rendered in the browser.',
 			pdfPageRenderError: 'Page render failed',
@@ -2622,6 +2627,10 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
 			sending: '发送中...',
+			sourceContext: {
+				remove: '移除原文上下文',
+				truncated: '摘录已缩短 · 完整内容请打开原文'
+			},
 			suggestions: {
 				overview: '这个集合里包含什么？',
 				findings: '目前有哪些已发布的研究发现？',
@@ -4208,6 +4217,7 @@ const translations: Record<Language, Translations> = {
 			fitWidth: '适配宽度',
 			searchSource: '搜索原文',
 			downloadSource: '下载原文',
+			askResearchAgent: '询问研究助手',
 			pdfLoading: '正在加载 PDF 页面...',
 			pdfLoadFailed: '浏览器无法渲染该 PDF。',
 			pdfPageRenderError: '页面渲染失败',

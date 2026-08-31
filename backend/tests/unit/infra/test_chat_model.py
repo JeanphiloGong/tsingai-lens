@@ -11,7 +11,7 @@ from application.chat.model import (
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
 )
-from domain.chat import ChatMessage, ToolRisk
+from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ToolRisk
 from infra.llm.chat_model import OpenAIChatModel
 
 
@@ -128,6 +128,47 @@ def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
     assert request["messages"][0]["role"] == "system"
     assert request["messages"][1] == {"role": "user", "content": "你好"}
     assert "tools" not in request
+
+
+def test_openai_chat_model_marks_selected_source_as_unverified_context() -> None:
+    client, completions = _client(_completion(content="This passage reports one measured result."))
+    model = OpenAIChatModel(client=client, model="test-model")
+    message = ChatMessage.user(
+        message_id="msg-source",
+        session_id="chat-1",
+        content="What does this passage support?",
+        created_at="2026-08-31T00:00:00+00:00",
+        source_contexts=(
+            ChatSourceContext(
+                resource_ref=ChatResourceRef(
+                    resource_type="source",
+                    resource_id="doc-1:results",
+                    href=(
+                        "/collections/col-1/documents/doc-1"
+                        "?view=parsed-paper&source_ref=results&page=3"
+                    ),
+                ),
+                collection_id="col-1",
+                document_id="doc-1",
+                document_title="Paper A",
+                source_kind="paragraph",
+                source_ref="results",
+                page=3,
+                quote="Conductivity improved to 12 mS/cm under EIS.",
+                heading_path="Results",
+            ),
+        ),
+    )
+
+    model.respond(messages=(message,), tool_specs=())
+
+    provider_content = completions.calls[0]["messages"][1]["content"]
+    assert "USER-SELECTED SOURCE CONTEXT" in provider_content
+    assert "not yet verified Evidence" in provider_content
+    assert '"document_id":"doc-1"' in provider_content
+    assert '"source_ref":"results"' in provider_content
+    assert "Conductivity improved to 12 mS/cm under EIS." in provider_content
+    assert provider_content.endswith("What does this passage support?")
 
 
 def test_openai_chat_model_parses_one_typed_tool_call() -> None:

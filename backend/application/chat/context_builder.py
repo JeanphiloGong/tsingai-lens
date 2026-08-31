@@ -73,6 +73,10 @@ class ChatContextBuilder:
         if message.role is ChatMessageRole.ASSISTANT and message.tool_call_id:
             model_message["tool_name"] = message.tool_name
             model_message["tool_arguments"] = dict(message.tool_arguments or {})
+        if message.source_contexts:
+            model_message["source_contexts"] = [
+                item.to_record() for item in message.source_contexts
+            ]
         return len(
             json.dumps(
                 model_message,

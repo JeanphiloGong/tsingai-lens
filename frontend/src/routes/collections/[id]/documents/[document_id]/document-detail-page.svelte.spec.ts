@@ -75,6 +75,7 @@ let scrollIntoViewMock: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewO
 
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
+		sessionStorage.clear();
 		setPage({
 			params: { id: 'col_123', document_id: 'doc_1' },
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
@@ -349,6 +350,59 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
+	});
+
+	it('hands a traceable parsed-paper Source to the collection research assistant', async () => {
+		render(Page);
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		const action = document.querySelector<HTMLAnchorElement>(
+			'[data-testid="ask-research-agent-source-results"]'
+		);
+		expect(action).not.toBeNull();
+		action?.addEventListener('click', (event) => event.preventDefault(), { capture: true });
+		action?.click();
+
+		expect(action?.getAttribute('href')).toBe('/collections/col_123/assistant');
+		expect(JSON.parse(sessionStorage.getItem('lens.chatSourceContext.col_123') ?? 'null')).toEqual({
+			resource_ref: {
+				resource_type: 'source',
+				resource_id: 'doc_1:results',
+				href: '/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=results&page=3'
+			},
+			collection_id: 'col_123',
+			document_id: 'doc_1',
+			document_title: 'Paper A',
+			source_kind: 'paragraph',
+			source_ref: 'results',
+			page: 3,
+			quote: 'Conductivity improved to 12 mS/cm under EIS.',
+			heading_path: 'Results',
+			quote_truncated: false
+		});
+		expect(
+			fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+		).toBe(false);
+	});
+
+	it('hands an entire source-mapped table to the Agent as readable Markdown', async () => {
+		render(Page);
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		const action = document.querySelector<HTMLAnchorElement>(
+			'[data-testid="ask-research-agent-source-table-1"]'
+		);
+		expect(action).not.toBeNull();
+		action?.addEventListener('click', (event) => event.preventDefault(), { capture: true });
+		action?.click();
+
+		const context = JSON.parse(sessionStorage.getItem('lens.chatSourceContext.col_123') ?? 'null');
+		expect(context.source_kind).toBe('table');
+		expect(context.source_ref).toBe('table-1');
+		expect(context.quote).toBe(
+			'| Sample | Mechanical properties > Yield strength (MPa) | Mechanical properties > Elongation (%) |\n' +
+				'| --- | --- | --- |\n' +
+				'| as-SLM | 920 | 8.4 |\n' +
+				'| HIP-SLM | 975 | 12.4 |'
+		);
 	});
 
 	it('renders the paper reading workbench without a synthetic local graph', async () => {

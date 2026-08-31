@@ -70,10 +70,14 @@ The selected session ID and a small presentation-only history are stored under:
 ```text
 lens.chatSession.{collection_id}
 lens.chatSessionHistory.{collection_id}
+lens.chatSourceContext.{collection_id}
 ```
 
-The server trajectory is authoritative. Browser storage only remembers which
-session to load and how to label it in the local history list.
+The server trajectory is authoritative. Browser storage remembers which
+session to load, how to label it in the local history list, and one pending
+Source handoff from the document reader. The pending Source is shown above the
+composer and can be removed. It is cleared after the complete persisted turn
+returns; the durable user message then owns the Source context.
 
 ## Visible States
 
@@ -84,6 +88,20 @@ and focused Objective proposals. A greeting or general conversational response
 is rendered incrementally as a normal assistant message with no fake capability
 activity. A stable response cursor occupies the assistant row before the first
 text delta; it does not create a stored partial message.
+
+### Document Source handoff
+
+Source-mapped paragraphs, list items, figures, tables, and parsed-source blocks
+offer an action to ask the Research Agent. The handoff opens the Agent for the
+same Collection and preserves the document, Source kind/reference, page,
+heading, canonical return link, bounded quote, and any explicit shortened-quote
+state. The user reviews that
+context and writes the actual question before sending it.
+
+The selected Source is context, not Evidence. Opening the Agent creates no Core
+record, and Agent prose cannot become Evidence or a Finding without a later
+explicit, grounded workflow. Any write capability remains subject to the same
+exact-argument approval contract.
 
 ### Capability activity
 
@@ -162,6 +180,8 @@ The focused browser suite covers:
 11. a visible mobile composer across consecutive turns and reduced viewport
     height;
 12. text visible before the final persisted turn arrives.
+13. one document Source handed to the same Collection Agent, removable before
+    submission and persisted only with the sent user message.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

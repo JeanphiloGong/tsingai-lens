@@ -118,6 +118,14 @@ export type WorkbenchPdfPage = {
 	source_span_ids: string[];
 };
 
+export type DocumentSourceSelection = {
+	source_kind: string;
+	source_ref: string;
+	page: number | null;
+	quote: string;
+	heading_path: string | null;
+};
+
 export type DocumentWorkbenchModel = {
 	collection_id: string;
 	document_id: string;

@@ -14,6 +14,7 @@ from application.chat.capabilities import AgentContext
 from domain.chat import (
     ChatMessage,
     ChatSession,
+    ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
@@ -33,6 +34,10 @@ class ChatSessionNotFoundError(FileNotFoundError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(f"chat session not found: {session_id}")
+
+
+class ChatSourceContextError(ValueError):
+    pass
 
 
 class ChatApprovalPendingError(RuntimeError):
@@ -112,8 +117,10 @@ class ChatSessionService:
         user_id: str,
         *,
         message: str,
+        source_contexts: tuple[ChatSourceContext, ...] = (),
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
+        await self._validate_source_contexts(session, source_contexts)
         previous_messages = await self.repository.read_messages(session_id)
         pending = await self.get_pending_approval_for_user(session_id, user_id)
         if pending is not None:
@@ -122,6 +129,7 @@ class ChatSessionService:
             context=self._context(session),
             previous_messages=previous_messages,
             user_message=message,
+            source_contexts=source_contexts,
             checkpoint=self._trajectory_checkpoint(session),
         )
         return self._turn_record(result, previous_count=len(previous_messages))
@@ -132,8 +140,10 @@ class ChatSessionService:
         user_id: str,
         *,
         message: str,
+        source_contexts: tuple[ChatSourceContext, ...] = (),
     ) -> AsyncIterator[dict[str, Any]]:
         session = await self.get_session_for_user(session_id, user_id)
+        await self._validate_source_contexts(session, source_contexts)
         previous_messages = await self.repository.read_messages(session_id)
         pending = await self.get_pending_approval_for_user(session_id, user_id)
         if pending is not None:
@@ -155,6 +165,7 @@ class ChatSessionService:
                         context=self._context(session),
                         previous_messages=previous_messages,
                         user_message=message,
+                        source_contexts=source_contexts,
                         checkpoint=self._trajectory_checkpoint(session),
                         text_delta_callback=emit_text_delta,
                     )
@@ -191,6 +202,26 @@ class ChatSessionService:
                 yield event
 
         return events()
+
+    async def _validate_source_contexts(
+        self,
+        session: ChatSession,
+        source_contexts: tuple[ChatSourceContext, ...],
+    ) -> None:
+        if any(item.collection_id != session.collection_id for item in source_contexts):
+            raise ChatSourceContextError(
+                "source context does not belong to the Chat collection"
+            )
+        try:
+            for item in source_contexts:
+                await self.collection_service.get_document(
+                    session.collection_id,
+                    item.document_id,
+                )
+        except FileNotFoundError as exc:
+            raise ChatSourceContextError(
+                "source context document does not belong to the Chat collection"
+            ) from exc
 
     async def decide_tool_call_for_user(
         self,
@@ -315,5 +346,6 @@ class ChatSessionService:
 __all__ = [
     "ChatApprovalPendingError",
     "ChatSessionNotFoundError",
+    "ChatSourceContextError",
     "ChatSessionService",
 ]

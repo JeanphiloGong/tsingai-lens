@@ -15,7 +15,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260827_0039"
+HEAD_REVISION = "20260831_0040"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -69,9 +69,46 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             column["name"]
             for column in inspect(connection).get_columns("objective_analyses")
         }
+        assert "source_contexts" in {
+            column["name"]
+            for column in inspect(connection).get_columns("chat_messages")
+        }
 
         with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_existing_0039_database_adds_chat_source_context(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "migration-from-0039.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260827_0039")
+        connection.exec_driver_sql(
+            "ALTER TABLE chat_messages DROP COLUMN source_contexts"
+        )
+        assert "source_contexts" not in {
+            column["name"]
+            for column in inspect(connection).get_columns("chat_messages")
+        }
+
+        command.upgrade(config, "head")
+
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            HEAD_REVISION
+        )
+        assert "source_contexts" in {
+            column["name"]
+            for column in inspect(connection).get_columns("chat_messages")
+        }
 
     engine.dispose()
 

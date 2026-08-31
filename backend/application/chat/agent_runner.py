@@ -23,6 +23,7 @@ from application.chat.context_builder import ChatContextBuilder
 from application.chat.model import ChatModel
 from domain.chat import (
     ChatMessage,
+    ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
@@ -91,6 +92,7 @@ class ResearchAgentRunner:
         context: AgentContext,
         previous_messages: tuple[ChatMessage, ...],
         user_message: str,
+        source_contexts: tuple[ChatSourceContext, ...] = (),
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
@@ -101,6 +103,7 @@ class ResearchAgentRunner:
                 session_id=context.session_id,
                 content=user_message,
                 created_at=_now_iso(),
+                source_contexts=source_contexts,
             ),
         ]
         calls: list[ChatToolCall] = []

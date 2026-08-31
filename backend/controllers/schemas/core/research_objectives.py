@@ -8,6 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field
 ConfirmationStatus = Literal["candidate", "confirmed"]
 AnalysisStatus = Literal["queued", "running", "succeeded", "failed"]
 ObjectiveOrigin = Literal["system_discovered", "chat_assisted"]
+ObjectiveScopeClassification = Literal[
+    "likely_relevant",
+    "needs_inspection",
+    "confidently_out_of_scope",
+]
 EvidenceAttributionScope = Literal[
     "isolated_effect",
     "joint_effect",
@@ -102,6 +107,40 @@ class ObjectiveDiscoveryResponse(BaseModel):
     collection_id: str
     document_inputs: list[PreparedDocumentInputResponse]
     objectives: list[RankedObjectiveSummaryResponse]
+
+
+class ObjectiveScopeCountsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    likely_relevant: int = Field(..., ge=0)
+    needs_inspection: int = Field(..., ge=0)
+    confidently_out_of_scope: int = Field(..., ge=0)
+
+
+class ObjectiveScopeDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    classification: ObjectiveScopeClassification
+    reason: str
+    doc_role: str
+    map_status: str
+    map_limitations: list[str] = Field(default_factory=list)
+    support_basis: list[str] = Field(default_factory=list)
+    is_seed: bool = False
+
+
+class ObjectiveScopeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str
+    objective_id: str
+    counts: ObjectiveScopeCountsResponse
+    recommended_document_ids: list[str] = Field(default_factory=list)
+    review_document_ids: list[str] = Field(default_factory=list)
+    excluded_document_ids: list[str] = Field(default_factory=list)
+    decisions: list[ObjectiveScopeDecisionResponse] = Field(default_factory=list)
+    support_is_evidence: bool = False
 
 
 class ObjectiveAnalysisStateResponse(BaseModel):

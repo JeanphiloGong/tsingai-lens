@@ -26,6 +26,7 @@ from controllers.schemas.core.documents import (
     DocumentMarkdownResponse,
     DocumentProfileItemResponse,
     DocumentProfileListResponse,
+    DocumentType,
 )
 
 router = APIRouter(prefix="/collections", tags=["documents"])
@@ -128,6 +129,14 @@ async def list_collection_document_profiles(
             description="Case-insensitive title or source filename search",
         ),
     ] = "",
+    doc_type: Annotated[
+        DocumentType | None,
+        Query(description="Optional document-role classification filter"),
+    ] = None,
+    has_warnings: Annotated[
+        bool | None,
+        Query(description="Optional parsing-warning presence filter"),
+    ] = None,
 ) -> DocumentProfileListResponse:
     try:
         payload = await request.app.state.document_profile_service.list_document_profiles(
@@ -135,6 +144,8 @@ async def list_collection_document_profiles(
             offset=offset,
             limit=limit,
             query=query,
+            doc_type=doc_type,
+            has_warnings=has_warnings,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

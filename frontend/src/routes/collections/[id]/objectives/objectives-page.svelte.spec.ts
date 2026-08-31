@@ -102,6 +102,63 @@ function analysisState(status: 'queued' | 'running' | 'succeeded' | 'failed') {
 	};
 }
 
+function scopePreview({
+	recommended = ['paper-1', 'paper-3'],
+	review = [],
+	excluded = []
+}: {
+	recommended?: string[];
+	review?: string[];
+	excluded?: string[];
+} = {}) {
+	const decisions = [
+		...recommended.map((documentId) => ({
+			document_id: documentId,
+			classification: 'likely_relevant',
+			reason: 'mapped_research_scope',
+			doc_role: 'experimental',
+			map_status: 'sufficient',
+			map_limitations: [],
+			support_basis: [`relationship-${documentId}`],
+			is_seed: ['paper-1', 'paper-2'].includes(documentId)
+		})),
+		...review.map((documentId) => ({
+			document_id: documentId,
+			classification: 'needs_inspection',
+			reason: 'paper_map_incomplete',
+			doc_role: 'review',
+			map_status: 'insufficient_map',
+			map_limitations: ['Outcome coverage is incomplete.'],
+			support_basis: [],
+			is_seed: ['paper-1', 'paper-2'].includes(documentId)
+		})),
+		...excluded.map((documentId) => ({
+			document_id: documentId,
+			classification: 'confidently_out_of_scope',
+			reason: 'no_mapped_scope_match',
+			doc_role: 'experimental',
+			map_status: 'sufficient',
+			map_limitations: [],
+			support_basis: [],
+			is_seed: ['paper-1', 'paper-2'].includes(documentId)
+		}))
+	];
+	return {
+		collection_id: 'col_123',
+		objective_id: 'obj_heat_strength',
+		counts: {
+			likely_relevant: recommended.length,
+			needs_inspection: review.length,
+			confidently_out_of_scope: excluded.length
+		},
+		recommended_document_ids: recommended,
+		review_document_ids: review,
+		excluded_document_ids: excluded,
+		decisions,
+		support_is_evidence: false
+	};
+}
+
 describe('collections/[id]/objectives/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -113,12 +170,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 	});
 
 	it('shows an explicit empty state before Objective candidates exist', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
-			const path = new URL(String(input), 'http://localhost').pathname;
-			return path.endsWith('/documents')
-				? jsonResponse({ items: [] })
-				: jsonResponse({ collection_id: 'col_123', objectives: [] });
-		});
+		fetchMock.mockResolvedValue(jsonResponse({ collection_id: 'col_123', objectives: [] }));
 
 		render(Page);
 
@@ -132,9 +184,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: '检查文献' }))
 			.toHaveAttribute('href', '/collections/col_123/documents');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('confirms and queues analysis under the same Objective identity', async () => {
+	it('uses the recommended paper scope without opening the adjustment dialog', async () => {
 		const requests: Array<{ path: string; method: string }> = [];
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
@@ -169,6 +222,9 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({ collection_id: 'col_123', objectives: [objective()] });
 			}
+			if (current.path.endsWith('/obj_heat_strength/scope') && current.method === 'GET') {
+				return jsonResponse(scopePreview());
+			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -187,9 +243,11 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				browserPage.getByRole('heading', { name: 'How does heat treatment affect strength?' })
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('2 篇已选')).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('checkbox')).not.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: '确认并分析' }).click();
+		await expect
+			.element(browserPage.getByRole('dialog', { name: '确认分析论文范围' }))
+			.not.toBeInTheDocument();
 
 		await vi.waitFor(() => {
 			expect(requests).toContainEqual({
@@ -201,7 +259,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
 		expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
-			document_ids: ['paper-1', 'paper-2']
+			document_ids: ['paper-1', 'paper-3']
 		});
 	});
 
@@ -228,6 +286,11 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objectives: [objective(), secondObjective]
 				});
 			}
+			if (current.path.endsWith('/obj_heat_strength/scope') && current.method === 'GET') {
+				return jsonResponse(
+					scopePreview({ recommended: ['paper-1', 'paper-2'], review: ['paper-3'] })
+				);
+			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -241,16 +304,14 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 
 		render(Page);
-		await browserPage
-			.getByRole('button', { name: '编辑「How does heat treatment affect strength?」的论文范围' })
-			.click();
+		await browserPage.getByRole('button', { name: '调整范围' }).first().click();
 		await browserPage.getByLabelText('搜索可用论文').fill('laser');
 		await expect.element(browserPage.getByText('laser-review.pdf')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('待人工确认', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('strength.pdf')).not.toBeInTheDocument();
 		await browserPage.getByRole('checkbox', { name: 'laser-review.pdf' }).click();
-		await expect.element(browserPage.getByText('3 篇已选')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('1 篇已选')).toBeInTheDocument();
-		await browserPage.getByRole('button', { name: '确认并分析' }).first().click();
+		await expect.element(browserPage.getByText('已选择 3 篇论文')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '使用 3 篇论文开始分析' }).click();
 
 		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -297,8 +358,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		});
 
 		render(Page);
-		await expect.element(browserPage.getByText('1 篇已选')).toBeInTheDocument();
 		await browserPage.getByRole('button', { name: '重试分析' }).click();
+		await expect
+			.element(browserPage.getByRole('dialog', { name: '确认分析论文范围' }))
+			.not.toBeInTheDocument();
 
 		await vi.waitFor(() => expect(goto).toHaveBeenCalled());
 		const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -319,25 +382,29 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objectives: [objective({ seed_document_ids: [] })]
 				});
 			}
+			if (current.path.endsWith('/obj_heat_strength/scope') && current.method === 'GET') {
+				return jsonResponse(scopePreview({ recommended: [], review: ['paper-1'] }));
+			}
 			throw new Error(`unexpected request: ${current.method} ${current.path}`);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByText('0 篇已选')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '确认并分析' }).click();
+		await expect.element(browserPage.getByText('已选择 0 篇论文')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('请选择至少一篇论文。')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('请先选择至少一篇已准备论文，再开始分析。'))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: '确认并分析' })).toBeDisabled();
-		await expect.element(browserPage.getByRole('checkbox')).not.toBeInTheDocument();
+			.element(browserPage.getByRole('button', { name: '选择论文后开始分析' }))
+			.toBeDisabled();
+		await browserPage.getByRole('checkbox', { name: 'available.pdf' }).click();
+		await expect
+			.element(browserPage.getByRole('button', { name: '使用 1 篇论文开始分析' }))
+			.toBeEnabled();
 	});
 
 	it('shows active analysis progress instead of offering confirmation again', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
-			if (current.path.endsWith('/documents') && current.method === 'GET') {
-				return jsonResponse({ items: [] });
-			}
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({
 					collection_id: 'col_123',
@@ -366,17 +433,24 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 		render(Page);
 
-		await expect.element(browserPage.getByText('分析中 · 2/6')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('progressbar', { name: '研究目标分析进度' }))
+			.toHaveAttribute('aria-valuenow', '33');
+		await expect.element(browserPage.getByText('论文进度 2 / 6')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('正在逐篇提取相关证据')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: '确认并分析' }))
 			.not.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('link', { name: '查看状态' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: '查看状态' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'How does heat treatment affect strength?' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
 	});
 
 	it('shows the published version without a second result lookup', async () => {
-		fetchMock.mockImplementation(async (input: string | URL | Request) => {
-			const path = new URL(String(input), 'http://localhost').pathname;
-			if (path.endsWith('/documents')) return jsonResponse({ items: [] });
+		fetchMock.mockImplementation(async () => {
 			return jsonResponse({
 				collection_id: 'col_123',
 				objectives: [
@@ -395,6 +469,76 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: '查看 Findings' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it('prioritizes resumed work and paginates lower-ranked candidates', async () => {
+		const candidates = Array.from({ length: 8 }, (_, index) =>
+			objective({
+				objective_id: `obj-${index + 1}`,
+				question: `Candidate question ${index + 1}?`,
+				seed_document_ids: [`paper-${index + 1}`]
+			})
+		);
+		const published = objective({
+			objective_id: 'obj-published',
+			question: 'Published research question?',
+			confirmation_status: 'confirmed',
+			active_analysis_version: 2,
+			published_analysis_version: 2
+		});
+		fetchMock.mockResolvedValue(
+			jsonResponse({ collection_id: 'col_123', objectives: [...candidates, published] })
+		);
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('Published research question?')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Candidate question 5?')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Objectives 1–5 of 9')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Next' }).click();
+		await expect.element(browserPage.getByText('Candidate question 5?')).toBeInTheDocument();
+		await expect.element(browserPage.getByText(/Objectives 6/)).toBeInTheDocument();
+		await browserPage.getByLabelText('搜索研究目标').fill('Candidate question');
+		await expect.element(browserPage.getByText('Objectives 1–5 of 8')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Candidate question 1?')).toBeInTheDocument();
+	});
+
+	it('filters the complete Objective list by scientific text and workflow status', async () => {
+		const candidates = Array.from({ length: 7 }, (_, index) =>
+			objective({
+				objective_id: `obj-candidate-${index + 1}`,
+				question: `Candidate question ${index + 1}?`,
+				material_scope: index === 5 ? ['Ti-6Al-4V'] : ['316L'],
+				outcomes: index === 5 ? ['fatigue life'] : ['yield strength']
+			})
+		);
+		const published = objective({
+			objective_id: 'obj-published-fatigue',
+			question: 'How does heat treatment affect fatigue life?',
+			material_scope: ['Ti-6Al-4V'],
+			outcomes: ['fatigue life'],
+			confirmation_status: 'confirmed',
+			active_analysis_version: 2,
+			published_analysis_version: 2
+		});
+		fetchMock.mockResolvedValue(
+			jsonResponse({ collection_id: 'col_123', objectives: [...candidates, published] })
+		);
+
+		render(Page);
+		await browserPage.getByLabelText('搜索研究目标').fill('fatigue');
+		await browserPage.getByLabelText('分析状态').selectOptions('published');
+
+		await expect
+			.element(browserPage.getByText('How does heat treatment affect fatigue life?'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Candidate question 6?')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('找到 1 个研究目标')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '下一页' }))
+			.not.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '清除筛选' }).click();
+		await expect.element(browserPage.getByText('Candidate question 1?')).toBeInTheDocument();
 	});
 });

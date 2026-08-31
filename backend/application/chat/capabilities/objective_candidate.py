@@ -36,7 +36,8 @@ class CreateObjectiveCandidateCapability:
         description=(
             "Create one durable Research Objective candidate from an already reviewed "
             "focused draft. The candidate must have exactly one outcome. Seed papers, "
-            "when supplied, are a proposed inspection scope rather than Evidence. This "
+            "when supplied, record where the question came from rather than its full "
+            "analysis scope or Evidence. This "
             "write requires explicit backend approval and records the question as "
             "untested; it does not confirm the Objective or start analysis."
         ),

@@ -46,7 +46,7 @@ describe('documents shared helpers', () => {
 		});
 	});
 
-	it('sends bounded profile pagination and a trimmed collection-wide query', async () => {
+	it('sends bounded profile pagination and collection-wide search filters', async () => {
 		requestJson.mockResolvedValue({
 			collection_id: 'col_123',
 			total: 0,
@@ -55,10 +55,16 @@ describe('documents shared helpers', () => {
 			items: []
 		});
 
-		await fetchDocumentProfiles('col_123', { offset: 25, limit: 25, query: '  laser  ' });
+		await fetchDocumentProfiles('col_123', {
+			offset: 25,
+			limit: 25,
+			query: '  laser  ',
+			docType: 'review',
+			hasWarnings: true
+		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/documents/profiles?offset=25&limit=25&query=laser',
+			'/collections/col_123/documents/profiles?offset=25&limit=25&query=laser&doc_type=review&has_warnings=true',
 			{ method: 'GET' }
 		);
 	});

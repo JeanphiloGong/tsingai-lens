@@ -164,8 +164,8 @@ The production Research Agent currently exposes these automatic capabilities:
   does not persist, confirm, analyze, or publish a Core Objective;
 - `create_objective_candidate` is a `write` capability. After exact-argument
   approval, it creates one unconfirmed `chat_assisted` Core candidate. Optional
-  seed-document IDs record an untested paper-scope hypothesis, not support or
-  Evidence; an empty seed set is valid. The candidate has zero confidence until
+  seed-document IDs record where the question came from, not the complete
+  analysis scope, support, or Evidence; an empty seed set is valid. The candidate has zero confidence until
   Objective analysis tests it. It never confirms the Objective or starts
   analysis. Repeating the same approved tool call is idempotent;
 - `preview_research_scope` is a `read` capability. For one proposed material,
@@ -215,6 +215,7 @@ can be inspected.
 
 - `POST /api/v1/collections/{collection_id}/objective-discovery`
 - `GET /api/v1/collections/{collection_id}/objectives`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/scope`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
@@ -239,7 +240,8 @@ warnings, but only facts grounded in inspected Sources may populate Evidence.
 contain:
 
 - question and material/process/property/comparison scope;
-- seed and excluded document IDs as proposal scope, not Evidence;
+- seed document IDs as question provenance and explicit exclusions as scope
+  constraints, neither of which is Evidence;
 - `confirmation_status`: `candidate | confirmed`;
 - `active_analysis_version` and `published_analysis_version`;
 - `origin`: `system_discovered | chat_assisted`, plus Chat creator provenance
@@ -259,6 +261,21 @@ omitted), and each Objective contains its one-based `rank`. Rank is for
 researcher prioritization. Paper Maps and Source remain owned by their Documents
 rather than embedded in Objective list responses.
 
+`GET .../scope` is the read-only screening step between question formation and
+deep analysis. It applies the Objective's material, variables, and outcome to
+every current Collection Paper Map and returns each mapped Document exactly once
+as `likely_relevant`, `needs_inspection`, or
+`confidently_out_of_scope`. The response contains complete
+`recommended_document_ids`, `review_document_ids`, and
+`excluded_document_ids`, category counts, per-document reasons, Paper Map
+status/limitations, support basis, and `is_seed`. A relationship or review
+synthesis match is navigation support only; `support_is_evidence` is always
+false. Incomplete maps, partial matches, broad-variable uncertainty, and review
+citation leads require researcher inspection and are not selected by default.
+The endpoint performs no LLM call and persists no scope. An unknown Objective
+returns `404`; a Collection with no Paper Maps returns
+`409 objective_scope_not_ready`.
+
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
 `analysis_version`. It contains immutable selected `document_inputs`,
 pipeline/model/prompt lineage,
@@ -277,6 +294,10 @@ from prompt or response text.
 `POST .../analysis` accepts the same required `{"document_ids": [...]}` shape
 as discovery and expresses researcher approval of both the Objective definition
 and the selected ready-paper analysis scope.
+The browser obtains its default selection from `GET .../scope`'s complete
+`recommended_document_ids`; it never substitutes `seed_document_ids` for that
+screening result. The researcher may add a `needs_inspection` paper or override
+another decision before submitting the command.
 For a candidate, it atomically changes `confirmation_status` to `confirmed` and
 creates the next analysis version with `queued` status. For an already confirmed
 Objective, it creates or reuses the active analysis normally. The command returns
@@ -464,11 +485,14 @@ navigation. A Finding Evidence link names the owning document, stable
 `source_ref`, and page when available. Internal Source IDs are audit/navigation
 parameters, not visible paper titles.
 
-The document-profile list accepts `offset`, `limit`, and an optional `query`.
-`query` performs case-insensitive matching against the profile title and source
-filename before pagination. `total` is the number of matching profiles,
-`count` is the current page size, and `summary.total_documents` remains the
-complete profiled collection size.
+The document-profile list accepts `offset`, `limit`, and optional `query`,
+`doc_type`, and `has_warnings` filters. `query` performs case-insensitive
+matching against the profile title and source filename. `doc_type` accepts
+`experimental`, `review`, `mixed`, or `uncertain`; `has_warnings` filters by
+whether parsing warnings are present. All active criteria are combined before
+pagination. `total` is the number of matching profiles, `count` is the current
+page size, and `summary.total_documents` remains the complete profiled
+collection size.
 
 The browser comparison overview has no separate comparison aggregate endpoint.
 It reads the Objective list and each published Finding list described above.

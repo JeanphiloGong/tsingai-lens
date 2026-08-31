@@ -107,23 +107,30 @@ class DocumentProfileService:
         offset: int = 0,
         limit: int = 51,
         query: str | None = None,
+        doc_type: str | None = None,
+        has_warnings: bool | None = None,
     ) -> dict[str, Any]:
         profiles = await self.read_document_profiles(collection_id)
         summary = self.summarize_document_profiles(profiles)
         normalized_query = str(query or "").strip().casefold()
-        matched_profiles = (
-            tuple(
-                profile
-                for profile in profiles
-                if normalized_query
+        normalized_doc_type = str(doc_type or "").strip().casefold()
+        matched_profiles = tuple(
+            profile
+            for profile in profiles
+            if (
+                not normalized_query
+                or normalized_query
                 in " ".join(
                     value
                     for value in (profile.title, profile.source_filename)
                     if value
                 ).casefold()
             )
-            if normalized_query
-            else profiles
+            and (not normalized_doc_type or profile.doc_type == normalized_doc_type)
+            and (
+                has_warnings is None
+                or bool(profile.parsing_warnings) is has_warnings
+            )
         )
         items = [
             profile.to_record()

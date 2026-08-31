@@ -25,7 +25,6 @@
 	let documents: CollectionDocument[] = [];
 	let tasks: Task[] = [];
 	let objectiveList: ObjectiveList | null = null;
-	let selectedDocumentIds: string[] = [];
 	let selectedFiles: File[] = [];
 	let loading = false;
 	let uploadLoading = false;
@@ -36,22 +35,48 @@
 	let loadedCollectionId = '';
 	let fileInput: HTMLInputElement | null = null;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
 	let collectionId = '';
+
+	type PreparationProgressSummary = {
+		ready: number;
+		total: number;
+		active: number;
+		percent: number;
+		message: string;
+	};
+
 	$: readyDocuments = documents.filter((document) => document.status === 'ready');
-	$: pendingDocuments = documents.filter((document) =>
-		['stored', 'uploaded', 'failed'].includes(document.status)
+	$: activeTasks = tasks.filter(isTaskActive);
+	$: activeDocumentIds = new Set(
+		activeTasks
+			.map((task) => task.document_id)
+			.filter((documentId): documentId is string => Boolean(documentId))
 	);
-	$: processingDocuments = documents.filter((document) => document.status === 'processing');
-	$: selectedReadyCount = selectedDocumentIds.filter((documentId) =>
-		readyDocuments.some((document) => document.document_id === documentId)
-	).length;
+	$: processingDocuments = documents.filter(
+		(document) => document.status === 'processing' || activeDocumentIds.has(document.document_id)
+	);
+	$: attentionDocuments = documents.filter(
+		(document) =>
+			['stored', 'uploaded', 'failed'].includes(document.status) &&
+			!activeDocumentIds.has(document.document_id)
+	);
+	$: objectiveCount = objectiveList?.objectives.length ?? 0;
+	$: collectionStage = objectiveCount
+		? 'objectives'
+		: processingDocuments.length
+			? 'processing'
+			: attentionDocuments.length
+				? 'attention'
+				: readyDocuments.length
+					? 'ready'
+					: 'empty';
+	$: preparationProgress = buildPreparationProgress(documents, activeTasks);
+
 	const unsubscribePage = page.subscribe((currentPage) => {
 		const nextCollectionId = currentPage.params.id ?? '';
 		if (!nextCollectionId || nextCollectionId === loadedCollectionId) return;
 		collectionId = nextCollectionId;
 		loadedCollectionId = nextCollectionId;
-		selectedDocumentIds = [];
 		void refreshAll();
 	});
 
@@ -78,7 +103,7 @@
 			const refreshed = await Promise.all(active.map((task) => getTask(task.task_id)));
 			const refreshedById = new Map(refreshed.map((task) => [task.task_id, task]));
 			tasks = tasks.map((task) => refreshedById.get(task.task_id) ?? task);
-			await loadDocuments();
+			await Promise.all([loadDocuments(), loadObjectives()]);
 		} catch (err) {
 			error = errorMessage(err);
 		}
@@ -99,12 +124,7 @@
 	}
 
 	async function loadDocuments() {
-		const response = await listCollectionDocuments(collectionId);
-		documents = response.items;
-		const readyIds = new Set(
-			documents.filter((item) => item.status === 'ready').map((item) => item.document_id)
-		);
-		selectedDocumentIds = selectedDocumentIds.filter((documentId) => readyIds.has(documentId));
+		documents = (await listCollectionDocuments(collectionId)).items;
 	}
 
 	async function loadTasks() {
@@ -121,19 +141,6 @@
 
 	function taskFor(documentId: string) {
 		return tasks.find((task) => task.document_id === documentId) ?? null;
-	}
-
-	function toggleDocument(documentId: string) {
-		selectedDocumentIds = selectedDocumentIds.includes(documentId)
-			? selectedDocumentIds.filter((item) => item !== documentId)
-			: [...selectedDocumentIds, documentId];
-	}
-
-	function toggleAllReady() {
-		selectedDocumentIds =
-			selectedReadyCount === readyDocuments.length
-				? []
-				: readyDocuments.map((document) => document.document_id);
 	}
 
 	async function prepareDocuments(targets: CollectionDocument[]) {
@@ -158,12 +165,13 @@
 	}
 
 	async function discoverObjectives() {
-		if (!selectedReadyCount || discoveryLoading) return;
+		if (!readyDocuments.length || discoveryLoading) return;
 		discoveryLoading = true;
 		error = '';
 		notice = '';
 		try {
-			const result = await discoverCollectionObjectives(collectionId, selectedDocumentIds);
+			const documentIds = readyDocuments.map((document) => document.document_id);
+			const result = await discoverCollectionObjectives(collectionId, documentIds);
 			await loadObjectives();
 			notice = $t('overview.currentModel.discoveryComplete', { count: result.objectives.length });
 		} catch (err) {
@@ -197,55 +205,48 @@
 		return translated === key ? document.status : translated;
 	}
 
-	function taskProgress(document: CollectionDocument) {
-		const task = taskFor(document.document_id);
-		if (!task || !isTaskActive(task)) return '';
-		return task.progress_detail?.message || `${task.progress_percent}%`;
-	}
+	function buildPreparationProgress(
+		items: CollectionDocument[],
+		active: Task[]
+	): PreparationProgressSummary | null {
+		if (!active.length) return null;
 
-	function formatSize(size: number) {
-		if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
-		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+		const activeDocumentIds = new Set(
+			active
+				.map((task) => task.document_id)
+				.filter((documentId): documentId is string => Boolean(documentId))
+		);
+		const ready = items.filter(
+			(document) => document.status === 'ready' && !activeDocumentIds.has(document.document_id)
+		).length;
+		const total = Math.max(items.length, ready + active.length);
+		const activeProgress = active.reduce(
+			(sum, task) => sum + Math.max(0, Math.min(100, Number(task.progress_percent) || 0)) / 100,
+			0
+		);
+		const percent = Math.round(((ready + activeProgress) / total) * 100);
+		const message =
+			active.find((task) => task.progress_detail?.message)?.progress_detail?.message ?? '';
+
+		return {
+			ready,
+			total,
+			active: active.length,
+			percent: Math.max(0, Math.min(100, percent)),
+			message
+		};
 	}
 </script>
 
 <svelte:head><title>{$t('overview.title')}</title></svelte:head>
 
-<section class="workspace-page fade-up">
-	<header class="workspace-heading">
+<section class="overview-page fade-up">
+	<header class="overview-heading">
 		<div>
 			<h2>{$t('overview.currentModel.title')}</h2>
 			<p>{$t('overview.currentModel.lead')}</p>
 		</div>
-		<button class="btn btn--ghost" type="button" on:click={refreshAll} disabled={loading}>
-			{$t('overview.actions.refreshStatus')}
-		</button>
-	</header>
-
-	{#if error}<p class="state state--error" role="alert">{error}</p>{/if}
-	{#if notice}<p class="state" role="status" aria-live="polite">{notice}</p>{/if}
-
-	<div class="scope-summary" aria-label={$t('overview.currentModel.summaryLabel')}>
-		<div><strong>{documents.length}</strong><span>{$t('overview.currentModel.total')}</span></div>
-		<div>
-			<strong>{readyDocuments.length}</strong><span>{$t('overview.currentModel.ready')}</span>
-		</div>
-		<div>
-			<strong>{processingDocuments.length}</strong><span
-				>{$t('overview.currentModel.processing')}</span
-			>
-		</div>
-		<div>
-			<strong>{selectedReadyCount}</strong><span>{$t('overview.currentModel.selected')}</span>
-		</div>
-	</div>
-
-	<section class="action-band" aria-labelledby="collection-action-title">
-		<div>
-			<h3 id="collection-action-title">{$t('overview.currentModel.actionsTitle')}</h3>
-			<p>{$t('overview.currentModel.actionsLead')}</p>
-		</div>
-		<div class="actions">
+		<div class="header-actions">
 			<input
 				class="file-input"
 				bind:this={fileInput}
@@ -258,199 +259,257 @@
 			<button class="btn btn--ghost" type="button" on:click={() => fileInput?.click()}>
 				{$t('overview.actions.uploadDocuments')}
 			</button>
-			{#if selectedFiles.length}
-				<button class="btn btn--primary" type="button" on:click={upload} disabled={uploadLoading}>
-					{uploadLoading
-						? $t('documents.uploading')
-						: $t('overview.currentModel.uploadSelected', { count: selectedFiles.length })}
+			<button class="btn btn--ghost" type="button" on:click={refreshAll} disabled={loading}>
+				{$t('overview.actions.refreshStatus')}
+			</button>
+		</div>
+	</header>
+
+	{#if selectedFiles.length}
+		<div class="upload-selection" role="status">
+			<span>{$t('overview.currentModel.uploadReady', { count: selectedFiles.length })}</span>
+			<button
+				class="btn btn--primary btn--small"
+				type="button"
+				on:click={upload}
+				disabled={uploadLoading}
+			>
+				{uploadLoading
+					? $t('documents.uploading')
+					: $t('overview.currentModel.uploadSelected', { count: selectedFiles.length })}
+			</button>
+		</div>
+	{/if}
+
+	{#if error}<p class="state state--error" role="alert">{error}</p>{/if}
+	{#if notice}<p class="state state--notice" role="status" aria-live="polite">{notice}</p>{/if}
+
+	<section class={`research-state research-state--${collectionStage}`} aria-live="polite">
+		<div class="research-state__copy">
+			<span class="eyebrow">{$t('overview.currentModel.stateEyebrow')}</span>
+			<h3>{$t(`overview.currentModel.state.${collectionStage}.title`)}</h3>
+			<p>
+				{$t(`overview.currentModel.state.${collectionStage}.body`, {
+					papers: documents.length,
+					ready: readyDocuments.length,
+					processing: processingDocuments.length,
+					objectives: objectiveCount
+				})}
+			</p>
+			{#if preparationProgress}
+				<div
+					class="active-progress"
+					role="status"
+					aria-label={$t('overview.currentModel.preparationProgressTitle')}
+				>
+					<div class="active-progress__header">
+						<span>{$t('overview.currentModel.preparationProgressTitle')}</span>
+						<strong>{preparationProgress.percent}%</strong>
+					</div>
+					<div
+						class="active-progress__track"
+						role="progressbar"
+						aria-label={$t('overview.currentModel.preparationProgressTitle')}
+						aria-valuemin="0"
+						aria-valuemax="100"
+						aria-valuenow={preparationProgress.percent}
+						aria-valuetext={`${preparationProgress.percent}%`}
+					>
+						<span style={`width: ${preparationProgress.percent}%`}></span>
+					</div>
+					<div class="active-progress__meta">
+						<span>
+							{$t('overview.currentModel.preparationProgressReady', {
+								ready: preparationProgress.ready,
+								total: preparationProgress.total
+							})}
+						</span>
+						<span>
+							{$t('overview.currentModel.preparationProgressActive', {
+								count: preparationProgress.active
+							})}
+						</span>
+					</div>
+					{#if preparationProgress.message}<small>{preparationProgress.message}</small>{/if}
+				</div>
+			{/if}
+		</div>
+
+		<div class="research-state__actions">
+			{#if objectiveCount}
+				<a
+					class="btn btn--primary"
+					href={resolve('/collections/[id]/objectives', { id: collectionId })}
+				>
+					{$t('overview.currentModel.openObjectives')}
+				</a>
+			{:else if attentionDocuments.length}
+				<button
+					class="btn btn--primary"
+					type="button"
+					disabled={preparationLoading}
+					on:click={() => prepareDocuments(attentionDocuments)}
+				>
+					{$t('overview.currentModel.preparePending', { count: attentionDocuments.length })}
+				</button>
+			{:else if readyDocuments.length}
+				<button
+					class="btn btn--primary"
+					type="button"
+					disabled={discoveryLoading}
+					on:click={discoverObjectives}
+				>
+					{discoveryLoading
+						? $t('overview.currentModel.discovering')
+						: $t('overview.currentModel.discover', { count: readyDocuments.length })}
+				</button>
+			{:else if !documents.length}
+				<button class="btn btn--primary" type="button" on:click={() => fileInput?.click()}>
+					{$t('overview.actions.uploadDocuments')}
 				</button>
 			{/if}
-			<button
-				class="btn btn--ghost"
-				type="button"
-				disabled={!pendingDocuments.length || preparationLoading}
-				on:click={() => prepareDocuments(pendingDocuments)}
-			>
-				{$t('overview.currentModel.preparePending', { count: pendingDocuments.length })}
-			</button>
-			<button
-				class="btn btn--primary"
-				type="button"
-				disabled={!selectedReadyCount || discoveryLoading}
-				on:click={discoverObjectives}
-			>
-				{discoveryLoading
-					? $t('overview.currentModel.discovering')
-					: $t('overview.currentModel.discover', { count: selectedReadyCount })}
-			</button>
+
+			{#if !objectiveCount && readyDocuments.length && attentionDocuments.length}
+				<button
+					class="btn btn--ghost"
+					type="button"
+					on:click={discoverObjectives}
+					disabled={discoveryLoading}
+				>
+					{$t('overview.currentModel.discover', { count: readyDocuments.length })}
+				</button>
+			{/if}
 		</div>
 	</section>
 
-	<section class="document-scope" aria-labelledby="document-scope-title">
-		<header>
+	<div class="research-progress" aria-label={$t('overview.currentModel.summaryLabel')}>
+		<div class:complete={documents.length > 0}>
+			<span>1</span>
 			<div>
-				<h3 id="document-scope-title">{$t('overview.currentModel.documentsTitle')}</h3>
-				<p>{$t('overview.currentModel.documentsLead')}</p>
+				<strong>{$t('overview.currentModel.progress.collected')}</strong><small
+					>{documents.length}</small
+				>
 			</div>
-			<label class="select-all">
-				<input
-					type="checkbox"
-					checked={readyDocuments.length > 0 && selectedReadyCount === readyDocuments.length}
-					disabled={!readyDocuments.length}
-					on:change={toggleAllReady}
-				/>
-				{$t('overview.currentModel.selectAllReady')}
-			</label>
-		</header>
+		</div>
+		<div class:complete={readyDocuments.length > 0} class:active={processingDocuments.length > 0}>
+			<span>2</span>
+			<div>
+				<strong>{$t('overview.currentModel.progress.understood')}</strong><small
+					>{readyDocuments.length}</small
+				>
+			</div>
+		</div>
+		<div class:complete={objectiveCount > 0}>
+			<span>3</span>
+			<div>
+				<strong>{$t('overview.currentModel.progress.objectives')}</strong><small
+					>{objectiveCount}</small
+				>
+			</div>
+		</div>
+		<div>
+			<span>4</span>
+			<div><strong>{$t('overview.currentModel.progress.analysis')}</strong><small>--</small></div>
+		</div>
+	</div>
 
-		{#if loading}
-			<p class="state" aria-busy="true">{$t('overview.loading')}</p>
-		{:else if !documents.length}
-			<p class="state">{$t('overview.currentModel.empty')}</p>
-		{:else}
-			<div class="document-list">
-				{#each documents as document (document.document_id)}
-					<div class="document-row">
-						<label class="document-select" aria-label={$t('overview.currentModel.selectDocument')}>
-							<input
-								type="checkbox"
-								checked={selectedDocumentIds.includes(document.document_id)}
-								disabled={document.status !== 'ready'}
-								aria-label={`${$t('overview.currentModel.selectDocument')}: ${document.original_filename}`}
-								on:change={() => toggleDocument(document.document_id)}
-							/>
-						</label>
-						<div class="document-identity">
+	{#if attentionDocuments.length}
+		<details class="attention-panel">
+			<summary>
+				<span>
+					<strong
+						>{$t('overview.currentModel.attentionTitle', {
+							count: attentionDocuments.length
+						})}</strong
+					>
+					<small>{$t('overview.currentModel.attentionLead')}</small>
+				</span>
+			</summary>
+			<div class="attention-list">
+				{#each attentionDocuments as document (document.document_id)}
+					<div class="attention-row">
+						<div>
 							<strong>{document.original_filename}</strong>
-							<span>{formatSize(document.size_bytes)}</span>
-						</div>
-						<div class="document-state">
-							<span class={`status-mark status-mark--${document.status}`}>
-								{documentStatus(document)}
-							</span>
-							{#if taskProgress(document)}<small>{taskProgress(document)}</small>{/if}
+							<span>{documentStatus(document)}</span>
 							{#if taskFor(document.document_id)?.errors[0]}
 								<small class="failure">{taskFor(document.document_id)?.errors[0]}</small>
 							{/if}
 						</div>
-						<div class="row-actions">
-							{#if ['stored', 'uploaded', 'failed'].includes(document.status)}
-								<button
-									class="btn btn--ghost btn--small"
-									type="button"
-									disabled={preparationLoading}
-									on:click={() => prepareDocuments([document])}
-								>
-									{$t(
-										document.status === 'failed'
-											? 'overview.currentModel.retry'
-											: 'overview.currentModel.prepare'
-									)}
-								</button>
-							{:else if document.status === 'ready'}
-								<a
-									class="btn btn--ghost btn--small"
-									href={resolve('/collections/[id]/documents/[document_id]', {
-										id: collectionId,
-										document_id: document.document_id
-									})}
-								>
-									{$t('research.documents.openPaper')}
-								</a>
-							{/if}
-						</div>
+						<button
+							class="btn btn--ghost btn--small"
+							type="button"
+							disabled={preparationLoading}
+							on:click={() => prepareDocuments([document])}
+						>
+							{$t(
+								document.status === 'failed'
+									? 'overview.currentModel.retry'
+									: 'overview.currentModel.prepare'
+							)}
+						</button>
 					</div>
 				{/each}
 			</div>
-		{/if}
-	</section>
-
-	{#if objectiveList?.objectives.length}
-		<footer class="objective-link">
-			<span
-				>{$t('overview.currentModel.objectiveCount', {
-					count: objectiveList.objectives.length
-				})}</span
-			>
-			<a
-				class="btn btn--ghost"
-				href={resolve('/collections/[id]/objectives', { id: collectionId })}
-			>
-				{$t('overview.actions.enterObjectives')}
-			</a>
-		</footer>
+		</details>
 	{/if}
 </section>
 
 <style>
-	.workspace-page {
+	.overview-page {
 		width: min(1120px, 100%);
 		margin: 0 auto;
 		display: grid;
-		gap: 22px;
-	}
-	.workspace-heading,
-	.document-scope > header,
-	.objective-link {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
 		gap: 20px;
 	}
+
+	.overview-heading,
+	.header-actions,
+	.upload-selection,
+	.research-state,
+	.research-state__actions,
+	.active-progress,
+	.attention-row {
+		display: flex;
+		align-items: center;
+	}
+
+	.overview-heading,
+	.research-state,
+	.attention-row {
+		justify-content: space-between;
+	}
+
+	.overview-heading {
+		align-items: flex-start;
+		gap: 20px;
+		padding-bottom: 16px;
+		border-bottom: 1px solid var(--border-default);
+	}
+
 	h2,
 	h3,
 	p {
 		margin: 0;
 	}
-	.workspace-heading p,
-	.action-band p,
-	.document-scope header p {
-		margin-top: 5px;
+
+	.overview-heading p,
+	.research-state p,
+	.attention-panel small {
 		color: var(--text-secondary);
+	}
+
+	.overview-heading p {
+		max-width: 720px;
+		margin-top: 6px;
 		line-height: 1.5;
 	}
-	.state {
-		margin: 0;
-		padding: 12px 0;
-		color: var(--text-secondary);
-	}
-	.state--error,
-	.failure {
-		color: var(--danger-text, #b42318);
-	}
-	.scope-summary {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		border-block: 1px solid var(--border-default);
-	}
-	.scope-summary div {
-		display: grid;
-		gap: 2px;
-		padding: 14px 18px;
-		border-right: 1px solid var(--border-default);
-	}
-	.scope-summary div:last-child {
-		border-right: 0;
-	}
-	.scope-summary strong {
-		font-size: 20px;
-	}
-	.scope-summary span {
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-	.action-band {
-		display: grid;
-		gap: 14px;
-		padding-bottom: 20px;
-		border-bottom: 1px solid var(--border-default);
-	}
-	.actions,
-	.row-actions {
-		display: flex;
+
+	.header-actions,
+	.research-state__actions {
 		flex-wrap: wrap;
 		gap: 8px;
 	}
+
 	.file-input {
 		position: absolute;
 		width: 1px;
@@ -458,87 +517,254 @@
 		overflow: hidden;
 		clip: rect(0, 0, 0, 0);
 	}
-	.document-scope {
-		display: grid;
-		gap: 12px;
+
+	.upload-selection,
+	.state {
+		padding: 10px 12px;
+		border: 1px solid var(--border-default);
 	}
-	.select-all,
-	.document-select {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		font-size: 13px;
+
+	.upload-selection {
+		justify-content: space-between;
+		gap: 16px;
+	}
+
+	.state {
 		color: var(--text-secondary);
 	}
-	.document-list {
+
+	.state--error,
+	.failure {
+		color: var(--danger-text, #b42318);
+	}
+
+	.state--notice {
+		color: var(--success-text, #256346);
+	}
+
+	.research-state {
+		min-height: 170px;
+		gap: 32px;
+		padding: 28px 0;
+		border-bottom: 1px solid var(--border-default);
+	}
+
+	.research-state__copy {
+		max-width: 680px;
+	}
+
+	.eyebrow {
+		display: block;
+		margin-bottom: 8px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.research-state h3 {
+		font-size: 24px;
+		line-height: 1.3;
+	}
+
+	.research-state p {
+		margin-top: 8px;
+		line-height: 1.6;
+	}
+
+	.active-progress {
+		max-width: 560px;
 		display: grid;
+		gap: 8px;
+		margin-top: 16px;
+		padding-top: 12px;
+		border-top: 1px solid var(--border-default);
+		font-size: 13px;
+	}
+
+	.active-progress__header,
+	.active-progress__meta {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		min-width: 0;
+	}
+
+	.active-progress__meta {
+		flex-wrap: wrap;
+	}
+
+	.active-progress__header strong {
+		color: var(--text-primary);
+		font-size: 15px;
+	}
+
+	.active-progress__track {
+		height: 8px;
+		overflow: hidden;
+		border-radius: 4px;
+		background: var(--border-default);
+	}
+
+	.active-progress__track span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: var(--accent-primary, #2563eb);
+		transition: width 180ms ease;
+	}
+
+	.active-progress__meta,
+	.active-progress small {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.active-progress small {
+		overflow-wrap: anywhere;
+	}
+
+	.research-progress {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		border-block: 1px solid var(--border-default);
+	}
+
+	.research-progress > div {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 14px 16px;
+		border-right: 1px solid var(--border-default);
+		color: var(--text-secondary);
+	}
+
+	.research-progress > div:last-child {
+		border-right: 0;
+	}
+
+	.research-progress > div > span {
+		display: grid;
+		width: 24px;
+		height: 24px;
+		place-items: center;
+		border: 1px solid currentColor;
+		border-radius: 50%;
+		font-size: 11px;
+	}
+
+	.research-progress > div.complete,
+	.research-progress > div.active {
+		color: var(--text-primary);
+	}
+
+	.research-progress > div.complete > span {
+		border-color: #3a7d5d;
+		background: #3a7d5d;
+		color: white;
+	}
+
+	.research-progress div div {
+		display: grid;
+		gap: 2px;
+	}
+
+	.research-progress strong {
+		font-size: 13px;
+	}
+
+	.research-progress small {
+		font-size: 11px;
+	}
+
+	.attention-panel {
+		border-block: 1px solid var(--border-default);
+	}
+
+	.attention-panel summary {
+		cursor: pointer;
+		padding: 16px 4px;
+	}
+
+	.attention-panel summary span {
+		display: inline-grid;
+		gap: 3px;
+		margin-left: 8px;
+	}
+
+	.attention-list {
 		border-top: 1px solid var(--border-default);
 	}
-	.document-row {
-		display: grid;
-		grid-template-columns: 28px minmax(0, 1fr) minmax(180px, 0.7fr) auto;
-		align-items: center;
-		gap: 14px;
-		min-height: 72px;
+
+	.attention-row {
+		gap: 20px;
 		padding: 12px 4px;
 		border-bottom: 1px solid var(--border-default);
 	}
-	.document-identity,
-	.document-state {
+
+	.attention-row:last-child {
+		border-bottom: 0;
+	}
+
+	.attention-row > div {
 		min-width: 0;
 		display: grid;
-		gap: 4px;
+		gap: 3px;
 	}
-	.document-identity strong {
+
+	.attention-row strong,
+	.attention-row small {
 		overflow-wrap: anywhere;
 	}
-	.document-identity span,
-	.document-state small {
-		color: var(--text-secondary);
-		font-size: 12px;
-		overflow-wrap: anywhere;
-	}
-	.status-mark {
-		width: fit-content;
-		border: 1px solid var(--border-default);
-		padding: 3px 7px;
+
+	.attention-row span,
+	.attention-row small {
 		font-size: 12px;
 	}
-	.status-mark--ready {
-		border-color: #3a7d5d;
-		color: #256346;
-	}
-	.status-mark--processing {
-		border-color: #917427;
-		color: #725b1d;
-	}
-	.status-mark--failed {
-		border-color: var(--danger-text, #b42318);
-		color: var(--danger-text, #b42318);
-	}
-	.objective-link {
-		align-items: center;
-		padding-top: 6px;
-	}
+
 	@media (max-width: 760px) {
-		.workspace-heading,
-		.document-scope > header,
-		.objective-link {
+		.overview-page {
+			gap: 14px;
+		}
+
+		.overview-heading,
+		.research-state,
+		.upload-selection,
+		.attention-row {
+			align-items: stretch;
 			flex-direction: column;
 		}
-		.scope-summary {
+
+		.header-actions,
+		.research-state__actions {
+			width: 100%;
+		}
+
+		.header-actions .btn,
+		.research-state__actions .btn {
+			flex: 1;
+		}
+
+		.research-state {
+			min-height: 0;
+			padding: 18px 0;
+		}
+
+		.research-state h3 {
+			font-size: 20px;
+		}
+
+		.research-progress {
 			grid-template-columns: 1fr 1fr;
 		}
-		.scope-summary div:nth-child(2) {
+
+		.research-progress > div:nth-child(2) {
 			border-right: 0;
 		}
-		.document-row {
-			grid-template-columns: 28px minmax(0, 1fr);
-			align-items: start;
-		}
-		.document-state,
-		.row-actions {
-			grid-column: 2;
+
+		.research-progress > div:nth-child(-n + 2) {
+			border-bottom: 1px solid var(--border-default);
 		}
 	}
 </style>

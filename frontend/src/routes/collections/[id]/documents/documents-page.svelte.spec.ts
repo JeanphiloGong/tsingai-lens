@@ -108,7 +108,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('paper-a.pdf')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Experimental')).toBeInTheDocument();
+		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
 		await expect.element(browserPage.getByText('Missing publication year')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open paper' }).first())
@@ -118,7 +118,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		);
 	});
 
-	it('uses a short display identifier when title and filename are unavailable', async () => {
+	it('uses a neutral fallback without exposing internal identifiers', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				collection_id: 'col_123',
@@ -141,7 +141,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		render(Page);
 
 		await expect.element(browserPage.getByText('Paper 1')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('ID: abcdef123456')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('ID: abcdef123456')).not.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('abcdef1234567890abcdef1234567890'))
 			.not.toBeInTheDocument();
@@ -162,7 +162,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('131 paper(s)')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Papers 1–25 of 131').first()).toBeInTheDocument();
-		expect(document.querySelectorAll('article')).toHaveLength(25);
+		expect(document.querySelectorAll('[data-paper-row]')).toHaveLength(25);
 		expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
 			'/api/v1/collections/col_123/documents/profiles?offset=0&limit=25'
 		);
@@ -207,7 +207,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		render(Page);
 		await browserPage.getByLabelText('Search papers').fill('  laser porosity  ');
-		await browserPage.getByRole('button', { name: 'Search' }).click();
+		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
 
 		await vi.waitFor(() => {
 			expect(
@@ -218,5 +218,110 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		});
 		await expect.element(browserPage.getByText('Laser porosity study')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('1 matching paper(s)')).toBeInTheDocument();
+	});
+
+	it('combines paper type and warning filters across the collection', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			const filtered =
+				url.searchParams.get('doc_type') === 'review' &&
+				url.searchParams.get('has_warnings') === 'true';
+			return jsonResponse({
+				collection_id: 'col_123',
+				total: filtered ? 1 : 131,
+				count: filtered ? 1 : 25,
+				summary: {
+					total_documents: 131,
+					by_doc_type: { experimental: 100, review: 25, mixed: 4, uncertain: 2 },
+					warnings: []
+				},
+				items: filtered
+					? [
+							{
+								...profile(91),
+								title: 'Review needing inspection',
+								doc_type: 'review',
+								parsing_warnings: ['insufficient_content']
+							}
+						]
+					: [profile(1)]
+			});
+		});
+
+		render(Page);
+		await browserPage.getByLabelText('Paper type').selectOptions('review');
+		await browserPage.getByLabelText('Has parsing warnings').click();
+		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
+
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) => {
+					const url = new URL(String(input), 'http://localhost');
+					return (
+						url.searchParams.get('offset') === '0' &&
+						url.searchParams.get('doc_type') === 'review' &&
+						url.searchParams.get('has_warnings') === 'true'
+					);
+				})
+			).toBe(true);
+		});
+		await expect.element(browserPage.getByText('Review needing inspection')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 matching paper(s)')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Clear filters' }))
+			.toBeInTheDocument();
+	});
+
+	it('keeps all active filters when changing paper pages', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			const isFiltered =
+				url.searchParams.get('doc_type') === 'review' &&
+				url.searchParams.get('has_warnings') === 'true';
+			const offset = Number(url.searchParams.get('offset') ?? 0);
+			return jsonResponse({
+				collection_id: 'col_123',
+				total: isFiltered ? 26 : 131,
+				count: 25,
+				summary: { total_documents: 131, by_doc_type: {}, warnings: [] },
+				items: Array.from({ length: 25 }, (_, index) => ({
+					...profile(offset + index + 1),
+					title: isFiltered
+						? `Filtered paper ${offset + index + 1}`
+						: profile(offset + index + 1).title
+				}))
+			});
+		});
+
+		render(Page);
+		await browserPage.getByLabelText('Paper type').selectOptions('review');
+		await browserPage.getByLabelText('Has parsing warnings').click();
+		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) => {
+					const url = new URL(String(input), 'http://localhost');
+					return (
+						url.searchParams.get('offset') === '0' && url.searchParams.get('doc_type') === 'review'
+					);
+				})
+			).toBe(true);
+		});
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Filtered paper 1', exact: true }))
+			.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'Next' }).click();
+		await vi.waitFor(() => {
+			const nextRequest = fetchMock.mock.calls.find(([input]) => {
+				const url = new URL(String(input), 'http://localhost');
+				return url.searchParams.get('offset') === '25';
+			});
+			expect(nextRequest).toBeDefined();
+			const url = new URL(String(nextRequest?.[0]), 'http://localhost');
+			expect(url.searchParams.get('doc_type')).toBe('review');
+			expect(url.searchParams.get('has_warnings')).toBe('true');
+		});
+		await expect.element(browserPage.getByText('Filtered paper 26')).toBeInTheDocument();
 	});
 });

@@ -64,6 +64,10 @@ from application.core.objectives.objective_candidate_service import (
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
+from application.core.objectives.scope_screening import (
+    ObjectiveScopePreview,
+    screen_objective_scope,
+)
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.source.collection_service import CollectionService
 from domain.core import (
@@ -161,6 +165,14 @@ class ResearchObjectiveNotFoundError(FileNotFoundError):
         self.collection_id = collection_id
         self.objective_id = objective_id
         super().__init__(f"research objective not found: {collection_id}/{objective_id}")
+
+
+class ObjectiveScopeNotReadyError(RuntimeError):
+    """Raised when no collection Paper Maps are available for scope screening."""
+
+    def __init__(self, collection_id: str) -> None:
+        self.collection_id = collection_id
+        super().__init__(f"objective paper scope not ready: {collection_id}")
 
 
 class ResearchObjectiveService:
@@ -307,11 +319,11 @@ class ResearchObjectiveService:
             confidence=0,
             reason=(
                 "User-approved untested research question with "
-                f"{len(objective.seed_document_ids)} paper scope hypothesis(es); "
-                "Paper Map scope is not Evidence and analysis has not tested support."
+                f"{len(objective.seed_document_ids)} question-source paper(s); "
+                "question provenance is not Evidence and analysis has not tested support."
                 if objective.seed_document_ids
-                else "User-approved untested research question; paper scope and "
-                "Evidence support have not been established."
+                else "User-approved untested research question; no question-source "
+                "paper was recorded and analysis has not tested Evidence support."
             ),
         )
         return await self.objective_repository.create_authored_candidate(
@@ -319,6 +331,25 @@ class ResearchObjectiveService:
             created_by_user_id=user_id,
             created_by_tool_call_id=tool_call_id,
         )
+
+    async def preview_objective_scope(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ObjectiveScopePreview:
+        """Screen every current collection Paper Map for one persisted Objective."""
+
+        await self.collection_service.get_collection(collection_id)
+        objective = await self.objective_repository.read_objective(
+            collection_id,
+            objective_id,
+        )
+        if objective is None:
+            raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        paper_maps = await self.paper_map_repository.list_collection(collection_id)
+        if not paper_maps:
+            raise ObjectiveScopeNotReadyError(collection_id)
+        return screen_objective_scope(paper_maps, objective=objective)
 
     async def generate_objective_analysis_artifacts(
         self,

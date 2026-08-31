@@ -114,13 +114,20 @@ describe('current collection document workflow', () => {
 
 		await expect.element(browserPage.getByText('Parsing paper.')).toBeInTheDocument();
 		await expect
+			.element(browserPage.getByRole('progressbar'))
+			.toHaveAttribute('aria-valuenow', '55');
+		await expect.element(browserPage.getByText('1 / 2 papers ready')).toBeInTheDocument();
+		await expect
 			.element(browserPage.getByRole('button', { name: 'Upload documents' }))
 			.not.toBeDisabled();
 	});
 
-	it('discovers objectives from exactly the checked ready documents', async () => {
+	it('discovers objectives from all ready papers without exposing the document selector', async () => {
 		render(Page);
-		await browserPage.getByLabelText('Select paper for research scope').first().click();
+
+		await expect
+			.element(browserPage.getByLabelText('Select paper for research scope'))
+			.not.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Discover objectives from 1' }).click();
 
 		const discoveryCall = fetchMock.mock.calls.find(([input]) =>
@@ -130,5 +137,34 @@ describe('current collection document workflow', () => {
 		expect(JSON.parse(String(discoveryCall?.[1]?.body))).toEqual({
 			document_ids: ['doc_ready']
 		});
+	});
+
+	it('leads with existing research objectives instead of the paper management table', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			if (url.pathname.endsWith('/documents')) {
+				return jsonResponse({ items: [readyDocument] });
+			}
+			if (url.pathname.endsWith('/tasks')) {
+				return jsonResponse({ collection_id: 'col_123', count: 0, items: [] });
+			}
+			if (url.pathname.endsWith('/objectives')) {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [{ objective_id: 'obj-1', question: 'How does heat affect strength?' }]
+				});
+			}
+			throw new Error(`unexpected request: ${url.pathname}`);
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Enter research objectives' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives');
+		await expect.element(browserPage.getByText('ready-paper.pdf')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Discover objectives from 1' }))
+			.not.toBeInTheDocument();
 	});
 });

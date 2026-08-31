@@ -17,7 +17,7 @@ const routes = [
 	['/', 'Lens Workbench'],
 	['/docs', 'Using Lens'],
 	['/system', 'System'],
-	[`/collections/${collectionId}`, 'Prepare and select papers'],
+	[`/collections/${collectionId}`, 'Research questions are ready to review'],
 	[`/collections/${collectionId}/documents`, 'Papers'],
 	[`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`, 'Paper A'],
 	[`/collections/${collectionId}/objectives`, '研究目标'],
@@ -278,7 +278,12 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { name: '研究目标' })).toBeVisible();
-		await expect(page.getByText('还没有准备完成的论文，请先返回集合概览准备论文。')).toBeVisible();
+		await expect(
+			page.getByRole('heading', {
+				name: 'How does heat treatment affect LPBF 316L tensile strength?'
+			})
+		).toBeVisible();
+		await expect(page.getByRole('link', { name: '查看 Findings' })).toBeVisible();
 		expect(objectiveRequests).toEqual([`/api/v1/collections/${collectionId}/objectives`]);
 	});
 
@@ -413,6 +418,75 @@ test.describe('page interaction audit', () => {
 		).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Review finding evidence' })).toBeVisible();
 		expect(await visibleElementsFitViewport(page, '.finding-item')).toBe(true);
+	});
+
+	test('shows aggregate preparation progress for active paper tasks', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`/collections/${collectionId}?audit_state=processing`);
+
+		await expect(
+			page.getByRole('progressbar', { name: 'Paper preparation progress' })
+		).toHaveAttribute('aria-valuenow', '70');
+		await expect(page.getByText('1 / 2 papers ready')).toBeVisible();
+		await expect(page.getByText('1 processing')).toBeVisible();
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'collection-preparation-progress-desktop.png'),
+				fullPage: true
+			});
+		}
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(
+			page.getByRole('progressbar', { name: 'Paper preparation progress' })
+		).toBeVisible();
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'collection-preparation-progress-mobile.png'),
+				fullPage: true
+			});
+		}
+	});
+
+	test('shows Objective analysis progress inline without a status button', async ({ page }) => {
+		const consoleErrors: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'error') consoleErrors.push(message.text());
+		});
+		page.on('pageerror', (error) => consoleErrors.push(error.message));
+
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`/collections/${collectionId}/objectives?audit_state=objective-running`);
+
+		await expect(page.getByRole('progressbar', { name: '研究目标分析进度' })).toHaveAttribute(
+			'aria-valuenow',
+			'33'
+		);
+		await expect(page.getByText('论文进度 2 / 6')).toBeVisible();
+		await expect(page.getByText('正在逐篇提取相关证据')).toBeVisible();
+		await expect(page.getByRole('link', { name: '查看状态' })).toHaveCount(0);
+		await expect(
+			page.getByRole('link', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })
+		).toHaveAttribute('href', `/collections/${collectionId}/objectives/${objectiveId}`);
+		expect(await visibleElementsFitViewport(page, '.analysis-progress')).toBe(true);
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'objective-analysis-progress-desktop.png'),
+				fullPage: true
+			});
+		}
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(page.getByRole('progressbar', { name: '研究目标分析进度' })).toBeVisible();
+		expect(await visibleElementsFitViewport(page, '.analysis-progress')).toBe(true);
+		expect(consoleErrors).toEqual([]);
+
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'objective-analysis-progress-mobile.png'),
+				fullPage: true
+			});
+		}
 	});
 });
 
@@ -551,10 +625,22 @@ async function mockApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}`)
 			return route.fulfill(json(collection(auditState)));
 		if (path === `/api/v1/collections/${collectionId}/documents`) {
-			return route.fulfill(json({ count: 1, items: [uploadedFile(auditState)] }));
+			return route.fulfill(
+				json(
+					auditState === 'processing'
+						? { count: 2, items: [uploadedFile(auditState), processingDocument()] }
+						: { count: 1, items: [uploadedFile(auditState)] }
+				)
+			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/tasks`) {
-			return route.fulfill(json({ collection_id: collectionId, count: 0, items: [] }));
+			return route.fulfill(
+				json(
+					auditState === 'processing'
+						? { collection_id: collectionId, count: 1, items: [processingTask()] }
+						: { collection_id: collectionId, count: 0, items: [] }
+				)
+			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/profiles`) {
 			return route.fulfill(json(documentProfiles()));
@@ -572,10 +658,10 @@ async function mockApis(page: Page) {
 			return route.fulfill({ status: 204, body: '' });
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
-			return route.fulfill(json(objectives()));
+			return route.fulfill(json(objectives(auditState)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/analysis`) {
-			return route.fulfill(json(objectiveView()));
+			return route.fulfill(json(objectiveView(auditState)));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
 			return route.fulfill(json(objectiveView()));
@@ -875,14 +961,19 @@ function readAuditState(url: URL, referer?: string) {
 }
 
 function collection(auditState?: string | null) {
+	const documents =
+		auditState === 'processing'
+			? [uploadedFile(auditState), processingDocument()]
+			: [uploadedFile(auditState)];
 	return {
 		collection_id: collectionId,
 		id: collectionId,
 		name: '316L LPBF evidence set',
 		description: 'Interaction audit fixture',
-		status: auditState === 'uploaded' ? 'uploaded' : 'ready',
-		paper_count: 2,
-		documents: [uploadedFile(auditState)],
+		status:
+			auditState === 'uploaded' ? 'uploaded' : auditState === 'processing' ? 'processing' : 'ready',
+		paper_count: documents.length,
+		documents,
 		created_at: now(),
 		updated_at: now()
 	};
@@ -906,6 +997,50 @@ function uploadedFile(auditState?: string | null) {
 		source_fingerprint: ready ? 'source-doc-1' : null,
 		profile_fingerprint: ready ? 'profile-doc-1' : null,
 		preparation_fingerprint: ready ? 'fingerprint-doc-1' : null
+	};
+}
+
+function processingDocument() {
+	return {
+		document_id: 'doc_2',
+		original_filename: 'paper-b.pdf',
+		stored_filename: 'paper-b.pdf',
+		storage_key: `${collectionId}/input/paper-b.pdf`,
+		sha256: 'b'.repeat(64),
+		media_type: 'application/pdf',
+		status: 'processing',
+		size_bytes: 4096,
+		created_at: now(),
+		updated_at: now(),
+		parser_version: null,
+		document_analysis_version: null,
+		source_fingerprint: null,
+		profile_fingerprint: null,
+		preparation_fingerprint: null
+	};
+}
+
+function processingTask() {
+	return {
+		task_id: 'task_processing',
+		collection_id: collectionId,
+		document_id: 'doc_2',
+		task_type: 'document_preparation',
+		mode: 'standard',
+		input_fingerprint: 'fingerprint-doc-2',
+		status: 'running',
+		current_stage: 'paper_map',
+		progress_percent: 40,
+		progress_detail: {
+			phase: 'paper_map',
+			message: 'Building paper map.'
+		},
+		errors: [],
+		warnings: [],
+		created_at: now(),
+		updated_at: now(),
+		started_at: now(),
+		finished_at: null
 	};
 }
 
@@ -1004,7 +1139,8 @@ function documentMarkdown() {
 	};
 }
 
-function objectives() {
+function objectives(auditState?: string | null) {
+	const isRunning = auditState === 'objective-running';
 	return {
 		collection_id: collectionId,
 		objectives: [
@@ -1024,7 +1160,7 @@ function objectives() {
 				reason: null,
 				confirmation_status: 'confirmed',
 				active_analysis_version: 1,
-				published_analysis_version: 1,
+				published_analysis_version: isRunning ? null : 1,
 				created_at: now(),
 				updated_at: now()
 			}
@@ -1032,18 +1168,19 @@ function objectives() {
 	};
 }
 
-function objectiveView() {
-	const objective = objectives().objectives[0];
+function objectiveView(auditState?: string | null) {
+	const objective = objectives(auditState).objectives[0];
+	const isRunning = auditState === 'objective-running';
 	return {
 		collection_id: collectionId,
 		objective,
-		active_analysis: objectiveAnalysis(),
-		published_analysis: objectiveAnalysis(),
+		active_analysis: objectiveAnalysis(isRunning),
+		published_analysis: isRunning ? null : objectiveAnalysis(),
 		warnings: []
 	};
 }
 
-function objectiveAnalysis() {
+function objectiveAnalysis(isRunning = false) {
 	return {
 		collection_id: collectionId,
 		objective_id: objectiveId,
@@ -1052,17 +1189,17 @@ function objectiveAnalysis() {
 		pipeline_version: 'objective-analysis.v2',
 		model_name: 'model-1',
 		prompt_versions: {},
-		status: 'succeeded',
-		phase: 'succeeded',
-		processed_document_count: 1,
-		total_document_count: 1,
-		current_document_id: null,
-		progress_message: null,
+		status: isRunning ? 'running' : 'succeeded',
+		phase: isRunning ? 'objective_evidence_extraction_started' : 'succeeded',
+		processed_document_count: isRunning ? 2 : 1,
+		total_document_count: isRunning ? 6 : 1,
+		current_document_id: isRunning ? documentId : null,
+		progress_message: isRunning ? 'Extracting objective evidence from selected sources.' : null,
 		error_code: null,
 		error_message: null,
 		created_at: now(),
 		started_at: now(),
-		completed_at: now()
+		completed_at: isRunning ? null : now()
 	};
 }
 

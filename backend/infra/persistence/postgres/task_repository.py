@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.source import TaskRecord, TaskStageRecord
 from infra.persistence.postgres.models.task import Task, TaskStage
+from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 
 
@@ -24,6 +25,38 @@ class PostgresTaskRepository:
         async with self.session_factory.begin() as session:
             session.add(_task_row(record))
         return record
+
+    async def get_or_create_collection_task(
+        self,
+        record: TaskRecord,
+    ) -> tuple[TaskRecord, bool]:
+        if record.document_id is not None:
+            raise ValueError("collection task must not identify one document")
+        async with self.session_factory.begin() as session:
+            collection = await session.scalar(
+                select(Collection)
+                .where(Collection.collection_id == record.collection_id)
+                .with_for_update()
+            )
+            if collection is None:
+                raise FileNotFoundError(
+                    f"collection not found: {record.collection_id}"
+                )
+            active = await session.scalar(
+                select(Task)
+                .where(
+                    Task.collection_id == record.collection_id,
+                    Task.document_id.is_(None),
+                    Task.task_type == record.task_type,
+                    Task.status.in_(("queued", "running")),
+                )
+                .order_by(Task.updated_at.desc(), Task.task_id.desc())
+                .limit(1)
+            )
+            if active is not None:
+                return _task_record(active), False
+            session.add(_task_row(record))
+            return record, True
 
     async def get_or_create_document_task(
         self,

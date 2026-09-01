@@ -27,6 +27,21 @@ class ChatResourceRefResponse(BaseModel):
     href: str | None = None
 
 
+class ChatSourceContextPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_ref: ChatResourceRefResponse
+    collection_id: str = Field(min_length=1, max_length=64)
+    document_id: str = Field(min_length=1, max_length=64)
+    document_title: str = Field(min_length=1, max_length=500)
+    source_kind: str = Field(min_length=1, max_length=64)
+    source_ref: str = Field(min_length=1, max_length=512)
+    page: int | None = Field(default=None, ge=1)
+    quote: str = Field(min_length=1, max_length=6000)
+    heading_path: str | None = Field(default=None, max_length=1000)
+    quote_truncated: bool = False
+
+
 class ChatToolResultResponse(BaseModel):
     tool_call_id: str
     status: Literal["succeeded", "queued", "failed"]
@@ -47,6 +62,7 @@ class ChatMessageResponse(BaseModel):
     tool_name: str | None = None
     tool_arguments: dict[str, Any] | None = None
     tool_result: ChatToolResultResponse | None = None
+    source_contexts: list[ChatSourceContextPayload] = Field(default_factory=list)
 
 
 class ChatToolCallResponse(BaseModel):
@@ -78,6 +94,10 @@ class ChatTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=12000)
+    source_contexts: list[ChatSourceContextPayload] = Field(
+        default_factory=list,
+        max_length=1,
+    )
 
 
 class ChatToolDecisionRequest(BaseModel):

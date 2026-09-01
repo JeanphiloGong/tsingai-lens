@@ -16,13 +16,18 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import (
+    CreateFindingVersionCapability,
     CreateObjectiveCandidateCapability,
+    CurateFindingCapability,
     GetCollectionContextCapability,
+    InspectDocumentSourcesCapability,
     InspectObjectiveAnalysisCapability,
+    InspectPublishedFindingCapability,
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    RecordFindingFeedbackCapability,
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
@@ -33,6 +38,9 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.finding_authoring_service import (
+    FindingAuthoringService,
+)
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
@@ -175,6 +183,7 @@ class ApplicationRuntime:
     objective_repository: ObjectiveRepository
     finding_review_repository: FindingReviewRepository
     finding_feedback_service: FindingFeedbackService
+    finding_authoring_service: FindingAuthoringService
     document_profile_service: DocumentProfileService
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
@@ -266,6 +275,10 @@ async def build_application_runtime(
             review_repository=finding_review_repository,
             objective_repository=objective_repository,
         )
+        finding_authoring_service = FindingAuthoringService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+        )
         research_objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
@@ -275,6 +288,7 @@ async def build_application_runtime(
             finding_synthesis_service=finding_synthesis_service,
             objective_candidate_service=ObjectiveCandidateService(),
             paper_map_service=paper_map_service,
+            task_service=task_service,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,
@@ -301,6 +315,10 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                             ),
+                            InspectDocumentSourcesCapability(
+                                collection_service=collection_service,
+                                source_artifact_repository=source_artifact_repository,
+                            ),
                             InspectResearchProcessCapability(
                                 collection_service=collection_service,
                                 task_service=task_service,
@@ -315,6 +333,21 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                                 objective_analysis_service=objective_analysis_service,
+                            ),
+                            InspectPublishedFindingCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            RecordFindingFeedbackCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
+                            ),
+                            CurateFindingCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
+                            ),
+                            CreateFindingVersionCapability(
+                                finding_authoring_service=finding_authoring_service,
                             ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,
@@ -353,6 +386,7 @@ async def build_application_runtime(
             objective_repository=objective_repository,
             finding_review_repository=finding_review_repository,
             finding_feedback_service=finding_feedback_service,
+            finding_authoring_service=finding_authoring_service,
             document_profile_service=document_profile_service,
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
@@ -386,6 +420,7 @@ def install_application_runtime(
     application.state.objective_repository = runtime.objective_repository
     application.state.finding_review_repository = runtime.finding_review_repository
     application.state.finding_feedback_service = runtime.finding_feedback_service
+    application.state.finding_authoring_service = runtime.finding_authoring_service
     application.state.document_profile_service = runtime.document_profile_service
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service
@@ -406,6 +441,7 @@ def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
         try:
             install_application_runtime(application, runtime)
             await runtime.document_preparation_service.recover_interrupted_tasks()
+            await runtime.research_objective_service.recover_interrupted_discoveries()
             await runtime.objective_analysis_service.recover_interrupted_analyses()
             yield
         finally:
@@ -560,7 +596,7 @@ def create_app(
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.12.15",
+        version="0.12.16",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

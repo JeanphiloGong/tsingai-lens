@@ -23,9 +23,11 @@ approves the exact persisted arguments.
 ## Product Boundary
 
 The Research Agent helps a materials researcher inspect a collection, ask what
-the published analysis supports, and formulate a focused candidate question.
-It does not replace the comparison workspace or become a second scientific
-fact store.
+the published analysis supports, formulate a focused candidate question,
+review an existing published conclusion, and propose a new conclusion from
+eligible published Evidence through the same controls as the Finding
+workbench. It does not replace the comparison workspace or become a second
+scientific fact store.
 
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
@@ -40,6 +42,15 @@ fact store.
   of ready Documents.
 - A created Objective remains an unconfirmed candidate. Confirmation and
   analysis stay in the Objective workspace.
+- A Finding review begins from the complete published Finding, linked Evidence,
+  and exact Sources. Feedback and curation reuse `FindingFeedbackService` after
+  exact user approval.
+- Finding authoring begins from the current published analysis and its complete
+  role-eligible Evidence. The Agent may propose exact Evidence roles, a bounded
+  conclusion, or an explicit evidence abstention. After exact user approval,
+  `FindingAuthoringService` publishes a new immutable analysis version. The
+  Agent cannot alter the source version, parent Finding, Evidence, or Source
+  identities.
 - General Agent prose cannot be saved as an Experiment Plan. New plans are
   authored manually until a dedicated scientifically validated capability
   exists.
@@ -70,10 +81,14 @@ The selected session ID and a small presentation-only history are stored under:
 ```text
 lens.chatSession.{collection_id}
 lens.chatSessionHistory.{collection_id}
+lens.chatSourceContext.{collection_id}
 ```
 
-The server trajectory is authoritative. Browser storage only remembers which
-session to load and how to label it in the local history list.
+The server trajectory is authoritative. Browser storage remembers which
+session to load, how to label it in the local history list, and one pending
+Source handoff from the document reader. The pending Source is shown above the
+composer and can be removed. It is cleared after the complete persisted turn
+returns; the durable user message then owns the Source context.
 
 ## Visible States
 
@@ -85,6 +100,20 @@ is rendered incrementally as a normal assistant message with no fake capability
 activity. A stable response cursor occupies the assistant row before the first
 text delta; it does not create a stored partial message.
 
+### Document Source handoff
+
+Source-mapped paragraphs, list items, figures, tables, and parsed-source blocks
+offer an action to ask the Research Agent. The handoff opens the Agent for the
+same Collection and preserves the document, Source kind/reference, page,
+heading, canonical return link, bounded quote, and any explicit shortened-quote
+state. The user reviews that
+context and writes the actual question before sending it.
+
+The selected Source is context, not Evidence. Opening the Agent creates no Core
+record, and Agent prose cannot become Evidence or a Finding without a later
+explicit, grounded workflow. Any write capability remains subject to the same
+exact-argument approval contract.
+
 ### Capability activity
 
 An assistant capability request and its result are separate from the final
@@ -92,6 +121,9 @@ answer. The result panel shows:
 
 - the named Lens capability;
 - a bounded human-readable summary;
+- bounded paper Source match counts and canonical Source links;
+- one complete published Finding with paginated linked Evidence when a review
+  needs exact scientific context;
 - structured Objective drafts when present;
 - the observable research stages and active paper when process status is read;
 - per-paper stored, processing, ready, and failed states;
@@ -108,15 +140,19 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 
 ### Write approval
 
-For `start_research_process`, `create_objective_candidate`, and
-`start_objective_analysis`, the page renders the exact persisted arguments and
-exposes explicit Reject and Approve actions. While approval is pending:
+For `start_research_process`, `create_objective_candidate`,
+`start_objective_analysis`, `record_finding_feedback`, `curate_finding`, and
+`create_finding_version`, the page renders the exact persisted arguments and
+exposes explicit Reject and Approve actions. Finding feedback and curation are
+separate writes against an existing published Finding. Finding authoring is a
+separate Evidence-to-conclusion decision that publishes a new immutable
+analysis version. While approval is pending:
 
 - the message composer is disabled;
 - refresh restores the pending decision from the server;
 - approval sends the stored argument digest;
 - rejection creates no Core record;
-- successful approval returns a link to the canonical Objective.
+- successful approval returns links to the resulting canonical records.
 
 The page does not allow editing the displayed arguments in place. Changed
 arguments require a new proposal and a new tool call.
@@ -162,6 +198,13 @@ The focused browser suite covers:
 11. a visible mobile composer across consecutive turns and reduced viewport
     height;
 12. text visible before the final persisted turn arrives.
+13. one document Source handed to the same Collection Agent, removable before
+    submission and persisted only with the sent user message;
+14. exact published Finding and linked Evidence inspection before review;
+15. distinct feedback and curation approvals, including rejection without a
+    write;
+16. exact Evidence roles and statement before approval publishes a new Finding
+    version.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

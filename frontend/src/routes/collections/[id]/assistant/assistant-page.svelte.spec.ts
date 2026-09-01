@@ -117,6 +117,7 @@ function message(
 		tool_name: null,
 		tool_arguments: null,
 		tool_result: null,
+		source_contexts: [],
 		...overrides
 	};
 }
@@ -199,11 +200,114 @@ async function send(text: string) {
 describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
 		localStorage.clear();
+		sessionStorage.clear();
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
+	});
+
+	it('reviews a document Source context before sending it with the user message', async () => {
+		const sourceContext = {
+			resource_ref: {
+				resource_type: 'source',
+				resource_id: 'doc_1:results',
+				href: '/collections/col_123/documents/doc_1?view=parsed-paper&source_ref=results&page=3'
+			},
+			collection_id: 'col_123',
+			document_id: 'doc_1',
+			document_title: 'Paper A',
+			source_kind: 'paragraph',
+			source_ref: 'results',
+			page: 3,
+			quote: 'Conductivity improved to 12 mS/cm under EIS.',
+			heading_path: 'Results',
+			quote_truncated: true
+		};
+		sessionStorage.setItem('lens.chatSourceContext.col_123', JSON.stringify(sourceContext));
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_source_user', 'user', 'What does this result support?', {
+						source_contexts: [sourceContext]
+					}),
+					message('msg_source_answer', 'assistant', 'It reports a measured conductivity result.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		const composer = await renderReady();
+		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Excerpt shortened · open the Source for the complete content')
+			)
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input as string | URL | Request).endsWith('/messages') &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toHaveLength(0);
+
+		await composer.fill('What does this result support?');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect
+			.poll(() => {
+				const call = fetchMock.mock.calls.find(
+					([input, init]) =>
+						requestPath(input as string | URL | Request).endsWith('/messages') &&
+						requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+				);
+				return call ? requestBody(call[0], call[1]) : null;
+			})
+			.toEqual({
+				message: 'What does this result support?',
+				source_contexts: [sourceContext]
+			});
+		await expect
+			.element(browserPage.getByText('It reports a measured conductivity result.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		expect(sessionStorage.getItem('lens.chatSourceContext.col_123')).toBeNull();
+	});
+
+	it('lets the researcher remove handed-off Source context before sending', async () => {
+		sessionStorage.setItem(
+			'lens.chatSourceContext.col_123',
+			JSON.stringify({
+				resource_ref: {
+					resource_type: 'source',
+					resource_id: 'doc_1:results',
+					href: '/collections/col_123/documents/doc_1?source_ref=results'
+				},
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'Paper A',
+				source_kind: 'paragraph',
+				source_ref: 'results',
+				page: 3,
+				quote: 'Conductivity improved to 12 mS/cm under EIS.',
+				heading_path: 'Results',
+				quote_truncated: false
+			})
+		);
+		installApi();
+
+		await renderReady();
+		await browserPage.getByRole('button', { name: 'Remove source context' }).click();
+
+		await expect.element(browserPage.getByText('Paper A', { exact: true })).not.toBeInTheDocument();
+		expect(sessionStorage.getItem('lens.chatSourceContext.col_123')).toBeNull();
 	});
 
 	it('handles ordinary conversation without showing capability activity', async () => {
@@ -308,6 +412,53 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?finding_id=finding_1');
 		await expect
 			.element(browserPage.getByText('Two published findings address this question.'))
+			.toBeInTheDocument();
+	});
+
+	it('shows one complete published finding and its linked evidence count', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Review this finding'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_finding_1',
+						tool_name: 'inspect_published_finding',
+						tool_arguments: {
+							objective_id: 'obj_1',
+							analysis_version: 2,
+							finding_id: 'finding_1'
+						}
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_finding_1',
+						tool_result: {
+							tool_call_id: 'call_finding_1',
+							status: 'succeeded',
+							data: {
+								finding: { statement: 'Higher energy input reduced elongation.' },
+								evidence_total: 3
+							},
+							resource_refs: [],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'The conclusion is ready for source review.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Review this finding');
+
+		await expect
+			.element(browserPage.getByText('Finding and evidence review completed'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Complete finding · 3 linked evidence records'))
 			.toBeInTheDocument();
 	});
 
@@ -526,6 +677,242 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and create' }))
+			.toBeInTheDocument();
+	});
+
+	it('shows exact finding feedback before recording the human review', async () => {
+		const call = pendingCall({
+			name: 'record_finding_feedback',
+			arguments: {
+				objective_id: 'obj_1',
+				analysis_version: 2,
+				finding_id: 'finding_1',
+				review_status: 'partial',
+				issue_type: 'overclaim',
+				note: 'The direction is supported, but the wording is too broad.'
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Record this as partly correct'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Record this as partly correct');
+
+		await expect
+			.element(browserPage.getByText('Finding feedback', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('partial', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('overclaim', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The direction is supported, but the wording is too broad.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and record review' }))
+			.toBeInTheDocument();
+	});
+
+	it('shows the complete finding revision before reusing the human curation path', async () => {
+		const revisedStatement =
+			'For the reported conditions, higher energy input was associated with lower elongation.';
+		const call = pendingCall({
+			name: 'curate_finding',
+			arguments: {
+				objective_id: 'obj_1',
+				analysis_version: 2,
+				finding_id: 'finding_1',
+				curated_status: 'limited',
+				curated_finding: {
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					analysis_version: 2,
+					finding_id: 'finding_1',
+					statement: revisedStatement,
+					paper_contributions: [{ document_id: 'doc_1', supporting_evidence_ids: ['ev_1'] }]
+				},
+				note: 'Narrowed the conclusion to the reported conditions.'
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Narrow this conclusion'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Narrow this conclusion');
+
+		await expect
+			.element(browserPage.getByText('Finding curation', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(revisedStatement, { exact: false }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and save revision' }))
+			.toBeInTheDocument();
+	});
+
+	it('shows the exact evidence-backed Finding before publishing a new version', async () => {
+		const statement = 'Higher temperature is associated with greater strength.';
+		const call = pendingCall({
+			name: 'create_finding_version',
+			arguments: {
+				objective_id: 'obj_1',
+				source_analysis_version: 2,
+				statement,
+				assertion_strength: 'associative',
+				supporting_evidence_ids: ['evidence_1'],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: ['evidence_2'],
+				condition_boundary_evidence_ids: ['evidence_2'],
+				limitations: ['Only one paper directly supports this conclusion.'],
+				parent_finding_id: null,
+				abstention_reason: null
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Create this conclusion'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Create this conclusion');
+
+		await expect
+			.element(browserPage.getByText('Finding authoring', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('evidence_1', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Publish this conclusion as a new immutable analysis version. The current system result will remain unchanged.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish Finding' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+	});
+
+	it('presents evidence abstention without implying that a Finding will be created', async () => {
+		const call = pendingCall({
+			name: 'create_finding_version',
+			arguments: {
+				objective_id: 'obj_1',
+				source_analysis_version: 2,
+				statement: null,
+				assertion_strength: null,
+				supporting_evidence_ids: [],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: [],
+				condition_boundary_evidence_ids: [],
+				limitations: ['The reported test conditions are not comparable.'],
+				parent_finding_id: null,
+				abstention_reason: 'no_comparable_evidence'
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Record that these results cannot be compared'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Record that these results cannot be compared');
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'Publish this evidence abstention as a new immutable analysis version without creating a placeholder Finding.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish evidence decision' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish Finding' }))
+			.not.toBeInTheDocument();
+	});
+
+	it('rejects finding feedback without implying that a review was recorded', async () => {
+		const call = pendingCall({
+			name: 'record_finding_feedback',
+			arguments: {
+				objective_id: 'obj_1',
+				analysis_version: 2,
+				finding_id: 'finding_1',
+				review_status: 'unclear',
+				issue_type: 'none'
+			}
+		});
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call
+			},
+			decisionTurn: {
+				status: 'rejected',
+				messages: [],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Reject' }).click();
+
+		await expect
+			.element(browserPage.getByText('The research conclusion review was not recorded.'))
 			.toBeInTheDocument();
 	});
 

@@ -135,6 +135,22 @@ export async function prepareCollectionDocument(
 	return task;
 }
 
+export async function formCollectionResearchQuestions(collectionId: string, documentIds: string[]) {
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/objective-discovery`,
+		{
+			method: 'POST',
+			body: JSON.stringify({ document_ids: documentIds })
+		}
+	);
+
+	const task = normalizeTask(data);
+	if (!task) {
+		throw new Error('Task response is missing task_id.');
+	}
+	return task;
+}
+
 export async function getTask(taskId: string) {
 	const data = await requestJson(`/tasks/${encodeURIComponent(taskId)}`, { method: 'GET' });
 	const task = normalizeTask(data);

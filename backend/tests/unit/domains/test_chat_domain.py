@@ -8,6 +8,7 @@ from domain.chat import (
     ChatMessage,
     ChatResourceRef,
     ChatSession,
+    ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
@@ -178,3 +179,52 @@ def test_resource_reference_requires_stable_identity() -> None:
         ChatResourceRef(resource_type=" ", resource_id="paper-1")
     with pytest.raises(ValueError, match="resource_id"):
         ChatResourceRef(resource_type="document", resource_id=" ")
+
+
+def test_user_message_round_trips_traceable_source_context() -> None:
+    source_context = ChatSourceContext(
+        resource_ref=ChatResourceRef(
+            resource_type="source",
+            resource_id="doc-1:results",
+            href=(
+                "/collections/col-1/documents/doc-1"
+                "?view=parsed-paper&source_ref=results&page=3"
+            ),
+        ),
+        collection_id="col-1",
+        document_id="doc-1",
+        document_title="Paper A",
+        source_kind="paragraph",
+        source_ref="results",
+        page=3,
+        quote="Conductivity improved to 12 mS/cm under EIS.",
+        heading_path="Results",
+    )
+    message = ChatMessage.user(
+        message_id="msg-source",
+        session_id="chat-1",
+        content="Explain what this result means.",
+        created_at="2026-08-31T00:00:00+00:00",
+        source_contexts=(source_context,),
+    )
+
+    assert ChatMessage.from_mapping(message.to_record()) == message
+    assert message.source_contexts == (source_context,)
+
+
+def test_source_context_requires_a_matching_stable_source_reference() -> None:
+    with pytest.raises(ValueError, match="resource identity"):
+        ChatSourceContext(
+            resource_ref=ChatResourceRef(
+                resource_type="source",
+                resource_id="doc-1:another-source",
+            ),
+            collection_id="col-1",
+            document_id="doc-1",
+            document_title="Paper A",
+            source_kind="paragraph",
+            source_ref="results",
+            page=3,
+            quote="Conductivity improved to 12 mS/cm under EIS.",
+            heading_path="Results",
+        )

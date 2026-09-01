@@ -103,12 +103,6 @@ class DocumentSelectionRequest(BaseModel):
     document_ids: list[str] = Field(min_length=1)
 
 
-class ObjectiveDiscoveryResponse(BaseModel):
-    collection_id: str
-    document_inputs: list[PreparedDocumentInputResponse]
-    objectives: list[RankedObjectiveSummaryResponse]
-
-
 class ObjectiveScopeCountsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -163,6 +157,17 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    origin: Literal["system_generated", "human_authored", "hybrid"] = (
+        "system_generated"
+    )
+    source_analysis_version: int | None = Field(default=None, ge=1)
+    created_by_user_id: str | None = None
+    abstention_reason: Literal[
+        "no_comparable_evidence",
+        "no_grounded_evidence",
+        "insufficient_evidence",
+    ] | None = None
+    abstention_note: str | None = None
 
 
 class FindingMechanismResponse(BaseModel):
@@ -267,6 +272,13 @@ class FindingResponse(BaseModel):
     paper_contributions: list[FindingPaperContributionResponse] = Field(
         ..., min_length=1
     )
+    origin: Literal["system_generated", "human_authored", "hybrid"] = (
+        "system_generated"
+    )
+    source_analysis_version: int | None = Field(default=None, ge=1)
+    parent_finding_id: str | None = None
+    created_by_user_id: str | None = None
+    created_at: str | None = None
 
 
 class ObjectiveEvidenceResponse(BaseModel):
@@ -296,6 +308,7 @@ class ObjectiveEvidenceResponse(BaseModel):
     resolution_status: str
     failure_reason: str | None = None
     confidence: float
+    supports_finding: bool = False
 
 
 class ObjectiveEvidenceMapObjectiveNodeResponse(BaseModel):

@@ -559,6 +559,109 @@ class PostgresObjectiveRepository:
             )
             return objective, analysis
 
+    async def publish_authored_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        source_analysis_version: int,
+        *,
+        analysis: ObjectiveAnalysis,
+        contributions: tuple[PaperContribution, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        findings: tuple[Finding, ...],
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
+        async with self.session_factory.begin() as session:
+            objective_row = await self._locked_objective(
+                session, collection_id, objective_id
+            )
+            objective = self._objective_from_row(objective_row)
+            if objective.published_analysis_version != source_analysis_version:
+                raise ValueError("source analysis version is stale")
+            source_row = await self._locked_analysis(
+                session, collection_id, objective_id, source_analysis_version
+            )
+            source = self._analysis_from_row(source_row)
+            active_version = (
+                objective.active_analysis_version or source_analysis_version
+            )
+            if active_version != source_analysis_version:
+                active_row = await self._locked_analysis(
+                    session, collection_id, objective_id, active_version
+                )
+                if self._analysis_from_row(active_row).status in {"queued", "running"}:
+                    raise ValueError("objective analysis is currently running")
+            if analysis.analysis_version != active_version + 1:
+                raise ValueError("authored analysis version is no longer current")
+            if analysis.status != "succeeded" or analysis.origin == "system_generated":
+                raise ValueError(
+                    "authored analysis must be a completed authored version"
+                )
+            if analysis.source_analysis_version != source_analysis_version:
+                raise ValueError(
+                    "authored analysis source version differs from request"
+                )
+            if source.status != "succeeded":
+                raise ValueError(
+                    "authored analysis requires a succeeded source version"
+                )
+            for record in (*contributions, *evidence_records, *findings):
+                if record.key[:3] != analysis.key:
+                    raise ValueError("analysis artifact belongs to another version")
+            input_documents = {item.document_id for item in analysis.document_inputs}
+            contribution_documents = {item.document_id for item in contributions}
+            if contribution_documents != input_documents:
+                raise ValueError(
+                    "paper contributions must cover every analysis input"
+                )
+            if {item.document_id for item in evidence_records} - contribution_documents:
+                raise ValueError(
+                    "objective evidence lacks owning paper contribution"
+                )
+            for evidence in evidence_records:
+                await self._require_source_locator(session, collection_id, evidence)
+            for finding in findings:
+                finding.validate_sources(evidence_records, contributions)
+
+            now = datetime.now(timezone.utc)
+            session.add(self._new_analysis_row(analysis, now=now))
+            session.add_all(
+                ObjectivePaperContributionRecord(
+                    collection_id=collection_id,
+                    objective_id=objective_id,
+                    analysis_version=analysis.analysis_version,
+                    source_document_id=item.document_id,
+                    payload=item.to_record(),
+                )
+                for item in contributions
+            )
+            await session.flush()
+            session.add_all(
+                ObjectiveEvidenceRecord(
+                    collection_id=collection_id,
+                    objective_id=objective_id,
+                    analysis_version=analysis.analysis_version,
+                    evidence_id=item.evidence_id,
+                    source_document_id=item.document_id,
+                    payload=item.to_record(),
+                )
+                for item in evidence_records
+            )
+            session.add_all(
+                ObjectiveFindingRecord(
+                    collection_id=collection_id,
+                    objective_id=objective_id,
+                    analysis_version=analysis.analysis_version,
+                    finding_id=item.finding_id,
+                    display_rank=item.display_rank,
+                    payload=item.to_record(),
+                )
+                for item in findings
+            )
+            objective = objective.queue_analysis(analysis.analysis_version)
+            objective = objective.publish_analysis(analysis)
+            self._write_objective(objective_row, objective, now=now)
+            return objective, analysis
+
     async def read_analysis(
         self,
         collection_id: str,

@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 
 import pytest
 
+from application.core.objectives.finding_authoring_service import (
+    FindingAuthoringService,
+)
 from domain.core import (
     Finding,
     ObjectiveDocumentEvidence,
@@ -397,6 +400,74 @@ async def test_analysis_publish_preserves_manifest_and_source_backed_results(
         OBJECTIVE_ID,
         analysis.analysis_version,
     ) == ((finding,), 1)
+
+
+async def test_authored_finding_publishes_new_snapshot_without_mutating_source(
+    objective_repository,
+) -> None:
+    _, analysis = await _queue_and_claim(objective_repository)
+    await objective_repository.publish_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+        contributions=_analysis_contributions(analysis.analysis_version),
+        evidence_records=_analysis_evidence(analysis.analysis_version),
+        findings=(_finding(analysis.analysis_version),),
+    )
+
+    class _OwnedCollectionService:
+        async def get_collection_for_user(self, collection_id, user_id):
+            assert collection_id == COLLECTION_ID
+            assert user_id == "user_source"
+            return {"collection_id": collection_id}
+
+    service = FindingAuthoringService(
+        collection_service=_OwnedCollectionService(),
+        objective_repository=objective_repository,
+    )
+    result = await service.create_version(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        source_analysis_version=1,
+        statement=(
+            "Across both papers, higher laser power was associated with "
+            "higher tensile strength in the reported windows."
+        ),
+        assertion_strength="associative",
+        supporting_evidence_ids=("evidence-doc_a", "evidence-doc_b"),
+        contradicting_evidence_ids=(),
+        context_evidence_ids=(),
+        condition_boundary_evidence_ids=(),
+        limitations=("Limited to the two reported process windows.",),
+        parent_finding_id="finding-strength",
+        abstention_reason=None,
+        created_by_user_id="user_source",
+    )
+
+    assert result.finding is not None
+    assert result.analysis.analysis_version == 2
+    assert result.finding.origin == "hybrid"
+    original = await objective_repository.read_finding(
+        COLLECTION_ID, OBJECTIVE_ID, 1, "finding-strength"
+    )
+    assert original == _finding(1)
+    version_two, total = await objective_repository.list_findings(
+        COLLECTION_ID, OBJECTIVE_ID, 2
+    )
+    assert total == 2
+    assert version_two[-1] == result.finding
+    cloned_evidence, evidence_total = await objective_repository.list_evidence(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        2,
+        finding_id=result.finding.finding_id,
+    )
+    assert evidence_total == 2
+    assert {item.analysis_version for item in cloned_evidence} == {2}
+    assert {item.source_ref for item in cloned_evidence} == {
+        "block-doc_a",
+        "block-doc_b",
+    }
 
 
 async def test_objective_document_evidence_round_trips_independent_status_and_payload(

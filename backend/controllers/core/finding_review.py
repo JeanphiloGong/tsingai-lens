@@ -5,7 +5,10 @@ import json
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
+from controllers.dependencies.auth import current_user_id
 from controllers.schemas.core.finding_review import (
+    FindingAuthoringCreateRequest,
+    FindingAuthoringResponse,
     FindingCurationCreateRequest,
     FindingCurationListResponse,
     FindingCurationResponse,
@@ -18,6 +21,47 @@ from controllers.schemas.core.finding_review import (
 
 
 router = APIRouter(prefix="/collections", tags=["finding-review"])
+
+
+@router.post(
+    "/{collection_id}/objectives/{objective_id}/findings",
+    response_model=FindingAuthoringResponse,
+    status_code=201,
+    summary="Create a researcher-authored Finding version",
+)
+async def create_finding_version(
+    collection_id: str,
+    objective_id: str,
+    payload: FindingAuthoringCreateRequest,
+    request: Request,
+) -> FindingAuthoringResponse:
+    try:
+        result = await request.app.state.finding_authoring_service.create_version(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            source_analysis_version=payload.source_analysis_version,
+            statement=payload.statement,
+            assertion_strength=payload.assertion_strength,
+            supporting_evidence_ids=tuple(payload.supporting_evidence_ids),
+            contradicting_evidence_ids=tuple(payload.contradicting_evidence_ids),
+            context_evidence_ids=tuple(payload.context_evidence_ids),
+            condition_boundary_evidence_ids=tuple(
+                payload.condition_boundary_evidence_ids
+            ),
+            limitations=tuple(payload.limitations),
+            parent_finding_id=payload.parent_finding_id,
+            abstention_reason=payload.abstention_reason,
+            created_by_user_id=await current_user_id(request),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return FindingAuthoringResponse(
+        analysis=result.analysis.to_record(),
+        finding=(result.finding.to_record() if result.finding is not None else None),
+        abstention_reason=result.analysis.abstention_reason,
+    )
 
 
 @router.post(

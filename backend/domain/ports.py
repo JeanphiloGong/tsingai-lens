@@ -87,6 +87,11 @@ class CollectionRepository(Protocol):
 class TaskRepository(Protocol):
     async def add_task(self, record: TaskRecord) -> TaskRecord: ...
 
+    async def get_or_create_collection_task(
+        self,
+        record: TaskRecord,
+    ) -> tuple[TaskRecord, bool]: ...
+
     async def get_or_create_document_task(
         self,
         record: TaskRecord,
@@ -395,6 +400,18 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
         analysis_version: int,
         *,
+        contributions: tuple[PaperContribution, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        findings: tuple[Finding, ...],
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
+
+    async def publish_authored_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        source_analysis_version: int,
+        *,
+        analysis: ObjectiveAnalysis,
         contributions: tuple[PaperContribution, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],

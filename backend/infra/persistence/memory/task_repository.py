@@ -19,6 +19,30 @@ class MemoryTaskRepository:
             self._tasks[record.task_id] = deepcopy(record)
             return deepcopy(record)
 
+    async def get_or_create_collection_task(
+        self,
+        record: TaskRecord,
+    ) -> tuple[TaskRecord, bool]:
+        if record.document_id is not None:
+            raise ValueError("collection task must not identify one document")
+        with self._lock:
+            active = sorted(
+                (
+                    task
+                    for task in self._tasks.values()
+                    if task.collection_id == record.collection_id
+                    and task.document_id is None
+                    and task.task_type == record.task_type
+                    and task.status in {"queued", "running"}
+                ),
+                key=lambda task: (task.updated_at, task.task_id),
+                reverse=True,
+            )
+            if active:
+                return deepcopy(active[0]), False
+            self._tasks[record.task_id] = deepcopy(record)
+            return deepcopy(record), True
+
     async def get_or_create_document_task(
         self,
         record: TaskRecord,

@@ -83,6 +83,15 @@ def _task(task_id: str, fingerprint: str) -> TaskRecord:
     )
 
 
+def _collection_task(task_id: str, fingerprint: str) -> TaskRecord:
+    return replace(
+        _task(task_id, fingerprint),
+        document_id=None,
+        task_type="objective_discovery",
+        details={"document_ids": ["doc_a", "doc_b"]},
+    )
+
+
 async def test_profiles_and_paper_maps_are_current_per_document(source_repository) -> None:
     profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
     paper_maps = PostgresPaperMapRepository(source_repository.session_factory)
@@ -143,6 +152,36 @@ async def test_document_task_reuses_active_and_matching_completed_work(
     changed_request = _task("task-changed-request", "fingerprint-b")
     created_task, created = await tasks.get_or_create_document_task(changed_request)
     assert (created_task, created) == (changed_request, True)
+
+
+async def test_collection_task_reuses_only_active_discovery_work(
+    source_repository,
+) -> None:
+    tasks = PostgresTaskRepository(source_repository.session_factory)
+    first = _collection_task("task-discovery-first", "scope-a")
+    stored, created = await tasks.get_or_create_collection_task(first)
+    assert (stored, created) == (first, True)
+
+    active_request = _collection_task("task-discovery-duplicate", "scope-b")
+    reused_active, created = await tasks.get_or_create_collection_task(
+        active_request
+    )
+    assert (reused_active, created) == (first, False)
+
+    completed = replace(
+        first,
+        status="completed",
+        current_stage="objectives_ready",
+        progress_percent=100,
+        updated_at="2026-08-27T10:01:00+00:00",
+        started_at=NOW,
+        finished_at="2026-08-27T10:01:00+00:00",
+    )
+    assert await tasks.update_task(completed) is True
+
+    retry = _collection_task("task-discovery-retry", "scope-b")
+    created_task, created = await tasks.get_or_create_collection_task(retry)
+    assert (created_task, created) == (retry, True)
 
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(

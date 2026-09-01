@@ -18,6 +18,7 @@
 	export let evidence: ObjectiveEvidence[] = [];
 	export let collectionId = '';
 	export let documentTitles: Record<string, string> = {};
+	export let onDerive: (finding: ObjectiveFinding) => void = () => {};
 
 	type SharedComparisonRow = {
 		evidence: ObjectiveEvidence;
@@ -467,6 +468,12 @@
 		return { causal: '因果', associative: '关联', descriptive: '描述' }[value];
 	}
 
+	function originLabel(value: ObjectiveFinding['origin'] | undefined) {
+		if (value === 'human_authored') return '研究者创建';
+		if (value === 'hybrid') return '研究者修订';
+		return '系统分析';
+	}
+
 	function relationLabel(value: string) {
 		return (
 			{
@@ -600,9 +607,16 @@
 <article class="finding-detail">
 	<header>
 		<div>
-			<span>{directPaperCount >= 2 ? '跨文献研究发现' : '单篇直接证据'}</span>
+			<span
+				>{originLabel(finding.origin)} · {directPaperCount >= 2
+					? '跨文献研究发现'
+					: '单篇直接证据'}</span
+			>
 			<h2>{finding.statement}</h2>
 		</div>
+		<button class="btn btn--ghost btn--small" type="button" on:click={() => onDerive(finding)}>
+			基于此 Finding 创建新版本
+		</button>
 	</header>
 
 	<section class="result-line" aria-label="Finding 核心结果">

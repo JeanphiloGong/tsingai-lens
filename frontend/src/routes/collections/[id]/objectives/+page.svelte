@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import { errorMessage } from '../../../_shared/api';
 	import {
 		listCollectionDocuments,
@@ -22,6 +22,7 @@
 
 	const OBJECTIVE_PAGE_SIZE = 5;
 	const SCOPE_PAGE_SIZE = 8;
+	const ANALYSIS_POLL_DELAY_MS = 2500;
 	type ObjectiveFilterStatus = 'all' | 'pending' | 'active' | 'published' | 'failed';
 
 	let objectiveList: ObjectiveList | null = null;
@@ -43,6 +44,7 @@
 	let actionObjectiveId = '';
 	let error = '';
 	let loadedCollectionId = '';
+	let analysisPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectives = objectiveList?.objectives ?? [];
@@ -95,6 +97,52 @@
 		void loadObjectives();
 	}
 
+	onDestroy(clearAnalysisPoll);
+
+	function clearAnalysisPoll() {
+		if (analysisPollTimer) clearTimeout(analysisPollTimer);
+		analysisPollTimer = null;
+	}
+
+	function scheduleAnalysisPoll() {
+		clearAnalysisPoll();
+		if (!Object.values(analysisStates).some(isAnalysisProcessing)) return;
+		analysisPollTimer = setTimeout(() => void pollActiveAnalyses(), ANALYSIS_POLL_DELAY_MS);
+	}
+
+	async function pollActiveAnalyses() {
+		const objectiveIds = Object.entries(analysisStates)
+			.filter(([, analysis]) => isAnalysisProcessing(analysis))
+			.map(([objectiveId]) => objectiveId);
+		if (!objectiveIds.length) return;
+		try {
+			const snapshots = await Promise.all(
+				objectiveIds.map((objectiveId) => fetchObjectiveAnalysis(collectionId, objectiveId))
+			);
+			for (const snapshot of snapshots) applyAnalysisSnapshot(snapshot);
+		} catch (err) {
+			error = errorMessage(err);
+		}
+		scheduleAnalysisPoll();
+	}
+
+	function applyAnalysisSnapshot(snapshot: Awaited<ReturnType<typeof fetchObjectiveAnalysis>>) {
+		if (objectiveList) {
+			objectiveList = {
+				...objectiveList,
+				objectives: objectiveList.objectives.map((objective) =>
+					objective.objective_id === snapshot.objective.objective_id
+						? snapshot.objective
+						: objective
+				)
+			};
+		}
+		analysisStates = {
+			...analysisStates,
+			[snapshot.objective.objective_id]: snapshot.active_analysis
+		};
+	}
+
 	function prioritizeObjectives(items: ObjectiveSummary[]) {
 		const resumed = items.filter(
 			(objective) =>
@@ -121,6 +169,7 @@
 			error = errorMessage(err);
 		} finally {
 			loading = false;
+			scheduleAnalysisPoll();
 		}
 	}
 
@@ -355,13 +404,13 @@
 				...selectedDocumentIdsByObjective,
 				[objective.objective_id]: documentIds
 			};
-			await runObjectiveAnalysis(collectionId, objective.objective_id, documentIds);
-			await goto(
-				resolve('/collections/[id]/objectives/[objective_id]', {
-					id: collectionId,
-					objective_id: objective.objective_id
-				})
+			const snapshot = await runObjectiveAnalysis(
+				collectionId,
+				objective.objective_id,
+				documentIds
 			);
+			applyAnalysisSnapshot(snapshot);
+			scheduleAnalysisPoll();
 		} catch (err) {
 			scopeObjectiveId = objective.objective_id;
 			scopeQuery = '';
@@ -378,13 +427,15 @@
 		actionObjectiveId = objective.objective_id;
 		scopeError = '';
 		try {
-			await runObjectiveAnalysis(collectionId, objective.objective_id, documentIds);
-			await goto(
-				resolve('/collections/[id]/objectives/[objective_id]', {
-					id: collectionId,
-					objective_id: objective.objective_id
-				})
+			const snapshot = await runObjectiveAnalysis(
+				collectionId,
+				objective.objective_id,
+				documentIds
 			);
+			applyAnalysisSnapshot(snapshot);
+			scopeObjectiveId = '';
+			scopeError = '';
+			scheduleAnalysisPoll();
 		} catch (err) {
 			scopeError = errorMessage(err);
 		} finally {
@@ -576,6 +627,11 @@
 									</div>
 								{/if}
 							</div>
+						{/if}
+						{#if activeAnalysis?.status === 'failed'}
+							<p class="analysis-error" role="alert">
+								{activeAnalysis.error_message || '本次分析失败，请检查论文范围后重试。'}
+							</p>
 						{/if}
 						<div class="actions">
 							{#if canStartAnalysis(objective)}
@@ -854,9 +910,14 @@
 	}
 
 	.state--error,
+	.analysis-error,
 	.scope-state--error,
 	.scope-dialog footer > p {
 		color: var(--danger-text, #b42318);
+	}
+
+	.analysis-error {
+		font-size: 13px;
 	}
 
 	.empty-state {

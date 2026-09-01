@@ -1,6 +1,7 @@
 from domain.chat.message import ChatMessage, ChatMessageRole
 from domain.chat.resource_ref import ChatResourceRef
 from domain.chat.session import ChatSession
+from domain.chat.source_context import ChatSourceContext
 from domain.chat.tool_call import (
     ChatToolCall,
     ChatToolResult,
@@ -15,6 +16,7 @@ __all__ = [
     "ChatMessageRole",
     "ChatResourceRef",
     "ChatSession",
+    "ChatSourceContext",
     "ChatToolCall",
     "ChatToolResult",
     "ToolCallStatus",

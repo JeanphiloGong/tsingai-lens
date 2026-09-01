@@ -1,6 +1,6 @@
 import { page as browserPage } from 'vitest/browser';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'vitest-browser-svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render } from 'vitest-browser-svelte';
 
 const { pageStore, fetchMock } = vi.hoisted(() => ({
 	pageStore: {
@@ -19,6 +19,8 @@ vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
+
+afterEach(cleanup);
 
 function jsonResponse(body: unknown) {
 	return new Response(JSON.stringify(body), {
@@ -97,13 +99,21 @@ describe('current collection document workflow', () => {
 				return jsonResponse(task({ status: 'queued' }));
 			}
 			if (url.pathname.endsWith('/objective-discovery') && method === 'POST') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					document_inputs: [
-						{ document_id: 'doc_ready', preparation_fingerprint: 'fingerprint-ready' }
-					],
-					objectives: []
-				});
+				return jsonResponse(
+					task({
+						task_id: 'task_discovery',
+						collection_id: 'col_123',
+						document_id: null,
+						task_type: 'objective_discovery',
+						status: 'queued',
+						current_stage: 'queued',
+						progress_percent: 0,
+						progress_detail: {
+							phase: 'queued',
+							message: 'Research question formation is queued.'
+						}
+					})
+				);
 			}
 			throw new Error(`unexpected request: ${method} ${url.pathname}`);
 		});
@@ -122,13 +132,13 @@ describe('current collection document workflow', () => {
 			.not.toBeDisabled();
 	});
 
-	it('discovers objectives from all ready papers without exposing the document selector', async () => {
+	it('forms research questions from all ready papers without exposing the document selector', async () => {
 		render(Page);
 
 		await expect
 			.element(browserPage.getByLabelText('Select paper for research scope'))
 			.not.toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Discover objectives from 1' }).click();
+		await browserPage.getByRole('button', { name: 'Form research questions from 1' }).click();
 
 		const discoveryCall = fetchMock.mock.calls.find(([input]) =>
 			String(input).includes('/objective-discovery')
@@ -137,6 +147,109 @@ describe('current collection document workflow', () => {
 		expect(JSON.parse(String(discoveryCall?.[1]?.body))).toEqual({
 			document_ids: ['doc_ready']
 		});
+	});
+
+	it('restores active research-question formation from the persisted task', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			const url = new URL(raw, 'http://localhost');
+			if (url.pathname.endsWith('/documents')) {
+				return jsonResponse({ items: [readyDocument] });
+			}
+			if (url.pathname.endsWith('/tasks')) {
+				return jsonResponse({
+					collection_id: 'col_123',
+					count: 1,
+					items: [
+						task({
+							task_id: 'task_discovery',
+							document_id: null,
+							task_type: 'objective_discovery',
+							status: 'running',
+							current_stage: 'objective_discovery_started',
+							progress_percent: 64,
+							progress_detail: {
+								phase: 'objective_discovery_started',
+								message: 'Forming candidate research questions.'
+							}
+						})
+					]
+				});
+			}
+			if (url.pathname.endsWith('/objectives')) {
+				return jsonResponse({ collection_id: 'col_123', objectives: [] });
+			}
+			throw new Error(`unexpected request: ${url.pathname}`);
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('Forming candidate research questions.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Forming research questions...' }))
+			.toBeDisabled();
+	});
+
+	it('polls persisted research-question formation through completion', async () => {
+		let taskReads = 0;
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			const url = new URL(raw, 'http://localhost');
+			if (url.pathname.endsWith('/documents')) {
+				return jsonResponse({ items: [readyDocument] });
+			}
+			if (url.pathname.endsWith('/tasks')) {
+				return jsonResponse({
+					collection_id: 'col_123',
+					count: 1,
+					items: [
+						task({
+							task_id: 'task_discovery',
+							document_id: null,
+							task_type: 'objective_discovery',
+							status: 'running',
+							progress_percent: 64
+						})
+					]
+				});
+			}
+			if (url.pathname.endsWith('/tasks/task_discovery')) {
+				taskReads += 1;
+				return jsonResponse(
+					task({
+						task_id: 'task_discovery',
+						document_id: null,
+						task_type: 'objective_discovery',
+						status: 'completed',
+						current_stage: 'objectives_ready',
+						progress_percent: 100
+					})
+				);
+			}
+			if (url.pathname.endsWith('/objectives')) {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives:
+						taskReads > 0
+							? [{ objective_id: 'obj-1', question: 'How does heat affect strength?' }]
+							: []
+				});
+			}
+			throw new Error(`unexpected request: ${url.pathname}`);
+		});
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Forming research questions...' }))
+			.toBeDisabled();
+		await new Promise((resolve) => setTimeout(resolve, 2700));
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Enter research objectives' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives');
+		expect(taskReads).toBe(1);
 	});
 
 	it('leads with existing research objectives instead of the paper management table', async () => {
@@ -164,7 +277,7 @@ describe('current collection document workflow', () => {
 			.toHaveAttribute('href', '/collections/col_123/objectives');
 		await expect.element(browserPage.getByText('ready-paper.pdf')).not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Discover objectives from 1' }))
+			.element(browserPage.getByRole('button', { name: 'Form research questions from 1' }))
 			.not.toBeInTheDocument();
 	});
 });

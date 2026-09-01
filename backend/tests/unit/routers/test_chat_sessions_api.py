@@ -22,7 +22,14 @@ from controllers.schemas.chat.session import (
     ChatToolDecisionRequest,
     ChatTurnRequest,
 )
-from domain.chat import ChatMessage, ChatSession, ChatToolCall, ToolRisk
+from domain.chat import (
+    ChatMessage,
+    ChatResourceRef,
+    ChatSession,
+    ChatSourceContext,
+    ChatToolCall,
+    ToolRisk,
+)
 from infra.persistence.memory import MemoryObjectiveRepository, MemoryTaskRepository
 from main import create_app
 
@@ -91,11 +98,23 @@ class _Service:
         user_id: str,
         *,
         message: str,
+        source_contexts: tuple[ChatSourceContext, ...] = (),
     ) -> dict:
         await self.get_session_for_user(session_id, user_id)
         if message == "blocked":
             raise ChatApprovalPendingError(self.pending.tool_call_id)
         assert message == "你好"
+        if source_contexts:
+            self.messages = (
+                ChatMessage.user(
+                    message_id="msg-source",
+                    session_id="chat-1",
+                    content=message,
+                    created_at="2026-08-31T00:00:00+00:00",
+                    source_contexts=source_contexts,
+                ),
+                self.messages[-1],
+            )
         return {
             "status": "completed",
             "messages": self.messages,
@@ -109,11 +128,13 @@ class _Service:
         user_id: str,
         *,
         message: str,
+        source_contexts: tuple[ChatSourceContext, ...] = (),
     ):
         turn = await self.post_message_for_user(
             session_id,
             user_id,
             message=message,
+            source_contexts=source_contexts,
         )
 
         async def events():
@@ -180,6 +201,48 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert turn.messages[-1].content.startswith("你好")
     assert [item.role for item in messages.items] == ["user", "assistant"]
     assert messages.pending_approval.tool_call_id == "call-1"
+
+
+def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
+    service = _Service()
+    source_context = {
+        "resource_ref": {
+            "resource_type": "source",
+            "resource_id": "doc-1:results",
+            "href": (
+                "/collections/col-1/documents/doc-1"
+                "?view=parsed-paper&source_ref=results&page=3"
+            ),
+        },
+        "collection_id": "col-1",
+        "document_id": "doc-1",
+        "document_title": "Paper A",
+        "source_kind": "paragraph",
+        "source_ref": "results",
+        "page": 3,
+        "quote": "Conductivity improved to 12 mS/cm under EIS.",
+        "heading_path": "Results",
+    }
+
+    turn = asyncio.run(
+        sessions_controller.post_chat_message(
+            "chat-1",
+            ChatTurnRequest(message="你好", source_contexts=[source_context]),
+            _request(service),
+        )
+    )
+
+    assert turn.messages[0].source_contexts[0].document_id == "doc-1"
+    assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
+        ChatResourceRef(
+            resource_type="source",
+            resource_id="doc-1:results",
+            href=(
+                "/collections/col-1/documents/doc-1"
+                "?view=parsed-paper&source_ref=results&page=3"
+            ),
+        ).to_record()
+    )
 
 
 def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:

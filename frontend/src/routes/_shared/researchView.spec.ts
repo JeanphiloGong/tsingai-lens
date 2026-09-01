@@ -4,7 +4,6 @@ import { requestJson } from './api';
 import {
 	createFindingCuration,
 	createFindingFeedback,
-	discoverCollectionObjectives,
 	fetchCollectionObjectives,
 	fetchFindingCurations,
 	fetchFindingFeedback,
@@ -68,6 +67,11 @@ const finding = {
 	objective_id: 'obj_1',
 	analysis_version: 1,
 	finding_id: 'finding-1',
+	origin: 'system_generated' as const,
+	source_analysis_version: null,
+	parent_finding_id: null,
+	created_by_user_id: null,
+	created_at: null,
 	statement: 'Higher temperature was associated with greater strength.',
 	factors: ['temperature'],
 	outcome: 'strength',
@@ -135,17 +139,6 @@ describe('objective Finding API', () => {
 		expect(result.active_analysis?.document_inputs).toEqual([
 			{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' }
 		]);
-	});
-
-	it('discovers objectives from the exact ready document selection', async () => {
-		request.mockResolvedValue({ collection_id: 'col_123', document_inputs: [], objectives: [] });
-
-		await discoverCollectionObjectives('col_123', ['paper-1', 'paper-3']);
-
-		expect(request).toHaveBeenCalledWith('/collections/col_123/objective-discovery', {
-			method: 'POST',
-			body: JSON.stringify({ document_ids: ['paper-1', 'paper-3'] })
-		});
 	});
 
 	it('normalizes and fetches the complete Objective scope preview', async () => {

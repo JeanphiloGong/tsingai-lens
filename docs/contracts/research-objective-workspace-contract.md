@@ -77,6 +77,13 @@ Owns one reproducible execution attempt:
   progress;
 - terminal error code/message and timestamps.
 
+System analysis has `origin=system_generated`. A deliberate researcher Finding
+or evidence-abstention decision publishes a new `human_authored | hybrid`
+analysis version with `source_analysis_version` and authenticated
+`created_by_user_id`. An authored abstention additionally records one bounded
+`abstention_reason` and explanation. It remains a successful scientific
+decision, not a failed model run.
+
 At most one version is queued or running for an Objective. Retry allocates the
 next version. Successful publication and the Objective's published pointer are
 committed atomically. Failed analysis never hides the previous published
@@ -149,6 +156,14 @@ Finding is the only conclusion identity. It owns:
   deterministic analysis limitations;
 - one FindingPaperContribution binding for every PaperContribution in the
   Objective analysis.
+
+It also records authorship lineage. `origin=human_authored` identifies a new
+researcher conclusion over existing Evidence. `origin=hybrid` additionally
+requires a `parent_finding_id` from the immutable source version.
+`source_analysis_version`, authenticated `created_by_user_id`, and
+`created_at` preserve who made the decision and which published Evidence they
+reviewed. System, human, and hybrid Findings therefore share one canonical
+scientific model and one versioned identity.
 
 Result sets use exact normalized `(factor tuple, outcome)` identity. Jointly
 changed factors remain one tuple. A causal statement requires exactly one
@@ -246,6 +261,7 @@ fallback recommendation. Retry reuses the failed version's frozen IDs.
 
 ### Published result reads
 
+- `POST /objectives/{objective_id}/findings`
 - `GET /objectives/{objective_id}/findings`
 - `GET /objectives/{objective_id}/findings/{finding_id}`
 - `GET /objectives/{objective_id}/evidence`
@@ -253,6 +269,24 @@ fallback recommendation. Retry reuses the failed version's frozen IDs.
 Finding and Evidence lists are paginated. `analysis_version` is explicit in
 every response and may be supplied as a query parameter. Evidence may be
 filtered by `finding_id`.
+
+The POST command is the researcher-approved Evidence-to-Finding decision
+boundary. The browser or Research Agent submits the current published
+`source_analysis_version`, one statement and assertion strength, selected
+support/contradiction/context Evidence IDs, optional boundary IDs and
+limitations, and an optional parent Finding. An Agent request remains paused
+until the authenticated researcher approves those exact arguments. The backend
+accepts only eligible Evidence from that exact version and derives the
+Finding's factors, outcome, direction, attribution, certainty, synthesis, paper
+coverage, target version, creator, and Source bindings.
+
+Publication clones the complete source-version PaperContribution, Evidence,
+and Finding snapshot into the next immutable version before appending the new
+Finding. The source analysis and parent Finding do not change. A stale version
+or concurrent analysis is a conflict, never a silent rebase. A researcher may
+instead record `no_comparable_evidence`, `no_grounded_evidence`, or
+`insufficient_evidence` with an explanation; that publishes analysis metadata
+without manufacturing a Finding.
 
 ### Review and export
 
@@ -284,6 +318,11 @@ or curation event controls review and training status.
 - `failed` with a published version: show retry while keeping the prior
   published Findings readable.
 - `succeeded`: show the published Finding list and selected detail.
+- `succeeded` with authoring open: load all eligible Evidence from that exact
+  published version, preserve Source links while roles are assigned, then
+  reload and select the new versioned Finding after publication.
+- `succeeded` with authored abstention: display the researcher's evidence
+  decision even when the published Finding set is empty.
 
 The Collection page allows upload and independent prepare/retry while other
 papers run. Objective discovery and analysis controls expose ready-paper
@@ -310,6 +349,12 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
 - Every eligible direct result in an atomic result set is assigned exactly once
   as supporting or contradicting.
 - Published Finding graphs are immutable.
+- Researcher-approved authorship, whether entered in the workbench or proposed
+  by the Agent, always creates a new published analysis version; it never edits
+  a published Finding or Evidence record in place.
+- The browser cannot declare creator identity, target version, paper coverage,
+  factors, outcome, direction, certainty, attribution, synthesis, or Source
+  text. These are deterministic backend responsibilities.
 - Internal IDs are retained for requests and audit but are not used as visible
   scientific labels.
 - A completed inspection with no grounded Evidence publishes an empty Finding
@@ -318,3 +363,7 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
   stale or technically failed output is never reported as successful analysis.
 - The frontend and downstream assistant consume published Findings directly;
   they do not rebuild another conclusion graph.
+
+Human Finding authoring currently uses existing published Evidence. Selecting
+raw document text, tables, or figures to create or correct Evidence remains
+owned by #191. Objective-local paper-scope review remains owned by #340.

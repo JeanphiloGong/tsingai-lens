@@ -137,6 +137,9 @@ class PostgresChatRepository:
                             if message.tool_arguments is not None
                             else None
                         ),
+                        source_contexts=[
+                            item.to_record() for item in message.source_contexts
+                        ],
                         created_at=_datetime(message.created_at),
                     )
                 )
@@ -298,6 +301,7 @@ def _message_record(
             "tool_name": row.tool_name,
             "tool_arguments": row.tool_arguments,
             "tool_result": _result_record(result) if result is not None else None,
+            "source_contexts": list(row.source_contexts),
         }
     )
 

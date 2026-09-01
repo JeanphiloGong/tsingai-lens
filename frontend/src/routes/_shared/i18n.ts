@@ -229,6 +229,10 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
 			sending: 'Sending...',
+			sourceContext: {
+				remove: 'Remove source context',
+				truncated: 'Excerpt shortened · open the Source for the complete content'
+			},
 			suggestions: {
 				overview: 'What does this collection contain?',
 				findings: 'What published findings are available?',
@@ -242,12 +246,17 @@ const translations: Record<Language, Translations> = {
 				queued: '{name} started',
 				failed: '{name} failed',
 				collection: 'Collection context',
+				documentSources: 'Paper source inspection',
 				researchProcess: 'Literature analysis progress',
 				startResearchProcess: 'Literature analysis',
 				researchProcessRequested: 'Checking literature analysis progress',
 				researchProcessStatus: 'Literature analysis progress',
 				researchProcessUnavailable: 'Literature analysis progress is unavailable.',
 				findings: 'Published findings',
+				findingReview: 'Finding and evidence review',
+				findingFeedback: 'Finding feedback',
+				findingCuration: 'Finding curation',
+				findingAuthoring: 'Finding authoring',
 				proposals: 'Objective drafts',
 				createObjective: 'Create objective candidate',
 				previewResearchScope: 'Preview relevant paper scope',
@@ -255,7 +264,13 @@ const translations: Record<Language, Translations> = {
 				inspectObjectiveAnalysis: 'Research question analysis progress',
 				unknown: 'Research capability',
 				paperCount: '{papers} papers · {objectives} objectives',
+				documentSourceCount: '{count} matching paper sources',
 				findingCount: '{findings} findings · {evidence} evidence records',
+				findingEvidenceCount: 'Complete finding · {count} linked evidence records',
+				feedbackRecorded: 'Finding feedback recorded',
+				curationRecorded: 'Finding curation recorded',
+				findingPublished: 'Researcher-authored Finding published in a new analysis version',
+				findingAbstentionPublished: 'Evidence abstention published in a new analysis version',
 				absence: 'No published findings or evidence were returned.',
 				draftCount: '{count} objective drafts',
 				objectiveCreated: 'Objective candidate created',
@@ -308,16 +323,31 @@ const translations: Record<Language, Translations> = {
 					'Prepare and classify the uploaded papers, build a lightweight Paper Map, and form candidate research questions.',
 				objectiveAnalysisBody:
 					'Inspect the selected papers, extract source-backed facts, and compare the result for this research question.',
+				findingFeedbackBody:
+					'Review the exact assessment that will be recorded for this published research conclusion.',
+				findingCurationBody:
+					'Review the complete revised conclusion. Its identity, paper coverage, evidence, and source lineage will remain unchanged.',
+				findingAuthoringBody:
+					'Publish this conclusion as a new immutable analysis version. The current system result will remain unchanged.',
+				findingAbstentionBody:
+					'Publish this evidence abstention as a new immutable analysis version without creating a placeholder Finding.',
 				arguments: 'Proposed values',
 				approve: 'Approve and create',
 				startResearch: 'Approve and start',
 				analyzeObjective: 'Approve and analyze',
+				recordFeedback: 'Approve and record review',
+				saveCuration: 'Approve and save revision',
+				publishFinding: 'Approve and publish Finding',
+				publishAbstention: 'Approve and publish evidence decision',
 				reject: 'Reject',
 				processing: 'Recording decision...'
 			},
 			rejected: 'The proposed write was rejected. No research objective was created.',
 			researchProcessRejected: 'Literature analysis was not started.',
 			objectiveAnalysisRejected: 'Research question analysis was not started.',
+			findingFeedbackRejected: 'The research conclusion review was not recorded.',
+			findingCurationRejected: 'The research conclusion revision was not saved.',
+			findingAuthoringRejected: 'The proposed research conclusion was not published.',
 			turnFailed: 'The Agent turn stopped with error: {code}'
 		},
 		research: {
@@ -704,6 +734,10 @@ const translations: Record<Language, Translations> = {
 						title: 'Lens is understanding the papers',
 						body: '{processing} paper(s) are being parsed and classified. Ready papers remain available for research.'
 					},
+					forming: {
+						title: 'Lens is forming research questions',
+						body: 'The selected prepared papers are being mapped together. Evidence analysis has not started.'
+					},
 					ready: {
 						title: 'Ready to form research questions',
 						body: '{ready} prepared paper(s) can now be reviewed together to identify focused research Objectives.'
@@ -733,9 +767,12 @@ const translations: Record<Language, Translations> = {
 				uploadComplete: '{count} paper(s) uploaded.',
 				preparePending: 'Prepare {count} pending',
 				preparationQueued: '{count} paper preparation task(s) queued.',
-				discover: 'Discover objectives from {count}',
-				discovering: 'Discovering objectives...',
-				discoveryComplete: 'Objective discovery completed with {count} candidate(s).',
+				discover: 'Form research questions from {count}',
+				discovering: 'Forming research questions...',
+				discoveryQueued: 'Research question formation has started.',
+				discoveryProgressTitle: 'Research question formation',
+				discoveryComplete: 'Research question formation completed with {count} candidate(s).',
+				discoveryFailed: 'Research question formation failed. Retry it.',
 				documentsTitle: 'Papers in this collection',
 				documentsLead:
 					'Readiness belongs to each paper. A failed paper does not block selection of the ready papers.',
@@ -1888,6 +1925,7 @@ const translations: Record<Language, Translations> = {
 			fitWidth: 'Fit width',
 			searchSource: 'Search source',
 			downloadSource: 'Download source',
+			askResearchAgent: 'Ask research assistant',
 			pdfLoading: 'Loading PDF pages...',
 			pdfLoadFailed: 'The PDF could not be rendered in the browser.',
 			pdfPageRenderError: 'Page render failed',
@@ -2622,6 +2660,10 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
 			sending: '发送中...',
+			sourceContext: {
+				remove: '移除原文上下文',
+				truncated: '摘录已缩短 · 完整内容请打开原文'
+			},
 			suggestions: {
 				overview: '这个集合里包含什么？',
 				findings: '目前有哪些已发布的研究发现？',
@@ -2635,12 +2677,17 @@ const translations: Record<Language, Translations> = {
 				queued: '{name}已启动',
 				failed: '{name}执行失败',
 				collection: '集合上下文',
+				documentSources: '查看论文原文',
 				researchProcess: '文献分析进度',
 				startResearchProcess: '开始文献分析',
 				researchProcessRequested: '查看文献分析进度',
 				researchProcessStatus: '文献分析进度',
 				researchProcessUnavailable: '暂时无法读取文献分析进度。',
 				findings: '已发布研究发现',
+				findingReview: '审阅研究发现与证据',
+				findingFeedback: '研究发现反馈',
+				findingCuration: '研究发现修订',
+				findingAuthoring: '创建研究发现',
 				proposals: '研究目标草稿',
 				createObjective: '创建研究目标候选',
 				previewResearchScope: '预览相关论文范围',
@@ -2648,7 +2695,13 @@ const translations: Record<Language, Translations> = {
 				inspectObjectiveAnalysis: '研究问题分析进度',
 				unknown: '研究能力',
 				paperCount: '{papers} 篇论文 · {objectives} 个研究目标',
+				documentSourceCount: '{count} 个匹配的论文原文来源',
 				findingCount: '{findings} 条发现 · {evidence} 条证据',
+				findingEvidenceCount: '完整研究发现 · {count} 条关联证据',
+				feedbackRecorded: '研究发现反馈已记录',
+				curationRecorded: '研究发现修订已记录',
+				findingPublished: '研究者撰写的 Finding 已发布到新的分析版本',
+				findingAbstentionPublished: '证据不足决定已发布到新的分析版本',
 				absence: '没有返回已发布的研究发现或证据。',
 				draftCount: '{count} 个研究目标草稿',
 				objectiveCreated: '研究目标候选已创建',
@@ -2698,16 +2751,28 @@ const translations: Record<Language, Translations> = {
 				body: '请核对即将创建的候选研究目标。',
 				startResearchBody: '整理论文、判断论文类型与用途、建立轻量论文地图并归纳候选研究问题。',
 				objectiveAnalysisBody: '检查选定论文、提取可回溯的事实，并围绕这个研究问题比较结果。',
+				findingFeedbackBody: '请核对即将记录到这条已发布研究发现上的审阅判断。',
+				findingCurationBody:
+					'请核对完整的修订后研究发现；其身份、论文范围、证据和原文来源关系不会改变。',
+				findingAuthoringBody: '将这条结论发布为新的不可变分析版本；当前系统结果会保持不变。',
+				findingAbstentionBody: '将证据不足决定发布为新的不可变分析版本，不创建占位 Finding。',
 				arguments: '拟写入内容',
 				approve: '确认并创建',
 				startResearch: '确认并开始',
 				analyzeObjective: '确认并分析',
+				recordFeedback: '确认并记录审阅',
+				saveCuration: '确认并保存修订',
+				publishFinding: '确认并发布 Finding',
+				publishAbstention: '确认并发布证据决定',
 				reject: '拒绝',
 				processing: '正在记录决定...'
 			},
 			rejected: '已拒绝写入，没有创建研究目标。',
 			researchProcessRejected: '已取消启动文献分析。',
 			objectiveAnalysisRejected: '已取消启动研究问题分析。',
+			findingFeedbackRejected: '已取消记录研究发现审阅。',
+			findingCurationRejected: '已取消保存研究发现修订。',
+			findingAuthoringRejected: '已取消发布拟议的研究发现。',
 			turnFailed: 'Agent 本轮执行停止，错误：{code}'
 		},
 		research: {
@@ -3082,6 +3147,10 @@ const translations: Record<Language, Translations> = {
 						title: 'Lens 正在理解论文',
 						body: '正在解析和识别 {processing} 篇论文；已经就绪的论文仍可用于研究。'
 					},
+					forming: {
+						title: 'Lens 正在形成研究问题',
+						body: '系统正在共同梳理所选论文；此时尚未开始目标级证据分析。'
+					},
 					ready: {
 						title: '可以开始形成研究问题',
 						body: '可共同审阅 {ready} 篇已准备论文，并从中形成聚焦的研究目标。'
@@ -3110,9 +3179,12 @@ const translations: Record<Language, Translations> = {
 				uploadComplete: '已上传 {count} 篇论文。',
 				preparePending: '准备 {count} 篇待处理论文',
 				preparationQueued: '已启动 {count} 个论文准备任务。',
-				discover: '从 {count} 篇论文发现研究目标',
-				discovering: '正在发现研究目标...',
-				discoveryComplete: '研究目标发现完成，得到 {count} 个候选。',
+				discover: '从 {count} 篇论文形成研究问题',
+				discovering: '正在形成研究问题...',
+				discoveryQueued: '已开始形成研究问题。',
+				discoveryProgressTitle: '研究问题形成进度',
+				discoveryComplete: '研究问题形成完成，得到 {count} 个候选。',
+				discoveryFailed: '研究问题形成失败，请重试。',
 				documentsTitle: '集合中的论文',
 				documentsLead: '就绪状态属于每篇论文；一篇论文失败，不会阻塞已经就绪的论文。',
 				selectAllReady: '选择所有已就绪论文',
@@ -4208,6 +4280,7 @@ const translations: Record<Language, Translations> = {
 			fitWidth: '适配宽度',
 			searchSource: '搜索原文',
 			downloadSource: '下载原文',
+			askResearchAgent: '询问研究助手',
 			pdfLoading: '正在加载 PDF 页面...',
 			pdfLoadFailed: '浏览器无法渲染该 PDF。',
 			pdfPageRenderError: '页面渲染失败',

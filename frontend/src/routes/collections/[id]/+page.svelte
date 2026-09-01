@@ -9,12 +9,9 @@
 		type CollectionDocument
 	} from '../../_shared/collectionDocuments';
 	import { t } from '../../_shared/i18n';
+	import { fetchCollectionObjectives, type ObjectiveList } from '../../_shared/researchView';
 	import {
-		discoverCollectionObjectives,
-		fetchCollectionObjectives,
-		type ObjectiveList
-	} from '../../_shared/researchView';
-	import {
+		formCollectionResearchQuestions,
 		getTask,
 		isTaskActive,
 		listCollectionTasks,
@@ -29,7 +26,7 @@
 	let loading = false;
 	let uploadLoading = false;
 	let preparationLoading = false;
-	let discoveryLoading = false;
+	let discoverySubmitting = false;
 	let error = '';
 	let notice = '';
 	let loadedCollectionId = '';
@@ -47,8 +44,14 @@
 
 	$: readyDocuments = documents.filter((document) => document.status === 'ready');
 	$: activeTasks = tasks.filter(isTaskActive);
+	$: activePreparationTasks = activeTasks.filter(
+		(task) => task.task_type === 'document_preparation'
+	);
+	$: activeDiscoveryTask =
+		activeTasks.find((task) => task.task_type === 'objective_discovery') ?? null;
+	$: discoveryLoading = discoverySubmitting || Boolean(activeDiscoveryTask);
 	$: activeDocumentIds = new Set(
-		activeTasks
+		activePreparationTasks
 			.map((task) => task.document_id)
 			.filter((documentId): documentId is string => Boolean(documentId))
 	);
@@ -63,14 +66,16 @@
 	$: objectiveCount = objectiveList?.objectives.length ?? 0;
 	$: collectionStage = objectiveCount
 		? 'objectives'
-		: processingDocuments.length
-			? 'processing'
-			: attentionDocuments.length
-				? 'attention'
-				: readyDocuments.length
-					? 'ready'
-					: 'empty';
-	$: preparationProgress = buildPreparationProgress(documents, activeTasks);
+		: activeDiscoveryTask
+			? 'forming'
+			: processingDocuments.length
+				? 'processing'
+				: attentionDocuments.length
+					? 'attention'
+					: readyDocuments.length
+						? 'ready'
+						: 'empty';
+	$: preparationProgress = buildPreparationProgress(documents, activePreparationTasks);
 
 	const unsubscribePage = page.subscribe((currentPage) => {
 		const nextCollectionId = currentPage.params.id ?? '';
@@ -103,7 +108,20 @@
 			const refreshed = await Promise.all(active.map((task) => getTask(task.task_id)));
 			const refreshedById = new Map(refreshed.map((task) => [task.task_id, task]));
 			tasks = tasks.map((task) => refreshedById.get(task.task_id) ?? task);
+			const finishedDiscovery = refreshed.find(
+				(task) => task.task_type === 'objective_discovery' && !isTaskActive(task)
+			);
 			await Promise.all([loadDocuments(), loadObjectives()]);
+			if (
+				finishedDiscovery?.status === 'completed' ||
+				finishedDiscovery?.status === 'partial_success'
+			) {
+				notice = $t('overview.currentModel.discoveryComplete', {
+					count: objectiveList?.objectives.length ?? 0
+				});
+			} else if (finishedDiscovery?.status === 'failed') {
+				error = finishedDiscovery.errors[0] || $t('overview.currentModel.discoveryFailed');
+			}
 		} catch (err) {
 			error = errorMessage(err);
 		}
@@ -115,6 +133,10 @@
 		error = '';
 		try {
 			await Promise.all([loadDocuments(), loadTasks(), loadObjectives()]);
+			const latestDiscovery = tasks.find((task) => task.task_type === 'objective_discovery');
+			if (latestDiscovery?.status === 'failed') {
+				error = latestDiscovery.errors[0] || $t('overview.currentModel.discoveryFailed');
+			}
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -166,18 +188,19 @@
 
 	async function discoverObjectives() {
 		if (!readyDocuments.length || discoveryLoading) return;
-		discoveryLoading = true;
+		discoverySubmitting = true;
 		error = '';
 		notice = '';
 		try {
 			const documentIds = readyDocuments.map((document) => document.document_id);
-			const result = await discoverCollectionObjectives(collectionId, documentIds);
-			await loadObjectives();
-			notice = $t('overview.currentModel.discoveryComplete', { count: result.objectives.length });
+			const task = await formCollectionResearchQuestions(collectionId, documentIds);
+			tasks = [task, ...tasks.filter((item) => item.task_id !== task.task_id)];
+			notice = $t('overview.currentModel.discoveryQueued');
+			schedulePoll();
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
-			discoveryLoading = false;
+			discoverySubmitting = false;
 		}
 	}
 
@@ -333,6 +356,32 @@
 					{#if preparationProgress.message}<small>{preparationProgress.message}</small>{/if}
 				</div>
 			{/if}
+			{#if activeDiscoveryTask}
+				<div
+					class="active-progress"
+					role="status"
+					aria-label={$t('overview.currentModel.discoveryProgressTitle')}
+				>
+					<div class="active-progress__header">
+						<span>{$t('overview.currentModel.discoveryProgressTitle')}</span>
+						<strong>{activeDiscoveryTask.progress_percent}%</strong>
+					</div>
+					<div
+						class="active-progress__track"
+						role="progressbar"
+						aria-label={$t('overview.currentModel.discoveryProgressTitle')}
+						aria-valuemin="0"
+						aria-valuemax="100"
+						aria-valuenow={activeDiscoveryTask.progress_percent}
+						aria-valuetext={`${activeDiscoveryTask.progress_percent}%`}
+					>
+						<span style={`width: ${activeDiscoveryTask.progress_percent}%`}></span>
+					</div>
+					{#if activeDiscoveryTask.progress_detail?.message}
+						<small>{activeDiscoveryTask.progress_detail.message}</small>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<div class="research-state__actions">
@@ -376,7 +425,9 @@
 					on:click={discoverObjectives}
 					disabled={discoveryLoading}
 				>
-					{$t('overview.currentModel.discover', { count: readyDocuments.length })}
+					{discoveryLoading
+						? $t('overview.currentModel.discovering')
+						: $t('overview.currentModel.discover', { count: readyDocuments.length })}
 				</button>
 			{/if}
 		</div>
@@ -399,7 +450,7 @@
 				>
 			</div>
 		</div>
-		<div class:complete={objectiveCount > 0}>
+		<div class:complete={objectiveCount > 0} class:active={Boolean(activeDiscoveryTask)}>
 			<span>3</span>
 			<div>
 				<strong>{$t('overview.currentModel.progress.objectives')}</strong><small

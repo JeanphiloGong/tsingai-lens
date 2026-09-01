@@ -4,7 +4,9 @@ import pytest
 
 from domain.chat import (
     ChatMessage,
+    ChatResourceRef,
     ChatSession,
+    ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
@@ -56,6 +58,27 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         session_id=chat.session_id,
         content="读取 collection",
         created_at="2026-08-19T00:00:01+00:00",
+        source_contexts=(
+            ChatSourceContext(
+                resource_ref=ChatResourceRef(
+                    resource_type="source",
+                    resource_id="doc-source:results",
+                    href=(
+                        "/collections/col-chat/documents/doc-source"
+                        "?view=parsed-paper&source_ref=results&page=3"
+                    ),
+                ),
+                collection_id="col-chat",
+                document_id="doc-source",
+                document_title="Paper A",
+                source_kind="paragraph",
+                source_ref="results",
+                page=3,
+                quote="Conductivity improved to 12 mS/cm under EIS.",
+                heading_path="Results",
+                quote_truncated=True,
+            ),
+        ),
     )
     assistant_call = ChatMessage.assistant_tool_call(
         message_id="msg-2",

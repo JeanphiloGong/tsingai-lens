@@ -74,6 +74,12 @@ class ChatMessageRow(Base):
         _JSON_DOCUMENT,
         nullable=True,
     )
+    source_contexts: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=False,
+        default=list,
+        server_default="[]",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

@@ -119,6 +119,15 @@ structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
 
+A user message may carry at most one `source_contexts` item selected from the
+same Collection's document reader. The item contains a stable Source resource
+reference, document identity, Source kind and reference, optional page and
+heading, a bounded verbatim quote, and whether that quote was shortened. It is stored with that user message and
+returned when the trajectory is reloaded. This context is material for the
+Agent to inspect, not verified Evidence and not authorization to create or
+modify an Objective, Evidence, Finding, or Analysis. The quoted content is never
+treated as model instructions. Existing messages have an empty context list.
+
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
@@ -143,6 +152,10 @@ approve or reject the exact pending action before starting another turn.
 The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
+- `inspect_document_sources` reads one prepared Document's parsed paragraphs,
+  complete table Markdown, and figure captions through exact or focused,
+  paginated Source filters. It returns canonical Document and Source links;
+  matched content remains inspection material rather than verified Evidence;
 - `inspect_research_process` reads each current Document and its latest
   preparation task. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,
@@ -158,6 +171,26 @@ The production Research Agent currently exposes these automatic capabilities:
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
+- `inspect_published_finding` returns one complete canonical published Finding
+  and a bounded page of its linked Evidence. This exact read, followed by any
+  necessary Source inspection, is required before the Agent proposes a review
+  or a new conclusion;
+- `create_finding_version` is a `write` capability. It accepts the same
+  statement, assertion strength, version-local Evidence roles, limitations,
+  optional parent Finding, or explicit abstention as the human Finding
+  authoring command. After exact-argument approval it calls
+  `FindingAuthoringService.create_version()` and returns the canonical new
+  analysis and optional Finding. The source analysis and all existing Finding,
+  Evidence, and Source records remain unchanged;
+- `record_finding_feedback` is a `write` capability. After exact-argument
+  approval, it calls the same `FindingFeedbackService.record_feedback()` path
+  as the Finding workbench and records the authenticated user as reviewer. It
+  does not mutate the published Finding, Evidence, or Sources;
+- `curate_finding` is a `write` capability. After exact-argument approval, it
+  passes one complete canonical Finding to the same
+  `FindingFeedbackService.record_curation()` path as the Finding workbench.
+  Service validation preserves Finding identity, paper coverage, Evidence IDs,
+  and Source lineage; curation cannot create a new Finding;
 - `propose_objective_drafts` records at most three focused, single-outcome
   drafts in the Chat trajectory. PaperResearchMap relationships may be reported
   as proposal context, but they are never presented as Evidence and this call
@@ -223,10 +256,24 @@ Discovery accepts `{"document_ids": [...]}` with one or more unique current
 Documents. The explicit selection is not truncated or divided into independent
 discovery scopes, so candidate formation retains the complete cross-paper
 context. Every selected Document must be `ready` with a preparation fingerprint.
-The command freezes the resolved `(document_id,
-preparation_fingerprint)` values, lazily builds or reuses their current Paper
-Maps, reads the Profiles and maps, and replaces the current generated
-candidates. It does not silently include all Collection papers.
+The command freezes the resolved `(document_id, preparation_fingerprint)`
+values in one collection-scoped `objective_discovery` Task and returns that
+Task immediately. At most one discovery Task may be `queued` or `running` for
+a Collection; a repeated command returns the active Task without scheduling a
+second worker, even when another request reaches a different backend process.
+Clients restore and poll its state through the ordinary Collection Task and
+Task-detail endpoints. On completion they read the replaced candidate set from
+`GET .../objectives`; on failure the terminal Task error remains visible and a
+new command creates a retry Task. A backend restart marks an interrupted Task
+failed rather than leaving it permanently active.
+
+The background worker lazily builds or reuses the selected Documents' current
+Paper Maps, reads their Profiles and maps, and replaces the current generated
+candidates. It does not silently include all Collection papers. This is
+research-question formation, not Objective Evidence analysis: analysis still
+requires the later, explicit Objective command. The worker is process-local,
+while admission, progress, completion, and failure are persisted; the Task
+record is observable execution state rather than an external durable queue.
 
 A Paper Map is preliminary scope metadata: paper type, material and process
 themes, variable-to-outcome axes, review synthesis, Source lineage, coverage,
@@ -363,6 +410,7 @@ list.
 
 ### Published Findings And Evidence
 
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
@@ -372,6 +420,49 @@ Finding and Evidence list endpoints support `offset` and `limit`. All responses
 include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
+
+The POST command records one deliberate researcher Evidence decision. It never
+inserts into the published source version. The request identifies that current
+`source_analysis_version`, assigns existing version-local Evidence to support,
+contradiction, context, and optional condition-boundary roles, and supplies a
+statement, assertion strength, limitations, and optional `parent_finding_id`.
+The authenticated user identity is server-derived. Paper coverage, factors,
+outcome, direction, attribution, synthesis status, certainty, target version,
+and Source content are also server-derived and cannot be supplied by the
+browser.
+
+```json
+{
+  "source_analysis_version": 3,
+  "statement": "Higher laser power is associated with lower porosity under the reported scan conditions.",
+  "assertion_strength": "associative",
+  "supporting_evidence_ids": ["evidence_a"],
+  "contradicting_evidence_ids": [],
+  "context_evidence_ids": ["evidence_b"],
+  "condition_boundary_evidence_ids": ["evidence_b"],
+  "limitations": ["Direct support is currently limited to one paper."],
+  "parent_finding_id": null,
+  "abstention_reason": null
+}
+```
+
+A successful command returns `201` with the newly published authored analysis
+and its new canonical Finding. The repository clones the complete published
+PaperContribution, Evidence, and Finding snapshot into the next version,
+validates every selected Evidence and exact Source, appends the human-authored
+or hybrid Finding, and atomically advances the Objective's published pointer.
+The source version and parent Finding remain unchanged. `parent_finding_id`
+therefore means derivation, not in-place editing.
+
+A researcher may instead submit one of `no_comparable_evidence`,
+`no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with
+an explanatory `limitations` entry and no statement, parent, or Evidence roles.
+The new analysis version records the abstention as metadata and creates no
+placeholder Finding. An unauthenticated request returns `401`; missing or
+unowned collections and missing Objectives return `404`; stale source versions,
+concurrent analysis, unknown or ineligible Evidence, and scientifically
+inconsistent role selections return `409`; malformed request shapes return
+`422`.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns
@@ -398,6 +489,13 @@ A Finding contains:
 - deterministic analysis limitations and one Finding-local PaperContribution
   binding for every analyzed, excluded, or failed paper.
 
+Every Finding also exposes `origin`, optional `source_analysis_version`,
+optional `parent_finding_id`, optional `created_by_user_id`, and optional
+`created_at`. `system_generated` is the default for historical/system results;
+`human_authored` is a new conclusion formed from existing Evidence; `hybrid`
+is derived from a named parent Finding. Authored analysis states expose the
+same source-version and creator lineage plus optional abstention metadata.
+
 The Finding-local `paper_contributions` bind supporting, contradicting,
 context, and boundary Evidence IDs for that Finding. They are distinct from
 `ObjectiveAnalysisResponse.paper_contributions`, which own paper-level framing,
@@ -416,7 +514,13 @@ Failed extraction attempts remain Evidence with their exact Source locator,
 participate in Findings. Finding-generation prompts may use a bounded,
 document-balanced representative subset, but backend validation, support and
 contradiction binding, paper counts, and traceback use the complete eligible
-Evidence set.
+Evidence set. `supports_finding` is a backend-derived eligibility signal for
+the authoring editor; it does not turn an Evidence record into support until a
+researcher assigns it a Finding role and publishes the new version.
+
+The authoring command currently consumes existing published Evidence only. It
+does not create, replace, or remove Evidence from a raw Source. Source-to-
+Evidence annotation and correction remain the separate #191 workflow.
 
 The consumer identity is always:
 
@@ -447,6 +551,19 @@ Curation requires `analysis_version` and one complete canonical
 version-local Evidence/PaperContribution binding. Unknown, stale, unpublished,
 partial, and cross-version references return `404`, `409`, or `422` and are
 never silently rebound.
+
+The Finding workbench and Research Agent share these same service operations.
+The Agent first reads the complete published Finding and linked Evidence,
+inspects exact Sources as needed, and proposes the same feedback or curation
+arguments. The write runs only after the authenticated user approves those
+exact arguments. Chat does not own a second Finding identity or review store.
+
+Finding authoring is distinct from review. The Agent may propose a new
+Evidence-to-Finding decision only from `supports_finding` Evidence in the exact
+current published version. The approved capability calls the same
+`FindingAuthoringService` as the HTTP workbench, including immutable version
+publication, role validation, Source validation, and abstention semantics.
+Agent prose or raw Source text cannot become Evidence.
 
 Dataset export supports `format=json | training_jsonl` plus optional
 `label_status` and `dataset_use_status` filters. `objective_finding_dataset.v2`

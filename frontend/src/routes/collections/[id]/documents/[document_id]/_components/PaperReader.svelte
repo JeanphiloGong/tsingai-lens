@@ -1,8 +1,14 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
-	import type { SourceAnchor, WorkbenchPdfPage } from '../../../../../_shared/documents';
+	import type {
+		DocumentSourceSelection,
+		SourceAnchor,
+		WorkbenchPdfPage,
+		WorkbenchPdfParagraph
+	} from '../../../../../_shared/documents';
 	import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 	type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -31,7 +37,10 @@
 	export let activeSourceSpanId = '';
 	export let activeSourceAnchor: SourceAnchor | null = null;
 	export let sourceJumpToken = 0;
+	export let collectionId = '';
+	export let onAskSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onSelectSourceSpan: (sourceSpanId: string) => void = () => {};
+	$: assistantHref = resolve('/collections/[id]/assistant', { id: collectionId });
 
 	let thumbnailTab: 'source' | 'outline' = 'source';
 	let currentPage = 1;
@@ -68,7 +77,8 @@
 	);
 	$: hasParsedSource = pages.some((page) => page.paragraphs.length > 0);
 	$: showParsedSourceFallback = hasParsedSource && (!hasPdfSource || Boolean(pdfError));
-	$: showParsedSourceView = hasParsedSource && (readerView === 'source' || showParsedSourceFallback);
+	$: showParsedSourceView =
+		hasParsedSource && (readerView === 'source' || showParsedSourceFallback);
 	$: showPdfView = hasPdfSource && readerView === 'pdf' && !pdfError;
 	$: totalPages = pdfPageStates.length || pages.length || 1;
 	$: thumbnailPageNumbers = pageNumbersForReader(totalPages);
@@ -502,6 +512,19 @@
 		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
 	}
 
+	function parsedSourceSelection(
+		pageNumber: number,
+		paragraph: WorkbenchPdfParagraph
+	): DocumentSourceSelection {
+		return {
+			source_kind: 'paragraph',
+			source_ref: paragraph.source_span_id || paragraph.id,
+			page: pageNumber,
+			quote: paragraph.text,
+			heading_path: paragraph.section
+		};
+	}
+
 	function canvasPage(node: HTMLCanvasElement, pageNumber: number) {
 		canvasNodes.set(pageNumber, node);
 		return {
@@ -779,15 +802,23 @@
 						>
 							<div class="parsed-source-page__label">{page.label}</div>
 							{#each page.paragraphs as paragraph}
-								<button
-									type="button"
-									class="parsed-source-paragraph"
-									class:active={paragraph.source_span_id === activeSourceSpanId}
-									on:click={() => selectParsedSource(page.page_number, paragraph.source_span_id)}
-								>
-									<span>{paragraph.section || $t('workbench.sectionFallback')}</span>
-									<p>{paragraph.text}</p>
-								</button>
+								<div class="parsed-source-entry">
+									<button
+										type="button"
+										class="parsed-source-paragraph"
+										class:active={paragraph.source_span_id === activeSourceSpanId}
+										on:click={() => selectParsedSource(page.page_number, paragraph.source_span_id)}
+									>
+										<span>{paragraph.section || $t('workbench.sectionFallback')}</span>
+										<p>{paragraph.text}</p>
+									</button>
+									<a
+										class="parsed-source-agent-action"
+										href={assistantHref}
+										on:click={() => onAskSource(parsedSourceSelection(page.page_number, paragraph))}
+										>{$t('workbench.askResearchAgent')}</a
+									>
+								</div>
 							{/each}
 						</section>
 					{/each}
@@ -1447,6 +1478,13 @@
 		text-transform: uppercase;
 	}
 
+	.parsed-source-entry {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
+	}
+
 	.parsed-source-paragraph {
 		display: grid;
 		width: 100%;
@@ -1477,6 +1515,26 @@
 		color: #334155;
 		font-size: 14px;
 		line-height: 22px;
+	}
+
+	.parsed-source-agent-action {
+		display: inline-flex;
+		min-height: 32px;
+		align-items: center;
+		padding: 0 10px;
+		border: 1px solid #bfdbfe;
+		border-radius: 6px;
+		background: #ffffff;
+		color: #1d4ed8;
+		font-size: 12px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.parsed-source-agent-action:hover,
+	.parsed-source-agent-action:focus-visible {
+		border-color: #2563eb;
+		background: #eff6ff;
 	}
 
 	.skeleton {

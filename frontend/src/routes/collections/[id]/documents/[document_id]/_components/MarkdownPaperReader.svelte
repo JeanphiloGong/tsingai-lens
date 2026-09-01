@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import { tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
 		DocumentMarkdownResponse,
 		DocumentMarkdownSourceMapItem,
+		DocumentSourceSelection,
 		WorkbenchSourceSpan
 	} from '../../../../../_shared/documents';
 
@@ -34,21 +36,33 @@
 		alt: string;
 		src: string;
 	};
-	type MarkdownNode = MarkdownHeading | MarkdownParagraph | MarkdownList | MarkdownTable | MarkdownImage;
+	type MarkdownNode =
+		| MarkdownHeading
+		| MarkdownParagraph
+		| MarkdownList
+		| MarkdownTable
+		| MarkdownImage;
 
 	export let markdown: DocumentMarkdownResponse | null = null;
 	export let sourceFileUrl = '';
 	export let activeSourceRef = '';
 	export let activeSourceQuote = '';
 	export let activeSourceSpan: WorkbenchSourceSpan | null = null;
+	export let collectionId = '';
+	export let onAskSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onShowPdf: () => void = () => {};
+	$: assistantHref = resolve('/collections/[id]/assistant', { id: collectionId });
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
 	$: title = markdown?.title || markdown?.source_filename || markdown?.document_id || '';
 	$: metadata = [
-		markdown?.source_filename ? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}` : '',
+		markdown?.source_filename
+			? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}`
+			: '',
 		markdown?.parser ? `${$t('workbench.parserLabel')}: ${markdown.parser}` : '',
-		markdown?.source_map.length ? `${$t('workbench.sourceMapLabel')}: ${markdown.source_map.length}` : ''
+		markdown?.source_map.length
+			? `${$t('workbench.sourceMapLabel')}: ${markdown.source_map.length}`
+			: ''
 	].filter(Boolean);
 	$: selectedEvidenceQuote = cleanSourceText(
 		activeSourceQuote || activeSourceSpan?.quote || activeSourceSpan?.target.quote || ''
@@ -65,6 +79,16 @@
 		activeSourceSpan,
 		selectedEvidenceQuote
 	);
+	$: activeFallbackSelection =
+		activeFallback && activeSourceSpan
+			? ({
+					source_kind: activeSourceSpan.target.sourceKind,
+					source_ref: activeSourceRef || activeSourceSpan.target.sourceRef || activeSourceSpan.id,
+					page: activeFallback.page,
+					quote: activeFallback.quote,
+					heading_path: activeSourceSpan.target.headingPath || activeFallback.section
+				} satisfies DocumentSourceSelection)
+			: null;
 	$: if (activeNodeKey) {
 		void scrollActiveNodeIntoView(activeNodeKey);
 	}
@@ -178,7 +202,10 @@
 	function tryReadTable(lines: string[], startIndex: number, usedSourceMapIndexes: Set<number>) {
 		const headerLine = lines[startIndex]?.trim() ?? '';
 		const separatorLine = lines[startIndex + 1]?.trim() ?? '';
-		if (!isTableLine(headerLine) || !/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(separatorLine)) {
+		if (
+			!isTableLine(headerLine) ||
+			!/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(separatorLine)
+		) {
 			return null;
 		}
 
@@ -371,11 +398,7 @@
 		return '';
 	}
 
-	function activeChildNodeKeyByQuote(
-		node: MarkdownNode,
-		index: number,
-		sourceQuote: string
-	) {
+	function activeChildNodeKeyByQuote(node: MarkdownNode, index: number, sourceQuote: string) {
 		if (node.type !== 'list') return '';
 		for (const [itemIndex, item] of node.items.entries()) {
 			const text = normalizeMatchKey(cleanSourceText(item.text));
@@ -415,10 +438,13 @@
 		selectedQuote: string
 	) {
 		if (nodeKey || !sourceRef || !sourceSpan) return null;
-		const quote = cleanSourceText(selectedQuote || sourceSpan.quote || sourceSpan.target.quote || '');
+		const quote = cleanSourceText(
+			selectedQuote || sourceSpan.quote || sourceSpan.target.quote || ''
+		);
 		if (!quote) return null;
 		return {
-			label: sourceSpan.target.label || sourceSpan.section || sourceSpan.target.headingPath || sourceRef,
+			label:
+				sourceSpan.target.label || sourceSpan.section || sourceSpan.target.headingPath || sourceRef,
 			page: sourceSpan.page || sourceSpan.target.page,
 			section: sourceSpan.section || sourceSpan.target.headingPath || '',
 			quote
@@ -462,12 +488,54 @@
 		return [...node.headers, ...node.rows.flat()].join(' ');
 	}
 
+	function sourceSelection(
+		sourceMap: DocumentMarkdownSourceMapItem | null,
+		quote: string
+	): DocumentSourceSelection | null {
+		if (!sourceMap || !quote.trim()) return null;
+		const sourceRef =
+			sourceMap.table_id ||
+			sourceMap.figure_id ||
+			sourceMap.block_id ||
+			sourceMap.artifact_id ||
+			sourceMap.markdown_anchor;
+		if (!sourceRef) return null;
+		return {
+			source_kind:
+				sourceMap.artifact_type === 'block'
+					? sourceMap.block_type || 'block'
+					: sourceMap.artifact_type,
+			source_ref: sourceRef,
+			page: sourceMap.page,
+			quote: quote.trim(),
+			heading_path: sourceMap.heading_path
+		};
+	}
+
+	function sourceQuote(node: MarkdownNode) {
+		if (node.type !== 'table') return nodeText(node);
+		const separator = node.headers.map(() => '---');
+		return [node.headers, separator, ...node.rows]
+			.map((row) => `| ${row.join(' | ')} |`)
+			.join('\n');
+	}
+
+	function sourceActionTestId(selection: DocumentSourceSelection) {
+		return `ask-research-agent-source-${selection.source_ref.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+	}
+
 	function normalizeMatchKey(value: string | null | undefined) {
-		return cleanSourceText(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+		return cleanSourceText(value ?? '')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.toLowerCase();
 	}
 
 	function cleanSourceText(value: string) {
-		return value.replace(/\ufffd/g, ' ').replace(/\s+/g, ' ').trim();
+		return value
+			.replace(/\ufffd/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
 	}
 
 	async function scrollActiveNodeIntoView(nodeKey: string) {
@@ -535,7 +603,14 @@
 							{/if}
 						</div>
 					</div>
-					<button type="button" on:click={onShowPdf}>{$t('workbench.viewPdf')}</button>
+					<div class="markdown-source-fallback__actions">
+						{#if activeFallbackSelection}
+							<a href={assistantHref} on:click={() => onAskSource(activeFallbackSelection)}
+								>{$t('workbench.askResearchAgent')}</a
+							>
+						{/if}
+						<button type="button" on:click={onShowPdf}>{$t('workbench.viewPdf')}</button>
+					</div>
 				</div>
 				<div class="markdown-source-fallback__body">
 					<strong>{$t('workbench.parsedSourceView')}</strong>
@@ -585,40 +660,57 @@
 						</h4>
 					{/if}
 				{:else if node.type === 'paragraph'}
+					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<p
+						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
 						{#if activeNodeKey === nodeKey && selectedEvidenceQuote}
-							<span
-								class="markdown-selected-quote"
-								data-testid="markdown-selected-evidence-quote"
-							>
+							<span class="markdown-selected-quote" data-testid="markdown-selected-evidence-quote">
 								<strong>{$t('workbench.selectedEvidenceQuoteLabel')}</strong>
 								<span>{selectedEvidenceQuote}</span>
 							</span>
 						{/if}
 						{node.text}
+						{#if selection}
+							<a
+								class="source-agent-action"
+								href={assistantHref}
+								data-testid={sourceActionTestId(selection)}
+								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
+							>
+						{/if}
 					</p>
 				{:else if node.type === 'image'}
+					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<figure
 						class="markdown-figure"
+						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
 						<img src={node.src} alt={node.alt} loading="lazy" />
+						{#if selection}
+							<a
+								class="source-agent-action"
+								href={assistantHref}
+								data-testid={sourceActionTestId(selection)}
+								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
+							>
+						{/if}
 					</figure>
 				{:else if node.type === 'list'}
-					<ul
-						data-markdown-node-key={nodeKey}
-					>
+					<ul data-markdown-node-key={nodeKey}>
 						{#each node.items as item, itemIndex (markdownListItemKey(node, index, item, itemIndex))}
 							{@const itemKey = markdownListItemKey(node, index, item, itemIndex)}
+							{@const selection = sourceSelection(item.sourceMap, item.text)}
 							<li
+								class:markdown-node--selectable={Boolean(selection)}
 								class:markdown-node--active={activeNodeKey === itemKey}
 								aria-current={activeNodeKey === itemKey ? 'location' : undefined}
 								data-testid={activeNodeKey === itemKey ? 'markdown-active-source' : undefined}
@@ -634,22 +726,29 @@
 									</span>
 								{/if}
 								{item.text}
+								{#if selection}
+									<a
+										class="source-agent-action"
+										href={assistantHref}
+										data-testid={sourceActionTestId(selection)}
+										on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
+									>
+								{/if}
 							</li>
 						{/each}
 					</ul>
 				{:else if node.type === 'table'}
+					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<div
 						class="markdown-table-wrapper"
+						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
 						data-testid={activeNodeKey === nodeKey ? 'markdown-active-source' : undefined}
 						data-markdown-node-key={nodeKey}
 					>
 						{#if activeNodeKey === nodeKey && selectedEvidenceQuote}
-							<div
-								class="markdown-selected-quote"
-								data-testid="markdown-selected-evidence-quote"
-							>
+							<div class="markdown-selected-quote" data-testid="markdown-selected-evidence-quote">
 								<strong>{$t('workbench.selectedEvidenceQuoteLabel')}</strong>
 								<span>{selectedEvidenceQuote}</span>
 							</div>
@@ -672,6 +771,14 @@
 								{/each}
 							</tbody>
 						</table>
+						{#if selection}
+							<a
+								class="source-agent-action"
+								href={assistantHref}
+								data-testid={sourceActionTestId(selection)}
+								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
+							>
+						{/if}
 					</div>
 				{/if}
 			{/each}
@@ -804,6 +911,44 @@
 		margin-top: 6px;
 	}
 
+	.markdown-node--selectable {
+		position: relative;
+	}
+
+	.source-agent-action {
+		display: inline-flex;
+		min-height: 28px;
+		align-items: center;
+		margin-left: 10px;
+		padding: 0 9px;
+		border: 1px solid #bfdbfe;
+		border-radius: 6px;
+		background: #ffffff;
+		color: #1d4ed8;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		text-decoration: none;
+		vertical-align: middle;
+	}
+
+	@media (hover: hover) {
+		.source-agent-action {
+			opacity: 0;
+		}
+
+		.markdown-node--selectable:hover > .source-agent-action,
+		.source-agent-action:focus-visible {
+			opacity: 1;
+		}
+	}
+
+	.source-agent-action:hover,
+	.source-agent-action:focus-visible {
+		border-color: #2563eb;
+		background: #eff6ff;
+	}
+
 	.markdown-reader__body .markdown-node--active {
 		border-radius: 8px;
 		outline: 2px solid #2563eb;
@@ -862,7 +1007,15 @@
 		line-height: 22px;
 	}
 
-	.markdown-source-fallback__header button {
+	.markdown-source-fallback__actions {
+		display: flex;
+		flex: 0 0 auto;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.markdown-source-fallback__header button,
+	.markdown-source-fallback__header a {
 		display: inline-flex;
 		min-height: 32px;
 		flex: 0 0 auto;
@@ -962,6 +1115,7 @@
 		background: #f8fafc;
 		color: #475569;
 		font-weight: 700;
+		text-decoration: none;
 	}
 
 	.markdown-table-wrapper tr:last-child td {

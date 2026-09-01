@@ -402,6 +402,7 @@ list.
 
 ### Published Findings And Evidence
 
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
@@ -411,6 +412,49 @@ Finding and Evidence list endpoints support `offset` and `limit`. All responses
 include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
+
+The POST command records one deliberate researcher Evidence decision. It never
+inserts into the published source version. The request identifies that current
+`source_analysis_version`, assigns existing version-local Evidence to support,
+contradiction, context, and optional condition-boundary roles, and supplies a
+statement, assertion strength, limitations, and optional `parent_finding_id`.
+The authenticated user identity is server-derived. Paper coverage, factors,
+outcome, direction, attribution, synthesis status, certainty, target version,
+and Source content are also server-derived and cannot be supplied by the
+browser.
+
+```json
+{
+  "source_analysis_version": 3,
+  "statement": "Higher laser power is associated with lower porosity under the reported scan conditions.",
+  "assertion_strength": "associative",
+  "supporting_evidence_ids": ["evidence_a"],
+  "contradicting_evidence_ids": [],
+  "context_evidence_ids": ["evidence_b"],
+  "condition_boundary_evidence_ids": ["evidence_b"],
+  "limitations": ["Direct support is currently limited to one paper."],
+  "parent_finding_id": null,
+  "abstention_reason": null
+}
+```
+
+A successful command returns `201` with the newly published authored analysis
+and its new canonical Finding. The repository clones the complete published
+PaperContribution, Evidence, and Finding snapshot into the next version,
+validates every selected Evidence and exact Source, appends the human-authored
+or hybrid Finding, and atomically advances the Objective's published pointer.
+The source version and parent Finding remain unchanged. `parent_finding_id`
+therefore means derivation, not in-place editing.
+
+A researcher may instead submit one of `no_comparable_evidence`,
+`no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with
+an explanatory `limitations` entry and no statement, parent, or Evidence roles.
+The new analysis version records the abstention as metadata and creates no
+placeholder Finding. An unauthenticated request returns `401`; missing or
+unowned collections and missing Objectives return `404`; stale source versions,
+concurrent analysis, unknown or ineligible Evidence, and scientifically
+inconsistent role selections return `409`; malformed request shapes return
+`422`.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns
@@ -437,6 +481,13 @@ A Finding contains:
 - deterministic analysis limitations and one Finding-local PaperContribution
   binding for every analyzed, excluded, or failed paper.
 
+Every Finding also exposes `origin`, optional `source_analysis_version`,
+optional `parent_finding_id`, optional `created_by_user_id`, and optional
+`created_at`. `system_generated` is the default for historical/system results;
+`human_authored` is a new conclusion formed from existing Evidence; `hybrid`
+is derived from a named parent Finding. Authored analysis states expose the
+same source-version and creator lineage plus optional abstention metadata.
+
 The Finding-local `paper_contributions` bind supporting, contradicting,
 context, and boundary Evidence IDs for that Finding. They are distinct from
 `ObjectiveAnalysisResponse.paper_contributions`, which own paper-level framing,
@@ -455,7 +506,13 @@ Failed extraction attempts remain Evidence with their exact Source locator,
 participate in Findings. Finding-generation prompts may use a bounded,
 document-balanced representative subset, but backend validation, support and
 contradiction binding, paper counts, and traceback use the complete eligible
-Evidence set.
+Evidence set. `supports_finding` is a backend-derived eligibility signal for
+the authoring editor; it does not turn an Evidence record into support until a
+researcher assigns it a Finding role and publishes the new version.
+
+The authoring command currently consumes existing published Evidence only. It
+does not create, replace, or remove Evidence from a raw Source. Source-to-
+Evidence annotation and correction remain the separate #191 workflow.
 
 The consumer identity is always:
 

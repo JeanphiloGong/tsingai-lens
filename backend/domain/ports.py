@@ -405,6 +405,18 @@ class ObjectiveRepository(Protocol):
         findings: tuple[Finding, ...],
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
+    async def publish_authored_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        source_analysis_version: int,
+        *,
+        analysis: ObjectiveAnalysis,
+        contributions: tuple[PaperContribution, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        findings: tuple[Finding, ...],
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
+
     async def read_analysis(
         self,
         collection_id: str,

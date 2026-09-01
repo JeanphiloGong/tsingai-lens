@@ -265,7 +265,10 @@ class ObjectiveAnalysisService:
             "objective_id": objective_id,
             "analysis_version": version,
             "finding_id": finding_id,
-            "items": [item.to_record() for item in evidence],
+            "items": [
+                {**item.to_record(), "supports_finding": item.supports_finding}
+                for item in evidence
+            ],
             "offset": offset,
             "limit": limit,
             "total": total,

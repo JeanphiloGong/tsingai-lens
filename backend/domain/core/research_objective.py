@@ -88,6 +88,12 @@ OBJECTIVE_ORIGINS: Final[frozenset[str]] = frozenset(
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"queued", "running", "succeeded", "failed"}
 )
+OBJECTIVE_ANALYSIS_ORIGINS: Final[frozenset[str]] = frozenset(
+    {"system_generated", "human_authored", "hybrid"}
+)
+OBJECTIVE_ANALYSIS_ABSTENTION_REASONS: Final[frozenset[str]] = frozenset(
+    {"no_comparable_evidence", "no_grounded_evidence", "insufficient_evidence"}
+)
 OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     "queued": frozenset({"running", "failed"}),
     "running": frozenset({"succeeded", "failed"}),
@@ -1125,6 +1131,11 @@ class ObjectiveAnalysis:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     diagnostics: tuple[Mapping[str, Any], ...] = ()
+    origin: str = "system_generated"
+    source_analysis_version: int | None = None
+    created_by_user_id: str | None = None
+    abstention_reason: str | None = None
+    abstention_note: str | None = None
 
     def __post_init__(self) -> None:
         if not _text(self.collection_id) or not _text(self.objective_id):
@@ -1141,6 +1152,35 @@ class ObjectiveAnalysis:
             raise ValueError("objective analysis requires pipeline_version")
         if self.status not in OBJECTIVE_ANALYSIS_STATUSES:
             raise ValueError(f"unsupported objective analysis status: {self.status}")
+        if self.origin not in OBJECTIVE_ANALYSIS_ORIGINS:
+            raise ValueError(f"unsupported objective analysis origin: {self.origin}")
+        if self.origin == "system_generated":
+            if self.source_analysis_version is not None or self.created_by_user_id:
+                raise ValueError(
+                    "system-generated analysis cannot have authoring provenance"
+                )
+            if self.abstention_reason is not None:
+                raise ValueError(
+                    "system-generated analysis cannot record an authored abstention"
+                )
+        else:
+            if self.source_analysis_version is None:
+                raise ValueError("authored analysis requires source_analysis_version")
+            if self.source_analysis_version >= self.analysis_version:
+                raise ValueError("authored analysis source must be an older version")
+            if not _text(self.created_by_user_id):
+                raise ValueError("authored analysis requires created_by_user_id")
+        if (
+            self.abstention_reason is not None
+            and self.abstention_reason not in OBJECTIVE_ANALYSIS_ABSTENTION_REASONS
+        ):
+            raise ValueError(
+                f"unsupported objective analysis abstention: {self.abstention_reason}"
+            )
+        if self.abstention_reason is not None and not _text(self.abstention_note):
+            raise ValueError("authored abstention requires an explanation")
+        if self.abstention_reason is None and self.abstention_note is not None:
+            raise ValueError("abstention note requires an abstention reason")
         if self.processed_document_count < 0 or self.total_document_count < 0:
             raise ValueError("analysis document counts cannot be negative")
         if self.processed_document_count > self.total_document_count:
@@ -1197,6 +1237,17 @@ class ObjectiveAnalysis:
                 for item in payload.get("diagnostics") or ()
                 if isinstance(item, Mapping)
             ),
+            origin=_choice(
+                payload.get("origin"),
+                OBJECTIVE_ANALYSIS_ORIGINS,
+                "system_generated",
+            ),
+            source_analysis_version=_positive_int_or_none(
+                payload.get("source_analysis_version")
+            ),
+            created_by_user_id=_text(payload.get("created_by_user_id")),
+            abstention_reason=_text(payload.get("abstention_reason")),
+            abstention_note=_text(payload.get("abstention_note")),
         )
 
     def start(self, *, started_at: datetime | None = None) -> "ObjectiveAnalysis":
@@ -1290,6 +1341,11 @@ class ObjectiveAnalysis:
             "created_at": _datetime_record(self.created_at),
             "started_at": _datetime_record(self.started_at),
             "completed_at": _datetime_record(self.completed_at),
+            "origin": self.origin,
+            "source_analysis_version": self.source_analysis_version,
+            "created_by_user_id": self.created_by_user_id,
+            "abstention_reason": self.abstention_reason,
+            "abstention_note": self.abstention_note,
         }
 
 

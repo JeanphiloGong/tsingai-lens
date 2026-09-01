@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from hashlib import sha1
 import math
 import re
@@ -22,6 +23,9 @@ FINDING_ASSERTION_STRENGTHS: Final[frozenset[str]] = frozenset(
 )
 FINDING_SYNTHESIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"agreement", "conflict", "condition_dependent", "insufficient_confirmation"}
+)
+FINDING_ORIGINS: Final[frozenset[str]] = frozenset(
+    {"system_generated", "human_authored", "hybrid"}
 )
 _FINDING_CONTEXT_ROLES: Final[frozenset[str]] = frozenset(
     {
@@ -193,6 +197,11 @@ class Finding:
     scientific_context: ObjectiveEvidenceContext
     limitations: tuple[str, ...]
     paper_contributions: tuple[FindingPaperContribution, ...]
+    origin: str = "system_generated"
+    source_analysis_version: int | None = None
+    parent_finding_id: str | None = None
+    created_by_user_id: str | None = None
+    created_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not all(
@@ -267,6 +276,26 @@ class Finding:
             self.assertion_strength != "descriptive"
         ):
             raise ValueError("descriptive Finding requires descriptive assertion")
+        if self.origin not in FINDING_ORIGINS:
+            raise ValueError(f"unsupported finding origin: {self.origin}")
+        if self.origin == "system_generated":
+            if self.created_by_user_id or self.parent_finding_id:
+                raise ValueError(
+                    "system-generated Finding cannot have human author provenance"
+                )
+        else:
+            if self.source_analysis_version is None:
+                raise ValueError("authored Finding requires source_analysis_version")
+            if self.source_analysis_version >= self.analysis_version:
+                raise ValueError("authored Finding source must be an older version")
+            if not _text(self.created_by_user_id) or self.created_at is None:
+                raise ValueError("authored Finding requires creator and creation time")
+        if self.origin == "hybrid" and not _text(self.parent_finding_id):
+            raise ValueError("hybrid Finding requires parent_finding_id")
+        if self.origin == "human_authored" and self.parent_finding_id is not None:
+            raise ValueError("human-authored Finding cannot have a parent Finding")
+        if self.parent_finding_id == self.finding_id:
+            raise ValueError("Finding cannot derive from itself")
 
     @property
     def key(self) -> tuple[str, str, int, str]:
@@ -380,6 +409,15 @@ class Finding:
                 FindingPaperContribution.from_mapping(item)
                 for item in _mapping_list(payload.get("paper_contributions"))
             ),
+            origin=_choice(
+                payload.get("origin"), FINDING_ORIGINS, "system_generated"
+            ),
+            source_analysis_version=(
+                _positive_int(payload.get("source_analysis_version")) or None
+            ),
+            parent_finding_id=_text(payload.get("parent_finding_id")),
+            created_by_user_id=_text(payload.get("created_by_user_id")),
+            created_at=_datetime_or_none(payload.get("created_at")),
         )
 
     @staticmethod
@@ -585,6 +623,11 @@ class Finding:
             "paper_contributions": [
                 item.to_record() for item in self.paper_contributions
             ],
+            "origin": self.origin,
+            "source_analysis_version": self.source_analysis_version,
+            "parent_finding_id": self.parent_finding_id,
+            "created_by_user_id": self.created_by_user_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
@@ -640,6 +683,18 @@ def _text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = _text(value)
+    if text is None:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid Finding creation time") from exc
 
 
 def _certainty(value: Any) -> float:

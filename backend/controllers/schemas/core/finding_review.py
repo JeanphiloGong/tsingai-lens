@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
+    ObjectiveAnalysisStateResponse,
     ObjectiveEvidenceResponse,
 )
 
@@ -30,6 +31,72 @@ FindingIssueType = Literal[
 FindingStatus = Literal["supported", "limited", "conflicted", "unsupported"]
 FindingDatasetLabelStatus = Literal["candidate", "silver", "gold", "rejected"]
 FindingDatasetUseStatus = Literal["training_ready", "review_candidate", "rejected"]
+FindingAssertionStrength = Literal["causal", "associative", "descriptive"]
+FindingAbstentionReason = Literal[
+    "no_comparable_evidence",
+    "no_grounded_evidence",
+    "insufficient_evidence",
+]
+
+
+class FindingAuthoringCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_analysis_version: int = Field(..., ge=1)
+    statement: str | None = Field(default=None, max_length=3000)
+    assertion_strength: FindingAssertionStrength | None = None
+    supporting_evidence_ids: list[str] = Field(
+        default_factory=list, max_length=100
+    )
+    contradicting_evidence_ids: list[str] = Field(
+        default_factory=list, max_length=100
+    )
+    context_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
+    condition_boundary_evidence_ids: list[str] = Field(
+        default_factory=list, max_length=100
+    )
+    limitations: list[str] = Field(default_factory=list, max_length=20)
+    parent_finding_id: str | None = Field(default=None, max_length=128)
+    abstention_reason: FindingAbstentionReason | None = None
+
+    @model_validator(mode="after")
+    def validate_authoring_mode(self) -> "FindingAuthoringCreateRequest":
+        if any(len(value.strip()) > 1000 for value in self.limitations):
+            raise ValueError("Finding limitations cannot exceed 1000 characters")
+        selected = (
+            self.supporting_evidence_ids
+            + self.contradicting_evidence_ids
+            + self.context_evidence_ids
+            + self.condition_boundary_evidence_ids
+        )
+        if any(not value.strip() or len(value) > 128 for value in selected):
+            raise ValueError("Evidence IDs must be non-empty and at most 128 characters")
+        if self.abstention_reason is not None:
+            if (
+                (self.statement or "").strip()
+                or self.assertion_strength is not None
+                or selected
+                or self.parent_finding_id is not None
+            ):
+                raise ValueError(
+                    "abstention cannot contain a Finding statement or Evidence roles"
+                )
+            if not any(value.strip() for value in self.limitations):
+                raise ValueError("abstention requires an explanation")
+            return self
+        if not (self.statement or "").strip():
+            raise ValueError("Finding statement is required")
+        if self.assertion_strength is None:
+            raise ValueError("Finding assertion strength is required")
+        if not self.supporting_evidence_ids:
+            raise ValueError("Finding requires supporting Evidence")
+        return self
+
+
+class FindingAuthoringResponse(BaseModel):
+    analysis: ObjectiveAnalysisStateResponse
+    finding: FindingResponse | None = None
+    abstention_reason: FindingAbstentionReason | None = None
 
 
 class FindingFeedbackCreateRequest(BaseModel):

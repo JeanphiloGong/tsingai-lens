@@ -4,11 +4,56 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from controllers.core.finding_review import router
-from domain.core import Finding, ObjectiveEvidence
+from domain.core import Finding, ObjectiveAnalysis, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
 
 
 class _Service:
+    def __init__(self) -> None:
+        self.authoring_kwargs = None
+
+    async def create_version(self, **kwargs):
+        from application.core.objectives.finding_authoring_service import (
+            FindingAuthoringResult,
+        )
+
+        self.authoring_kwargs = kwargs
+        analysis = ObjectiveAnalysis.from_mapping(
+            {
+                "collection_id": kwargs["collection_id"],
+                "objective_id": kwargs["objective_id"],
+                "analysis_version": 2,
+                "document_inputs": [
+                    {
+                        "document_id": "paper-1",
+                        "preparation_fingerprint": "fingerprint-1",
+                    }
+                ],
+                "pipeline_version": "test.v1",
+                "model_name": "model-1",
+                "prompt_versions": {},
+                "status": "succeeded",
+                "phase": "completed",
+                "processed_document_count": 1,
+                "total_document_count": 1,
+                "origin": "hybrid",
+                "source_analysis_version": 1,
+                "created_by_user_id": kwargs["created_by_user_id"],
+            }
+        )
+        finding = Finding.from_mapping(
+            {
+                **_finding_record(kwargs["statement"]),
+                "analysis_version": 2,
+                "finding_id": "finding-manual-1",
+                "origin": "human_authored",
+                "source_analysis_version": 1,
+                "created_by_user_id": kwargs["created_by_user_id"],
+                "created_at": "2026-09-01T00:00:00+00:00",
+            }
+        )
+        return FindingAuthoringResult(analysis=analysis, finding=finding)
+
     async def record_feedback(self, **kwargs):
         return FindingFeedback.from_mapping(
             {
@@ -181,9 +226,57 @@ def _evidence_record() -> dict:
 
 def _client(service: _Service | None = None) -> TestClient:
     app = FastAPI()
-    app.state.finding_feedback_service = service or _Service()
+    resolved = service or _Service()
+    app.state.finding_feedback_service = resolved
+    app.state.finding_authoring_service = resolved
+
+    @app.middleware("http")
+    async def authenticated(request, call_next):
+        request.state.current_user = {
+            "user_id": "user-researcher",
+            "email": "researcher@example.com",
+        }
+        return await call_next(request)
+
     app.include_router(router)
     return TestClient(app)
+
+
+def test_author_finding_api_uses_authenticated_creator_and_exact_evidence_roles() -> None:
+    service = _Service()
+    response = _client(service).post(
+        "/collections/col-1/objectives/obj-1/findings",
+        json={
+            "source_analysis_version": 1,
+            "statement": "Temperature is associated with greater strength.",
+            "assertion_strength": "associative",
+            "supporting_evidence_ids": ["evidence-1"],
+            "contradicting_evidence_ids": [],
+            "context_evidence_ids": [],
+            "condition_boundary_evidence_ids": [],
+            "limitations": ["One paper provides direct Evidence."],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["analysis"]["analysis_version"] == 2
+    assert response.json()["finding"]["origin"] == "human_authored"
+    assert service.authoring_kwargs["created_by_user_id"] == "user-researcher"
+    assert service.authoring_kwargs["supporting_evidence_ids"] == ("evidence-1",)
+
+
+def test_author_finding_api_rejects_unbacked_statement() -> None:
+    response = _client().post(
+        "/collections/col-1/objectives/obj-1/findings",
+        json={
+            "source_analysis_version": 1,
+            "statement": "Temperature changes strength.",
+            "assertion_strength": "associative",
+            "supporting_evidence_ids": [],
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_feedback_api_requires_explicit_analysis_version() -> None:

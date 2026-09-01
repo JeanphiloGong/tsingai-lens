@@ -27,7 +27,13 @@ This node owns the Collection route family.
   completion exposes Findings, while failure keeps its explanation and retry on
   the same row.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
-  Published Finding list and one selected Finding detail.
+  Published Finding list and one selected Finding detail. A researcher can
+  create a new Finding from all eligible Evidence in the current published
+  version, or derive one from a selected system Finding. Evidence roles and
+  exact Source links stay visible in the editor. Saving publishes a new
+  immutable analysis snapshot, reloads that version, and selects the authored
+  Finding; the prior Finding remains unchanged. The same editor can record an
+  explicit evidence abstention without creating a placeholder Finding.
 - `collections/[id]/comparisons/+page.svelte`
   Published cross-paper Finding overview grouped by Objective.
 - `collections/[id]/graph/+page.svelte`
@@ -76,8 +82,16 @@ Research Objective
      -> typed scientific context, deterministic analysis boundaries, and mechanisms
      -> PaperContribution bindings
      -> exact Evidence excerpts and Source links
+     -> researcher-authored Finding or explicit evidence abstention
      -> feedback action
 ```
+
+Finding authoring exposes only decisions the researcher actually makes:
+statement strength, limitations, and Evidence roles. It never asks for
+internal IDs as visible labels or for derived factors, outcome, direction,
+certainty, attribution, synthesis, paper coverage, creator identity, or target
+version. Blank creation and parent-derived revision call the same backend
+command; neither edits a published result in place.
 
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
@@ -151,7 +165,10 @@ rows, Evidence cards, material projections, or collection-wide graph
 projections. The Objective Evidence Map is a read-only view of those same
 published records, not another aggregate or analysis path. The Objective page
 owns the single confirmation-and-analysis command; the Finding page owns expert
-review; the document reader owns Source verification.
+authorship and review; the document reader owns Source verification. Current
+Finding authorship reuses already published Evidence. Creating or correcting
+Evidence directly from a document Source remains the later #191 workflow, and
+Objective-local paper-scope review remains #340.
 The Research Agent and experiment plans may consume published Findings, but
 they do not introduce a second conclusion identity.
 

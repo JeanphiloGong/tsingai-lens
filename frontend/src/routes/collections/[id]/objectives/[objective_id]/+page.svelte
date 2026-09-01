@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
+	import FindingAuthoringEditor from '../../_components/FindingAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
@@ -14,7 +15,8 @@
 		runObjectiveAnalysis,
 		type ObjectiveAnalysis,
 		type ObjectiveEvidence,
-		type ObjectiveFinding
+		type ObjectiveFinding,
+		type FindingAuthoringResult
 	} from '../../../../_shared/researchView';
 
 	const POLL_DELAY_MS = 2500;
@@ -33,6 +35,13 @@
 	let loadedKey = '';
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let findingRequestSequence = 0;
+	let authoringRequestSequence = 0;
+	let authoringOpen = false;
+	let authoringLoading = false;
+	let authoringError = '';
+	let authoringEvidence: ObjectiveEvidence[] = [];
+	let authoringEvidenceVersion: number | null = null;
+	let authoringParent: ObjectiveFinding | null = null;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
@@ -48,7 +57,7 @@
 
 	onDestroy(clearPoll);
 
-	async function loadObjective() {
+	async function loadObjective(preferredFindingId = '', updateFindingUrl = false) {
 		findingRequestSequence += 1;
 		loading = true;
 		error = '';
@@ -69,7 +78,7 @@
 							])
 						)
 					: {};
-			await loadFindings();
+			await loadFindings(preferredFindingId, updateFindingUrl);
 			schedulePoll();
 		} catch (err) {
 			error = errorMessage(err);
@@ -83,7 +92,7 @@
 		}
 	}
 
-	async function loadFindings() {
+	async function loadFindings(preferredFindingId = '', updateFindingUrl = false) {
 		if (!analysis?.objective.published_analysis_version) {
 			findingRequestSequence += 1;
 			findings = [];
@@ -108,12 +117,64 @@
 		}
 		findings = loadedFindings;
 		const nextId =
-			(requestedFindingId && findings.some((item) => item.finding_id === requestedFindingId)
-				? requestedFindingId
-				: selectedFindingId && findings.some((item) => item.finding_id === selectedFindingId)
-					? selectedFindingId
-					: findings[0]?.finding_id) ?? '';
-		await selectFinding(nextId, false);
+			(preferredFindingId && findings.some((item) => item.finding_id === preferredFindingId)
+				? preferredFindingId
+				: requestedFindingId && findings.some((item) => item.finding_id === requestedFindingId)
+					? requestedFindingId
+					: selectedFindingId && findings.some((item) => item.finding_id === selectedFindingId)
+						? selectedFindingId
+						: findings[0]?.finding_id) ?? '';
+		await selectFinding(nextId, updateFindingUrl && Boolean(nextId));
+	}
+
+	async function openAuthoring(parent: ObjectiveFinding | null = null) {
+		if (!published) return;
+		authoringOpen = true;
+		authoringParent = parent;
+		authoringError = '';
+		const version = published.analysis_version;
+		if (authoringEvidenceVersion === version && authoringEvidence.length) return;
+		const requestSequence = ++authoringRequestSequence;
+		authoringLoading = true;
+		try {
+			const records: ObjectiveEvidence[] = [];
+			while (true) {
+				const page = await fetchObjectiveEvidence(
+					collectionId,
+					objectiveId,
+					version,
+					null,
+					records.length,
+					500
+				);
+				records.push(...page.items);
+				if (records.length >= page.total) break;
+				if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
+			}
+			if (requestSequence !== authoringRequestSequence) return;
+			authoringEvidence = records;
+			authoringEvidenceVersion = version;
+		} catch (err) {
+			if (requestSequence === authoringRequestSequence) authoringError = errorMessage(err);
+		} finally {
+			if (requestSequence === authoringRequestSequence) authoringLoading = false;
+		}
+	}
+
+	function closeAuthoring() {
+		authoringRequestSequence += 1;
+		authoringOpen = false;
+		authoringParent = null;
+		authoringError = '';
+		authoringLoading = false;
+	}
+
+	async function handleFindingSaved(result: FindingAuthoringResult) {
+		const findingId = result.finding?.finding_id ?? '';
+		closeAuthoring();
+		authoringEvidence = [];
+		authoringEvidenceVersion = null;
+		await loadObjective(findingId, Boolean(findingId));
 	}
 
 	async function selectFinding(findingId: string, updateUrl = true) {
@@ -161,6 +222,11 @@
 		}
 	}
 
+	function reviewFinding(findingId: string) {
+		closeAuthoring();
+		void selectFinding(findingId);
+	}
+
 	function directPaperCount(finding: ObjectiveFinding) {
 		return finding.paper_contributions.filter(
 			(item) => item.supporting_evidence_ids.length || item.contradicting_evidence_ids.length
@@ -180,6 +246,22 @@
 		if (value >= 0.8) return '较高确定性';
 		if (value >= 0.6) return '中等确定性';
 		return '较低确定性';
+	}
+
+	function findingOriginLabel(value: ObjectiveFinding['origin'] | undefined) {
+		if (value === 'human_authored') return '研究者创建';
+		if (value === 'hybrid') return '研究者修订';
+		return '系统分析';
+	}
+
+	function abstentionLabel(value: string | null) {
+		return (
+			{
+				no_comparable_evidence: '研究者判断：现有结果不可直接比较',
+				no_grounded_evidence: '研究者判断：没有足够的原文支持',
+				insufficient_evidence: '研究者判断：证据数量或质量不足'
+			}[value ?? ''] ?? '研究者记录了证据不足'
+		);
 	}
 
 	async function startAnalysis() {
@@ -226,6 +308,9 @@
 				findingRequestSequence += 1;
 				selectedFinding = null;
 				evidence = [];
+				closeAuthoring();
+				authoringEvidence = [];
+				authoringEvidenceVersion = null;
 			}
 			analysis = refreshed;
 			if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
@@ -321,7 +406,14 @@
 		{/if}
 		{#if actionError}<p class="action-error" role="alert">{actionError}</p>{/if}
 
-		{#if published && findings.length}
+		{#if published?.abstention_reason}
+			<section class="authored-abstention" aria-label="研究者证据判断">
+				<strong>{abstentionLabel(published.abstention_reason)}</strong>
+				{#if published.abstention_note}<span>{published.abstention_note}</span>{/if}
+			</section>
+		{/if}
+
+		{#if published}
 			<section class="findings-workspace" aria-label="Finding 审阅工作区">
 				<aside class="findings-sidebar" aria-label="Finding 列表">
 					<div class="findings-heading">
@@ -338,33 +430,73 @@
 							{/if}
 						</div>
 					</div>
-					<ul class="finding-list">
-						{#each findings as item (item.finding_id)}
-							<li>
-								<button
-									type="button"
-									aria-pressed={item.finding_id === selectedFindingId}
-									class:selected={item.finding_id === selectedFindingId}
-									on:click={() => selectFinding(item.finding_id)}
-								>
-									<span>{item.statement}</span>
-									<small
-										>{synthesisLabel(item.synthesis_status)} · {certaintyLabel(item.certainty)} · {directPaperCount(
-											item
-										)} 篇直接文献</small
+					<button
+						class="btn btn--primary btn--small new-finding"
+						type="button"
+						on:click={() => openAuthoring(null)}
+					>
+						新建 Finding
+					</button>
+					{#if findings.length}
+						<ul class="finding-list">
+							{#each findings as item (item.finding_id)}
+								<li>
+									<button
+										type="button"
+										aria-pressed={!authoringOpen && item.finding_id === selectedFindingId}
+										class:selected={!authoringOpen && item.finding_id === selectedFindingId}
+										on:click={() => reviewFinding(item.finding_id)}
 									>
-								</button>
-							</li>
-						{/each}
-					</ul>
+										<span>{item.statement}</span>
+										<small>{findingOriginLabel(item.origin)}</small>
+										<small
+											>{synthesisLabel(item.synthesis_status)} · {certaintyLabel(item.certainty)} · {directPaperCount(
+												item
+											)} 篇直接文献</small
+										>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p class="empty-findings">当前版本尚无 Finding。</p>
+					{/if}
 					<details class="secondary-actions">
 						<summary>更多</summary>
 						<a href={datasetUrl()} rel="external">导出训练数据</a>
 					</details>
 				</aside>
 
-				<section class="finding-workspace" aria-label="Finding 详情" aria-busy={findingLoading}>
-					{#if findingLoading}
+				<section
+					class="finding-workspace"
+					aria-label="Finding 详情"
+					aria-busy={findingLoading || authoringLoading}
+				>
+					{#if authoringOpen && authoringLoading}
+						<p class="page-state">正在加载当前版本的 Evidence...</p>
+					{:else if authoringOpen && authoringError}
+						<div class="finding-error" role="alert">
+							<p>{authoringError}</p>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								on:click={() => openAuthoring(authoringParent)}>重试加载 Evidence</button
+							>
+						</div>
+					{:else if authoringOpen}
+						{#key `${published.analysis_version}:${authoringParent?.finding_id ?? 'blank'}`}
+							<FindingAuthoringEditor
+								{collectionId}
+								{objectiveId}
+								analysisVersion={published.analysis_version}
+								evidence={authoringEvidence}
+								{documentTitles}
+								parentFinding={authoringParent}
+								onSaved={handleFindingSaved}
+								onCancel={closeAuthoring}
+							/>
+						{/key}
+					{:else if findingLoading}
 						<p class="page-state">正在加载原文证据...</p>
 					{:else if findingError}
 						<div class="finding-error" role="alert">
@@ -381,19 +513,21 @@
 							{evidence}
 							{collectionId}
 							{documentTitles}
+							onDerive={(finding) => openAuthoring(finding)}
 						/>
+					{:else}
+						<div class="page-state page-state--complete">
+							<p>分析已完成，但当前证据未形成可直接比较的 Finding。</p>
+							<span
+								>v{published.analysis_version} · {published.model_name
+									? `模型 ${published.model_name}`
+									: '模型未记录'}</span
+							>
+							<span>可以记录证据不足，或从现有 Evidence 创建研究者 Finding。</span>
+						</div>
 					{/if}
 				</section>
 			</section>
-		{:else if published}
-			<div class="page-state page-state--complete">
-				<p>分析已完成，但当前证据未形成可直接比较的 Finding。</p>
-				<span
-					>v{published.analysis_version} · {published.model_name
-						? `模型 ${published.model_name}`
-						: '模型未记录'}</span
-				>
-			</div>
 		{:else if !isProcessing}
 			<p class="page-state">确认并开始分析后，这里将展示可追溯的 Findings。</p>
 		{/if}
@@ -478,6 +612,17 @@
 	.analysis-state.failed {
 		border-color: #b42318;
 	}
+	.authored-abstention {
+		display: grid;
+		gap: 4px;
+		padding: 12px 14px;
+		border-left: 3px solid #8a6d1d;
+		background: var(--surface-subtle);
+	}
+	.authored-abstention span {
+		color: var(--text-secondary);
+		white-space: pre-line;
+	}
 	.analysis-state .version-note {
 		color: var(--text-primary);
 		font-weight: 600;
@@ -524,6 +669,16 @@
 		padding: 0;
 		list-style: none;
 		border-top: 1px solid var(--border-default);
+	}
+	.new-finding {
+		width: 100%;
+		margin-bottom: 12px;
+	}
+	.empty-findings {
+		padding: 14px 0;
+		border-block: 1px solid var(--border-default);
+		color: var(--text-secondary);
+		font-size: 13px;
 	}
 	.finding-list button {
 		width: 100%;

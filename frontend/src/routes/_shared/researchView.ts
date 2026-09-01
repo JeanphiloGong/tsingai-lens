@@ -44,6 +44,23 @@ export type FindingCuration = FindingCurationCreate & {
 	finding_id: string;
 	updated_at: string;
 };
+export type FindingOrigin = 'system_generated' | 'human_authored' | 'hybrid';
+export type FindingAbstentionReason =
+	| 'no_comparable_evidence'
+	| 'no_grounded_evidence'
+	| 'insufficient_evidence';
+export type FindingAuthoringCreate = {
+	source_analysis_version: number;
+	statement: string | null;
+	assertion_strength: 'causal' | 'associative' | 'descriptive' | null;
+	supporting_evidence_ids: string[];
+	contradicting_evidence_ids: string[];
+	context_evidence_ids: string[];
+	condition_boundary_evidence_ids: string[];
+	limitations: string[];
+	parent_finding_id: string | null;
+	abstention_reason: FindingAbstentionReason | null;
+};
 export type FindingDatasetLabelStatus = 'candidate' | 'silver' | 'gold' | 'rejected';
 export type FindingDatasetUseStatus = 'training_ready' | 'review_candidate' | 'rejected';
 export type FindingDatasetSample = {
@@ -138,6 +155,11 @@ export type ObjectiveAnalysisState = {
 	created_at: string | null;
 	started_at: string | null;
 	completed_at: string | null;
+	origin: FindingOrigin;
+	source_analysis_version: number | null;
+	created_by_user_id: string | null;
+	abstention_reason: FindingAbstentionReason | null;
+	abstention_note: string | null;
 };
 export type PreparedDocumentInput = {
 	document_id: string;
@@ -209,6 +231,11 @@ export type ObjectiveFinding = {
 	scientific_context: ObjectiveScientificContext;
 	limitations: string[];
 	paper_contributions: ObjectiveFindingPaperContribution[];
+	origin: FindingOrigin;
+	source_analysis_version: number | null;
+	parent_finding_id: string | null;
+	created_by_user_id: string | null;
+	created_at: string | null;
 };
 export type ObjectiveEvidence = {
 	collection_id: string;
@@ -252,6 +279,12 @@ export type ObjectiveEvidence = {
 	resolution_status: string;
 	failure_reason: string | null;
 	confidence: number;
+	supports_finding: boolean;
+};
+export type FindingAuthoringResult = {
+	analysis: ObjectiveAnalysisState;
+	finding: ObjectiveFinding | null;
+	abstention_reason: FindingAbstentionReason | null;
 };
 
 export type ObjectiveList = {
@@ -460,6 +493,8 @@ function normalizeObjectiveAnalysisState(value: unknown): ObjectiveAnalysisState
 	const record = asRecord(value);
 	if (!record || !toNumber(record.analysis_version)) return null;
 	const status = toText(record.status) as ObjectiveAnalysisStatus;
+	const origin = toText(record.origin) as FindingOrigin;
+	const abstentionReason = nonEmptyText(record.abstention_reason) as FindingAbstentionReason | null;
 	return {
 		collection_id: toText(record.collection_id),
 		objective_id: toText(record.objective_id),
@@ -492,7 +527,12 @@ function normalizeObjectiveAnalysisState(value: unknown): ObjectiveAnalysisState
 		error_message: nonEmptyText(record.error_message),
 		created_at: nonEmptyText(record.created_at),
 		started_at: nonEmptyText(record.started_at),
-		completed_at: nonEmptyText(record.completed_at)
+		completed_at: nonEmptyText(record.completed_at),
+		origin: ['human_authored', 'hybrid'].includes(origin) ? origin : 'system_generated',
+		source_analysis_version: toOptionalNumber(record.source_analysis_version),
+		created_by_user_id: nonEmptyText(record.created_by_user_id),
+		abstention_reason: abstentionReason,
+		abstention_note: nonEmptyText(record.abstention_note)
 	};
 }
 
@@ -631,18 +671,29 @@ export async function fetchObjectiveEvidence(
 	collectionId: string,
 	objectiveId: string,
 	analysisVersion: number,
-	findingId: string,
+	findingId: string | null,
 	offset = 0,
 	limit = 100
 ): Promise<ObjectiveEvidencePage> {
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/evidence`;
-	const params = new URLSearchParams({
-		analysis_version: String(analysisVersion),
-		finding_id: findingId,
-		offset: String(offset),
-		limit: String(limit)
-	});
+	const params = new URLSearchParams({ analysis_version: String(analysisVersion) });
+	if (findingId) params.set('finding_id', findingId);
+	params.set('offset', String(offset));
+	params.set('limit', String(limit));
 	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveEvidencePage>;
+}
+
+export async function createFindingVersion(
+	collectionId: string,
+	objectiveId: string,
+	payload: FindingAuthoringCreate
+): Promise<FindingAuthoringResult> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	return requestJson(`/collections/${encodedCollection}/objectives/${encodedObjective}/findings`, {
+		method: 'POST',
+		body: JSON.stringify(payload)
+	}) as Promise<FindingAuthoringResult>;
 }
 
 export async function fetchObjectiveEvidenceMap(

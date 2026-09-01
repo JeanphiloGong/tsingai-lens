@@ -108,6 +108,11 @@ function analysisState(status: string, version = 1, overrides: Record<string, un
 		created_at: null,
 		started_at: null,
 		completed_at: null,
+		origin: 'system_generated',
+		source_analysis_version: null,
+		created_by_user_id: null,
+		abstention_reason: null,
+		abstention_note: null,
 		...overrides
 	};
 }
@@ -128,6 +133,11 @@ const finding = {
 	objective_id: 'obj_1',
 	analysis_version: 1,
 	finding_id: 'finding-1',
+	origin: 'system_generated' as const,
+	source_analysis_version: null,
+	parent_finding_id: null,
+	created_by_user_id: null,
+	created_at: null,
 	statement: 'Annealing was associated with higher tensile strength.',
 	factors: ['heat treatment'],
 	outcome: 'tensile strength',
@@ -214,7 +224,8 @@ const evidence = {
 	anchor_ids: [],
 	resolution_status: 'resolved',
 	failure_reason: null,
-	confidence: 0.92
+	confidence: 0.92,
+	supports_finding: true
 };
 
 const mechanismEvidence = {
@@ -303,6 +314,140 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 		goto.mockReset();
 		fetchMock.mockReset();
+	});
+
+	it('creates a new Finding from current published Evidence and reloads its version', async () => {
+		let publishedVersion = 1;
+		let submitted: Record<string, unknown> | null = null;
+		const manualFinding = {
+			...finding,
+			analysis_version: 2,
+			finding_id: 'finding-manual-1',
+			statement: 'Annealing is associated with higher tensile strength in the reported test.',
+			display_rank: 1,
+			origin: 'human_authored',
+			source_analysis_version: 1,
+			parent_finding_id: null,
+			created_by_user_id: 'user-researcher',
+			created_at: '2026-09-01T00:00:00+00:00'
+		};
+
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			const params = new URLSearchParams(current.search);
+			if (current.path.endsWith('/documents/profiles')) {
+				return jsonResponse({
+					items: [
+						{
+							document_id: 'paper-1',
+							title: 'Annealing response of LPBF 316L',
+							source_filename: 'annealing.pdf'
+						}
+					],
+					total: 1
+				});
+			}
+			if (current.path.endsWith('/objectives/obj_1/analysis')) {
+				return jsonResponse(
+					objectiveResponse({
+						objective: objective({
+							active_analysis_version: publishedVersion,
+							published_analysis_version: publishedVersion
+						}),
+						active_analysis: analysisState('succeeded', publishedVersion),
+						published_analysis: analysisState('succeeded', publishedVersion)
+					})
+				);
+			}
+			if (current.path.endsWith('/objectives/obj_1/findings') && current.method === 'POST') {
+				submitted = JSON.parse(String(init?.body ?? '{}'));
+				publishedVersion = 2;
+				return jsonResponse({
+					analysis: analysisState('succeeded', 2, {
+						origin: 'hybrid',
+						source_analysis_version: 1,
+						created_by_user_id: 'user-researcher'
+					}),
+					finding: manualFinding,
+					abstention_reason: null
+				});
+			}
+			if (current.path.endsWith('/objectives/obj_1/findings')) {
+				return jsonResponse({
+					items:
+						publishedVersion === 2
+							? [{ ...finding, analysis_version: 2 }, manualFinding]
+							: [finding],
+					total: publishedVersion === 2 ? 2 : 1
+				});
+			}
+			if (current.path.endsWith('/objectives/obj_1/evidence')) {
+				const findingId = params.get('finding_id');
+				return jsonResponse({
+					items: [{ ...evidence, analysis_version: publishedVersion }],
+					total: 1,
+					finding_id: findingId
+				});
+			}
+			throw new Error(`unexpected request: ${current.method} ${current.path}${current.search}`);
+		});
+
+		render(Page);
+		await browserPage.getByRole('button', { name: '新建 Finding' }).click();
+		await expect
+			.element(browserPage.getByRole('heading', { name: '创建 Finding' }))
+			.toBeInTheDocument();
+		await browserPage.getByLabelText('结论').fill(manualFinding.statement);
+		await browserPage.getByLabelText('陈述强度').selectOptions('associative');
+		await browserPage.getByLabelText('在 Finding 中的作用').selectOptions('supporting');
+		await browserPage.getByRole('button', { name: '创建 Finding' }).click();
+
+		await expect
+			.element(browserPage.getByText(manualFinding.statement).first())
+			.toBeInTheDocument();
+		expect(submitted).toMatchObject({
+			source_analysis_version: 1,
+			statement: manualFinding.statement,
+			assertion_strength: 'associative',
+			supporting_evidence_ids: ['evidence-1'],
+			parent_finding_id: null
+		});
+		expect(goto).toHaveBeenCalledWith(
+			expect.stringContaining('finding_id=finding-manual-1'),
+			expect.any(Object)
+		);
+	});
+
+	it('starts a hybrid draft from the selected AI Finding without editing it', async () => {
+		let submitted: Record<string, unknown> | null = null;
+		installPublishedResponses();
+		const installed = fetchMock.getMockImplementation();
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/objectives/obj_1/findings') && current.method === 'POST') {
+				submitted = JSON.parse(String(init?.body ?? '{}'));
+				return jsonResponse({
+					analysis: analysisState('succeeded', 2),
+					finding: { ...finding, analysis_version: 2, finding_id: 'finding-hybrid-1' },
+					abstention_reason: null
+				});
+			}
+			return installed!(input, init);
+		});
+
+		render(Page);
+		await browserPage.getByRole('button', { name: '基于此 Finding 创建新版本' }).click();
+		await expect
+			.element(browserPage.getByRole('heading', { name: '修订为新 Finding' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('结论')).toHaveValue(finding.statement);
+		await browserPage.getByRole('button', { name: '创建 Finding' }).click();
+
+		expect(submitted).toMatchObject({
+			parent_finding_id: 'finding-1',
+			supporting_evidence_ids: ['evidence-1'],
+			context_evidence_ids: ['evidence-mechanism']
+		});
 	});
 
 	it('confirms a candidate and queues analysis on the same Objective', async () => {

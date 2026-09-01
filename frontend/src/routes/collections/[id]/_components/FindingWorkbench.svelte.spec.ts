@@ -42,6 +42,11 @@ const finding = {
 	objective_id: 'obj-1',
 	analysis_version: 1,
 	finding_id: 'finding-1',
+	origin: 'system_generated' as const,
+	source_analysis_version: null,
+	parent_finding_id: null,
+	created_by_user_id: null,
+	created_at: null,
 	statement: 'Higher temperature was associated with greater strength.',
 	factors: ['temperature'],
 	outcome: 'strength',
@@ -113,7 +118,8 @@ const evidence = [
 		anchor_ids: [],
 		resolution_status: 'resolved',
 		failure_reason: null,
-		confidence: 0.9
+		confidence: 0.9,
+		supports_finding: true
 	}
 ];
 

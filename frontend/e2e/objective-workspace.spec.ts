@@ -152,7 +152,8 @@ const evidence = {
 	anchor_ids: [],
 	resolution_status: 'resolved',
 	failure_reason: null,
-	confidence: 0.92
+	confidence: 0.92,
+	supports_finding: true
 };
 
 const additionalTableEvidence = [
@@ -368,6 +369,16 @@ for (const viewport of [
 	test(`objective workspace keeps published Findings readable after a failed retry (${viewport.name})`, async ({
 		page
 	}) => {
+		const consoleProblems: string[] = [];
+		const requestFailures: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'error' || message.type() === 'warning') {
+				consoleProblems.push(`${message.type()}: ${message.text()}`);
+			}
+		});
+		page.on('requestfailed', (request) => {
+			requestFailures.push(`${request.method()} ${request.url()}`);
+		});
 		await page.setViewportSize({ width: viewport.width, height: viewport.height });
 		await mockApis(page);
 		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
@@ -445,6 +456,31 @@ for (const viewport of [
 			fullPage: true
 		});
 
+		await page.getByRole('button', { name: '新建 Finding' }).click();
+		await expect(page.getByRole('heading', { name: '创建 Finding' })).toBeVisible();
+		await expect(page.getByText('0 条支持证据 · 4 条可用 Evidence')).toBeVisible();
+		await page.getByLabel('结论').fill('Annealing is associated with higher tensile strength.');
+		await page.getByLabel('在 Finding 中的作用').first().selectOption('supporting');
+		await expect(page.getByText('1 条支持证据 · 4 条可用 Evidence')).toBeVisible();
+		const authoringLayout = await page.evaluate(() => {
+			const workspace = document.querySelector<HTMLElement>('.finding-workspace');
+			return {
+				pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth + 1,
+				workspaceFits:
+					!!workspace && workspace.scrollWidth <= workspace.getBoundingClientRect().width + 1
+			};
+		});
+		expect(authoringLayout.pageFitsViewport).toBe(true);
+		expect(authoringLayout.workspaceFits).toBe(true);
+		await page.screenshot({
+			path: `test-results/objective-finding-authoring-${viewport.name}.png`,
+			fullPage: true
+		});
+		await page.getByRole('button', { name: '取消' }).click();
+		await expect(tableSource).not.toHaveAttribute('open');
+		await tableSource.getByText('表格来源 · p.7', { exact: true }).click();
+		await expect(tableSource).toHaveAttribute('open');
+
 		const sourceApiPaths: string[] = [];
 		page.on('request', (request) => {
 			const path = new URL(request.url()).pathname;
@@ -483,5 +519,7 @@ for (const viewport of [
 		expect(sourceApiPaths).toContain(
 			`/api/v1/collections/${collectionId}/documents/${documentId}/markdown`
 		);
+		expect(consoleProblems).toEqual([]);
+		expect(requestFailures).toEqual([]);
 	});
 }

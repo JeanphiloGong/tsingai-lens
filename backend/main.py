@@ -17,13 +17,16 @@ from application.chat import (
 )
 from application.chat.capabilities import (
     CreateObjectiveCandidateCapability,
+    CurateFindingCapability,
     GetCollectionContextCapability,
     InspectDocumentSourcesCapability,
     InspectObjectiveAnalysisCapability,
+    InspectPublishedFindingCapability,
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    RecordFindingFeedbackCapability,
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
@@ -321,6 +324,18 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                                 objective_analysis_service=objective_analysis_service,
+                            ),
+                            InspectPublishedFindingCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            RecordFindingFeedbackCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
+                            ),
+                            CurateFindingCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
                             ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,

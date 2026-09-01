@@ -171,6 +171,18 @@ The production Research Agent currently exposes these automatic capabilities:
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
+- `inspect_published_finding` returns one complete canonical published Finding
+  and a bounded page of its linked Evidence. This exact read, followed by any
+  necessary Source inspection, is required before the Agent proposes a review;
+- `record_finding_feedback` is a `write` capability. After exact-argument
+  approval, it calls the same `FindingFeedbackService.record_feedback()` path
+  as the Finding workbench and records the authenticated user as reviewer. It
+  does not mutate the published Finding, Evidence, or Sources;
+- `curate_finding` is a `write` capability. After exact-argument approval, it
+  passes one complete canonical Finding to the same
+  `FindingFeedbackService.record_curation()` path as the Finding workbench.
+  Service validation preserves Finding identity, paper coverage, Evidence IDs,
+  and Source lineage; curation cannot create a new Finding;
 - `propose_objective_drafts` records at most three focused, single-outcome
   drafts in the Chat trajectory. PaperResearchMap relationships may be reported
   as proposal context, but they are never presented as Evidence and this call
@@ -474,6 +486,12 @@ Curation requires `analysis_version` and one complete canonical
 version-local Evidence/PaperContribution binding. Unknown, stale, unpublished,
 partial, and cross-version references return `404`, `409`, or `422` and are
 never silently rebound.
+
+The Finding workbench and Research Agent share these same service operations.
+The Agent first reads the complete published Finding and linked Evidence,
+inspects exact Sources as needed, and proposes the same feedback or curation
+arguments. The write runs only after the authenticated user approves those
+exact arguments. Chat does not own a second Finding identity or review store.
 
 Dataset export supports `format=json | training_jsonl` plus optional
 `label_status` and `dataset_use_status` filters. `objective_finding_dataset.v2`

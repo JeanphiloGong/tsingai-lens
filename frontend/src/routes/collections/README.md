@@ -55,6 +55,10 @@ This node owns the Collection route family.
   starting its canonical Objective analysis requires a separate approval. The
   Agent can then inspect the same persisted analysis state and paper progress
   shown by the Objective workspace.
+  For a published Finding, the Agent reads the complete Finding, linked
+  Evidence, and exact Sources before proposing feedback or curation. Both
+  writes require exact user approval and reuse the Finding workbench's existing
+  review service; Chat does not create another Finding or review identity.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.

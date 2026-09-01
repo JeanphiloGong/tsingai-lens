@@ -17,14 +17,17 @@ from application.chat import (
 from application.chat.capabilities import (
     CreateObjectiveCandidateArguments,
     CreateObjectiveCandidateCapability,
+    CurateFindingCapability,
     GetCollectionContextCapability,
     InspectDocumentSourcesCapability,
     InspectObjectiveAnalysisCapability,
+    InspectPublishedFindingCapability,
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsArguments,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    RecordFindingFeedbackCapability,
     StartObjectiveAnalysisArguments,
     StartObjectiveAnalysisCapability,
     StartResearchProcessArguments,
@@ -295,6 +298,76 @@ class _SourceArtifactRepository:
         return self.document if document_id == self.document.document_id else None
 
 
+def _canonical_finding_record() -> dict:
+    return {
+        "collection_id": "col-1",
+        "objective_id": "objective-published",
+        "analysis_version": 2,
+        "finding_id": "finding-1",
+        "statement": "Higher energy input was associated with lower elongation.",
+        "factors": ["energy input"],
+        "outcome": "elongation",
+        "direction": "decrease",
+        "assertion_strength": "associative",
+        "attribution_scope": "association_only",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.78,
+        "display_rank": 1,
+        "mechanisms": [],
+        "scientific_context": {
+            "material": [],
+            "sample": [],
+            "process": [],
+            "test": [],
+        },
+        "limitations": ["Only one paper reported a directly comparable result."],
+        "paper_contributions": [
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-1"],
+                "contradicting_evidence_ids": [],
+                "context_evidence_ids": [],
+                "condition_boundary_evidence_ids": [],
+            }
+        ],
+    }
+
+
+class _RecordedReview:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def to_record(self) -> dict:
+        return dict(self.payload)
+
+
+class _FindingFeedbackService:
+    def __init__(self) -> None:
+        self.feedback_calls: list[dict] = []
+        self.curation_calls: list[dict] = []
+
+    async def record_feedback(self, **kwargs) -> _RecordedReview:
+        self.feedback_calls.append(kwargs)
+        return _RecordedReview(
+            {
+                "feedback_id": "feedback-1",
+                **kwargs,
+                "created_at": "2026-08-31T08:00:00+00:00",
+            }
+        )
+
+    async def record_curation(self, **kwargs) -> _RecordedReview:
+        self.curation_calls.append(kwargs)
+        return _RecordedReview(
+            {
+                "curation_id": "curation-1",
+                **kwargs,
+                "updated_at": "2026-08-31T08:00:00+00:00",
+            }
+        )
+
+
 class _StartResearchProcessModel:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
@@ -440,6 +513,23 @@ class _AnalysisService:
             ],
         }
 
+    async def get_finding(
+        self,
+        collection_id: str,
+        objective_id: str,
+        finding_id: str,
+        **_kwargs,
+    ) -> dict:
+        assert collection_id == "col-1"
+        assert objective_id == "objective-published"
+        assert finding_id == "finding-1"
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective_id,
+            "analysis_version": 2,
+            "finding": _canonical_finding_record(),
+        }
+
 
 class _Model:
     def __init__(self, *turns: ModelTurn) -> None:
@@ -521,6 +611,121 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
         "source",
     ]
     assert "source_ref=table-2" in (result.resource_refs[1].href or "")
+
+
+async def test_agent_records_finding_feedback_only_after_exact_approval() -> None:
+    feedback_service = _FindingFeedbackService()
+    capability = RecordFindingFeedbackCapability(
+        collection_service=_CollectionService(),
+        finding_feedback_service=feedback_service,
+    )
+
+    class FeedbackModel:
+        def __init__(self) -> None:
+            self.turns = deque(
+                (
+                    ModelTurn(
+                        content="I prepared a partial-correctness review for approval.",
+                        tool_call=ModelToolCall(
+                            name="record_finding_feedback",
+                            arguments={
+                                "objective_id": "objective-published",
+                                "analysis_version": 2,
+                                "finding_id": "finding-1",
+                                "review_status": "partial",
+                                "issue_type": "overclaim",
+                                "note": "The direction is supported, but the wording is too broad.",
+                            },
+                        ),
+                    ),
+                    ModelTurn(content="The approved review has been recorded."),
+                )
+            )
+
+        def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+            assert messages
+            assert {item.name for item in tool_specs} == {"record_finding_feedback"}
+            return self.turns.popleft()
+
+    runner = ResearchAgentRunner(
+        model=FeedbackModel(),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+    context = AgentContext("chat-1", "user-1", "col-1")
+
+    proposed = await runner.run_turn(
+        context=context,
+        previous_messages=(),
+        user_message="Mark this conclusion as partly correct because it overclaims.",
+    )
+
+    assert proposed.status.value == "approval_required"
+    assert feedback_service.feedback_calls == []
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-08-31T08:00:00+00:00",
+    )
+    completed = await runner.resume_approved_call(
+        context=context,
+        previous_messages=proposed.messages,
+        approved_call=approved,
+    )
+
+    assert feedback_service.feedback_calls == [
+        {
+            "collection_id": "col-1",
+            "objective_id": "objective-published",
+            "analysis_version": 2,
+            "finding_id": "finding-1",
+            "review_status": "partial",
+            "issue_type": "overclaim",
+            "note": "The direction is supported, but the wording is too broad.",
+            "reviewer": "user-1",
+        }
+    ]
+    assert completed.tool_results[0].data["feedback_id"] == "feedback-1"
+
+
+async def test_agent_curation_reuses_complete_existing_finding_contract() -> None:
+    feedback_service = _FindingFeedbackService()
+    capability = CurateFindingCapability(
+        collection_service=_CollectionService(),
+        finding_feedback_service=feedback_service,
+    )
+    curated_finding = _canonical_finding_record()
+    curated_finding["statement"] = (
+        "For the reported conditions, higher energy input was associated with "
+        "lower elongation."
+    )
+
+    result = await capability.execute(
+        _context("call-curate-finding"),
+        capability.spec.input_model(
+            objective_id="objective-published",
+            analysis_version=2,
+            finding_id="finding-1",
+            curated_status="limited",
+            curated_finding=curated_finding,
+            note="Narrowed the statement to the reported conditions.",
+        ),
+    )
+
+    assert capability.spec.risk.value == "write"
+    assert feedback_service.curation_calls == [
+        {
+            "collection_id": "col-1",
+            "objective_id": "objective-published",
+            "analysis_version": 2,
+            "finding_id": "finding-1",
+            "curated_status": "limited",
+            "curated_finding": curated_finding,
+            "note": "Narrowed the statement to the reported conditions.",
+            "reviewer": "user-1",
+        }
+    ]
+    assert result.data["curation_id"] == "curation-1"
+    assert result.resource_refs[0].resource_type == "finding"
 
 
 async def test_research_process_projects_canonical_task_without_retry_internals() -> None:
@@ -922,6 +1127,34 @@ async def test_published_findings_reads_only_published_objective_versions() -> N
     assert refs_by_type["evidence"].href == (
         "/collections/col-1/documents/paper-1?evidence_id=evidence-1"
     )
+
+
+async def test_agent_reads_one_complete_published_finding_before_curation() -> None:
+    analysis_service = _AnalysisService()
+    capability = InspectPublishedFindingCapability(
+        collection_service=_CollectionService(),
+        objective_analysis_service=analysis_service,
+    )
+
+    result = await capability.execute(
+        _context("call-inspect-finding"),
+        capability.spec.input_model(
+            objective_id="objective-published",
+            analysis_version=2,
+            finding_id="finding-1",
+        ),
+    )
+
+    assert result.status.value == "succeeded"
+    assert result.data["finding"] == _canonical_finding_record()
+    assert result.data["evidence_total"] == 1
+    assert result.data["evidence"][0]["evidence_id"] == "evidence-1"
+    assert result.data["evidence"][0]["source_ref"] == "table-2"
+    assert result.data["finding_is_published"] is True
+    assert [ref.resource_type for ref in result.resource_refs] == [
+        "finding",
+        "evidence",
+    ]
 
 
 async def test_missing_published_results_is_a_successful_scientific_absence() -> None:

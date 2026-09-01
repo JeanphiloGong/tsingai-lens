@@ -415,6 +415,53 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shows one complete published finding and its linked evidence count', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Review this finding'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_finding_1',
+						tool_name: 'inspect_published_finding',
+						tool_arguments: {
+							objective_id: 'obj_1',
+							analysis_version: 2,
+							finding_id: 'finding_1'
+						}
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_finding_1',
+						tool_result: {
+							tool_call_id: 'call_finding_1',
+							status: 'succeeded',
+							data: {
+								finding: { statement: 'Higher energy input reduced elongation.' },
+								evidence_total: 3
+							},
+							resource_refs: [],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'The conclusion is ready for source review.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Review this finding');
+
+		await expect
+			.element(browserPage.getByText('Finding and evidence review completed'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Complete finding · 3 linked evidence records'))
+			.toBeInTheDocument();
+	});
+
 	it('shows the canonical research process without technical recovery details', async () => {
 		installApi({
 			messageTurn: {
@@ -630,6 +677,138 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and create' }))
+			.toBeInTheDocument();
+	});
+
+	it('shows exact finding feedback before recording the human review', async () => {
+		const call = pendingCall({
+			name: 'record_finding_feedback',
+			arguments: {
+				objective_id: 'obj_1',
+				analysis_version: 2,
+				finding_id: 'finding_1',
+				review_status: 'partial',
+				issue_type: 'overclaim',
+				note: 'The direction is supported, but the wording is too broad.'
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Record this as partly correct'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Record this as partly correct');
+
+		await expect
+			.element(browserPage.getByText('Finding feedback', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('partial', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('overclaim', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The direction is supported, but the wording is too broad.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and record review' }))
+			.toBeInTheDocument();
+	});
+
+	it('shows the complete finding revision before reusing the human curation path', async () => {
+		const revisedStatement =
+			'For the reported conditions, higher energy input was associated with lower elongation.';
+		const call = pendingCall({
+			name: 'curate_finding',
+			arguments: {
+				objective_id: 'obj_1',
+				analysis_version: 2,
+				finding_id: 'finding_1',
+				curated_status: 'limited',
+				curated_finding: {
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					analysis_version: 2,
+					finding_id: 'finding_1',
+					statement: revisedStatement,
+					paper_contributions: [{ document_id: 'doc_1', supporting_evidence_ids: ['ev_1'] }]
+				},
+				note: 'Narrowed the conclusion to the reported conditions.'
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Narrow this conclusion'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Narrow this conclusion');
+
+		await expect
+			.element(browserPage.getByText('Finding curation', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(revisedStatement, { exact: false }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and save revision' }))
+			.toBeInTheDocument();
+	});
+
+	it('rejects finding feedback without implying that a review was recorded', async () => {
+		const call = pendingCall({
+			name: 'record_finding_feedback',
+			arguments: {
+				objective_id: 'obj_1',
+				analysis_version: 2,
+				finding_id: 'finding_1',
+				review_status: 'unclear',
+				issue_type: 'none'
+			}
+		});
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call
+			},
+			decisionTurn: {
+				status: 'rejected',
+				messages: [],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Reject' }).click();
+
+		await expect
+			.element(browserPage.getByText('The research conclusion review was not recorded.'))
 			.toBeInTheDocument();
 	});
 

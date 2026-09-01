@@ -38,6 +38,16 @@ class QueryPublishedFindingsArguments(BaseModel):
         return normalized
 
 
+class InspectPublishedFindingArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective_id: ObjectiveId
+    finding_id: str = Field(min_length=1, max_length=128)
+    analysis_version: int | None = Field(default=None, ge=1)
+    evidence_offset: int = Field(default=0, ge=0)
+    evidence_limit: int = Field(default=40, ge=1, le=100)
+
+
 class QueryPublishedFindingsCapability:
     spec = ToolSpec(
         name="query_published_findings",
@@ -256,4 +266,101 @@ class QueryPublishedFindingsCapability:
         )
 
 
-__all__ = ["QueryPublishedFindingsArguments", "QueryPublishedFindingsCapability"]
+class InspectPublishedFindingCapability:
+    spec = ToolSpec(
+        name="inspect_published_finding",
+        description=(
+            "Read one exact complete published Finding and a bounded page of its "
+            "Source-linked Evidence. Use this before proposing feedback or curation. "
+            "The complete Finding object is the only valid basis for a curation write; "
+            "do not reconstruct omitted fields from a summary."
+        ),
+        risk=ToolRisk.READ,
+        input_model=InspectPublishedFindingArguments,
+    )
+
+    def __init__(self, *, collection_service: Any, objective_analysis_service: Any) -> None:
+        self.collection_service = collection_service
+        self.objective_analysis_service = objective_analysis_service
+
+    async def execute(
+        self,
+        context: CapabilityExecutionContext,
+        arguments: InspectPublishedFindingArguments,
+    ) -> ChatToolResult:
+        await self.collection_service.get_collection_for_user(
+            context.collection_id,
+            context.user_id,
+        )
+        detail = await self.objective_analysis_service.get_finding(
+            context.collection_id,
+            arguments.objective_id,
+            arguments.finding_id,
+            analysis_version=arguments.analysis_version,
+        )
+        version = int(detail["analysis_version"])
+        evidence = await self.objective_analysis_service.list_evidence(
+            context.collection_id,
+            arguments.objective_id,
+            analysis_version=version,
+            finding_id=arguments.finding_id,
+            offset=arguments.evidence_offset,
+            limit=arguments.evidence_limit,
+        )
+        evidence_items = [
+            QueryPublishedFindingsCapability._evidence_summary(item)
+            for item in evidence.get("items", ())
+            if isinstance(item, Mapping)
+        ]
+        evidence_total = int(evidence.get("total") or 0)
+        next_offset = arguments.evidence_offset + len(evidence_items)
+        if next_offset >= evidence_total:
+            next_offset = None
+        warnings: tuple[str, ...] = ()
+        if next_offset is not None:
+            warnings = (
+                "Additional Finding Evidence was omitted from this bounded page; "
+                "inspect the next evidence_offset before proposing a complete review.",
+            )
+        finding_ref = QueryPublishedFindingsCapability._finding_ref(
+            context.collection_id,
+            arguments.objective_id,
+            version,
+            arguments.finding_id,
+        )
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id,
+            status="succeeded",
+            data={
+                "objective_id": arguments.objective_id,
+                "analysis_version": version,
+                "finding": dict(detail["finding"]),
+                "finding_is_published": True,
+                "evidence": evidence_items,
+                "evidence_total": evidence_total,
+                "evidence_offset": arguments.evidence_offset,
+                "evidence_limit": arguments.evidence_limit,
+                "next_evidence_offset": next_offset,
+            },
+            resource_refs=(
+                finding_ref,
+                *(
+                    QueryPublishedFindingsCapability._evidence_ref(
+                        context.collection_id,
+                        arguments.objective_id,
+                        item["document_id"],
+                        item["evidence_id"],
+                    )
+                    for item in evidence_items
+                ),
+            ),
+            warnings=warnings,
+        )
+
+
+__all__ = [
+    "InspectPublishedFindingArguments",
+    "InspectPublishedFindingCapability",
+    "QueryPublishedFindingsArguments",
+    "QueryPublishedFindingsCapability",
+]

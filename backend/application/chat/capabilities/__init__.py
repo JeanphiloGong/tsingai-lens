@@ -12,6 +12,12 @@ from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesArguments,
     InspectDocumentSourcesCapability,
 )
+from application.chat.capabilities.finding_review import (
+    CurateFindingArguments,
+    CurateFindingCapability,
+    RecordFindingFeedbackArguments,
+    RecordFindingFeedbackCapability,
+)
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
     ProposeObjectiveDraftsArguments,
@@ -28,6 +34,8 @@ from application.chat.capabilities.objective_analysis import (
     StartObjectiveAnalysisCapability,
 )
 from application.chat.capabilities.published_findings import (
+    InspectPublishedFindingArguments,
+    InspectPublishedFindingCapability,
     QueryPublishedFindingsArguments,
     QueryPublishedFindingsCapability,
 )
@@ -52,12 +60,16 @@ __all__ = [
     "CapabilityRegistry",
     "CreateObjectiveCandidateArguments",
     "CreateObjectiveCandidateCapability",
+    "CurateFindingArguments",
+    "CurateFindingCapability",
     "GetCollectionContextArguments",
     "GetCollectionContextCapability",
     "InspectDocumentSourcesArguments",
     "InspectDocumentSourcesCapability",
     "InspectObjectiveAnalysisArguments",
     "InspectObjectiveAnalysisCapability",
+    "InspectPublishedFindingArguments",
+    "InspectPublishedFindingCapability",
     "InspectResearchProcessArguments",
     "InspectResearchProcessCapability",
     "ObjectiveDraftInput",
@@ -67,6 +79,8 @@ __all__ = [
     "PreviewResearchScopeCapability",
     "QueryPublishedFindingsArguments",
     "QueryPublishedFindingsCapability",
+    "RecordFindingFeedbackArguments",
+    "RecordFindingFeedbackCapability",
     "StartResearchProcessArguments",
     "StartResearchProcessCapability",
     "StartObjectiveAnalysisArguments",

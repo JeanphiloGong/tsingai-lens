@@ -393,6 +393,12 @@
 				return $t('researchAgent.capability.startResearchProcess');
 			case 'query_published_findings':
 				return $t('researchAgent.capability.findings');
+			case 'inspect_published_finding':
+				return $t('researchAgent.capability.findingReview');
+			case 'record_finding_feedback':
+				return $t('researchAgent.capability.findingFeedback');
+			case 'curate_finding':
+				return $t('researchAgent.capability.findingCuration');
 			case 'propose_objective_drafts':
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
@@ -489,6 +495,17 @@
 				findings: numberValue(result.data, 'finding_count'),
 				evidence: numberValue(result.data, 'evidence_count')
 			});
+		}
+		if (name === 'inspect_published_finding') {
+			return $t('researchAgent.capability.findingEvidenceCount', {
+				count: numberValue(result.data, 'evidence_total')
+			});
+		}
+		if (name === 'record_finding_feedback') {
+			return $t('researchAgent.capability.feedbackRecorded');
+		}
+		if (name === 'curate_finding') {
+			return $t('researchAgent.capability.curationRecorded');
 		}
 		if (name === 'propose_objective_drafts') {
 			return $t('researchAgent.capability.draftCount', {
@@ -660,6 +677,12 @@
 		if (call.name === 'start_objective_analysis') {
 			return $t('researchAgent.approval.objectiveAnalysisBody');
 		}
+		if (call.name === 'record_finding_feedback') {
+			return $t('researchAgent.approval.findingFeedbackBody');
+		}
+		if (call.name === 'curate_finding') {
+			return $t('researchAgent.approval.findingCurationBody');
+		}
 		return $t('researchAgent.approval.body');
 	}
 
@@ -670,12 +693,20 @@
 		if (call.name === 'start_objective_analysis') {
 			return $t('researchAgent.approval.analyzeObjective');
 		}
+		if (call.name === 'record_finding_feedback') {
+			return $t('researchAgent.approval.recordFeedback');
+		}
+		if (call.name === 'curate_finding') {
+			return $t('researchAgent.approval.saveCuration');
+		}
 		return $t('researchAgent.approval.approve');
 	}
 
 	function rejectionNoticeKey(toolName: string | null) {
 		if (toolName === 'start_research_process') return 'researchAgent.researchProcessRejected';
 		if (toolName === 'start_objective_analysis') return 'researchAgent.objectiveAnalysisRejected';
+		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
+		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		return 'researchAgent.rejected';
 	}
 

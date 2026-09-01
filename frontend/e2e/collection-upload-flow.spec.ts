@@ -45,13 +45,39 @@ function preparationTask(documentId: string, status: 'queued' | 'running' | 'fai
 		progress_percent: status === 'running' ? 42 : 0,
 		progress_detail:
 			status === 'running' ? { phase: 'source_parsing', message: 'Parsing this paper.' } : null,
-		output_path: null,
 		errors: status === 'failed' ? ['The PDF could not be parsed.'] : [],
 		warnings: [],
 		created_at: '2026-08-27T00:00:00Z',
 		updated_at: '2026-08-27T00:01:00Z',
 		started_at: status === 'running' ? '2026-08-27T00:00:01Z' : null,
 		finished_at: status === 'failed' ? '2026-08-27T00:01:00Z' : null
+	};
+}
+
+function discoveryTask(status: 'queued' | 'completed') {
+	return {
+		task_id: 'task_discovery',
+		collection_id: collectionId,
+		document_id: null,
+		task_type: 'objective_discovery',
+		mode: 'standard',
+		input_fingerprint: 'discovery-scope',
+		status,
+		current_stage: status === 'completed' ? 'objectives_ready' : 'queued',
+		progress_percent: status === 'completed' ? 100 : 0,
+		progress_detail: {
+			phase: status === 'completed' ? 'objectives_ready' : 'queued',
+			message:
+				status === 'completed'
+					? 'Candidate research questions are ready for review.'
+					: 'Research question formation is queued.'
+		},
+		errors: [],
+		warnings: [],
+		created_at: '2026-08-27T00:00:00Z',
+		updated_at: '2026-08-27T00:01:00Z',
+		started_at: status === 'completed' ? '2026-08-27T00:00:01Z' : null,
+		finished_at: status === 'completed' ? '2026-08-27T00:01:00Z' : null
 	};
 }
 
@@ -121,6 +147,9 @@ async function mockCurrentDocumentApis(page: Page) {
 		if (path === '/api/v1/tasks/task_doc_processing' && method === 'GET') {
 			return route.fulfill(json(preparationTask('doc_processing', 'running')));
 		}
+		if (path === '/api/v1/tasks/task_discovery' && method === 'GET') {
+			return route.fulfill(json(discoveryTask('completed')));
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives` && method === 'GET') {
 			return route.fulfill(json({ collection_id: collectionId, objectives }));
 		}
@@ -138,16 +167,7 @@ async function mockCurrentDocumentApis(page: Page) {
 					confirmation_status: 'candidate'
 				}
 			];
-			return route.fulfill(
-				json({
-					collection_id: collectionId,
-					document_inputs: readyDocumentIds.map((documentId) => ({
-						document_id: documentId,
-						preparation_fingerprint: `fingerprint-${documentId}`
-					})),
-					objectives
-				})
-			);
+			return route.fulfill(json(discoveryTask('queued')));
 		}
 
 		return route.fulfill(json({ detail: `unhandled test route: ${method} ${path}` }, 404));
@@ -170,10 +190,11 @@ test('ready papers remain usable while other papers process or fail', async ({ p
 
 	await page.goto(`/collections/${collectionId}`);
 
-	await expect(page.getByRole('heading', { name: 'Prepare and select papers' })).toBeVisible();
-	const uploadButton = page.locator('button').filter({ hasText: 'Upload documents' });
+	await expect(page.getByRole('heading', { name: 'Research overview' })).toBeVisible();
+	const uploadButton = page.getByRole('button', { name: 'Upload documents' }).last();
 	await expect(uploadButton).toBeEnabled();
 	await expect(page.getByText('Parsing this paper.')).toBeVisible();
+	await page.getByText('1 paper(s) need attention', { exact: true }).click();
 	await expect(page.getByText('The PDF could not be parsed.')).toBeVisible();
 	await page.getByRole('button', { name: 'Retry' }).click();
 	await expect(page.getByText('1 paper preparation task(s) queued.')).toBeVisible();
@@ -181,18 +202,15 @@ test('ready papers remain usable while other papers process or fail', async ({ p
 		`/api/v1/collections/${collectionId}/documents/doc_failed/preparation`
 	]);
 
-	await page
-		.getByRole('checkbox', { name: 'Select paper for research scope: grain-structure.pdf' })
-		.check();
-	await page
-		.getByRole('checkbox', { name: 'Select paper for research scope: tensile-strength.pdf' })
-		.check();
-	await expect(page.getByRole('button', { name: 'Discover objectives from 2' })).toBeEnabled();
-	await page.getByRole('button', { name: 'Discover objectives from 2' }).click();
+	const discoveryButton = page.getByRole('button', { name: 'Form research questions from 2' });
+	await expect(discoveryButton).toBeEnabled();
+	await discoveryButton.click();
 
 	expect(requests.discoveryBodies).toEqual([{ document_ids: readyDocumentIds }]);
-	await expect(page.getByText('Objective discovery completed with 1 candidate(s).')).toBeVisible();
-	await expect(page.getByText('1 objective candidate(s) available.')).toBeVisible();
+	await expect(
+		page.getByText('Research question formation completed with 1 candidate(s).')
+	).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Enter research objectives' })).toBeVisible();
 	await expect(uploadButton).toBeEnabled();
 	await expectNoHorizontalOverflow(page);
 

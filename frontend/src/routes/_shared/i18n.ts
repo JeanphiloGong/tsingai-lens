@@ -67,6 +67,7 @@ const translations: Record<Language, Translations> = {
 			filter: {
 				all: 'All status',
 				complete: 'Complete',
+				ready: 'Documents ready',
 				processing: 'Processing',
 				attention: 'Attention'
 			},
@@ -85,6 +86,7 @@ const translations: Record<Language, Translations> = {
 			statusUnknown: 'Unknown',
 			statusDisplay: {
 				complete: 'Complete',
+				ready: 'Documents ready',
 				processing: 'Processing',
 				attention: 'Needs attention',
 				pending: 'Pending'
@@ -111,6 +113,8 @@ const translations: Record<Language, Translations> = {
 			actionStartProcessing: 'Start processing',
 			actionRetryProcessing: 'Retry processing',
 			actionProcessing: 'Processing',
+			actionReady: 'Ready',
+			actionReadyTitle: 'Documents are already ready',
 			actionDelete: 'Delete',
 			indexing: 'Starting processing...',
 			indexStarted: 'Processing started',
@@ -2504,6 +2508,7 @@ const translations: Record<Language, Translations> = {
 			filter: {
 				all: '全部状态',
 				complete: '已完成',
+				ready: '文档已准备',
 				processing: '处理中',
 				attention: '需关注'
 			},
@@ -2522,6 +2527,7 @@ const translations: Record<Language, Translations> = {
 			statusUnknown: '未知',
 			statusDisplay: {
 				complete: '已完成',
+				ready: '文档已准备',
 				processing: '处理中',
 				attention: '需要关注',
 				pending: '待处理'
@@ -2548,6 +2554,8 @@ const translations: Record<Language, Translations> = {
 			actionStartProcessing: '启动处理',
 			actionRetryProcessing: '重新处理',
 			actionProcessing: '处理中',
+			actionReady: '已准备',
+			actionReadyTitle: '文档已经准备好',
 			actionDelete: '删除',
 			indexing: '正在启动处理...',
 			indexStarted: '处理已启动',

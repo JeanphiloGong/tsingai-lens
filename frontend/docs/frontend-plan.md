@@ -16,6 +16,8 @@
 ## 产品主流程
 
 - 首页集合列表：`GET /api/v1/collections`
+  首页列表会结合响应中的当前文档状态显示集合阶段：全部文档为 `ready` 时显示“文档已准备”，
+  不会因为历史集合的顶层 `status=uploaded` 而误显示为“待处理”；处理中或失败文档仍优先显示对应风险状态。
 - 登录会话：`POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`

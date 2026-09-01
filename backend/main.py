@@ -17,6 +17,7 @@ from application.chat import (
 )
 from application.chat.capabilities import (
     CreateFindingVersionCapability,
+    CreateEvidenceVersionCapability,
     CreateObjectiveCandidateCapability,
     CurateFindingCapability,
     GetCollectionContextCapability,
@@ -38,6 +39,9 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.evidence_authoring_service import (
+    EvidenceAuthoringService,
+)
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
@@ -184,6 +188,7 @@ class ApplicationRuntime:
     finding_review_repository: FindingReviewRepository
     finding_feedback_service: FindingFeedbackService
     finding_authoring_service: FindingAuthoringService
+    evidence_authoring_service: EvidenceAuthoringService
     document_profile_service: DocumentProfileService
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
@@ -279,6 +284,11 @@ async def build_application_runtime(
             collection_service=collection_service,
             objective_repository=objective_repository,
         )
+        evidence_authoring_service = EvidenceAuthoringService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+            source_artifact_repository=source_artifact_repository,
+        )
         research_objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
@@ -349,6 +359,9 @@ async def build_application_runtime(
                             CreateFindingVersionCapability(
                                 finding_authoring_service=finding_authoring_service,
                             ),
+                            CreateEvidenceVersionCapability(
+                                evidence_authoring_service=evidence_authoring_service,
+                            ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
@@ -387,6 +400,7 @@ async def build_application_runtime(
             finding_review_repository=finding_review_repository,
             finding_feedback_service=finding_feedback_service,
             finding_authoring_service=finding_authoring_service,
+            evidence_authoring_service=evidence_authoring_service,
             document_profile_service=document_profile_service,
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
@@ -421,6 +435,7 @@ def install_application_runtime(
     application.state.finding_review_repository = runtime.finding_review_repository
     application.state.finding_feedback_service = runtime.finding_feedback_service
     application.state.finding_authoring_service = runtime.finding_authoring_service
+    application.state.evidence_authoring_service = runtime.evidence_authoring_service
     application.state.document_profile_service = runtime.document_profile_service
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service

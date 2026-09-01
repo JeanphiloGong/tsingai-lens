@@ -262,6 +262,7 @@ fallback recommendation. Retry reuses the failed version's frozen IDs.
 ### Published result reads
 
 - `POST /objectives/{objective_id}/findings`
+- `POST /objectives/{objective_id}/evidence`
 - `GET /objectives/{objective_id}/findings`
 - `GET /objectives/{objective_id}/findings/{finding_id}`
 - `GET /objectives/{objective_id}/evidence`
@@ -270,7 +271,7 @@ Finding and Evidence lists are paginated. `analysis_version` is explicit in
 every response and may be supplied as a query parameter. Evidence may be
 filtered by `finding_id`.
 
-The POST command is the researcher-approved Evidence-to-Finding decision
+The Findings POST command is the researcher-approved Evidence-to-Finding decision
 boundary. The browser or Research Agent submits the current published
 `source_analysis_version`, one statement and assertion strength, selected
 support/contradiction/context Evidence IDs, optional boundary IDs and
@@ -287,6 +288,25 @@ or concurrent analysis is a conflict, never a silent rebase. A researcher may
 instead record `no_comparable_evidence`, `no_grounded_evidence`, or
 `insufficient_evidence` with an explanation; that publishes analysis metadata
 without manufacturing a Finding.
+
+The Evidence POST command is the Source-to-Evidence decision boundary. It
+accepts one current published analysis version, one prepared Document and
+Source locator, a verbatim Source excerpt, an Evidence role, and the structured
+variables, comparison, reported result, attribution, and scientific context
+that the researcher confirms. The backend verifies collection ownership,
+analysis scope, exact Source identity, and normalized excerpt containment. It
+derives the Evidence identity, page, confidence, and authenticated creator;
+the request cannot move a Source from another collection or analysis version.
+
+Creating a correction with `supersedes_evidence_id` publishes a new immutable
+analysis snapshot. The prior Evidence and any Finding that cites it remain
+unchanged, while the new record records `origin=human_revised` and explicit
+supersession lineage. A new Source-grounded record uses
+`origin=human_authored`. An Agent uses the same command only after exact-
+argument approval and supplies the `source_digest` obtained from
+`inspect_document_sources`. Invalid excerpts, stale or out-of-scope Sources,
+concurrent analysis, and attempts to revise a superseded record are conflicts;
+they never create a partial record.
 
 ### Review and export
 
@@ -364,6 +384,8 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
 - The frontend and downstream assistant consume published Findings directly;
   they do not rebuild another conclusion graph.
 
-Human Finding authoring currently uses existing published Evidence. Selecting
-raw document text, tables, or figures to create or correct Evidence remains
-owned by #191. Objective-local paper-scope review remains owned by #340.
+The Finding workbench currently starts from existing published Evidence.
+Source-grounded Evidence can be recorded through the HTTP command or the
+approved Agent capability; direct selection of arbitrary raw document text,
+tables, or figures inside the document reader remains owned by #191.
+Objective-local paper-scope review remains owned by #340.

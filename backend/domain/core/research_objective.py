@@ -79,6 +79,9 @@ EVIDENCE_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
 EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
     {"resolved", "partial", "unresolved", "skipped", "unknown"}
 )
+EVIDENCE_ORIGINS: Final[frozenset[str]] = frozenset(
+    {"system_generated", "human_authored", "human_revised"}
+)
 OBJECTIVE_CONFIRMATION_STATUSES: Final[frozenset[str]] = frozenset(
     {"candidate", "confirmed"}
 )
@@ -1757,6 +1760,13 @@ class ObjectiveEvidence:
     resolution_status: str
     failure_reason: str | None
     confidence: float
+    origin: str = "system_generated"
+    source_analysis_version: int | None = None
+    supersedes_evidence_id: str | None = None
+    superseded_by_evidence_id: str | None = None
+    created_by_user_id: str | None = None
+    created_at: datetime | None = None
+    authoring_note: str | None = None
 
     def __post_init__(self) -> None:
         if not all(
@@ -1791,6 +1801,36 @@ class ObjectiveEvidence:
             raise ValueError(
                 f"unsupported evidence resolution status: {self.resolution_status}"
             )
+        if self.origin not in EVIDENCE_ORIGINS:
+            raise ValueError(f"unsupported objective evidence origin: {self.origin}")
+        if self.source_analysis_version is not None and self.source_analysis_version < 1:
+            raise ValueError("objective evidence source version must be positive")
+        if self.supersedes_evidence_id == self.evidence_id:
+            raise ValueError("objective evidence cannot supersede itself")
+        if self.superseded_by_evidence_id == self.evidence_id:
+            raise ValueError("objective evidence cannot be superseded by itself")
+        if self.origin == "system_generated" and any(
+            value is not None
+            for value in (
+                self.supersedes_evidence_id,
+                self.created_by_user_id,
+                self.authoring_note,
+            )
+        ):
+            raise ValueError("system-generated evidence cannot contain authoring provenance")
+        if self.origin != "system_generated":
+            if self.source_analysis_version is None or not _text(
+                self.created_by_user_id
+            ):
+                raise ValueError(
+                    "authored evidence requires source version and authenticated creator"
+                )
+            if self.created_at is None:
+                raise ValueError("authored evidence requires creation time")
+        if self.origin == "human_revised" and not _text(
+            self.supersedes_evidence_id
+        ):
+            raise ValueError("revised evidence requires supersession lineage")
         if self.selection_status == "failed" and not _text(self.failure_reason):
             raise ValueError("failed objective evidence requires failure_reason")
         if self.selection_status == "extracted":
@@ -1892,6 +1932,19 @@ class ObjectiveEvidence:
             ),
             failure_reason=_text(payload.get("failure_reason")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
+            origin=_choice(
+                payload.get("origin"), EVIDENCE_ORIGINS, "system_generated"
+            ),
+            source_analysis_version=_positive_int_or_none(
+                payload.get("source_analysis_version")
+            ),
+            supersedes_evidence_id=_text(payload.get("supersedes_evidence_id")),
+            superseded_by_evidence_id=_text(
+                payload.get("superseded_by_evidence_id")
+            ),
+            created_by_user_id=_text(payload.get("created_by_user_id")),
+            created_at=_datetime_or_none(payload.get("created_at")),
+            authoring_note=_text(payload.get("authoring_note")),
         )
 
     def select(
@@ -2020,6 +2073,13 @@ class ObjectiveEvidence:
             "resolution_status": self.resolution_status,
             "failure_reason": self.failure_reason,
             "confidence": self.confidence,
+            "origin": self.origin,
+            "source_analysis_version": self.source_analysis_version,
+            "supersedes_evidence_id": self.supersedes_evidence_id,
+            "superseded_by_evidence_id": self.superseded_by_evidence_id,
+            "created_by_user_id": self.created_by_user_id,
+            "created_at": _datetime_record(self.created_at),
+            "authoring_note": self.authoring_note,
         }
 
 

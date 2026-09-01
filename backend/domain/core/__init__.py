@@ -51,6 +51,7 @@ from domain.core.evidence_backbone import (
 )
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
+    EVIDENCE_ORIGINS,
     EVIDENCE_RESULT_DIRECTIONS,
     EVIDENCE_ROLE_VALUES,
     EVIDENCE_RESOLUTION_STATUS_VALUES,
@@ -128,6 +129,7 @@ __all__ = [
     "ContextBinding",
     "DocumentProfile",
     "DocumentProfileSummary",
+    "EVIDENCE_ORIGINS",
     "EVIDENCE_ATTRIBUTION_SCOPES",
     "EVIDENCE_RESULT_DIRECTIONS",
     "EVIDENCE_ROLE_VALUES",

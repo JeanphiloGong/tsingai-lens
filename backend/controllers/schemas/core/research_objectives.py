@@ -309,6 +309,15 @@ class ObjectiveEvidenceResponse(BaseModel):
     failure_reason: str | None = None
     confidence: float
     supports_finding: bool = False
+    origin: Literal["system_generated", "human_authored", "human_revised"] = (
+        "system_generated"
+    )
+    source_analysis_version: int | None = Field(default=None, ge=1)
+    supersedes_evidence_id: str | None = None
+    superseded_by_evidence_id: str | None = None
+    created_by_user_id: str | None = None
+    created_at: str | None = None
+    authoring_note: str | None = None
 
 
 class ObjectiveEvidenceMapObjectiveNodeResponse(BaseModel):

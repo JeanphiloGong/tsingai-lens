@@ -22,6 +22,10 @@ from application.chat.capabilities.finding_authoring import (
     CreateFindingVersionArguments,
     CreateFindingVersionCapability,
 )
+from application.chat.capabilities.evidence_authoring import (
+    CreateEvidenceVersionArguments,
+    CreateEvidenceVersionCapability,
+)
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
     ProposeObjectiveDraftsArguments,
@@ -64,6 +68,8 @@ __all__ = [
     "CapabilityRegistry",
     "CreateFindingVersionArguments",
     "CreateFindingVersionCapability",
+    "CreateEvidenceVersionArguments",
+    "CreateEvidenceVersionCapability",
     "CreateObjectiveCandidateArguments",
     "CreateObjectiveCandidateCapability",
     "CurateFindingArguments",

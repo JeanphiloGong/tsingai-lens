@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -47,11 +48,13 @@ class InspectDocumentSourcesCapability:
     spec = ToolSpec(
         name="inspect_document_sources",
         description=(
-            "Inspect a bounded page of parsed text, complete table Markdown, and figure "
-            "captions from one paper in the current collection. Filter by a phrase, "
-            "page, Source type, or exact Source reference. Returned content is quoted "
-            "paper Source for inspection, not verified Evidence or a Finding. Continue "
-            "with next_offset when more matching Sources remain."
+            "Inspect a bounded page of parsed text, bounded table Markdown, and figure "
+            "captions from one paper in the current collection. Each returned Source "
+            "includes a digest for the complete canonical content; check "
+            "content_truncated before using the quote. Filter by a phrase, page, Source "
+            "type, or exact Source reference. Returned content is quoted paper Source "
+            "for inspection, not verified Evidence or a Finding. Continue with "
+            "next_offset when more matching Sources remain."
         ),
         risk=ToolRisk.READ,
         input_model=InspectDocumentSourcesArguments,
@@ -168,12 +171,16 @@ class InspectDocumentSourcesCapability:
         content, truncated = InspectDocumentSourcesCapability._bounded(block.text)
         return {
             "source_type": "text",
-            "source_kind": str(block.block_type or "paragraph"),
+            # `source_kind` is the stable Evidence locator kind. Keep the
+            # parser-specific block type as separate display metadata.
+            "source_kind": "text_window",
+            "block_type": str(block.block_type or "paragraph"),
             "source_ref": block.block_id,
             "page": block.page,
             "heading_path": block.heading_path,
             "content": content,
             "content_truncated": truncated,
+            "source_digest": hashlib.sha256(str(block.text or "").encode("utf-8")).hexdigest(),
         }
 
     @staticmethod
@@ -193,6 +200,7 @@ class InspectDocumentSourcesCapability:
             "column_count": table.col_count,
             "content": content,
             "content_truncated": truncated,
+            "source_digest": hashlib.sha256(record["table_markdown"].encode("utf-8")).hexdigest(),
         }
 
     @staticmethod
@@ -209,6 +217,7 @@ class InspectDocumentSourcesCapability:
             "figure_label": figure.figure_label,
             "content": content,
             "content_truncated": truncated,
+            "source_digest": hashlib.sha256(str(figure.caption_text or "").encode("utf-8")).hexdigest(),
         }
 
     @staticmethod

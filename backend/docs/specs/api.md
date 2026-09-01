@@ -153,9 +153,12 @@ The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
-  complete table Markdown, and figure captions through exact or focused,
-  paginated Source filters. It returns canonical Document and Source links;
-  matched content remains inspection material rather than verified Evidence;
+  bounded table Markdown, and figure captions through exact or focused,
+  paginated Source filters. Each Source includes a digest of its complete
+  canonical content and a `content_truncated` flag; callers must not treat a
+  truncated quote as the complete Source. It returns canonical Document and
+  Source links; matched content remains inspection material rather than
+  verified Evidence;
 - `inspect_research_process` reads each current Document and its latest
   preparation task. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,
@@ -411,6 +414,7 @@ list.
 ### Published Findings And Evidence
 
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
@@ -421,11 +425,12 @@ include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
 
-The POST command records one deliberate researcher Evidence decision. It never
-inserts into the published source version. The request identifies that current
-`source_analysis_version`, assigns existing version-local Evidence to support,
-contradiction, context, and optional condition-boundary roles, and supplies a
-statement, assertion strength, limitations, and optional `parent_finding_id`.
+The Findings POST command records one deliberate researcher Evidence-to-Finding
+decision. It never inserts into the published source version. The request
+identifies that current `source_analysis_version`, assigns existing
+version-local Evidence to support, contradiction, context, and optional
+condition-boundary roles, and supplies a statement, assertion strength,
+limitations, and optional `parent_finding_id`.
 The authenticated user identity is server-derived. Paper coverage, factors,
 outcome, direction, attribution, synthesis status, certainty, target version,
 and Source content are also server-derived and cannot be supplied by the
@@ -463,6 +468,29 @@ unowned collections and missing Objectives return `404`; stale source versions,
 concurrent analysis, unknown or ineligible Evidence, and scientifically
 inconsistent role selections return `409`; malformed request shapes return
 `422`.
+
+The Evidence POST command records one source-grounded Evidence decision from a
+specific prepared Document Source. It accepts `source_analysis_version`,
+`document_id`, `source_kind` (`text_window | table | figure`), `source_ref`, an
+exact `source_excerpt`, an Evidence role, optional changed variables,
+comparison, reported result, attribution scope, and scientific context. The
+server checks collection ownership, the published analysis version, the
+analysis document scope, the Source locator, and that the normalized excerpt
+is a substring of the canonical Source. It derives identity, page, resolution,
+confidence, and creator provenance. The browser cannot provide a creator,
+analysis target version, or Source outside the selected analysis.
+
+An Evidence correction never overwrites the old record. Supplying
+`supersedes_evidence_id` must refer to the current Evidence at the same Source
+locator; publication clones the complete source snapshot into the next
+immutable analysis version, marks the old record as superseded, and leaves old
+Findings pointing at their original Evidence. A successful command returns
+`201` with the new analysis and Evidence. Stale versions, running analyses,
+unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
+already superseded record return `409`; malformed scientific shapes return
+`422`. The Research Agent exposes the same operation as the approved
+`create_evidence_version` write capability and must supply the digest returned
+by `inspect_document_sources`; it does not create a second Evidence identity.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns

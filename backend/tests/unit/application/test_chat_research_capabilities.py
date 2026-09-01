@@ -15,6 +15,8 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import (
+    CreateEvidenceVersionArguments,
+    CreateEvidenceVersionCapability,
     CreateFindingVersionArguments,
     CreateFindingVersionCapability,
     CreateObjectiveCandidateArguments,
@@ -614,6 +616,8 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
     )
 
     assert result.status.value == "succeeded"
+    assert "bounded table Markdown" in InspectDocumentSourcesCapability.spec.description
+    assert "complete table Markdown" not in InspectDocumentSourcesCapability.spec.description
     assert result.data["document"] == {
         "document_id": "paper-1",
         "title": "Energy input and tensile response",
@@ -630,6 +634,9 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
     assert result.data["sources"][0]["content"].startswith(
         "| Condition | Elongation (%) |"
     )
+    assert result.data["sources"][0]["source_kind"] == "table"
+    assert len(result.data["sources"][0]["source_digest"]) == 64
+    assert result.data["sources"][1]["source_kind"] == "figure"
     assert [ref.resource_type for ref in result.resource_refs] == [
         "document",
         "source",
@@ -740,6 +747,108 @@ def test_finding_authoring_arguments_separate_finding_and_abstention() -> None:
             statement="An unsupported conclusion.",
             assertion_strength="associative",
         )
+
+
+def test_evidence_authoring_arguments_require_complete_source_and_result_shape() -> None:
+    draft = CreateEvidenceVersionArguments(
+        objective_id="obj-1",
+        source_analysis_version=1,
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-result",
+        source_excerpt="Elongation decreased as the combined energy input increased.",
+        source_digest="a" * 64,
+        evidence_role="direct_result",
+        changed_variables=[{"name": "energy input"}],
+        comparison=None,
+        reported_result={
+            "outcome": "elongation",
+            "direction": "decrease",
+            "result_text": "Elongation decreased.",
+        },
+        attribution_scope="association_only",
+    )
+    assert draft.source_digest == "a" * 64
+
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        CreateEvidenceVersionArguments(
+            objective_id="obj-1",
+            source_analysis_version=1,
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="block-result",
+            source_excerpt="Elongation decreased.",
+            source_digest="z" * 64,
+            evidence_role="direct_result",
+            attribution_scope="association_only",
+        )
+
+    with pytest.raises(ValidationError, match="requires a reported result"):
+        CreateEvidenceVersionArguments(
+            objective_id="obj-1",
+            source_analysis_version=1,
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="block-result",
+            source_excerpt="Elongation decreased.",
+            source_digest="a" * 64,
+            evidence_role="direct_result",
+            attribution_scope="association_only",
+        )
+
+
+async def test_agent_evidence_write_waits_for_approval_and_reuses_service() -> None:
+    class _EvidenceService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def create_version(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                analysis=SimpleNamespace(
+                    analysis_version=2,
+                    to_record=lambda: {"analysis_version": 2, "status": "succeeded"},
+                ),
+                evidence=SimpleNamespace(
+                    evidence_id="evidence-manual-1",
+                    page_numbers=(5,),
+                    to_record=lambda: {
+                        "evidence_id": "evidence-manual-1",
+                        "analysis_version": 2,
+                        "source_ref": "block-result",
+                    },
+                    supports_finding=True,
+                ),
+            )
+
+    evidence_service = _EvidenceService()
+    capability = CreateEvidenceVersionCapability(
+        evidence_authoring_service=evidence_service,
+    )
+    arguments = capability.spec.input_model(
+        objective_id="obj-1",
+        source_analysis_version=1,
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-result",
+        source_excerpt="Elongation decreased as the combined energy input increased.",
+        source_digest="a" * 64,
+        evidence_role="direct_result",
+        changed_variables=[{"name": "energy input"}],
+        reported_result={
+            "outcome": "elongation",
+            "direction": "decrease",
+            "result_text": "Elongation decreased.",
+        },
+        attribution_scope="association_only",
+    )
+    result = await capability.execute(_context("call-evidence"), arguments)
+    assert capability.spec.risk.value == "write"
+    assert result.data["evidence"]["evidence_id"] == "evidence-manual-1"
+    assert result.resource_refs[0].resource_type == "objective_analysis"
+    assert result.resource_refs[1].resource_type == "evidence"
+    assert evidence_service.calls[0]["created_by_user_id"] == "user-1"
+    assert evidence_service.calls[0]["source_digest"] == "a" * 64
     with pytest.raises(ValidationError, match="abstention cannot contain"):
         CreateFindingVersionArguments(
             objective_id="obj-1",

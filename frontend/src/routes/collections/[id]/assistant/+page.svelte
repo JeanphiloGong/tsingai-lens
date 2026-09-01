@@ -401,6 +401,8 @@
 				return $t('researchAgent.capability.findingCuration');
 			case 'create_finding_version':
 				return $t('researchAgent.capability.findingAuthoring');
+			case 'create_evidence_version':
+				return $t('researchAgent.capability.evidenceAuthoring');
 			case 'propose_objective_drafts':
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
@@ -513,6 +515,9 @@
 			return result.data.finding
 				? $t('researchAgent.capability.findingPublished')
 				: $t('researchAgent.capability.findingAbstentionPublished');
+		}
+		if (name === 'create_evidence_version') {
+			return $t('researchAgent.capability.evidencePublished');
 		}
 		if (name === 'propose_objective_drafts') {
 			return $t('researchAgent.capability.draftCount', {
@@ -695,6 +700,9 @@
 				? $t('researchAgent.approval.findingAbstentionBody')
 				: $t('researchAgent.approval.findingAuthoringBody');
 		}
+		if (call.name === 'create_evidence_version') {
+			return $t('researchAgent.approval.evidenceAuthoringBody');
+		}
 		return $t('researchAgent.approval.body');
 	}
 
@@ -716,6 +724,9 @@
 				? $t('researchAgent.approval.publishAbstention')
 				: $t('researchAgent.approval.publishFinding');
 		}
+		if (call.name === 'create_evidence_version') {
+			return $t('researchAgent.approval.publishEvidence');
+		}
 		return $t('researchAgent.approval.approve');
 	}
 
@@ -725,6 +736,7 @@
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
+		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
 		return 'researchAgent.rejected';
 	}
 

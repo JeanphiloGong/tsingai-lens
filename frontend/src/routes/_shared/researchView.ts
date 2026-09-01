@@ -280,6 +280,59 @@ export type ObjectiveEvidence = {
 	failure_reason: string | null;
 	confidence: number;
 	supports_finding: boolean;
+	origin?: 'system_generated' | 'human_authored' | 'human_revised';
+	source_analysis_version?: number | null;
+	supersedes_evidence_id?: string | null;
+	superseded_by_evidence_id?: string | null;
+	created_by_user_id?: string | null;
+	created_at?: string | null;
+	authoring_note?: string | null;
+};
+export type EvidenceAuthoringCreate = {
+	source_analysis_version: number;
+	document_id: string;
+	source_kind: 'text_window' | 'table' | 'figure';
+	source_ref: string;
+	source_excerpt: string;
+	evidence_role:
+		| 'direct_result'
+		| 'condition_context'
+		| 'mechanism_context'
+		| 'baseline_context'
+		| 'comparison_context'
+		| 'background_context'
+		| 'contradictory_result'
+		| 'irrelevant';
+	changed_variables: Array<{
+		name: string;
+		baseline_value: string | number | boolean | null;
+		target_value: string | number | boolean | null;
+		unit: string | null;
+	}>;
+	comparison: {
+		baseline_label: string;
+		target_label: string;
+		axis_names: string[];
+		comparable: boolean;
+		incomparability_reasons: string[];
+	} | null;
+	reported_result: {
+		outcome: string;
+		value: string | number | boolean | null;
+		baseline_value: string | number | boolean | null;
+		target_value: string | number | boolean | null;
+		unit: string | null;
+		direction: ObjectiveEvidenceResultDirection;
+		result_text: string;
+	} | null;
+	attribution_scope: ObjectiveEvidence['attribution_scope'];
+	scientific_context: ObjectiveScientificContext;
+	supersedes_evidence_id: string | null;
+	authoring_note: string | null;
+};
+export type EvidenceAuthoringResult = {
+	analysis: ObjectiveAnalysisState;
+	evidence: ObjectiveEvidence;
 };
 export type FindingAuthoringResult = {
 	analysis: ObjectiveAnalysisState;
@@ -694,6 +747,19 @@ export async function createFindingVersion(
 		method: 'POST',
 		body: JSON.stringify(payload)
 	}) as Promise<FindingAuthoringResult>;
+}
+
+export async function createEvidenceVersion(
+	collectionId: string,
+	objectiveId: string,
+	payload: EvidenceAuthoringCreate
+): Promise<EvidenceAuthoringResult> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	return requestJson(`/collections/${encodedCollection}/objectives/${encodedObjective}/evidence`, {
+		method: 'POST',
+		body: JSON.stringify(payload)
+	}) as Promise<EvidenceAuthoringResult>;
 }
 
 export async function fetchObjectiveEvidenceMap(

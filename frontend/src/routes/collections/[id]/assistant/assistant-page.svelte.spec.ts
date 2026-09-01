@@ -827,6 +827,74 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
 	});
 
+	it('shows Source-grounded Evidence authoring as a distinct approved action', async () => {
+		const call = pendingCall({
+			name: 'create_evidence_version',
+			arguments: {
+				objective_id: 'obj_1',
+				source_analysis_version: 2,
+				document_id: 'doc_1',
+				source_kind: 'text_window',
+				source_ref: 'block_results',
+				source_excerpt: 'Higher temperature increased strength to 620 MPa.',
+				source_digest: 'a'.repeat(64),
+				evidence_role: 'direct_result',
+				changed_variables: [{ name: 'temperature', baseline_value: 400, target_value: 500 }],
+				comparison: null,
+				reported_result: {
+					outcome: 'strength',
+					direction: 'increase',
+					result_text: 'Higher temperature increased strength to 620 MPa.'
+				},
+				attribution_scope: 'association_only',
+				scientific_context: {
+					material: [],
+					sample: [],
+					process: [],
+					test: []
+				},
+				supersedes_evidence_id: null,
+				authoring_note: null
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Record this source as Evidence'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Record this source as Evidence');
+
+		await expect
+			.element(browserPage.getByText('Evidence authoring', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Higher temperature increased strength to 620 MPa.', { exact: true })
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Publish this Source-grounded Evidence as a new immutable analysis version. A revision keeps the previous Evidence and Findings unchanged.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish Evidence' }))
+			.toBeInTheDocument();
+	});
+
 	it('presents evidence abstention without implying that a Finding will be created', async () => {
 		const call = pendingCall({
 			name: 'create_finding_version',

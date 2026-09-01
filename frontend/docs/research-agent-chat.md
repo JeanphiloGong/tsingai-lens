@@ -51,6 +51,13 @@ scientific fact store.
   `FindingAuthoringService` publishes a new immutable analysis version. The
   Agent cannot alter the source version, parent Finding, Evidence, or Source
   identities.
+- `create_evidence_version` is a `write` capability. It accepts one exact
+  Source returned by `inspect_document_sources`, a verbatim excerpt, and the
+  structured Evidence fields. The Agent must supply the Source digest; the
+  backend verifies the canonical Source, analysis scope, and scientific shape.
+  Exact user approval publishes a new immutable analysis version. A revision
+  records supersession lineage and never changes the previous Evidence or any
+  Finding that cites it.
 - General Agent prose cannot be saved as an Experiment Plan. New plans are
   authored manually until a dedicated scientifically validated capability
   exists.
@@ -141,8 +148,8 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 ### Write approval
 
 For `start_research_process`, `create_objective_candidate`,
-`start_objective_analysis`, `record_finding_feedback`, `curate_finding`, and
-`create_finding_version`, the page renders the exact persisted arguments and
+`start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
+`create_finding_version`, and `create_evidence_version`, the page renders the exact persisted arguments and
 exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
 separate Evidence-to-conclusion decision that publishes a new immutable

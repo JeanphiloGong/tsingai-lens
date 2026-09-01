@@ -261,6 +261,7 @@ const translations: Record<Language, Translations> = {
 				findingFeedback: 'Finding feedback',
 				findingCuration: 'Finding curation',
 				findingAuthoring: 'Finding authoring',
+				evidenceAuthoring: 'Evidence authoring',
 				proposals: 'Objective drafts',
 				createObjective: 'Create objective candidate',
 				previewResearchScope: 'Preview relevant paper scope',
@@ -275,6 +276,7 @@ const translations: Record<Language, Translations> = {
 				curationRecorded: 'Finding curation recorded',
 				findingPublished: 'Researcher-authored Finding published in a new analysis version',
 				findingAbstentionPublished: 'Evidence abstention published in a new analysis version',
+				evidencePublished: 'Researcher-confirmed Evidence published in a new analysis version',
 				absence: 'No published findings or evidence were returned.',
 				draftCount: '{count} objective drafts',
 				objectiveCreated: 'Objective candidate created',
@@ -335,6 +337,8 @@ const translations: Record<Language, Translations> = {
 					'Publish this conclusion as a new immutable analysis version. The current system result will remain unchanged.',
 				findingAbstentionBody:
 					'Publish this evidence abstention as a new immutable analysis version without creating a placeholder Finding.',
+				evidenceAuthoringBody:
+					'Publish this Source-grounded Evidence as a new immutable analysis version. A revision keeps the previous Evidence and Findings unchanged.',
 				arguments: 'Proposed values',
 				approve: 'Approve and create',
 				startResearch: 'Approve and start',
@@ -343,6 +347,7 @@ const translations: Record<Language, Translations> = {
 				saveCuration: 'Approve and save revision',
 				publishFinding: 'Approve and publish Finding',
 				publishAbstention: 'Approve and publish evidence decision',
+				publishEvidence: 'Approve and publish Evidence',
 				reject: 'Reject',
 				processing: 'Recording decision...'
 			},
@@ -352,6 +357,7 @@ const translations: Record<Language, Translations> = {
 			findingFeedbackRejected: 'The research conclusion review was not recorded.',
 			findingCurationRejected: 'The research conclusion revision was not saved.',
 			findingAuthoringRejected: 'The proposed research conclusion was not published.',
+			evidenceAuthoringRejected: 'The proposed Evidence was not published.',
 			turnFailed: 'The Agent turn stopped with error: {code}'
 		},
 		research: {
@@ -2696,6 +2702,7 @@ const translations: Record<Language, Translations> = {
 				findingFeedback: '研究发现反馈',
 				findingCuration: '研究发现修订',
 				findingAuthoring: '创建研究发现',
+				evidenceAuthoring: '创建研究证据',
 				proposals: '研究目标草稿',
 				createObjective: '创建研究目标候选',
 				previewResearchScope: '预览相关论文范围',
@@ -2710,6 +2717,7 @@ const translations: Record<Language, Translations> = {
 				curationRecorded: '研究发现修订已记录',
 				findingPublished: '研究者撰写的 Finding 已发布到新的分析版本',
 				findingAbstentionPublished: '证据不足决定已发布到新的分析版本',
+				evidencePublished: '研究者确认的 Evidence 已发布到新的分析版本',
 				absence: '没有返回已发布的研究发现或证据。',
 				draftCount: '{count} 个研究目标草稿',
 				objectiveCreated: '研究目标候选已创建',
@@ -2764,6 +2772,8 @@ const translations: Record<Language, Translations> = {
 					'请核对完整的修订后研究发现；其身份、论文范围、证据和原文来源关系不会改变。',
 				findingAuthoringBody: '将这条结论发布为新的不可变分析版本；当前系统结果会保持不变。',
 				findingAbstentionBody: '将证据不足决定发布为新的不可变分析版本，不创建占位 Finding。',
+				evidenceAuthoringBody:
+					'将这条有原文依据的 Evidence 发布为新的不可变分析版本；修订会保留旧 Evidence 和 Finding。',
 				arguments: '拟写入内容',
 				approve: '确认并创建',
 				startResearch: '确认并开始',
@@ -2772,6 +2782,7 @@ const translations: Record<Language, Translations> = {
 				saveCuration: '确认并保存修订',
 				publishFinding: '确认并发布 Finding',
 				publishAbstention: '确认并发布证据决定',
+				publishEvidence: '确认并发布 Evidence',
 				reject: '拒绝',
 				processing: '正在记录决定...'
 			},
@@ -2781,6 +2792,7 @@ const translations: Record<Language, Translations> = {
 			findingFeedbackRejected: '已取消记录研究发现审阅。',
 			findingCurationRejected: '已取消保存研究发现修订。',
 			findingAuthoringRejected: '已取消发布拟议的研究发现。',
+			evidenceAuthoringRejected: '已取消发布拟议的 Evidence。',
 			turnFailed: 'Agent 本轮执行停止，错误：{code}'
 		},
 		research: {

@@ -29,6 +29,7 @@
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`、
+  `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence-map`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`、
   `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`

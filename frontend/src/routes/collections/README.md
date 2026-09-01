@@ -69,6 +69,10 @@ This node owns the Collection route family.
   evidence abstention. Approval calls the same authoring service as the human
   editor and publishes a new immutable analysis version; Chat does not create
   another Finding, Evidence, or review identity.
+  It can also inspect one exact prepared Source and propose a structured
+  Source-grounded Evidence record. That write requires the same exact
+  approval, Source digest, and immutable-version publication as the human
+  authoring command.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
@@ -170,8 +174,10 @@ projections. The Objective Evidence Map is a read-only view of those same
 published records, not another aggregate or analysis path. The Objective page
 owns the single confirmation-and-analysis command; the Finding page owns expert
 authorship and review; the document reader owns Source verification. Current
-Finding authorship reuses already published Evidence. Creating or correcting
-Evidence directly from a document Source remains the later #191 workflow, and
+Finding authoring reuses already published Evidence. The Agent and HTTP
+Evidence command can record a verified Source decision; selecting arbitrary
+raw document text, tables, or figures directly inside the document reader
+remains the later #191 workflow, and
 Objective-local paper-scope review remains #340.
 The Research Agent may consume published Findings and propose a new
 researcher-approved version through the same authoring service. It does not

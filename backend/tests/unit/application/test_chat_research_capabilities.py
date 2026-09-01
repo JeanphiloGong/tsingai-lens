@@ -15,6 +15,8 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import (
+    CreateFindingVersionArguments,
+    CreateFindingVersionCapability,
     CreateObjectiveCandidateArguments,
     CreateObjectiveCandidateCapability,
     CurateFindingCapability,
@@ -33,6 +35,9 @@ from application.chat.capabilities import (
     StartResearchProcessArguments,
     StartResearchProcessCapability,
 )
+from application.core.objectives.finding_authoring_service import (
+    FindingAuthoringService,
+)
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
@@ -45,6 +50,9 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.source import SourceBlock, SourceDocument, SourceFigure, SourceTable
+from tests.unit.services.test_evaluation_services import (
+    _published_objective_repository,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -162,6 +170,17 @@ class _EmptyCollectionService(_CollectionService):
             "paper_count": 0,
             "documents": [],
         }
+
+
+class _GoldCollectionService:
+    async def get_collection_for_user(
+        self,
+        collection_id: str,
+        user_id: str,
+    ) -> dict:
+        if collection_id != "col-gold" or user_id != "user-1":
+            raise FileNotFoundError("collection not found")
+        return {"collection_id": collection_id, "owner_user_id": user_id}
 
 
 class _ObjectiveRepository:
@@ -331,6 +350,11 @@ def _canonical_finding_record() -> dict:
                 "condition_boundary_evidence_ids": [],
             }
         ],
+        "origin": "system_generated",
+        "source_analysis_version": None,
+        "parent_finding_id": None,
+        "created_by_user_id": None,
+        "created_at": None,
     }
 
 
@@ -509,6 +533,7 @@ class _AnalysisService:
                     "attribution_scope": "joint_effect",
                     "resolution_status": "resolved",
                     "confidence": 0.82,
+                    "supports_finding": True,
                 }
             ],
         }
@@ -685,6 +710,143 @@ async def test_agent_records_finding_feedback_only_after_exact_approval() -> Non
         }
     ]
     assert completed.tool_results[0].data["feedback_id"] == "feedback-1"
+
+
+def test_finding_authoring_arguments_separate_finding_and_abstention() -> None:
+    authored = CreateFindingVersionArguments(
+        objective_id="obj-1",
+        source_analysis_version=1,
+        statement="Higher temperature is associated with greater strength.",
+        assertion_strength="associative",
+        supporting_evidence_ids=["evidence-1"],
+        limitations=["Only one paper directly supports this conclusion."],
+    )
+    assert authored.supporting_evidence_ids == ["evidence-1"]
+    assert authored.abstention_reason is None
+
+    abstained = CreateFindingVersionArguments(
+        objective_id="obj-1",
+        source_analysis_version=1,
+        abstention_reason="no_comparable_evidence",
+        limitations=["The reported test conditions are not comparable."],
+    )
+    assert abstained.statement is None
+    assert abstained.abstention_reason == "no_comparable_evidence"
+
+    with pytest.raises(ValidationError, match="requires supporting Evidence"):
+        CreateFindingVersionArguments(
+            objective_id="obj-1",
+            source_analysis_version=1,
+            statement="An unsupported conclusion.",
+            assertion_strength="associative",
+        )
+    with pytest.raises(ValidationError, match="abstention cannot contain"):
+        CreateFindingVersionArguments(
+            objective_id="obj-1",
+            source_analysis_version=1,
+            statement="A conclusion must not accompany abstention.",
+            assertion_strength="associative",
+            supporting_evidence_ids=["evidence-1"],
+            abstention_reason="insufficient_evidence",
+            limitations=["Evidence is insufficient."],
+        )
+
+
+async def test_agent_publishes_authored_finding_only_after_exact_approval() -> None:
+    repository = await _published_objective_repository()
+    capability = CreateFindingVersionCapability(
+        finding_authoring_service=FindingAuthoringService(
+            collection_service=_GoldCollectionService(),
+            objective_repository=repository,
+        )
+    )
+
+    class FindingAuthoringModel:
+        def __init__(self) -> None:
+            self.turns = deque(
+                (
+                    ModelTurn(
+                        content="I prepared an evidence-backed conclusion for approval.",
+                        tool_call=ModelToolCall(
+                            name="create_finding_version",
+                            arguments={
+                                "objective_id": "obj-1",
+                                "source_analysis_version": 1,
+                                "statement": (
+                                    "Higher temperature is associated with greater strength."
+                                ),
+                                "assertion_strength": "associative",
+                                "supporting_evidence_ids": ["evidence-1"],
+                                "contradicting_evidence_ids": [],
+                                "context_evidence_ids": [],
+                                "condition_boundary_evidence_ids": [],
+                                "limitations": [
+                                    "Only one paper directly supports this conclusion."
+                                ],
+                                "parent_finding_id": None,
+                                "abstention_reason": None,
+                            },
+                        ),
+                    ),
+                    ModelTurn(content="The approved conclusion is now published as a new version."),
+                )
+            )
+
+        def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+            assert messages
+            assert {item.name for item in tool_specs} == {"create_finding_version"}
+            return self.turns.popleft()
+
+    runner = ResearchAgentRunner(
+        model=FindingAuthoringModel(),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+    context = AgentContext("chat-1", "user-1", "col-gold")
+
+    proposed = await runner.run_turn(
+        context=context,
+        previous_messages=(),
+        user_message="Create a narrower conclusion from the reviewed Evidence.",
+    )
+
+    objective_before = await repository.read_objective("col-gold", "obj-1")
+    assert proposed.status.value == "approval_required"
+    assert proposed.pending_approval is not None
+    assert objective_before is not None
+    assert objective_before.published_analysis_version == 1
+    assert await repository.read_analysis("col-gold", "obj-1", 2) is None
+
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-09-01T08:00:00+00:00",
+    )
+    completed = await runner.resume_approved_call(
+        context=context,
+        previous_messages=proposed.messages,
+        approved_call=approved,
+    )
+
+    objective_after = await repository.read_objective("col-gold", "obj-1")
+    original = await repository.read_finding(
+        "col-gold", "obj-1", 1, "finding-1"
+    )
+    result = completed.tool_results[0]
+    assert completed.status.value == "completed"
+    assert objective_after is not None
+    assert objective_after.published_analysis_version == 2
+    assert original is not None
+    assert original.statement == (
+        "Higher temperature was associated with greater strength."
+    )
+    assert result.data["analysis"]["analysis_version"] == 2
+    assert result.data["finding"]["origin"] == "human_authored"
+    assert result.data["finding"]["source_analysis_version"] == 1
+    assert result.data["finding"]["created_by_user_id"] == "user-1"
+    assert {ref.resource_type for ref in result.resource_refs} == {
+        "objective_analysis",
+        "finding",
+    }
 
 
 async def test_agent_curation_reuses_complete_existing_finding_contract() -> None:
@@ -1113,6 +1275,7 @@ async def test_published_findings_reads_only_published_objective_versions() -> N
     assert result.data["finding_count"] == 1
     assert result.data["evidence_count"] == 1
     assert result.data["scientific_absence"] is False
+    assert result.data["objectives"][0]["evidence"][0]["supports_finding"] is True
     assert analysis_service.finding_calls == ["objective-published"]
     assert analysis_service.evidence_calls == ["objective-published"]
     assert {ref.resource_type for ref in result.resource_refs} == {
@@ -1150,6 +1313,7 @@ async def test_agent_reads_one_complete_published_finding_before_curation() -> N
     assert result.data["evidence_total"] == 1
     assert result.data["evidence"][0]["evidence_id"] == "evidence-1"
     assert result.data["evidence"][0]["source_ref"] == "table-2"
+    assert result.data["evidence"][0]["supports_finding"] is True
     assert result.data["finding_is_published"] is True
     assert [ref.resource_type for ref in result.resource_refs] == [
         "finding",

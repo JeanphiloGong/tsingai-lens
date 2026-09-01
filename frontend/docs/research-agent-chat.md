@@ -23,10 +23,11 @@ approves the exact persisted arguments.
 ## Product Boundary
 
 The Research Agent helps a materials researcher inspect a collection, ask what
-the published analysis supports, formulate a focused candidate question, and
-review an existing published conclusion through the same controls as the
-Finding workbench. It does not replace the comparison workspace or become a
-second scientific fact store.
+the published analysis supports, formulate a focused candidate question,
+review an existing published conclusion, and propose a new conclusion from
+eligible published Evidence through the same controls as the Finding
+workbench. It does not replace the comparison workspace or become a second
+scientific fact store.
 
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
@@ -43,8 +44,13 @@ second scientific fact store.
   analysis stay in the Objective workspace.
 - A Finding review begins from the complete published Finding, linked Evidence,
   and exact Sources. Feedback and curation reuse `FindingFeedbackService` after
-  exact user approval; the Agent cannot create a new Finding or alter published
-  Finding, Evidence, or Source identities.
+  exact user approval.
+- Finding authoring begins from the current published analysis and its complete
+  role-eligible Evidence. The Agent may propose exact Evidence roles, a bounded
+  conclusion, or an explicit evidence abstention. After exact user approval,
+  `FindingAuthoringService` publishes a new immutable analysis version. The
+  Agent cannot alter the source version, parent Finding, Evidence, or Source
+  identities.
 - General Agent prose cannot be saved as an Experiment Plan. New plans are
   authored manually until a dedicated scientifically validated capability
   exists.
@@ -135,16 +141,18 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 ### Write approval
 
 For `start_research_process`, `create_objective_candidate`,
-`start_objective_analysis`, `record_finding_feedback`, and `curate_finding`, the
-page renders the exact persisted arguments and exposes explicit Reject and
-Approve actions. Finding feedback and curation are separate writes against an
-existing published Finding. While approval is pending:
+`start_objective_analysis`, `record_finding_feedback`, `curate_finding`, and
+`create_finding_version`, the page renders the exact persisted arguments and
+exposes explicit Reject and Approve actions. Finding feedback and curation are
+separate writes against an existing published Finding. Finding authoring is a
+separate Evidence-to-conclusion decision that publishes a new immutable
+analysis version. While approval is pending:
 
 - the message composer is disabled;
 - refresh restores the pending decision from the server;
 - approval sends the stored argument digest;
 - rejection creates no Core record;
-- successful approval returns a link to the canonical Objective.
+- successful approval returns links to the resulting canonical records.
 
 The page does not allow editing the displayed arguments in place. Changed
 arguments require a new proposal and a new tool call.
@@ -194,7 +202,9 @@ The focused browser suite covers:
     submission and persisted only with the sent user message;
 14. exact published Finding and linked Evidence inspection before review;
 15. distinct feedback and curation approvals, including rejection without a
-    write.
+    write;
+16. exact Evidence roles and statement before approval publishes a new Finding
+    version.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

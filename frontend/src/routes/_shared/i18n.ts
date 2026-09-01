@@ -256,6 +256,7 @@ const translations: Record<Language, Translations> = {
 				findingReview: 'Finding and evidence review',
 				findingFeedback: 'Finding feedback',
 				findingCuration: 'Finding curation',
+				findingAuthoring: 'Finding authoring',
 				proposals: 'Objective drafts',
 				createObjective: 'Create objective candidate',
 				previewResearchScope: 'Preview relevant paper scope',
@@ -268,6 +269,8 @@ const translations: Record<Language, Translations> = {
 				findingEvidenceCount: 'Complete finding · {count} linked evidence records',
 				feedbackRecorded: 'Finding feedback recorded',
 				curationRecorded: 'Finding curation recorded',
+				findingPublished: 'Researcher-authored Finding published in a new analysis version',
+				findingAbstentionPublished: 'Evidence abstention published in a new analysis version',
 				absence: 'No published findings or evidence were returned.',
 				draftCount: '{count} objective drafts',
 				objectiveCreated: 'Objective candidate created',
@@ -324,12 +327,18 @@ const translations: Record<Language, Translations> = {
 					'Review the exact assessment that will be recorded for this published research conclusion.',
 				findingCurationBody:
 					'Review the complete revised conclusion. Its identity, paper coverage, evidence, and source lineage will remain unchanged.',
+				findingAuthoringBody:
+					'Publish this conclusion as a new immutable analysis version. The current system result will remain unchanged.',
+				findingAbstentionBody:
+					'Publish this evidence abstention as a new immutable analysis version without creating a placeholder Finding.',
 				arguments: 'Proposed values',
 				approve: 'Approve and create',
 				startResearch: 'Approve and start',
 				analyzeObjective: 'Approve and analyze',
 				recordFeedback: 'Approve and record review',
 				saveCuration: 'Approve and save revision',
+				publishFinding: 'Approve and publish Finding',
+				publishAbstention: 'Approve and publish evidence decision',
 				reject: 'Reject',
 				processing: 'Recording decision...'
 			},
@@ -338,6 +347,7 @@ const translations: Record<Language, Translations> = {
 			objectiveAnalysisRejected: 'Research question analysis was not started.',
 			findingFeedbackRejected: 'The research conclusion review was not recorded.',
 			findingCurationRejected: 'The research conclusion revision was not saved.',
+			findingAuthoringRejected: 'The proposed research conclusion was not published.',
 			turnFailed: 'The Agent turn stopped with error: {code}'
 		},
 		research: {
@@ -2677,6 +2687,7 @@ const translations: Record<Language, Translations> = {
 				findingReview: '审阅研究发现与证据',
 				findingFeedback: '研究发现反馈',
 				findingCuration: '研究发现修订',
+				findingAuthoring: '创建研究发现',
 				proposals: '研究目标草稿',
 				createObjective: '创建研究目标候选',
 				previewResearchScope: '预览相关论文范围',
@@ -2689,6 +2700,8 @@ const translations: Record<Language, Translations> = {
 				findingEvidenceCount: '完整研究发现 · {count} 条关联证据',
 				feedbackRecorded: '研究发现反馈已记录',
 				curationRecorded: '研究发现修订已记录',
+				findingPublished: '研究者撰写的 Finding 已发布到新的分析版本',
+				findingAbstentionPublished: '证据不足决定已发布到新的分析版本',
 				absence: '没有返回已发布的研究发现或证据。',
 				draftCount: '{count} 个研究目标草稿',
 				objectiveCreated: '研究目标候选已创建',
@@ -2741,12 +2754,16 @@ const translations: Record<Language, Translations> = {
 				findingFeedbackBody: '请核对即将记录到这条已发布研究发现上的审阅判断。',
 				findingCurationBody:
 					'请核对完整的修订后研究发现；其身份、论文范围、证据和原文来源关系不会改变。',
+				findingAuthoringBody: '将这条结论发布为新的不可变分析版本；当前系统结果会保持不变。',
+				findingAbstentionBody: '将证据不足决定发布为新的不可变分析版本，不创建占位 Finding。',
 				arguments: '拟写入内容',
 				approve: '确认并创建',
 				startResearch: '确认并开始',
 				analyzeObjective: '确认并分析',
 				recordFeedback: '确认并记录审阅',
 				saveCuration: '确认并保存修订',
+				publishFinding: '确认并发布 Finding',
+				publishAbstention: '确认并发布证据决定',
 				reject: '拒绝',
 				processing: '正在记录决定...'
 			},
@@ -2755,6 +2772,7 @@ const translations: Record<Language, Translations> = {
 			objectiveAnalysisRejected: '已取消启动研究问题分析。',
 			findingFeedbackRejected: '已取消记录研究发现审阅。',
 			findingCurationRejected: '已取消保存研究发现修订。',
+			findingAuthoringRejected: '已取消发布拟议的研究发现。',
 			turnFailed: 'Agent 本轮执行停止，错误：{code}'
 		},
 		research: {

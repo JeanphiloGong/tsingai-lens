@@ -54,7 +54,9 @@ class QueryPublishedFindingsCapability:
         description=(
             "Read bounded Finding and source-linked Evidence summaries from published "
             "Research Objective analyses. A successful empty result means the collection "
-            "does not yet contain published evidence for the selected Objectives."
+            "does not yet contain published evidence for the selected Objectives. "
+            "Evidence explicitly reports whether it is eligible for new Finding "
+            "authorship."
         ),
         risk=ToolRisk.READ,
         input_model=QueryPublishedFindingsArguments,
@@ -223,6 +225,7 @@ class QueryPublishedFindingsCapability:
             "attribution_scope": item.get("attribution_scope"),
             "resolution_status": item.get("resolution_status"),
             "confidence": item.get("confidence"),
+            "supports_finding": item.get("supports_finding") is True,
         }
 
     @staticmethod
@@ -271,9 +274,10 @@ class InspectPublishedFindingCapability:
         name="inspect_published_finding",
         description=(
             "Read one exact complete published Finding and a bounded page of its "
-            "Source-linked Evidence. Use this before proposing feedback or curation. "
-            "The complete Finding object is the only valid basis for a curation write; "
-            "do not reconstruct omitted fields from a summary."
+            "Source-linked Evidence. Use this before proposing feedback, curation, or a "
+            "new Finding derived from this parent. The complete Finding object is the "
+            "only valid basis for a curation or parent-derived authoring write; do not "
+            "reconstruct omitted fields from a summary."
         ),
         risk=ToolRisk.READ,
         input_model=InspectPublishedFindingArguments,

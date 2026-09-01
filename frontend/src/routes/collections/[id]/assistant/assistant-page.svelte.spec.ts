@@ -773,6 +773,110 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shows the exact evidence-backed Finding before publishing a new version', async () => {
+		const statement = 'Higher temperature is associated with greater strength.';
+		const call = pendingCall({
+			name: 'create_finding_version',
+			arguments: {
+				objective_id: 'obj_1',
+				source_analysis_version: 2,
+				statement,
+				assertion_strength: 'associative',
+				supporting_evidence_ids: ['evidence_1'],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: ['evidence_2'],
+				condition_boundary_evidence_ids: ['evidence_2'],
+				limitations: ['Only one paper directly supports this conclusion.'],
+				parent_finding_id: null,
+				abstention_reason: null
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Create this conclusion'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Create this conclusion');
+
+		await expect
+			.element(browserPage.getByText('Finding authoring', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('evidence_1', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Publish this conclusion as a new immutable analysis version. The current system result will remain unchanged.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish Finding' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+	});
+
+	it('presents evidence abstention without implying that a Finding will be created', async () => {
+		const call = pendingCall({
+			name: 'create_finding_version',
+			arguments: {
+				objective_id: 'obj_1',
+				source_analysis_version: 2,
+				statement: null,
+				assertion_strength: null,
+				supporting_evidence_ids: [],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: [],
+				condition_boundary_evidence_ids: [],
+				limitations: ['The reported test conditions are not comparable.'],
+				parent_finding_id: null,
+				abstention_reason: 'no_comparable_evidence'
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Record that these results cannot be compared'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Record that these results cannot be compared');
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'Publish this evidence abstention as a new immutable analysis version without creating a placeholder Finding.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish evidence decision' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish Finding' }))
+			.not.toBeInTheDocument();
+	});
+
 	it('rejects finding feedback without implying that a review was recorded', async () => {
 		const call = pendingCall({
 			name: 'record_finding_feedback',

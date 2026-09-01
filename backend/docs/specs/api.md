@@ -173,7 +173,15 @@ The production Research Agent currently exposes these automatic capabilities:
   is a scientific absence, not a provider failure;
 - `inspect_published_finding` returns one complete canonical published Finding
   and a bounded page of its linked Evidence. This exact read, followed by any
-  necessary Source inspection, is required before the Agent proposes a review;
+  necessary Source inspection, is required before the Agent proposes a review
+  or a new conclusion;
+- `create_finding_version` is a `write` capability. It accepts the same
+  statement, assertion strength, version-local Evidence roles, limitations,
+  optional parent Finding, or explicit abstention as the human Finding
+  authoring command. After exact-argument approval it calls
+  `FindingAuthoringService.create_version()` and returns the canonical new
+  analysis and optional Finding. The source analysis and all existing Finding,
+  Evidence, and Source records remain unchanged;
 - `record_finding_feedback` is a `write` capability. After exact-argument
   approval, it calls the same `FindingFeedbackService.record_feedback()` path
   as the Finding workbench and records the authenticated user as reviewer. It
@@ -549,6 +557,13 @@ The Agent first reads the complete published Finding and linked Evidence,
 inspects exact Sources as needed, and proposes the same feedback or curation
 arguments. The write runs only after the authenticated user approves those
 exact arguments. Chat does not own a second Finding identity or review store.
+
+Finding authoring is distinct from review. The Agent may propose a new
+Evidence-to-Finding decision only from `supports_finding` Evidence in the exact
+current published version. The approved capability calls the same
+`FindingAuthoringService` as the HTTP workbench, including immutable version
+publication, role validation, Source validation, and abstention semantics.
+Agent prose or raw Source text cannot become Evidence.
 
 Dataset export supports `format=json | training_jsonl` plus optional
 `label_status` and `dataset_use_status` filters. `objective_finding_dataset.v2`

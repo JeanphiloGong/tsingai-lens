@@ -399,6 +399,8 @@
 				return $t('researchAgent.capability.findingFeedback');
 			case 'curate_finding':
 				return $t('researchAgent.capability.findingCuration');
+			case 'create_finding_version':
+				return $t('researchAgent.capability.findingAuthoring');
 			case 'propose_objective_drafts':
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
@@ -506,6 +508,11 @@
 		}
 		if (name === 'curate_finding') {
 			return $t('researchAgent.capability.curationRecorded');
+		}
+		if (name === 'create_finding_version') {
+			return result.data.finding
+				? $t('researchAgent.capability.findingPublished')
+				: $t('researchAgent.capability.findingAbstentionPublished');
 		}
 		if (name === 'propose_objective_drafts') {
 			return $t('researchAgent.capability.draftCount', {
@@ -683,6 +690,11 @@
 		if (call.name === 'curate_finding') {
 			return $t('researchAgent.approval.findingCurationBody');
 		}
+		if (call.name === 'create_finding_version') {
+			return typeof call.arguments.abstention_reason === 'string'
+				? $t('researchAgent.approval.findingAbstentionBody')
+				: $t('researchAgent.approval.findingAuthoringBody');
+		}
 		return $t('researchAgent.approval.body');
 	}
 
@@ -699,6 +711,11 @@
 		if (call.name === 'curate_finding') {
 			return $t('researchAgent.approval.saveCuration');
 		}
+		if (call.name === 'create_finding_version') {
+			return typeof call.arguments.abstention_reason === 'string'
+				? $t('researchAgent.approval.publishAbstention')
+				: $t('researchAgent.approval.publishFinding');
+		}
 		return $t('researchAgent.approval.approve');
 	}
 
@@ -707,6 +724,7 @@
 		if (toolName === 'start_objective_analysis') return 'researchAgent.objectiveAnalysisRejected';
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
+		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
 		return 'researchAgent.rejected';
 	}
 

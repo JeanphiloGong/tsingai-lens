@@ -195,9 +195,10 @@ state through the public API.
 ## Consumer Boundary
 
 The HTTP workspace and Research Agent call the same services. Agent write
-capabilities pause for user approval before creating an Objective or starting
-analysis. Neither consumer may maintain its own Objective, Evidence, Finding,
-progress, or publication state.
+capabilities pause for exact user approval before creating an Objective,
+starting analysis, or publishing a researcher-authored Finding version from
+eligible published Evidence. Neither consumer may maintain its own Objective,
+Evidence, Finding, progress, or publication state.
 
 The shared domain and browser contract is
 [`../../../../docs/contracts/research-objective-workspace-contract.md`](../../../../docs/contracts/research-objective-workspace-contract.md).

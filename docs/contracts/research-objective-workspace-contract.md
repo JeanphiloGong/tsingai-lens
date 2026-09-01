@@ -270,11 +270,13 @@ Finding and Evidence lists are paginated. `analysis_version` is explicit in
 every response and may be supplied as a query parameter. Evidence may be
 filtered by `finding_id`.
 
-The POST command is the human Evidence-to-Finding decision boundary. The
-browser submits the current published `source_analysis_version`, one statement
-and assertion strength, selected support/contradiction/context Evidence IDs,
-optional boundary IDs and limitations, and an optional parent Finding. The
-backend accepts only eligible Evidence from that exact version and derives the
+The POST command is the researcher-approved Evidence-to-Finding decision
+boundary. The browser or Research Agent submits the current published
+`source_analysis_version`, one statement and assertion strength, selected
+support/contradiction/context Evidence IDs, optional boundary IDs and
+limitations, and an optional parent Finding. An Agent request remains paused
+until the authenticated researcher approves those exact arguments. The backend
+accepts only eligible Evidence from that exact version and derives the
 Finding's factors, outcome, direction, attribution, certainty, synthesis, paper
 coverage, target version, creator, and Source bindings.
 
@@ -347,8 +349,9 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
 - Every eligible direct result in an atomic result set is assigned exactly once
   as supporting or contradicting.
 - Published Finding graphs are immutable.
-- Human authorship always creates a new published analysis version; it never
-  edits a published Finding or Evidence record in place.
+- Researcher-approved authorship, whether entered in the workbench or proposed
+  by the Agent, always creates a new published analysis version; it never edits
+  a published Finding or Evidence record in place.
 - The browser cannot declare creator identity, target version, paper coverage,
   factors, outcome, direction, certainty, attribution, synthesis, or Source
   text. These are deterministic backend responsibilities.

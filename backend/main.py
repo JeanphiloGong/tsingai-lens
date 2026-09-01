@@ -16,6 +16,7 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import (
+    CreateFindingVersionCapability,
     CreateObjectiveCandidateCapability,
     CurateFindingCapability,
     GetCollectionContextCapability,
@@ -344,6 +345,9 @@ async def build_application_runtime(
                             CurateFindingCapability(
                                 collection_service=collection_service,
                                 finding_feedback_service=finding_feedback_service,
+                            ),
+                            CreateFindingVersionCapability(
+                                finding_authoring_service=finding_authoring_service,
                             ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,

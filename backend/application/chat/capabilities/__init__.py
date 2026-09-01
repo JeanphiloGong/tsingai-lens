@@ -18,6 +18,10 @@ from application.chat.capabilities.finding_review import (
     RecordFindingFeedbackArguments,
     RecordFindingFeedbackCapability,
 )
+from application.chat.capabilities.finding_authoring import (
+    CreateFindingVersionArguments,
+    CreateFindingVersionCapability,
+)
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
     ProposeObjectiveDraftsArguments,
@@ -58,6 +62,8 @@ __all__ = [
     "CapabilityExecutionContext",
     "CapabilityHandler",
     "CapabilityRegistry",
+    "CreateFindingVersionArguments",
+    "CreateFindingVersionCapability",
     "CreateObjectiveCandidateArguments",
     "CreateObjectiveCandidateCapability",
     "CurateFindingArguments",

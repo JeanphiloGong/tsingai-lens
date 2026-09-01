@@ -64,7 +64,11 @@ This node owns the Collection route family.
   For a published Finding, the Agent reads the complete Finding, linked
   Evidence, and exact Sources before proposing feedback or curation. Both
   writes require exact user approval and reuse the Finding workbench's existing
-  review service; Chat does not create another Finding or review identity.
+  review service. From the current published analysis, the Agent may also
+  propose a new Finding with exact eligible Evidence roles or an explicit
+  evidence abstention. Approval calls the same authoring service as the human
+  editor and publishes a new immutable analysis version; Chat does not create
+  another Finding, Evidence, or review identity.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
@@ -169,8 +173,10 @@ authorship and review; the document reader owns Source verification. Current
 Finding authorship reuses already published Evidence. Creating or correcting
 Evidence directly from a document Source remains the later #191 workflow, and
 Objective-local paper-scope review remains #340.
-The Research Agent and experiment plans may consume published Findings, but
-they do not introduce a second conclusion identity.
+The Research Agent may consume published Findings and propose a new
+researcher-approved version through the same authoring service. It does not
+introduce a second conclusion identity. Experiment plans remain downstream
+consumers of published Findings.
 
 The Papers route reports the complete profiled collection size while rendering
 one bounded, compact page. Its title/filename search, document-type filter, and

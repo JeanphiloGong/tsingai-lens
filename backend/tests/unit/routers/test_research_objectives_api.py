@@ -224,7 +224,6 @@ class _DiscoveryService:
                 "total": len(document_ids),
                 "message": "Research question formation is queued.",
             },
-            "output_path": None,
             "errors": [],
             "warnings": [],
             "created_at": "2026-08-31T00:00:00+00:00",

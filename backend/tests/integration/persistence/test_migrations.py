@@ -15,7 +15,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260831_0040"
+HEAD_REVISION = "20260901_0041"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -55,16 +55,15 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
                 for column in inspect(connection).get_columns("documents")
             }
         )
+        task_columns = {
+            column["name"] for column in inspect(connection).get_columns("tasks")
+        }
         assert {
             "document_id",
             "input_fingerprint",
             "task_type",
-        }.issubset(
-            {
-                column["name"]
-                for column in inspect(connection).get_columns("tasks")
-            }
-        )
+        }.issubset(task_columns)
+        assert "output_path" not in task_columns
         assert "payload" in {
             column["name"]
             for column in inspect(connection).get_columns("objective_analyses")
@@ -76,6 +75,40 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
         with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_existing_0040_database_removes_retired_task_output_path(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "migration-from-0040.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260831_0040")
+        if "output_path" not in {
+            column["name"] for column in inspect(connection).get_columns("tasks")
+        }:
+            connection.exec_driver_sql(
+                "ALTER TABLE tasks ADD COLUMN output_path TEXT"
+            )
+        assert "output_path" in {
+            column["name"] for column in inspect(connection).get_columns("tasks")
+        }
+
+        command.upgrade(config, "head")
+
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            HEAD_REVISION
+        )
+        assert "output_path" not in {
+            column["name"] for column in inspect(connection).get_columns("tasks")
+        }
 
     engine.dispose()
 

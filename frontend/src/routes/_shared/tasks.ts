@@ -31,7 +31,6 @@ export type Task = {
 	current_stage: TaskStage;
 	progress_percent: number;
 	progress_detail?: TaskProgressDetail | null;
-	output_path?: string | null;
 	errors: string[];
 	warnings: string[];
 	created_at: string;
@@ -68,7 +67,6 @@ function normalizeTask(item: unknown): Task | null {
 				? record.progress_percent
 				: Number(record.progress_percent ?? 0),
 		progress_detail: normalizeProgressDetail(record.progress_detail),
-		output_path: typeof record.output_path === 'string' ? record.output_path : null,
 		errors: Array.isArray(record.errors) ? record.errors.map((item) => String(item)) : [],
 		warnings: Array.isArray(record.warnings) ? record.warnings.map((item) => String(item)) : [],
 		created_at: String(record.created_at ?? ''),

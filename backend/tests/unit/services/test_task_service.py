@@ -113,9 +113,10 @@ async def test_task_service_reuses_only_an_active_collection_task() -> None:
     assert first_created is True
     assert duplicate_created is False
     assert duplicate["task_id"] == first["task_id"]
-    assert duplicate["document_ids"] == ["doc_a"]
+    assert duplicate["details"] == {"document_ids": ["doc_a"]}
 
-    await task_service.finish_task(first["task_id"], status="failed")
+    finished = await task_service.finish_task(first["task_id"], status="failed")
+    assert finished["details"] == {"document_ids": ["doc_a"]}
     retry, retry_created = await task_service.get_or_create_collection_task(
         collection_id="col_a",
         task_type="objective_discovery",
@@ -125,4 +126,4 @@ async def test_task_service_reuses_only_an_active_collection_task() -> None:
 
     assert retry_created is True
     assert retry["task_id"] != first["task_id"]
-    assert retry["document_ids"] == ["doc_b"]
+    assert retry["details"] == {"document_ids": ["doc_b"]}

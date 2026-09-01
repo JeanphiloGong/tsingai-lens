@@ -52,7 +52,9 @@ preparation command queues only the named Document; it does not prepare other
 Collection members or discover Objectives. Paper Map construction is a lazy
 Objective-core operation over an explicit ready-document selection. Task
 responses expose `document_id`, input fingerprint, current stage, progress,
-terminal error, and retry-appropriate status.
+warnings, terminal errors, timestamps, and retry-appropriate status. Tasks do
+not expose a filesystem output path; scientific artifacts are addressed by
+their owning Document, Objective, analysis, Finding, or Evidence identities.
 
 At most one `document_preparation` task may be queued or running for a Document.
 Repeated requests reuse that active task. A completed task is reusable only when

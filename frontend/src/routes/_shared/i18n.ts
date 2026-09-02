@@ -233,6 +233,30 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
 			sending: 'Sending...',
+			upload: {
+				add: 'Add papers',
+				choose: 'Choose PDF papers',
+				panelTitle: 'Papers to add',
+				panelBody: 'PDFs are stored in this collection, then queued for paper preparation.',
+				clear: 'Clear',
+				uploadOne: 'Upload and prepare 1 paper',
+				uploadMany: 'Upload and prepare {count} papers',
+				retryOne: 'Retry failed paper',
+				retryMany: 'Retry {count} failed papers',
+				uploading: 'Uploading papers...',
+				openProgress: 'Open collection progress',
+				unsupportedFile: 'Only PDF papers can be uploaded here.',
+				queuedSummary: '{count} paper preparation task(s) queued.',
+				failedSummary: '{count} paper(s) need attention before preparation can continue.',
+				status: {
+					selected: 'Ready to upload',
+					uploading: 'Uploading',
+					preparing: 'Starting paper preparation',
+					queued: 'Preparation queued',
+					upload_failed: 'Upload failed',
+					preparation_failed: 'Uploaded, but preparation could not be queued'
+				}
+			},
 			sourceContext: {
 				remove: 'Remove source context',
 				truncated: 'Excerpt shortened · open the Source for the complete content'
@@ -2680,6 +2704,30 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
 			sending: '发送中...',
+			upload: {
+				add: '添加论文',
+				choose: '选择 PDF 论文',
+				panelTitle: '待添加论文',
+				panelBody: 'PDF 会先存入当前集合，再进入论文准备队列。',
+				clear: '清空',
+				uploadOne: '上传并准备 1 篇论文',
+				uploadMany: '上传并准备 {count} 篇论文',
+				retryOne: '重试失败论文',
+				retryMany: '重试 {count} 篇失败论文',
+				uploading: '正在上传论文...',
+				openProgress: '打开集合进度',
+				unsupportedFile: '此处仅支持上传 PDF 论文。',
+				queuedSummary: '已启动 {count} 个论文准备任务。',
+				failedSummary: '有 {count} 篇论文需要处理后才能继续准备。',
+				status: {
+					selected: '等待上传',
+					uploading: '正在上传',
+					preparing: '正在启动论文准备',
+					queued: '已进入准备队列',
+					upload_failed: '上传失败',
+					preparation_failed: '已上传，但未能进入准备队列'
+				}
+			},
 			sourceContext: {
 				remove: '移除原文上下文',
 				truncated: '摘录已缩短 · 完整内容请打开原文'

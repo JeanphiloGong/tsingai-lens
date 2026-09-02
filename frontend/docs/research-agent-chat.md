@@ -74,6 +74,16 @@ POST /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 ```
 
+The composer also exposes an explicit PDF-paper upload action for the current
+Collection. It calls the same `POST /collections/{collection_id}/documents`
+and per-document preparation endpoint used by the Collection workspace. The
+upload is a user action outside the Chat trajectory: PDF bytes are never sent
+to the model or stored as a Chat attachment, and uploading does not create an
+Objective, Evidence, or Finding. Each file reports its own stored, preparing,
+queued, upload-failed, or preparation-failed state. A preparation retry reuses
+the stored document ID, while the Collection workspace remains the canonical
+view for long-running task progress.
+
 Message submission uses `Accept: text/event-stream` on the existing `POST
 /messages` endpoint. The browser appends `text_delta` events to one temporary
 assistant message, then replaces the temporary user/assistant pair with the
@@ -134,6 +144,8 @@ answer. The result panel shows:
 - structured Objective drafts when present;
 - the observable research stages and active paper when process status is read;
 - per-paper stored, processing, ready, and failed states;
+- selected PDF papers and their upload/preparation state when papers are added
+  from the composer;
 - warnings and scientific absence;
 - links to canonical collection, Objective, Finding, or Evidence records;
 - a distinct Agent paper-analysis activity whose completed summary reports the

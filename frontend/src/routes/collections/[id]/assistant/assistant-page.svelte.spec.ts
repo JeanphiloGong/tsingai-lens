@@ -151,13 +151,17 @@ function installApi({
 	messageTurn,
 	messageDeltas = [],
 	messageDelayMs = 0,
-	decisionTurn
+	decisionTurn,
+	uploadDocument,
+	prepareDocument
 }: {
 	trajectory?: ChatTrajectory;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
 	decisionTurn?: ChatTurn;
+	uploadDocument?: (file: File) => Response | Promise<Response>;
+	prepareDocument?: (documentId: string) => Response | Promise<Response>;
 } = {}) {
 	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 		const path = requestPath(input);
@@ -180,8 +184,63 @@ function installApi({
 		) {
 			return Promise.resolve(jsonResponse(decisionTurn));
 		}
+		if (path === '/api/v1/collections/col_123/documents' && method === 'POST') {
+			const file = init?.body instanceof FormData ? init.body.get('file') : null;
+			return uploadDocument && file instanceof File
+				? Promise.resolve(uploadDocument(file))
+				: Promise.resolve(jsonResponse({ detail: 'Unexpected document upload' }, 500));
+		}
+		const preparationMatch = path.match(
+			/^\/api\/v1\/collections\/col_123\/documents\/([^/]+)\/preparation$/
+		);
+		if (preparationMatch && method === 'POST') {
+			return prepareDocument
+				? Promise.resolve(prepareDocument(decodeURIComponent(preparationMatch[1])))
+				: Promise.resolve(jsonResponse({ detail: 'Unexpected document preparation' }, 500));
+		}
 		return Promise.resolve(jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500));
 	});
+}
+
+function uploadedDocument(file: File, documentId = 'doc_upload_1') {
+	return {
+		document_id: documentId,
+		original_filename: file.name,
+		stored_filename: `${documentId}.pdf`,
+		storage_key: `col_123/input/${documentId}.pdf`,
+		sha256: 'a'.repeat(64),
+		media_type: file.type,
+		status: 'stored',
+		size_bytes: file.size,
+		created_at: createdAt,
+		updated_at: createdAt,
+		parser_version: null,
+		document_analysis_version: null,
+		source_fingerprint: null,
+		profile_fingerprint: null,
+		preparation_fingerprint: null
+	};
+}
+
+function queuedPreparation(documentId = 'doc_upload_1') {
+	return {
+		task_id: `task_${documentId}`,
+		collection_id: 'col_123',
+		document_id: documentId,
+		task_type: 'document_preparation',
+		mode: 'standard',
+		input_fingerprint: null,
+		status: 'queued',
+		current_stage: 'queued',
+		progress_percent: 0,
+		progress_detail: { phase: 'queued' },
+		errors: [],
+		warnings: [],
+		created_at: createdAt,
+		updated_at: createdAt,
+		started_at: null,
+		finished_at: null
+	};
 }
 
 async function renderReady() {
@@ -191,9 +250,9 @@ async function renderReady() {
 	return composer;
 }
 
-async function send(text: string) {
-	const composer = await renderReady();
-	await composer.fill(text);
+async function send(text: string, composer?: Awaited<ReturnType<typeof renderReady>>) {
+	const activeComposer = composer ?? (await renderReady());
+	await activeComposer.fill(text);
 	await browserPage.getByRole('button', { name: 'Send' }).click();
 }
 
@@ -206,6 +265,140 @@ describe('collections/[id]/assistant Research Agent', () => {
 			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
+	});
+
+	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
+		installApi({
+			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 201),
+			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 202)
+		});
+		await renderReady();
+
+		const file = new File(['%PDF-1.7 paper content'], 'laser-exposure.pdf', {
+			type: 'application/pdf'
+		});
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+
+		await expect.element(browserPage.getByText('laser-exposure.pdf')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Upload and prepare 1 paper' }).click();
+
+		await expect.element(browserPage.getByText('Preparation queued')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open collection progress' }))
+			.toHaveAttribute('href', '/collections/col_123');
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input as string | URL | Request) ===
+						'/api/v1/collections/col_123/documents' &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toBe(true);
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input as string | URL | Request) ===
+						'/api/v1/collections/col_123/documents/doc_upload_1/preparation' &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toBe(true);
+		expect(
+			fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input as string | URL | Request).endsWith('/messages') &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toHaveLength(0);
+	});
+
+	it('keeps upload controls disabled while a paper is being stored', async () => {
+		let finishUpload: ((response: Response) => void) | undefined;
+		const uploadPending = new Promise<Response>((resolve) => {
+			finishUpload = resolve;
+		});
+		installApi({
+			uploadDocument: () => uploadPending,
+			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 202)
+		});
+		await renderReady();
+
+		const file = new File(['%PDF-1.7'], 'pending.pdf', { type: 'application/pdf' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 1 paper' }).click();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Uploading papers...' }))
+			.toBeDisabled();
+		await expect.element(browserPage.getByRole('button', { name: 'Add papers' })).toBeDisabled();
+
+		finishUpload?.(jsonResponse(uploadedDocument(file), 201));
+		await expect.element(browserPage.getByText('Preparation queued')).toBeInTheDocument();
+	});
+
+	it('reports an upload failure beside the paper without hiding the retry path', async () => {
+		installApi({
+			uploadDocument: () => jsonResponse({ detail: 'PDF exceeds the upload limit' }, 413)
+		});
+		await renderReady();
+
+		const file = new File(['%PDF-1.7'], 'oversized.pdf', { type: 'application/pdf' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 1 paper' }).click();
+
+		await expect.element(browserPage.getByText('Upload failed')).toBeInTheDocument();
+		await expect.element(browserPage.getByText(/PDF exceeds the upload limit/)).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry failed paper' }))
+			.toBeEnabled();
+	});
+
+	it('retries preparation without uploading the paper a second time', async () => {
+		let uploadCalls = 0;
+		let preparationCalls = 0;
+		installApi({
+			uploadDocument: (file) => {
+				uploadCalls += 1;
+				return jsonResponse(uploadedDocument(file), 201);
+			},
+			prepareDocument: (documentId) => {
+				preparationCalls += 1;
+				return preparationCalls === 1
+					? jsonResponse({ detail: 'Preparation worker unavailable' }, 503)
+					: jsonResponse(queuedPreparation(documentId), 202);
+			}
+		});
+		await renderReady();
+
+		const file = new File(['%PDF-1.7'], 'retry-preparation.pdf', { type: 'application/pdf' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 1 paper' }).click();
+
+		await expect
+			.element(browserPage.getByText('Uploaded, but preparation could not be queued'))
+			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Retry failed paper' }).click();
+		await expect.element(browserPage.getByText('Preparation queued')).toBeInTheDocument();
+		expect(uploadCalls).toBe(1);
+		expect(preparationCalls).toBe(2);
+	});
+
+	it('rejects non-PDF attachments before they reach the collection API', async () => {
+		installApi();
+		await renderReady();
+
+		const file = new File(['plain text'], 'notes.txt', { type: 'text/plain' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+
+		await expect
+			.element(browserPage.getByText('Only PDF papers can be uploaded here.'))
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input as string | URL | Request) ===
+						'/api/v1/collections/col_123/documents' &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toBe(false);
 	});
 
 	it('reviews a document Source context before sending it with the user message', async () => {
@@ -329,6 +522,34 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('Hello. I can help inspect this collection.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Research activity')).not.toBeInTheDocument();
+	});
+
+	it('allows a second question after the first turn is persisted', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_repeat', 'user', 'First question'),
+					message('msg_assistant_repeat', 'assistant', 'First answer')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		const composer = await renderReady();
+		await send('First question', composer);
+		await expect.element(browserPage.getByText('First answer')).toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await send('Follow-up question', composer);
+		await expect.element(browserPage.getByText('First answer')).toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input as string | URL | Request).endsWith('/messages') &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+			)
+		).toHaveLength(2);
 	});
 
 	it('shows assistant text before the persisted turn finishes streaming', async () => {

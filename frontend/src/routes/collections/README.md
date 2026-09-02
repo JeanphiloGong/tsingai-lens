@@ -73,6 +73,14 @@ This node owns the Collection route family.
   Source-grounded Evidence record. That write requires the same exact
   approval, Source digest, and immutable-version publication as the human
   authoring command.
+  The Agent composer can also add PDF papers directly to the current
+  Collection. This user action reuses the canonical Collection document upload
+  endpoint and queues independent per-paper preparation tasks; it does not send
+  file bytes through Chat, create an Agent-owned attachment, or form an
+  Objective. Each selected paper remains visible with upload/preparation
+  status, failures can be retried without duplicating a successful upload, and
+  the Collection workspace remains the canonical place to inspect full task
+  progress.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.

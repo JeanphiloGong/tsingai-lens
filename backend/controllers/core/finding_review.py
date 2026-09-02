@@ -246,7 +246,10 @@ async def export_objective_finding_dataset(
     collection_id: str,
     objective_id: str,
     request: Request,
-    format: str = Query(default="json", pattern="^(json|training_jsonl)$"),
+    format: str = Query(
+        default="json",
+        pattern="^(json|training_jsonl|llamafactory_alpaca)$",
+    ),
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
@@ -271,7 +274,10 @@ async def export_objective_finding_dataset(
 async def export_collection_finding_dataset(
     collection_id: str,
     request: Request,
-    format: str = Query(default="json", pattern="^(json|training_jsonl)$"),
+    format: str = Query(
+        default="json",
+        pattern="^(json|training_jsonl|llamafactory_alpaca)$",
+    ),
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
@@ -301,6 +307,15 @@ async def export_finding_gold_draft(
 def _dataset_response(payload: dict, format: str):
     if format == "json":
         return FindingDatasetResponse(**payload)
+    if format == "llamafactory_alpaca":
+        body = "\n".join(
+            json.dumps(row, ensure_ascii=False)
+            for row in _llamafactory_alpaca_rows(payload)
+        )
+        return Response(
+            content=f"{body}\n" if body else "",
+            media_type="application/x-ndjson",
+        )
     body = "\n".join(
         json.dumps(
             {"messages": item["training_messages"], "metadata": item["metadata"]},
@@ -314,3 +329,36 @@ def _dataset_response(payload: dict, format: str):
         content=f"{body}\n" if body else "",
         media_type="application/x-ndjson",
     )
+
+
+def _llamafactory_alpaca_rows(payload: dict):
+    """Project Lens training rows into LlamaFactory's Alpaca contract."""
+
+    for item in payload["items"]:
+        if item["dataset_use_status"] != "training_ready":
+            continue
+        messages = item["training_messages"]
+        instruction = next(
+            (
+                message["content"]
+                for message in messages
+                if message.get("role") == "user" and message.get("content")
+            ),
+            None,
+        )
+        output = next(
+            (
+                message["content"]
+                for message in messages
+                if message.get("role") == "assistant" and message.get("content")
+            ),
+            None,
+        )
+        if not instruction or not output:
+            continue
+        yield {
+            "instruction": instruction,
+            "input": "",
+            "output": output,
+            "metadata": item["metadata"],
+        }

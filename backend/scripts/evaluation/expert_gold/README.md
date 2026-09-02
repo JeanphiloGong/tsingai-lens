@@ -245,7 +245,7 @@ GET /api/v1/collections/{collection_id}/objectives/{objective_id}/finding-datase
 GET /api/v1/collections/{collection_id}/finding-dataset
 ```
 
-Use `format=training_jsonl` for fine-tuning rows. Each line contains:
+Use `format=training_jsonl` for Lens-native fine-tuning rows. Each line contains:
 
 ```json
 {
@@ -267,3 +267,20 @@ Use `format=training_jsonl` for fine-tuning rows. Each line contains:
 Only `training_ready` samples produce JSONL rows. The model input contains
 exact source text and scientific context. `evidence_ids` preserve audit
 identity; they are never the only Evidence content supplied to training.
+
+Use `format=llamafactory_alpaca` when the receiving LlamaFactory dataset is
+registered with `formatting: alpaca`. Each line then contains the compatible
+`instruction`, `input`, and `output` fields plus the same lineage metadata:
+
+```json
+{
+  "instruction": "Research objective plus exact Evidence excerpts",
+  "input": "",
+  "output": "{\"statement\":\"...\"}",
+  "metadata": {
+    "analysis_version": 2,
+    "finding_id": "finding_xxx",
+    "evidence_ids": ["evidence_xxx"]
+  }
+}
+```

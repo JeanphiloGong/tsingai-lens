@@ -626,14 +626,36 @@ current published version. The approved capability calls the same
 publication, role validation, Source validation, and abstention semantics.
 Agent prose or raw Source text cannot become Evidence.
 
-Dataset export supports `format=json | training_jsonl` plus optional
-`label_status` and `dataset_use_status` filters. `objective_finding_dataset.v2`
-includes canonical system prediction, optional expert target, resolved training
-target, deterministic Finding/Evidence fingerprints, and exact Evidence
-excerpts with document/page/locator provenance. `training_jsonl` contains one
-`{messages, metadata}` object per line and omits samples without valid training
-messages. IDs preserve lineage; source text and scientific context are part of
-model input. The latest feedback or curation event controls dataset status.
+Dataset export supports `format=json | training_jsonl | llamafactory_alpaca`
+plus optional `label_status` and `dataset_use_status` filters.
+`objective_finding_dataset.v2` includes canonical system prediction, optional
+expert target, resolved training target, deterministic Finding/Evidence
+fingerprints, and exact Evidence excerpts with document/page/locator
+provenance. `training_jsonl` contains one `{messages, metadata}` object per
+line. `llamafactory_alpaca` contains one `{instruction, input, output,
+metadata}` object per line, where `instruction` and `output` are projected from
+the existing Lens user/assistant training messages and `input` is empty. Both
+training formats omit samples without valid training messages and include only
+`training_ready` samples. IDs preserve lineage; source text and scientific
+context are part of model input. The latest feedback or curation event controls
+dataset status.
+
+For LlamaFactory, register the downloaded JSONL with its existing Alpaca
+formatter (the default column names are already correct):
+
+```json
+{
+  "lens_finding": {
+    "file_name": "lens_finding_alpaca.jsonl",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "instruction",
+      "query": "input",
+      "response": "output"
+    }
+  }
+}
+```
 
 ### Objective Experiment Plans
 

@@ -39,7 +39,6 @@ class TaskResponse(BaseModel):
             "current/total/unit/message"
         ),
     )
-    output_path: str | None = Field(default=None, description="Output directory")
     errors: list[str] = Field(default_factory=list, description="Errors")
     warnings: list[str] = Field(default_factory=list, description="Warnings")
     created_at: str = Field(..., description="Creation timestamp")

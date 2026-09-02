@@ -35,6 +35,62 @@ export type Collection = {
 	documents: CollectionDocument[];
 };
 
+export type CollectionStatusGroup = 'complete' | 'ready' | 'processing' | 'attention' | 'neutral';
+
+const PROCESSING_COLLECTION_STATUSES = new Set([
+	'processing',
+	'running',
+	'queued',
+	'started',
+	'in_progress'
+]);
+const ATTENTION_COLLECTION_STATUSES = new Set(['attention_required', 'failed', 'partial_success']);
+const COMPLETE_COLLECTION_STATUSES = new Set([
+	'ready',
+	'completed',
+	'complete',
+	'success',
+	'graph_ready',
+	'document_profiled',
+	'comparison_pending',
+	'partial_ready'
+]);
+const PROCESSING_DOCUMENT_STATUSES = new Set(['processing', 'running', 'queued', 'started']);
+
+/**
+ * Derive the list-level state from current documents before trusting the
+ * legacy collection status. Collection status is only updated on upload in
+ * older records, while document preparation records the actual readiness.
+ */
+export function getCollectionStatusGroup(
+	collection: Pick<Collection, 'status' | 'documents'>
+): CollectionStatusGroup {
+	const normalizedStatus = collection.status?.toLowerCase() ?? '';
+	const documents = collection.documents ?? [];
+
+	if (ATTENTION_COLLECTION_STATUSES.has(normalizedStatus)) return 'attention';
+	if (documents.some((document) => document.status.toLowerCase() === 'failed')) {
+		return 'attention';
+	}
+
+	if (PROCESSING_COLLECTION_STATUSES.has(normalizedStatus)) return 'processing';
+	if (
+		documents.some((document) => PROCESSING_DOCUMENT_STATUSES.has(document.status.toLowerCase()))
+	) {
+		return 'processing';
+	}
+
+	if (
+		documents.length > 0 &&
+		documents.every((document) => document.status.toLowerCase() === 'ready')
+	) {
+		return COMPLETE_COLLECTION_STATUSES.has(normalizedStatus) ? 'complete' : 'ready';
+	}
+
+	if (COMPLETE_COLLECTION_STATUSES.has(normalizedStatus)) return 'complete';
+	return 'neutral';
+}
+
 export const collections = writable<Collection[]>([]);
 
 function normalizeCollection(item: unknown): Collection | null {

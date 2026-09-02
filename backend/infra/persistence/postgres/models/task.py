@@ -13,7 +13,6 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
     UniqueConstraint,
     text,
 )
@@ -84,7 +83,6 @@ class Task(Base):
         _JSON_DOCUMENT,
         nullable=True,
     )
-    output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     errors: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     details: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)

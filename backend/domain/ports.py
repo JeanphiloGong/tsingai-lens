@@ -311,6 +311,11 @@ class ObjectiveRepository(Protocol):
         collection_id: str,
     ) -> tuple[ResearchObjective, ...]: ...
 
+    async def list_objective_records(
+        self,
+        collection_id: str,
+    ) -> tuple[dict[str, Any], ...]: ...
+
     async def create_authored_candidate(
         self,
         objective: ResearchObjective,
@@ -325,6 +330,12 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
     ) -> ResearchObjective | None: ...
 
+    async def read_objective_record(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any] | None: ...
+
     async def queue_analysis(
         self,
         collection_id: str,
@@ -334,6 +345,9 @@ class ObjectiveRepository(Protocol):
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        origin: str = "system_generated",
+        created_by_user_id: str | None = None,
+        created_by_tool_call_id: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
     async def claim_analysis(

@@ -18,7 +18,9 @@
 		type ChatToolCall,
 		type ChatTurn
 	} from '../../../_shared/chatSessions';
+	import { uploadCollectionDocument } from '../../../_shared/collectionDocuments';
 	import { t } from '../../../_shared/i18n';
+	import { prepareCollectionDocument } from '../../../_shared/tasks';
 
 	type StoredChatSession = {
 		session_id: string;
@@ -41,6 +43,22 @@
 		status: string;
 	};
 
+	type PaperUploadStatus =
+		| 'selected'
+		| 'uploading'
+		| 'preparing'
+		| 'queued'
+		| 'upload_failed'
+		| 'preparation_failed';
+
+	type PaperUploadItem = {
+		key: string;
+		file: File;
+		status: PaperUploadStatus;
+		documentId: string | null;
+		error: string;
+	};
+
 	const suggestionKeys = [
 		'researchAgent.suggestions.greeting',
 		'researchAgent.suggestions.overview',
@@ -60,12 +78,28 @@
 	let input = '';
 	let pendingSourceContext: ChatSourceContext | null = null;
 	let loadedCollectionId = '';
+	let uploadItems: PaperUploadItem[] = [];
+	let uploadLoading = false;
+	let uploadError = '';
+	let uploadNotice = '';
+	let uploadInput: HTMLInputElement | null = null;
+	let uploadSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
+	$: uploadCandidates = uploadItems.filter((item) =>
+		['selected', 'upload_failed', 'preparation_failed'].includes(item.status)
+	);
+	$: uploadBusy =
+		uploadLoading || uploadItems.some((item) => ['uploading', 'preparing'].includes(item.status));
+	$: uploadActionText = getUploadActionText(uploadBusy, uploadCandidates);
 	$: if (browser && collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
+		uploadItems = [];
+		uploadError = '';
+		uploadNotice = '';
+		uploadSequence = 0;
 		void loadSession();
 	}
 
@@ -211,6 +245,122 @@
 		messages = [];
 		pendingApproval = null;
 		await loadSession(sessionId);
+	}
+
+	function isPdf(file: File) {
+		return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+	}
+
+	function selectUploadFiles(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		const files = Array.from(target.files ?? []);
+		const validFiles = files.filter(isPdf);
+		uploadError =
+			validFiles.length === files.length ? '' : $t('researchAgent.upload.unsupportedFile');
+		uploadNotice = '';
+
+		const existing = new Set(
+			uploadItems.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`)
+		);
+		const selected = validFiles
+			.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))
+			.map((file) => ({
+				key: `upload-${uploadSequence++}`,
+				file,
+				status: 'selected' as const,
+				documentId: null,
+				error: ''
+			}));
+		uploadItems = [...uploadItems, ...selected];
+		target.value = '';
+	}
+
+	function updateUploadItem(key: string, patch: Partial<PaperUploadItem>) {
+		uploadItems = uploadItems.map((item) => (item.key === key ? { ...item, ...patch } : item));
+	}
+
+	async function uploadAndPrepareItem(item: PaperUploadItem) {
+		let documentId = item.documentId;
+		if (!documentId) {
+			updateUploadItem(item.key, { status: 'uploading', error: '' });
+			try {
+				const uploaded = await uploadCollectionDocument(collectionId, item.file);
+				documentId = uploaded.document_id;
+				updateUploadItem(item.key, { status: 'preparing', documentId, error: '' });
+			} catch (err) {
+				updateUploadItem(item.key, {
+					status: 'upload_failed',
+					error: errorMessage(err)
+				});
+				return false;
+			}
+		} else {
+			updateUploadItem(item.key, { status: 'preparing', error: '' });
+		}
+
+		try {
+			await prepareCollectionDocument(collectionId, documentId);
+			updateUploadItem(item.key, { status: 'queued', documentId, error: '' });
+			return true;
+		} catch (err) {
+			updateUploadItem(item.key, {
+				status: 'preparation_failed',
+				documentId,
+				error: errorMessage(err)
+			});
+			return false;
+		}
+	}
+
+	async function uploadPapers() {
+		if (!uploadCandidates.length || uploadLoading) return;
+		const candidates = [...uploadCandidates];
+		uploadLoading = true;
+		uploadError = '';
+		uploadNotice = '';
+		let queuedCount = 0;
+		for (const item of candidates) {
+			if (await uploadAndPrepareItem(item)) queuedCount += 1;
+		}
+		const failedCount = candidates.length - queuedCount;
+		if (queuedCount) {
+			uploadNotice = $t('researchAgent.upload.queuedSummary', { count: queuedCount });
+		}
+		if (failedCount) {
+			uploadError = $t('researchAgent.upload.failedSummary', { count: failedCount });
+		}
+		uploadLoading = false;
+	}
+
+	function clearUploadItems() {
+		if (uploadLoading) return;
+		uploadItems = [];
+		uploadError = '';
+		uploadNotice = '';
+	}
+
+	function uploadStatus(item: PaperUploadItem) {
+		return $t(`researchAgent.upload.status.${item.status}`);
+	}
+
+	function getUploadActionText(busy: boolean, candidates: PaperUploadItem[]) {
+		if (busy) return $t('researchAgent.upload.uploading');
+		const retry =
+			candidates.length > 0 && candidates.every((item) => item.status.endsWith('_failed'));
+		if (retry) {
+			return $t(
+				candidates.length === 1
+					? 'researchAgent.upload.retryOne'
+					: 'researchAgent.upload.retryMany',
+				{ count: candidates.length }
+			);
+		}
+		return $t(
+			candidates.length === 1
+				? 'researchAgent.upload.uploadOne'
+				: 'researchAgent.upload.uploadMany',
+			{ count: candidates.length }
+		);
 	}
 
 	async function sendMessage(nextText = input.trim()) {
@@ -401,6 +551,10 @@
 				return $t('researchAgent.capability.findingCuration');
 			case 'create_finding_version':
 				return $t('researchAgent.capability.findingAuthoring');
+			case 'create_evidence_version':
+				return $t('researchAgent.capability.evidenceAuthoring');
+			case 'publish_agent_objective_analysis':
+				return $t('researchAgent.capability.agentObjectiveAnalysis');
 			case 'propose_objective_drafts':
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
@@ -514,6 +668,14 @@
 				? $t('researchAgent.capability.findingPublished')
 				: $t('researchAgent.capability.findingAbstentionPublished');
 		}
+		if (name === 'create_evidence_version') {
+			return $t('researchAgent.capability.evidencePublished');
+		}
+		if (name === 'publish_agent_objective_analysis') {
+			return $t('researchAgent.capability.agentAnalysisPublished', {
+				count: numberValue(result.data, 'evidence_count')
+			});
+		}
 		if (name === 'propose_objective_drafts') {
 			return $t('researchAgent.capability.draftCount', {
 				count: numberValue(result.data, 'draft_count')
@@ -554,6 +716,17 @@
 		if (result?.status === 'failed') return $t('researchAgent.capability.failed', { name });
 		if (result?.status === 'queued') return $t('researchAgent.capability.queued', { name });
 		return $t('researchAgent.capability.succeeded', { name });
+	}
+
+	function resultStatusLabel(message: ChatMessage) {
+		switch (message.tool_result?.status) {
+			case 'queued':
+				return $t('researchAgent.capability.statusQueued');
+			case 'failed':
+				return $t('researchAgent.capability.statusFailed');
+			default:
+				return $t('researchAgent.capability.statusSucceeded');
+		}
 	}
 
 	function resultResearchSteps(message: ChatMessage): ResearchProcessStep[] {
@@ -695,6 +868,12 @@
 				? $t('researchAgent.approval.findingAbstentionBody')
 				: $t('researchAgent.approval.findingAuthoringBody');
 		}
+		if (call.name === 'create_evidence_version') {
+			return $t('researchAgent.approval.evidenceAuthoringBody');
+		}
+		if (call.name === 'publish_agent_objective_analysis') {
+			return $t('researchAgent.approval.agentObjectiveAnalysisBody');
+		}
 		return $t('researchAgent.approval.body');
 	}
 
@@ -716,6 +895,12 @@
 				? $t('researchAgent.approval.publishAbstention')
 				: $t('researchAgent.approval.publishFinding');
 		}
+		if (call.name === 'create_evidence_version') {
+			return $t('researchAgent.approval.publishEvidence');
+		}
+		if (call.name === 'publish_agent_objective_analysis') {
+			return $t('researchAgent.approval.publishAgentAnalysis');
+		}
 		return $t('researchAgent.approval.approve');
 	}
 
@@ -725,6 +910,10 @@
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
+		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
+		if (toolName === 'publish_agent_objective_analysis') {
+			return 'researchAgent.agentObjectiveAnalysisRejected';
+		}
 		return 'researchAgent.rejected';
 	}
 
@@ -784,6 +973,10 @@
 
 <section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
 	<aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
+		<a class="back-workspace" href={resolve('/collections/[id]', { id: collectionId })}>
+			<span aria-hidden="true">←</span>
+			{$t('researchAgent.backToWorkspace')}
+		</a>
 		<div class="brand">
 			<span class="brand-mark" aria-hidden="true">L</span>
 			<h1>{$t('researchAgent.title')}</h1>
@@ -819,13 +1012,12 @@
 			</div>
 		</section>
 
-		<a class="collection-link" href={resolve('/collections/[id]', { id: collectionId })}>
+		<div class="collection-context">
 			<span>
 				<small>{$t('researchAgent.currentCollection')}</small>
 				<strong>{collectionId}</strong>
 			</span>
-			<span>{$t('researchAgent.openWorkspace')}</span>
-		</a>
+		</div>
 	</aside>
 
 	<main class="conversation">
@@ -861,7 +1053,9 @@
 						<h3>{$t('researchAgent.loading')}</h3>
 					</div>
 				{:else if messages.length === 0}
-					<div class="empty-state">
+					<div class="empty-state welcome-state">
+						<div class="welcome-avatar" aria-hidden="true">AI</div>
+						<p class="welcome-eyebrow">{$t('researchAgent.welcomeEyebrow')}</p>
 						<h3>{$t('researchAgent.emptyTitle')}</h3>
 						<p>{$t('researchAgent.emptyBody')}</p>
 						<div class="suggestions">
@@ -944,6 +1138,7 @@
 									{/if}
 									{#if message.tool_call_id}
 										<p class="capability-request">
+											<span class="capability-request-dot" aria-hidden="true"></span>
 											{capabilityRequestLabel(message.tool_name)}
 										</p>
 									{/if}
@@ -956,6 +1151,7 @@
 							>
 								<header>
 									<span
+										aria-hidden="true"
 										class:failed={message.tool_result.status === 'failed'}
 										class:queued={message.tool_result.status === 'queued'}
 									>
@@ -969,6 +1165,13 @@
 										<strong>{resultTitle(message)}</strong>
 										<p>{resultSummary(message)}</p>
 									</div>
+									<span
+										class="capability-status"
+										class:failed={message.tool_result.status === 'failed'}
+										class:queued={message.tool_result.status === 'queued'}
+									>
+										{resultStatusLabel(message)}
+									</span>
 								</header>
 
 								{#if resultDrafts(message).length}
@@ -1038,7 +1241,10 @@
 								<h3 id="approval-title">{$t('researchAgent.approval.title')}</h3>
 								<p>{approvalBody(pendingApproval)}</p>
 							</div>
-							<strong>{capabilityName(pendingApproval.name)}</strong>
+							<div class="approval-header-meta">
+								<span class="approval-status">{$t('researchAgent.approval.status')}</span>
+								<strong>{capabilityName(pendingApproval.name)}</strong>
+							</div>
 						</header>
 						{#if approvalArguments(pendingApproval).length}
 							<h4>{$t('researchAgent.approval.arguments')}</h4>
@@ -1077,6 +1283,66 @@
 		</div>
 
 		<form class="composer" on:submit|preventDefault={() => sendMessage()}>
+			<input
+				class="sr-only"
+				bind:this={uploadInput}
+				type="file"
+				multiple
+				accept=".pdf,application/pdf"
+				aria-label={$t('researchAgent.upload.choose')}
+				disabled={uploadLoading}
+				on:change={selectUploadFiles}
+			/>
+			{#if uploadItems.length}
+				<section class="upload-panel" aria-label={$t('researchAgent.upload.panelTitle')}>
+					<header>
+						<div>
+							<strong>{$t('researchAgent.upload.panelTitle')}</strong>
+							<small>{$t('researchAgent.upload.panelBody')}</small>
+						</div>
+						<button
+							type="button"
+							class="clear-uploads"
+							disabled={uploadLoading}
+							on:click={clearUploadItems}
+						>
+							{$t('researchAgent.upload.clear')}
+						</button>
+					</header>
+					<ul aria-live="polite">
+						{#each uploadItems as item (item.key)}
+							<li>
+								<span class="pdf-mark" aria-hidden="true">PDF</span>
+								<div>
+									<strong>{item.file.name}</strong>
+									<small>{uploadStatus(item)}</small>
+									{#if item.error}<small class="upload-item-error">{item.error}</small>{/if}
+								</div>
+							</li>
+						{/each}
+					</ul>
+					{#if uploadError}<p class="upload-error" role="alert">{uploadError}</p>{/if}
+					{#if uploadNotice}<p class="upload-notice" role="status">{uploadNotice}</p>{/if}
+					<footer>
+						<a href={resolve('/collections/[id]', { id: collectionId })}>
+							{$t('researchAgent.upload.openProgress')}
+						</a>
+						{#if uploadCandidates.length || uploadBusy}
+							<button
+								type="button"
+								class="upload-primary"
+								aria-label={uploadActionText}
+								disabled={uploadBusy}
+								on:click={uploadPapers}
+							>
+								{uploadActionText}
+							</button>
+						{/if}
+					</footer>
+				</section>
+			{:else if uploadError}
+				<p class="upload-error upload-error--standalone" role="alert">{uploadError}</p>
+			{/if}
 			{#if pendingSourceContext}
 				<div class="source-context-preview" data-testid="pending-source-context">
 					<div>
@@ -1100,20 +1366,36 @@
 					>
 				</div>
 			{/if}
-			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
-			<textarea
-				id="research-agent-message"
-				rows="2"
-				bind:value={input}
-				placeholder={$t('researchAgent.messagePlaceholder')}
-				disabled={!session || sending || deciding || Boolean(pendingApproval)}
-			></textarea>
-			<button
-				type="submit"
-				disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
-			>
-				{sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-			</button>
+			<div class="composer-row">
+				<label class="sr-only" for="research-agent-message"
+					>{$t('researchAgent.messageLabel')}</label
+				>
+				<textarea
+					id="research-agent-message"
+					rows="2"
+					bind:value={input}
+					placeholder={$t('researchAgent.messagePlaceholder')}
+					disabled={!session || sending || deciding || Boolean(pendingApproval)}
+				></textarea>
+				<button
+					class="send-message"
+					type="submit"
+					disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
+				>
+					{sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+				</button>
+				<button
+					class="add-papers"
+					type="button"
+					aria-label={$t('researchAgent.upload.add')}
+					title={$t('researchAgent.upload.add')}
+					disabled={uploadBusy}
+					on:click={() => uploadInput?.click()}
+				>
+					<span aria-hidden="true">+</span>
+					<span class="add-papers-label">{$t('researchAgent.upload.add')}</span>
+				</button>
+			</div>
 		</form>
 	</main>
 </section>
@@ -1167,10 +1449,33 @@
 		background: var(--bg-subtle);
 	}
 
+	.back-workspace {
+		display: inline-flex;
+		align-items: center;
+		align-self: flex-start;
+		gap: 7px;
+		min-height: 30px;
+		padding: 0 8px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.back-workspace span {
+		font-size: 18px;
+		line-height: 1;
+	}
+
+	.back-workspace:hover {
+		color: var(--brand-primary);
+	}
+
 	.brand {
 		display: flex;
 		align-items: center;
 		gap: 12px;
+		margin-top: 18px;
 	}
 
 	.brand-mark,
@@ -1212,7 +1517,8 @@
 
 	.new-session:hover:not(:disabled),
 	.approve:hover:not(:disabled),
-	.composer button:hover:not(:disabled) {
+	.send-message:hover:not(:disabled),
+	.upload-primary:hover:not(:disabled) {
 		background: var(--brand-primary-hover);
 	}
 
@@ -1277,32 +1583,31 @@
 		font-size: 11px;
 	}
 
-	.collection-link {
+	.collection-context {
 		display: grid;
 		gap: 10px;
 		padding-top: 16px;
 		border-top: 1px solid var(--border-default);
-		color: var(--brand-primary);
 		font-size: 12px;
 		font-weight: 700;
-		text-decoration: none;
 	}
 
-	.collection-link span:first-child {
+	.collection-context span {
 		display: grid;
 		gap: 2px;
 		min-width: 0;
 	}
 
-	.collection-link small {
+	.collection-context small {
 		color: var(--text-secondary);
 		font-weight: 500;
 	}
 
-	.collection-link strong {
+	.collection-context strong {
 		overflow: hidden;
 		color: var(--text-primary);
 		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.conversation {
@@ -1380,8 +1685,37 @@
 
 	.empty-state {
 		max-width: 620px;
-		margin: 100px auto 0;
+		margin: 88px auto 0;
 		text-align: center;
+	}
+
+	.welcome-state {
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+	}
+
+	.welcome-avatar {
+		display: grid;
+		place-items: center;
+		width: 48px;
+		height: 48px;
+		border: 1px solid var(--brand-border);
+		border-radius: 50%;
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+		font-size: 12px;
+		font-weight: 800;
+		letter-spacing: 0;
+	}
+
+	.welcome-eyebrow {
+		margin: 16px 0 0;
+		color: var(--brand-primary);
+		font-size: 11px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: uppercase;
 	}
 
 	.empty-state h3 {
@@ -1546,9 +1880,33 @@
 	}
 
 	.capability-request {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
 		margin: 7px 0 0;
 		color: var(--text-secondary);
 		font-size: 12px;
+	}
+
+	.capability-request-dot {
+		width: 7px;
+		height: 7px;
+		border: 1px solid var(--brand-primary);
+		border-radius: 50%;
+		background: var(--brand-primary);
+		animation: capability-pulse 1.2s ease-in-out infinite;
+	}
+
+	@keyframes capability-pulse {
+		50% {
+			opacity: 0.35;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.capability-request-dot {
+			animation: none;
+		}
 	}
 
 	.capability-event {
@@ -1562,7 +1920,37 @@
 	.capability-event > header {
 		display: flex;
 		align-items: flex-start;
+		justify-content: space-between;
 		gap: 10px;
+	}
+
+	.capability-event > header > div {
+		min-width: 0;
+	}
+
+	.capability-status {
+		flex: 0 0 auto;
+		padding: 4px 7px;
+		border: 1px solid var(--success-border);
+		border-radius: 999px;
+		background: var(--success-bg);
+		color: var(--success-text);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.2;
+		white-space: nowrap;
+	}
+
+	.capability-status.queued {
+		border-color: var(--warning-border);
+		background: var(--warning-bg);
+		color: var(--warning-text);
+	}
+
+	.capability-status.failed {
+		border-color: var(--danger-border);
+		background: var(--danger-bg);
+		color: var(--danger-text);
 	}
 
 	.capability-event > header > span {
@@ -1737,9 +2125,28 @@
 		font-size: 13px;
 	}
 
-	.approval > header > strong {
+	.approval-header-meta > strong {
 		color: var(--warning-text);
 		font-size: 12px;
+	}
+
+	.approval-header-meta {
+		display: grid;
+		justify-items: end;
+		gap: 6px;
+		flex: 0 0 auto;
+	}
+
+	.approval-status {
+		padding: 4px 7px;
+		border: 1px solid var(--warning-border);
+		border-radius: 999px;
+		background: var(--surface-card);
+		color: var(--warning-text);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.2;
+		white-space: nowrap;
 	}
 
 	.approval dl {
@@ -1799,14 +2206,22 @@
 
 	.composer {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 10px;
 		padding: 16px 32px max(20px, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--border-default);
 		background: var(--surface-card);
 	}
 
-	.composer textarea {
+	.composer-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		gap: 10px;
+		width: 100%;
+	}
+
+	.composer-row textarea {
+		grid-column: 1;
+		grid-row: 1;
 		min-height: 54px;
 		max-height: 150px;
 		padding: 12px 14px;
@@ -1817,6 +2232,173 @@
 		font: inherit;
 		line-height: 22px;
 		resize: vertical;
+	}
+
+	.upload-panel {
+		display: grid;
+		gap: 10px;
+		padding: 12px 14px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--bg-subtle);
+	}
+
+	.upload-panel > header,
+	.upload-panel > footer {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.upload-panel > header > div {
+		display: grid;
+		gap: 2px;
+	}
+
+	.upload-panel > header strong {
+		font-size: 13px;
+	}
+
+	.upload-panel > header small,
+	.upload-panel li small {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.upload-panel ul {
+		display: grid;
+		gap: 7px;
+		max-height: 152px;
+		margin: 0;
+		padding: 0;
+		overflow-y: auto;
+		list-style: none;
+	}
+
+	.upload-panel li {
+		display: grid;
+		grid-template-columns: 34px minmax(0, 1fr);
+		align-items: center;
+		gap: 9px;
+	}
+
+	.upload-panel li > div {
+		display: grid;
+		min-width: 0;
+		gap: 1px;
+	}
+
+	.upload-panel li strong {
+		overflow: hidden;
+		font-size: 12px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.pdf-mark {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 28px;
+		border: 1px solid var(--border-strong);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: var(--danger-text);
+		font-size: 9px;
+		font-weight: 800;
+	}
+
+	.upload-panel .upload-item-error,
+	.upload-error {
+		color: var(--danger-text);
+	}
+
+	.upload-error,
+	.upload-notice {
+		margin: 0;
+		font-size: 12px;
+	}
+
+	.upload-notice {
+		color: var(--success-text);
+	}
+
+	.upload-error--standalone {
+		padding: 8px 10px;
+		border: 1px solid var(--danger-border);
+		border-radius: 6px;
+		background: var(--danger-bg);
+	}
+
+	.upload-panel > footer a {
+		color: var(--brand-primary);
+		font-size: 12px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.upload-panel > footer a:hover {
+		text-decoration: underline;
+	}
+
+	.clear-uploads,
+	.add-papers {
+		border: 1px solid var(--border-strong);
+		border-radius: 6px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+
+	.clear-uploads {
+		min-height: 30px;
+		padding: 0 10px;
+		font-size: 12px;
+	}
+
+	.add-papers {
+		display: inline-flex;
+		align-items: center;
+		align-self: end;
+		justify-content: center;
+		gap: 6px;
+		min-height: 42px;
+		padding: 0 12px;
+		font-weight: 700;
+	}
+
+	.composer-row .send-message {
+		grid-column: 2;
+		grid-row: 1;
+	}
+
+	.composer-row .add-papers {
+		grid-column: 3;
+		grid-row: 1;
+	}
+
+	.add-papers > span:first-child {
+		font-size: 20px;
+		font-weight: 400;
+		line-height: 1;
+	}
+
+	.clear-uploads:hover:not(:disabled),
+	.add-papers:hover:not(:disabled) {
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
+	}
+
+	.upload-primary {
+		min-height: 36px;
+		padding: 0 12px;
+		border: 1px solid var(--brand-primary);
+		border-radius: 6px;
+		background: var(--brand-primary);
+		color: #fff;
+		font-weight: 700;
+		cursor: pointer;
 	}
 
 	.source-context-preview {
@@ -1872,13 +2454,13 @@
 		line-height: 1;
 	}
 
-	.composer textarea:focus {
+	.composer-row textarea:focus {
 		border-color: var(--brand-primary);
 		outline: 2px solid var(--brand-border);
 		outline-offset: 1px;
 	}
 
-	.composer button {
+	.send-message {
 		align-self: end;
 		min-width: 92px;
 		min-height: 42px;
@@ -1911,6 +2493,7 @@
 		.sidebar {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-rows: auto auto;
 			align-items: center;
 			gap: 12px;
 			padding: 12px 16px;
@@ -1918,13 +2501,26 @@
 			border-bottom: 1px solid var(--border-default);
 		}
 
+		.back-workspace {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		.brand {
+			grid-column: 1;
+			grid-row: 2;
+			margin-top: 0;
+		}
+
 		.new-session {
+			grid-column: 2;
+			grid-row: 1 / span 2;
 			margin: 0;
 			padding: 0 12px;
 		}
 
 		.history,
-		.collection-link {
+		.collection-context {
 			display: none;
 		}
 
@@ -1963,20 +2559,51 @@
 		}
 
 		.composer {
-			grid-template-columns: minmax(0, 1fr) auto;
 			gap: 8px;
 			padding: 12px 12px max(12px, env(safe-area-inset-bottom));
 		}
 
-		.composer button {
+		.composer-row {
+			grid-template-columns: minmax(0, 1fr) auto auto;
+			gap: 8px;
+		}
+
+		.composer-row textarea {
+			grid-column: 1;
+		}
+
+		.composer-row .send-message {
+			grid-column: 2;
+		}
+
+		.composer-row .add-papers {
+			grid-column: 3;
+		}
+
+		.add-papers {
+			width: 44px;
+			min-width: 44px;
+			padding: 0;
+		}
+
+		.add-papers-label {
+			display: none;
+		}
+
+		.send-message {
 			align-self: stretch;
 			min-width: 76px;
 			width: auto;
 		}
 
-		.composer textarea {
+		.composer-row textarea {
 			min-height: 48px;
 			resize: none;
+		}
+
+		.upload-panel > header,
+		.upload-panel > footer {
+			align-items: flex-start;
 		}
 	}
 </style>

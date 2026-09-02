@@ -10,12 +10,13 @@
 		collections,
 		deleteCollection,
 		fetchCollections,
+		getCollectionStatusGroup,
 		type Collection
 	} from './_shared/collections';
 	import { language, t } from './_shared/i18n';
 	import { prepareCollectionDocument } from './_shared/tasks';
 
-	const statusFilters = ['all', 'complete', 'processing', 'attention'] as const;
+	const statusFilters = ['all', 'complete', 'ready', 'processing', 'attention'] as const;
 	type StatusFilter = (typeof statusFilters)[number];
 
 	const futureCards = [
@@ -63,7 +64,7 @@
 			collection.name?.toLowerCase().includes(query) ||
 			collection.description?.toLowerCase().includes(query);
 
-		return matchesQuery && matchesStatusFilter(collection.status, statusFilter);
+		return matchesQuery && matchesStatusFilter(collection, statusFilter);
 	});
 	$: if (
 		$page.url?.pathname === '/' &&
@@ -104,7 +105,7 @@
 	}
 
 	function hasProcessingCollections(items: Collection[]) {
-		return items.some((collection) => getStatusGroup(collection.status) === 'processing');
+		return items.some((collection) => getCollectionStatusGroup(collection) === 'processing');
 	}
 
 	function scheduleCollectionPoll() {
@@ -217,63 +218,49 @@
 		return $t('home.metricsPlaceholder');
 	}
 
-	function getStatusGroup(status?: string | null) {
-		const normalized = status?.toLowerCase() ?? '';
-		if (['processing', 'running', 'queued', 'started', 'in_progress'].includes(normalized)) {
-			return 'processing';
-		}
-		if (['attention_required', 'failed', 'partial_success'].includes(normalized)) {
-			return 'attention';
-		}
-		if (
-			normalized === 'ready' ||
-			normalized === 'completed' ||
-			normalized === 'complete' ||
-			normalized === 'success' ||
-			normalized === 'graph_ready' ||
-			normalized === 'document_profiled' ||
-			normalized === 'comparison_pending' ||
-			normalized === 'partial_ready'
-		) {
-			return 'complete';
-		}
-		return 'neutral';
-	}
-
-	function matchesStatusFilter(status: string | null | undefined, filter: StatusFilter) {
+	function matchesStatusFilter(collection: Collection, filter: StatusFilter) {
 		if (filter === 'all') return true;
-		return getStatusGroup(status) === filter;
+		return getCollectionStatusGroup(collection) === filter;
 	}
 
-	function statusLabel(status?: string | null) {
-		const group = getStatusGroup(status);
+	function statusLabel(collection: Collection) {
+		const group = getCollectionStatusGroup(collection);
 		if (group === 'complete') return $t('home.statusDisplay.complete');
+		if (group === 'ready') return $t('home.statusDisplay.ready');
 		if (group === 'processing') return $t('home.statusDisplay.processing');
 		if (group === 'attention') return $t('home.statusDisplay.attention');
 		return $t('home.statusDisplay.pending');
 	}
 
 	function buildActionLabel(collection: Collection) {
-		const group = getStatusGroup(collection.status);
+		const group = getCollectionStatusGroup(collection);
 		if (group === 'processing') return $t('home.actionProcessing');
+		if (group === 'ready') return $t('home.actionReady');
 		if (group === 'complete' || group === 'attention') return $t('home.actionRetryProcessing');
 		return $t('home.actionStartProcessing');
 	}
 
 	function isBuildActionDisabled(collection: Collection) {
-		return getStatusGroup(collection.status) === 'processing' || !collection.paper_count;
+		const group = getCollectionStatusGroup(collection);
+		return group === 'processing' || group === 'ready' || !collection.paper_count;
 	}
 
 	function buildActionTitle(collection: Collection) {
 		if (!collection.paper_count) return $t('home.indexNoFiles');
-		if (getStatusGroup(collection.status) === 'processing') return $t('home.actionProcessing');
+		const group = getCollectionStatusGroup(collection);
+		if (group === 'processing') return $t('home.actionProcessing');
+		if (group === 'ready') return $t('home.actionReadyTitle');
 		return buildActionLabel(collection);
 	}
 
 	function nextStep(collection: Collection) {
-		const group = getStatusGroup(collection.status);
+		const group = getCollectionStatusGroup(collection);
 		if (group === 'processing') {
 			return $t('home.nextProgress');
+		}
+
+		if (group === 'ready') {
+			return $t('home.nextWorkspace');
 		}
 
 		if (group === 'complete') {
@@ -479,7 +466,7 @@
 				<tbody>
 					{#each visibleCollections as collection (collection.id)}
 						{@const step = nextStep(collection)}
-						{@const statusGroup = getStatusGroup(collection.status)}
+						{@const statusGroup = getCollectionStatusGroup(collection)}
 						<tr>
 							<td>
 								<div class="collection-main">
@@ -492,12 +479,12 @@
 							<td>
 								<span
 									class="status-badge"
-									class:complete={statusGroup === 'complete'}
+									class:complete={statusGroup === 'complete' || statusGroup === 'ready'}
 									class:processing={statusGroup === 'processing'}
 									class:attention={statusGroup === 'attention'}
 									class:neutral={statusGroup === 'neutral'}
 								>
-									{statusLabel(collection.status)}
+									{statusLabel(collection)}
 								</span>
 							</td>
 							<td>{formatCount(collection.paper_count)}</td>
@@ -576,7 +563,7 @@
 		<div class="collection-list">
 			{#each visibleCollections as collection (collection.id)}
 				{@const step = nextStep(collection)}
-				{@const statusGroup = getStatusGroup(collection.status)}
+				{@const statusGroup = getCollectionStatusGroup(collection)}
 				<article class="collection-list-card">
 					<div class="collection-list-card__header">
 						<div class="collection-main">
@@ -587,12 +574,12 @@
 						</div>
 						<span
 							class="status-badge"
-							class:complete={statusGroup === 'complete'}
+							class:complete={statusGroup === 'complete' || statusGroup === 'ready'}
 							class:processing={statusGroup === 'processing'}
 							class:attention={statusGroup === 'attention'}
 							class:neutral={statusGroup === 'neutral'}
 						>
-							{statusLabel(collection.status)}
+							{statusLabel(collection)}
 						</span>
 					</div>
 					<div class="collection-list-card__meta">

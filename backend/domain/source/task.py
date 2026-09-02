@@ -6,27 +6,6 @@ from typing import Any, Mapping
 from domain.pipeline import PipelineNodeRun
 
 
-_TASK_FIELDS = {
-    "task_id",
-    "collection_id",
-    "document_id",
-    "task_type",
-    "mode",
-    "input_fingerprint",
-    "status",
-    "current_stage",
-    "progress_percent",
-    "progress_detail",
-    "output_path",
-    "errors",
-    "warnings",
-    "created_at",
-    "updated_at",
-    "started_at",
-    "finished_at",
-}
-
-
 @dataclass(frozen=True)
 class TaskRecord:
     task_id: str
@@ -37,7 +16,6 @@ class TaskRecord:
     current_stage: str
     progress_percent: int
     progress_detail: Mapping[str, Any] | None
-    output_path: str | None
     errors: tuple[str, ...]
     warnings: tuple[str, ...]
     created_at: str
@@ -52,6 +30,7 @@ class TaskRecord:
     def from_mapping(cls, payload: Mapping[str, Any]) -> "TaskRecord":
         source = dict(payload)
         progress_detail = source.get("progress_detail")
+        details = source.get("details")
         return cls(
             task_id=str(source["task_id"]),
             collection_id=str(source["collection_id"]),
@@ -65,46 +44,39 @@ class TaskRecord:
             progress_detail=(
                 dict(progress_detail) if isinstance(progress_detail, Mapping) else None
             ),
-            output_path=_optional_text(source.get("output_path")),
             errors=tuple(str(item) for item in source.get("errors") or ()),
             warnings=tuple(str(item) for item in source.get("warnings") or ()),
             created_at=str(source["created_at"]),
             updated_at=str(source["updated_at"]),
             started_at=_optional_text(source.get("started_at")),
             finished_at=_optional_text(source.get("finished_at")),
-            details={
-                key: value for key, value in source.items() if key not in _TASK_FIELDS
-            },
+            details=dict(details) if isinstance(details, Mapping) else {},
         )
 
     def to_record(self) -> dict[str, Any]:
-        record = dict(self.details)
-        record.update(
-            {
-                "task_id": self.task_id,
-                "collection_id": self.collection_id,
-                "document_id": self.document_id,
-                "task_type": self.task_type,
-                "mode": self.mode,
-                "input_fingerprint": self.input_fingerprint,
-                "status": self.status,
-                "current_stage": self.current_stage,
-                "progress_percent": self.progress_percent,
-                "progress_detail": (
-                    dict(self.progress_detail)
-                    if self.progress_detail is not None
-                    else None
-                ),
-                "output_path": self.output_path,
-                "errors": list(self.errors),
-                "warnings": list(self.warnings),
-                "created_at": self.created_at,
-                "updated_at": self.updated_at,
-                "started_at": self.started_at,
-                "finished_at": self.finished_at,
-            }
-        )
-        return record
+        return {
+            "task_id": self.task_id,
+            "collection_id": self.collection_id,
+            "document_id": self.document_id,
+            "task_type": self.task_type,
+            "mode": self.mode,
+            "input_fingerprint": self.input_fingerprint,
+            "status": self.status,
+            "current_stage": self.current_stage,
+            "progress_percent": self.progress_percent,
+            "progress_detail": (
+                dict(self.progress_detail)
+                if self.progress_detail is not None
+                else None
+            ),
+            "errors": list(self.errors),
+            "warnings": list(self.warnings),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "details": dict(self.details),
+        }
 
 
 @dataclass(frozen=True)

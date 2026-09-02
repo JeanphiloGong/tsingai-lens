@@ -69,7 +69,7 @@ def _message() -> ChatMessage:
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v11"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v13"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -87,6 +87,14 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "inspect the exact complete Finding" in prompt
     assert "does not create a new Finding" in prompt
     assert "Never reconstruct a complete Finding from a summary" in prompt
+    assert "record or correct Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "exact complete Source" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "create_evidence_version" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Source-to-Evidence write" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "analysis authored by you" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "publish_agent_objective_analysis" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "publishes no Finding" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Never expose hidden chain-of-thought" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert (
         "Creating a research question and starting its analysis"
         in RESEARCH_AGENT_SYSTEM_PROMPT

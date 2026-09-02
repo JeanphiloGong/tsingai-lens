@@ -53,6 +53,7 @@ class FindingAuthoringService:
         parent_finding_id: str | None,
         abstention_reason: str | None,
         created_by_user_id: str,
+        created_by_tool_call_id: str | None = None,
     ) -> FindingAuthoringResult:
         await self.collection_service.get_collection_for_user(
             collection_id, created_by_user_id
@@ -144,6 +145,7 @@ class FindingAuthoringService:
                 limitations=limitations,
                 parent_finding_id=parent_finding_id,
                 created_by_user_id=created_by_user_id,
+                created_by_tool_call_id=created_by_tool_call_id,
                 created_at=now,
                 evidence_records=evidence_records,
                 contributions=contributions,
@@ -176,9 +178,18 @@ class FindingAuthoringService:
             started_at=now,
             completed_at=now,
             diagnostics=source_analysis.diagnostics,
-            origin="hybrid" if source_findings else "human_authored",
+            origin=(
+                "hybrid"
+                if source_findings
+                else (
+                    "agent_authored"
+                    if created_by_tool_call_id
+                    else "human_authored"
+                )
+            ),
             source_analysis_version=source_analysis_version,
             created_by_user_id=created_by_user_id,
+            created_by_tool_call_id=created_by_tool_call_id,
             abstention_reason=abstention_reason,
             abstention_note=abstention_note,
         )
@@ -214,6 +225,7 @@ class FindingAuthoringService:
         limitations: tuple[str, ...],
         parent_finding_id: str | None,
         created_by_user_id: str,
+        created_by_tool_call_id: str | None,
         created_at: datetime,
         evidence_records: tuple[ObjectiveEvidence, ...],
         contributions: tuple[PaperContribution, ...],
@@ -329,10 +341,19 @@ class FindingAuthoringService:
             scientific_context=Finding.common_scientific_context_for(supporting),
             limitations=self._clean_text(limitations),
             paper_contributions=paper_bindings,
-            origin="hybrid" if parent_finding_id else "human_authored",
+            origin=(
+                "hybrid"
+                if parent_finding_id
+                else (
+                    "agent_authored"
+                    if created_by_tool_call_id
+                    else "human_authored"
+                )
+            ),
             source_analysis_version=source_analysis_version,
             parent_finding_id=parent_finding_id,
             created_by_user_id=created_by_user_id,
+            created_by_tool_call_id=created_by_tool_call_id,
             created_at=created_at,
         )
         finding.validate_sources(evidence_records, contributions)

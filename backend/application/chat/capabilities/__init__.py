@@ -4,6 +4,12 @@ from application.chat.capabilities.contracts import (
     CapabilityHandler,
     ToolSpec,
 )
+from application.chat.capabilities.agent_objective_analysis import (
+    AgentEvidenceDraftArguments,
+    AgentPaperSummaryArguments,
+    PublishAgentObjectiveAnalysisArguments,
+    PublishAgentObjectiveAnalysisCapability,
+)
 from application.chat.capabilities.collection_context import (
     GetCollectionContextArguments,
     GetCollectionContextCapability,
@@ -21,6 +27,10 @@ from application.chat.capabilities.finding_review import (
 from application.chat.capabilities.finding_authoring import (
     CreateFindingVersionArguments,
     CreateFindingVersionCapability,
+)
+from application.chat.capabilities.evidence_authoring import (
+    CreateEvidenceVersionArguments,
+    CreateEvidenceVersionCapability,
 )
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
@@ -59,11 +69,15 @@ from application.chat.capabilities.registry import CapabilityRegistry
 
 __all__ = [
     "AgentContext",
+    "AgentEvidenceDraftArguments",
+    "AgentPaperSummaryArguments",
     "CapabilityExecutionContext",
     "CapabilityHandler",
     "CapabilityRegistry",
     "CreateFindingVersionArguments",
     "CreateFindingVersionCapability",
+    "CreateEvidenceVersionArguments",
+    "CreateEvidenceVersionCapability",
     "CreateObjectiveCandidateArguments",
     "CreateObjectiveCandidateCapability",
     "CurateFindingArguments",
@@ -83,6 +97,8 @@ __all__ = [
     "ProposeObjectiveDraftsCapability",
     "PreviewResearchScopeArguments",
     "PreviewResearchScopeCapability",
+    "PublishAgentObjectiveAnalysisArguments",
+    "PublishAgentObjectiveAnalysisCapability",
     "QueryPublishedFindingsArguments",
     "QueryPublishedFindingsCapability",
     "RecordFindingFeedbackArguments",

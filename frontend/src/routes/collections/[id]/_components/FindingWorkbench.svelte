@@ -19,6 +19,10 @@
 	export let collectionId = '';
 	export let documentTitles: Record<string, string> = {};
 	export let onDerive: (finding: ObjectiveFinding) => void = () => {};
+	export let onAuthorEvidence: (
+		item: ObjectiveEvidence,
+		mode: 'create' | 'revise'
+	) => void = () => {};
 
 	type SharedComparisonRow = {
 		evidence: ObjectiveEvidence;
@@ -470,6 +474,7 @@
 
 	function originLabel(value: ObjectiveFinding['origin'] | undefined) {
 		if (value === 'human_authored') return '研究者创建';
+		if (value === 'agent_authored') return 'Agent 分析';
 		if (value === 'hybrid') return '研究者修订';
 		return '系统分析';
 	}
@@ -533,6 +538,19 @@
 	function evidenceAttributionLabel(value: ObjectiveEvidence['attribution_scope']) {
 		if (value === 'not_attributable') return '不可归因';
 		return attributionLabel(value);
+	}
+
+	function evidenceOriginLabel(item: ObjectiveEvidence) {
+		const origin =
+			item.origin === 'human_authored'
+				? '研究者创建'
+				: item.origin === 'agent_authored'
+					? 'Agent 分析'
+				: item.origin === 'human_revised'
+					? '研究者修订'
+					: '系统提取';
+		if (item.superseded_by_evidence_id) return `${origin} · 已有更新版本`;
+		return origin;
 	}
 
 	function resetFeedback() {
@@ -836,6 +854,24 @@
 																		<summary>查看摘录</summary>
 																		<blockquote>{row.evidence.source_excerpt}</blockquote>
 																	</details>
+																	<div class="evidence-author-actions">
+																		{#if row.evidence.superseded_by_evidence_id}
+																			<span class="evidence-revision-status">已有更新版本</span>
+																		{:else}
+																			<button
+																				class="btn btn--ghost btn--small"
+																				type="button"
+																				on:click={() => onAuthorEvidence(row.evidence, 'revise')}
+																				>修订 Evidence</button
+																			>
+																		{/if}
+																		<button
+																			class="btn btn--ghost btn--small"
+																			type="button"
+																			on:click={() => onAuthorEvidence(row.evidence, 'create')}
+																			>从此来源新建</button
+																		>
+																	</div>
 																</div>
 															</td>
 														</tr>
@@ -857,7 +893,26 @@
 															>{/if}
 														<span>{evidenceRoleLabel(item.evidence_role)}</span>
 														<span>{evidenceAttributionLabel(item.attribution_scope)}</span>
+														<span>{evidenceOriginLabel(item)}</span>
 														<a href={resolve(sourceHref(item))}>打开原文</a>
+														<div class="evidence-author-actions">
+															{#if item.superseded_by_evidence_id}
+																<span class="evidence-revision-status">已有更新版本</span>
+															{:else}
+																<button
+																	class="btn btn--ghost btn--small"
+																	type="button"
+																	on:click={() => onAuthorEvidence(item, 'revise')}
+																	>修订 Evidence</button
+																>
+															{/if}
+															<button
+																class="btn btn--ghost btn--small"
+																type="button"
+																on:click={() => onAuthorEvidence(item, 'create')}
+																>从此来源新建</button
+															>
+														</div>
 													</div>
 													<blockquote>{item.source_excerpt}</blockquote>
 												</article>
@@ -1275,6 +1330,12 @@
 		max-width: 520px;
 		color: var(--text-primary);
 	}
+	.evidence-author-actions {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin-top: 6px;
+	}
 	.evidence-list {
 		display: grid;
 		gap: 10px;
@@ -1301,6 +1362,13 @@
 	.evidence-meta a {
 		margin-left: auto;
 		color: var(--accent);
+	}
+	.evidence-meta .evidence-author-actions {
+		width: 100%;
+	}
+	.evidence-revision-status {
+		color: var(--text-secondary);
+		font-size: 12px;
 	}
 	blockquote {
 		margin: 10px 0 0;

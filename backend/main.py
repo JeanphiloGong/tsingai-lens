@@ -17,6 +17,7 @@ from application.chat import (
 )
 from application.chat.capabilities import (
     CreateFindingVersionCapability,
+    CreateEvidenceVersionCapability,
     CreateObjectiveCandidateCapability,
     CurateFindingCapability,
     GetCollectionContextCapability,
@@ -26,11 +27,13 @@ from application.chat.capabilities import (
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
+    PublishAgentObjectiveAnalysisCapability,
     QueryPublishedFindingsCapability,
     RecordFindingFeedbackCapability,
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
+from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
@@ -38,6 +41,12 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.agent_analysis_service import (
+    AgentObjectiveAnalysisService,
+)
+from application.core.objectives.evidence_authoring_service import (
+    EvidenceAuthoringService,
+)
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
@@ -121,6 +130,8 @@ logger = setup_logger("lens")
 
 PUBLIC_API_PREFIX = "/api"
 PUBLIC_API_V1_PREFIX = f"{PUBLIC_API_PREFIX}/v1"
+_DEFAULT_AGENT_MAX_MODEL_STEPS = 6
+_MAX_AGENT_MAX_MODEL_STEPS = 32
 _AUTH_EXEMPT_PATHS = {
     f"{PUBLIC_API_V1_PREFIX}/auth/login",
     f"{PUBLIC_API_V1_PREFIX}/auth/logout",
@@ -132,6 +143,30 @@ def _parse_cors_allowed_origins() -> list[str]:
     if not raw:
         return []
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def _parse_agent_max_model_steps() -> int:
+    raw = os.getenv("LENS_AGENT_MAX_MODEL_STEPS", "").strip()
+    if not raw:
+        return _DEFAULT_AGENT_MAX_MODEL_STEPS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid LENS_AGENT_MAX_MODEL_STEPS=%s; using default=%s",
+            raw,
+            _DEFAULT_AGENT_MAX_MODEL_STEPS,
+        )
+        return _DEFAULT_AGENT_MAX_MODEL_STEPS
+    if not 1 <= value <= _MAX_AGENT_MAX_MODEL_STEPS:
+        logger.warning(
+            "Unsafe LENS_AGENT_MAX_MODEL_STEPS=%s; expected 1..%s, using default=%s",
+            raw,
+            _MAX_AGENT_MAX_MODEL_STEPS,
+            _DEFAULT_AGENT_MAX_MODEL_STEPS,
+        )
+        return _DEFAULT_AGENT_MAX_MODEL_STEPS
+    return value
 
 
 AppLifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -184,6 +219,7 @@ class ApplicationRuntime:
     finding_review_repository: FindingReviewRepository
     finding_feedback_service: FindingFeedbackService
     finding_authoring_service: FindingAuthoringService
+    evidence_authoring_service: EvidenceAuthoringService
     document_profile_service: DocumentProfileService
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
@@ -279,6 +315,16 @@ async def build_application_runtime(
             collection_service=collection_service,
             objective_repository=objective_repository,
         )
+        evidence_authoring_service = EvidenceAuthoringService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+            source_artifact_repository=source_artifact_repository,
+        )
+        agent_analysis_service = AgentObjectiveAnalysisService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+            source_artifact_repository=source_artifact_repository,
+        )
         research_objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
@@ -304,11 +350,13 @@ async def build_application_runtime(
         )
 
         if overrides.chat_session_service is None:
+            chat_model = OpenAIChatModel()
             chat_session_service = ChatSessionService(
                 collection_service=collection_service,
                 repository=chat_repository,
                 runner=ResearchAgentRunner(
-                    model=OpenAIChatModel(),
+                    model=chat_model,
+                    max_model_steps=_parse_agent_max_model_steps(),
                     capabilities=CapabilityRegistry(
                         (
                             GetCollectionContextCapability(
@@ -349,6 +397,14 @@ async def build_application_runtime(
                             CreateFindingVersionCapability(
                                 finding_authoring_service=finding_authoring_service,
                             ),
+                            CreateEvidenceVersionCapability(
+                                evidence_authoring_service=evidence_authoring_service,
+                            ),
+                            PublishAgentObjectiveAnalysisCapability(
+                                agent_analysis_service=agent_analysis_service,
+                                model_name=chat_model.model,
+                                prompt_version=RESEARCH_AGENT_PROMPT_VERSION,
+                            ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
@@ -387,6 +443,7 @@ async def build_application_runtime(
             finding_review_repository=finding_review_repository,
             finding_feedback_service=finding_feedback_service,
             finding_authoring_service=finding_authoring_service,
+            evidence_authoring_service=evidence_authoring_service,
             document_profile_service=document_profile_service,
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
@@ -421,6 +478,7 @@ def install_application_runtime(
     application.state.finding_review_repository = runtime.finding_review_repository
     application.state.finding_feedback_service = runtime.finding_feedback_service
     application.state.finding_authoring_service = runtime.finding_authoring_service
+    application.state.evidence_authoring_service = runtime.evidence_authoring_service
     application.state.document_profile_service = runtime.document_profile_service
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service
@@ -596,7 +654,7 @@ def create_app(
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.12.16",
+        version="0.12.17",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

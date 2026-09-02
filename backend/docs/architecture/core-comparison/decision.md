@@ -9,8 +9,9 @@ The maintained rule is:
 
 `Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`
 
-Comparison rows, comparable results, Evidence cards, Materials, and Graph
-projections cannot become a parallel conclusion identity.
+The retired comparison rows, comparable results, collection overlays, Evidence
+cards, Materials, and Graph projections cannot become a parallel conclusion
+identity.
 
 ## Accepted Boundaries
 
@@ -21,62 +22,20 @@ projections cannot become a parallel conclusion identity.
 - Legacy comparison records are removed rather than retained as a second
   persistence model.
 
-## Object Responsibilities
+## Current Scientific Objects
 
-### Paper Facts
+- `ObjectiveEvidence` records one versioned, Source-grounded fact relevant to
+  a confirmed research question.
+- `ObjectiveEvidenceComparison` records whether that Evidence contains a
+  grounded within-paper comparison and the limits of that comparison.
+- `Finding` records the published cross-paper conclusion and its uncertainty.
 
-Paper-fact objects answer what one document reported.
-
-They remain owned by:
-
-- [`../../../domain/core/evidence_backbone.py`](../../../domain/core/evidence_backbone.py)
-
-### Comparable Results
-
-`ComparableResult` carries the normalized comparison-semantic unit built from
-paper facts plus comparison context.
-
-It must:
-
-- preserve one-document provenance through `source_document_id`
-- carry normalized comparison context and evidence traceability
-- stay reusable across collections
-
-It must not:
-
-- carry `collection_id`
-- hide collection-specific judgment inside the base semantic object
-- depend on row identity
-
-### Collection-Scoped Overlays
-
-`CollectionComparableResult` carries the working-set layer for one collection.
-
-It owns:
-
-- collection-specific assessment
-- inclusion and sort order
-- policy family and policy version
-- normalization-version and reassessment metadata
-
-### Row Projection
-
-`ComparisonRowRecord` is retired. Published Finding and ObjectiveEvidence
-records are the evaluation and export inputs.
-
-## Identity Rules
-
-- `comparable_result_id` belongs to the reusable semantic unit and must be
-  deterministic from semantic inputs
-- `row_id` belongs to the collection-facing projection and must be deterministic
-  from scope-level inputs plus projection version
-- collection identity belongs on `CollectionComparableResult`, not on the base
-  semantic object
+Published Finding and ObjectiveEvidence records are the evaluation and export
+inputs. They do not depend on a comparison row, comparable result, collection
+overlay, or material-first reassessment policy.
 
 ## Ownership Rules
 
-- domain invariants and comparison dataclasses stay in
-  [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
 - no comparison repository or compatibility read remains
 - current HTTP resources are defined only by
   [`../../specs/api.md`](../../specs/api.md)
@@ -85,7 +44,7 @@ records are the evaluation and export inputs.
 
 - no compatibility route for retired comparison resources
 - no hidden Finding reconstruction in exports or browser clients
-- no generic service layer added only to preserve old ownership
+- no material-first comparison substrate or compatibility layer
 
 Earlier field-level boundaries remain available in Git history when needed for
 offline data archaeology.

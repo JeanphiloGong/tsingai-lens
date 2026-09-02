@@ -52,7 +52,9 @@ preparation command queues only the named Document; it does not prepare other
 Collection members or discover Objectives. Paper Map construction is a lazy
 Objective-core operation over an explicit ready-document selection. Task
 responses expose `document_id`, input fingerprint, current stage, progress,
-terminal error, and retry-appropriate status.
+warnings, terminal errors, timestamps, and retry-appropriate status. Tasks do
+not expose a filesystem output path; scientific artifacts are addressed by
+their owning Document, Objective, analysis, Finding, or Evidence identities.
 
 At most one `document_preparation` task may be queued or running for a Document.
 Repeated requests reuse that active task. A completed task is reusable only when
@@ -153,9 +155,12 @@ The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
-  complete table Markdown, and figure captions through exact or focused,
-  paginated Source filters. It returns canonical Document and Source links;
-  matched content remains inspection material rather than verified Evidence;
+  bounded table Markdown, and figure captions through exact or focused,
+  paginated Source filters. Each Source includes a digest of its complete
+  canonical content and a `content_truncated` flag; callers must not treat a
+  truncated quote as the complete Source. It returns canonical Document and
+  Source links; matched content remains inspection material rather than
+  verified Evidence;
 - `inspect_research_process` reads each current Document and its latest
   preparation task. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,
@@ -213,6 +218,19 @@ The production Research Agent currently exposes these automatic capabilities:
   exact approved ready `document_ids`. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
+- `publish_agent_objective_analysis` is a separate `write` capability for the
+  case where the researcher explicitly asks the Agent itself to analyze a
+  bounded paper scope. Before proposing the write, the Agent reads exact
+  Sources through `inspect_document_sources` over one or more turns. The
+  approved payload contains one summary and at least one structured Evidence
+  draft for every selected ready Document. The backend revalidates each Source
+  locator, complete-content SHA-256 digest, normalized verbatim excerpt, and
+  Evidence contract before allocating a version. It then publishes one
+  `agent_authored` analysis through the existing repository queue, claim, and
+  atomic publication lifecycle. The version contains PaperContributions and
+  Evidence but no Finding; any conclusion requires a later approved
+  `create_finding_version` call. This capability has no separate HTTP endpoint,
+  draft store, background extraction, or Finding-synthesis call;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work.
@@ -338,6 +356,13 @@ or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens
 from prompt or response text.
 
+Analysis responses also expose their authoring lineage. `origin` distinguishes
+`system_generated`, `human_authored`, `agent_authored`, and `hybrid` versions;
+`created_by_user_id` identifies the accountable researcher and the optional
+`created_by_tool_call_id` links an Agent-authored version to the approved Chat
+tool call. These fields record authorship only and do not make a statement or
+Source into verified Evidence.
+
 `POST .../analysis` accepts the same required `{"document_ids": [...]}` shape
 as discovery and expresses researcher approval of both the Objective definition
 and the selected ready-paper analysis scope.
@@ -367,10 +392,13 @@ and source-backed Evidence were published but no defensible comparison
 survived; this is a scientific abstention, not a technical failure. The Finding
 list then returns `total=0` without a placeholder Finding.
 
-`ObjectiveAnalysisService` owns queue-and-dispatch for both this HTTP command
-and the Research Agent capability. This keeps confirmation, version allocation,
-the process-local concurrency limit, dispatch-failure persistence, retry, and
-published-state semantics identical for both consumers.
+`ObjectiveAnalysisService` owns queue-and-dispatch for this HTTP command and
+the Agent's automatic `start_objective_analysis` capability. Direct
+Agent-authored analysis does not call that extraction pipeline; its application
+service revalidates the approved Source-grounded payload and uses the same
+Objective repository queue, claim, failure, and publication transitions.
+Both commands therefore share confirmation, version allocation, active-version
+exclusion, and published-pointer semantics without sharing scientific authorship.
 
 Every version stores ordered `document_inputs` containing `document_id` and
 `preparation_fingerprint`. Execution checks these fingerprints against the
@@ -411,6 +439,7 @@ list.
 ### Published Findings And Evidence
 
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
+- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
@@ -421,11 +450,20 @@ include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
 
-The POST command records one deliberate researcher Evidence decision. It never
-inserts into the published source version. The request identifies that current
-`source_analysis_version`, assigns existing version-local Evidence to support,
-contradiction, context, and optional condition-boundary roles, and supplies a
-statement, assertion strength, limitations, and optional `parent_finding_id`.
+Each Finding and Evidence record exposes its `origin`, optional
+`created_by_user_id`, and optional `created_by_tool_call_id`. The tool-call field
+is populated for an `agent_authored` record and for an Agent-assisted revision;
+it is `null` for system-generated and ordinary direct human-authored records.
+It is durable authoring provenance, not scientific support; Evidence remains
+grounded through its Source identity and a Finding remains supported through
+its version-local Evidence bindings.
+
+The Findings POST command records one deliberate researcher Evidence-to-Finding
+decision. It never inserts into the published source version. The request
+identifies that current `source_analysis_version`, assigns existing
+version-local Evidence to support, contradiction, context, and optional
+condition-boundary roles, and supplies a statement, assertion strength,
+limitations, and optional `parent_finding_id`.
 The authenticated user identity is server-derived. Paper coverage, factors,
 outcome, direction, attribution, synthesis status, certainty, target version,
 and Source content are also server-derived and cannot be supplied by the
@@ -463,6 +501,29 @@ unowned collections and missing Objectives return `404`; stale source versions,
 concurrent analysis, unknown or ineligible Evidence, and scientifically
 inconsistent role selections return `409`; malformed request shapes return
 `422`.
+
+The Evidence POST command records one source-grounded Evidence decision from a
+specific prepared Document Source. It accepts `source_analysis_version`,
+`document_id`, `source_kind` (`text_window | table | figure`), `source_ref`, an
+exact `source_excerpt`, an Evidence role, optional changed variables,
+comparison, reported result, attribution scope, and scientific context. The
+server checks collection ownership, the published analysis version, the
+analysis document scope, the Source locator, and that the normalized excerpt
+is a substring of the canonical Source. It derives identity, page, resolution,
+confidence, and creator provenance. The browser cannot provide a creator,
+analysis target version, or Source outside the selected analysis.
+
+An Evidence correction never overwrites the old record. Supplying
+`supersedes_evidence_id` must refer to the current Evidence at the same Source
+locator; publication clones the complete source snapshot into the next
+immutable analysis version, marks the old record as superseded, and leaves old
+Findings pointing at their original Evidence. A successful command returns
+`201` with the new analysis and Evidence. Stale versions, running analyses,
+unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
+already superseded record return `409`; malformed scientific shapes return
+`422`. The Research Agent exposes the same operation as the approved
+`create_evidence_version` write capability and must supply the digest returned
+by `inspect_document_sources`; it does not create a second Evidence identity.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns

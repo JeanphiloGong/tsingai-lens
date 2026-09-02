@@ -111,6 +111,69 @@ class _Service:
         }
 
 
+class _EvidenceAuthoringService:
+    def __init__(self) -> None:
+        self.authoring_kwargs = None
+
+    async def create_version(self, **kwargs):
+        from application.core.objectives.evidence_authoring_service import (
+            EvidenceAuthoringResult,
+        )
+
+        self.authoring_kwargs = kwargs
+        analysis = ObjectiveAnalysis.from_mapping(
+            {
+                "collection_id": kwargs["collection_id"],
+                "objective_id": kwargs["objective_id"],
+                "analysis_version": 2,
+                "document_inputs": [
+                    {
+                        "document_id": kwargs["document_id"],
+                        "preparation_fingerprint": "fingerprint-1",
+                    }
+                ],
+                "pipeline_version": "test.v1",
+                "model_name": "model-1",
+                "prompt_versions": {},
+                "status": "succeeded",
+                "phase": "completed",
+                "processed_document_count": 1,
+                "total_document_count": 1,
+                "origin": "hybrid",
+                "source_analysis_version": 1,
+                "created_by_user_id": kwargs["created_by_user_id"],
+            }
+        )
+        evidence = ObjectiveEvidence.from_mapping(
+            {
+                "collection_id": kwargs["collection_id"],
+                "objective_id": kwargs["objective_id"],
+                "analysis_version": 2,
+                "evidence_id": "evidence-manual-1",
+                "document_id": kwargs["document_id"],
+                "source_kind": kwargs["source_kind"],
+                "source_ref": kwargs["source_ref"],
+                "source_excerpt": kwargs["source_excerpt"],
+                "page_numbers": [7],
+                "evidence_role": kwargs["evidence_role"],
+                "selection_status": "extracted",
+                "changed_variables": kwargs["changed_variables"],
+                "comparison": kwargs["comparison"],
+                "reported_result": kwargs["reported_result"],
+                "attribution_scope": kwargs["attribution_scope"],
+                "scientific_context": kwargs["scientific_context"],
+                "resolution_status": "resolved",
+                "confidence": 1,
+                "origin": "human_authored",
+                "source_analysis_version": 1,
+                "created_by_user_id": kwargs["created_by_user_id"],
+                "created_at": "2026-09-01T00:00:00+00:00",
+                "authoring_note": kwargs["authoring_note"],
+            }
+        )
+        return EvidenceAuthoringResult(analysis=analysis, evidence=evidence)
+
+
 def _dataset(collection_id: str, objective_id: str | None) -> dict:
     finding = _finding_record()
     evidence = _evidence_record()
@@ -224,11 +287,15 @@ def _evidence_record() -> dict:
     ).to_record()
 
 
-def _client(service: _Service | None = None) -> TestClient:
+def _client(
+    service: _Service | None = None,
+    evidence_service: _EvidenceAuthoringService | None = None,
+) -> TestClient:
     app = FastAPI()
     resolved = service or _Service()
     app.state.finding_feedback_service = resolved
     app.state.finding_authoring_service = resolved
+    app.state.evidence_authoring_service = evidence_service or _EvidenceAuthoringService()
 
     @app.middleware("http")
     async def authenticated(request, call_next):
@@ -273,6 +340,83 @@ def test_author_finding_api_rejects_unbacked_statement() -> None:
             "statement": "Temperature changes strength.",
             "assertion_strength": "associative",
             "supporting_evidence_ids": [],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_author_evidence_api_uses_authenticated_creator_and_structured_source() -> None:
+    service = _EvidenceAuthoringService()
+    response = _client(evidence_service=service).post(
+        "/collections/col-1/objectives/obj-1/evidence",
+        json={
+            "source_analysis_version": 1,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-7",
+            "source_excerpt": "At 500 C, strength reached 620 MPa.",
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 400,
+                    "target_value": 500,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "400 C",
+                "target_label": "500 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "baseline_value": 580,
+                "target_value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "At 500 C, strength reached 620 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
+            "authoring_note": "Verified against Results.",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["analysis"]["analysis_version"] == 2
+    assert response.json()["evidence"]["origin"] == "human_authored"
+    assert response.json()["evidence"]["supports_finding"] is True
+    assert service.authoring_kwargs is not None
+    assert service.authoring_kwargs["created_by_user_id"] == "user-researcher"
+    assert service.authoring_kwargs["changed_variables"][0]["name"] == "temperature"
+
+
+def test_author_evidence_api_rejects_oversized_or_unknown_input() -> None:
+    response = _client().post(
+        "/collections/col-1/objectives/obj-1/evidence",
+        json={
+            "source_analysis_version": 1,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-7",
+            "source_excerpt": "quote",
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": None,
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {"material": [], "sample": [], "process": [], "test": []},
+            "unexpected": "must be rejected",
         },
     )
 

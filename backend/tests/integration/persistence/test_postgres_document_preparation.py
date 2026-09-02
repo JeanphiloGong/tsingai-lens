@@ -73,7 +73,6 @@ def _task(task_id: str, fingerprint: str) -> TaskRecord:
         current_stage="queued",
         progress_percent=0,
         progress_detail=None,
-        output_path=None,
         errors=(),
         warnings=(),
         created_at=NOW,

@@ -179,7 +179,6 @@ def _task_row(record: TaskRecord) -> Task:
         progress_detail=(
             dict(record.progress_detail) if record.progress_detail is not None else None
         ),
-        output_path=record.output_path,
         errors=list(record.errors),
         warnings=list(record.warnings),
         details=dict(record.details),
@@ -202,7 +201,6 @@ def _update_task_row(row: Task, record: TaskRecord) -> None:
     row.progress_detail = (
         dict(record.progress_detail) if record.progress_detail is not None else None
     )
-    row.output_path = record.output_path
     row.errors = list(record.errors)
     row.warnings = list(record.warnings)
     row.details = dict(record.details)
@@ -225,7 +223,6 @@ def _task_record(row: Task) -> TaskRecord:
         progress_detail=(
             dict(row.progress_detail) if row.progress_detail is not None else None
         ),
-        output_path=row.output_path,
         errors=tuple(row.errors or ()),
         warnings=tuple(row.warnings or ()),
         details=dict(row.details or {}),

@@ -67,6 +67,7 @@ const translations: Record<Language, Translations> = {
 			filter: {
 				all: 'All status',
 				complete: 'Complete',
+				ready: 'Documents ready',
 				processing: 'Processing',
 				attention: 'Attention'
 			},
@@ -85,6 +86,7 @@ const translations: Record<Language, Translations> = {
 			statusUnknown: 'Unknown',
 			statusDisplay: {
 				complete: 'Complete',
+				ready: 'Documents ready',
 				processing: 'Processing',
 				attention: 'Needs attention',
 				pending: 'Pending'
@@ -111,6 +113,8 @@ const translations: Record<Language, Translations> = {
 			actionStartProcessing: 'Start processing',
 			actionRetryProcessing: 'Retry processing',
 			actionProcessing: 'Processing',
+			actionReady: 'Ready',
+			actionReadyTitle: 'Documents are already ready',
 			actionDelete: 'Delete',
 			indexing: 'Starting processing...',
 			indexStarted: 'Processing started',
@@ -219,16 +223,42 @@ const translations: Record<Language, Translations> = {
 			emptyHistory: 'No conversations yet',
 			untitledSession: 'New conversation',
 			currentCollection: 'Current collection',
-			openWorkspace: 'Open workspace',
+			backToWorkspace: 'Back to workspace',
 			loading: 'Loading conversation...',
 			headerPrefix: 'Collection',
 			objectiveScope: 'Open selected objective',
-			emptyTitle: 'Start with a research question',
-			emptyBody: 'Ask a question or request a collection-backed research action.',
+			welcomeEyebrow: 'Your literature research workspace',
+			emptyTitle: 'Hello. What would you like to investigate?',
+			emptyBody:
+				'I can help you understand these papers, form a focused question, and review the evidence behind a conclusion.',
 			messageLabel: 'Message',
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
 			sending: 'Sending...',
+			upload: {
+				add: 'Add papers',
+				choose: 'Choose PDF papers',
+				panelTitle: 'Papers to add',
+				panelBody: 'PDFs are stored in this collection, then queued for paper preparation.',
+				clear: 'Clear',
+				uploadOne: 'Upload and prepare 1 paper',
+				uploadMany: 'Upload and prepare {count} papers',
+				retryOne: 'Retry failed paper',
+				retryMany: 'Retry {count} failed papers',
+				uploading: 'Uploading papers...',
+				openProgress: 'Open collection progress',
+				unsupportedFile: 'Only PDF papers can be uploaded here.',
+				queuedSummary: '{count} paper preparation task(s) queued.',
+				failedSummary: '{count} paper(s) need attention before preparation can continue.',
+				status: {
+					selected: 'Ready to upload',
+					uploading: 'Uploading',
+					preparing: 'Starting paper preparation',
+					queued: 'Preparation queued',
+					upload_failed: 'Upload failed',
+					preparation_failed: 'Uploaded, but preparation could not be queued'
+				}
+			},
 			sourceContext: {
 				remove: 'Remove source context',
 				truncated: 'Excerpt shortened · open the Source for the complete content'
@@ -245,6 +275,9 @@ const translations: Record<Language, Translations> = {
 				succeeded: '{name} completed',
 				queued: '{name} started',
 				failed: '{name} failed',
+				statusSucceeded: 'Completed',
+				statusQueued: 'In progress',
+				statusFailed: 'Needs attention',
 				collection: 'Collection context',
 				documentSources: 'Paper source inspection',
 				researchProcess: 'Literature analysis progress',
@@ -257,6 +290,8 @@ const translations: Record<Language, Translations> = {
 				findingFeedback: 'Finding feedback',
 				findingCuration: 'Finding curation',
 				findingAuthoring: 'Finding authoring',
+				evidenceAuthoring: 'Evidence authoring',
+				agentObjectiveAnalysis: 'Agent paper analysis',
 				proposals: 'Objective drafts',
 				createObjective: 'Create objective candidate',
 				previewResearchScope: 'Preview relevant paper scope',
@@ -271,6 +306,8 @@ const translations: Record<Language, Translations> = {
 				curationRecorded: 'Finding curation recorded',
 				findingPublished: 'Researcher-authored Finding published in a new analysis version',
 				findingAbstentionPublished: 'Evidence abstention published in a new analysis version',
+				evidencePublished: 'Researcher-confirmed Evidence published in a new analysis version',
+				agentAnalysisPublished: 'Agent analysis published with {count} Evidence records',
 				absence: 'No published findings or evidence were returned.',
 				draftCount: '{count} objective drafts',
 				objectiveCreated: 'Objective candidate created',
@@ -331,7 +368,12 @@ const translations: Record<Language, Translations> = {
 					'Publish this conclusion as a new immutable analysis version. The current system result will remain unchanged.',
 				findingAbstentionBody:
 					'Publish this evidence abstention as a new immutable analysis version without creating a placeholder Finding.',
+				evidenceAuthoringBody:
+					'Publish this Source-grounded Evidence as a new immutable analysis version. A revision keeps the previous Evidence and Findings unchanged.',
+				agentObjectiveAnalysisBody:
+					"Publish the Agent's complete paper-by-paper analysis after Lens revalidates every Source excerpt and Evidence record. No Finding will be created yet.",
 				arguments: 'Proposed values',
+				status: 'Awaiting approval',
 				approve: 'Approve and create',
 				startResearch: 'Approve and start',
 				analyzeObjective: 'Approve and analyze',
@@ -339,6 +381,8 @@ const translations: Record<Language, Translations> = {
 				saveCuration: 'Approve and save revision',
 				publishFinding: 'Approve and publish Finding',
 				publishAbstention: 'Approve and publish evidence decision',
+				publishEvidence: 'Approve and publish Evidence',
+				publishAgentAnalysis: 'Approve and publish analysis',
 				reject: 'Reject',
 				processing: 'Recording decision...'
 			},
@@ -348,6 +392,8 @@ const translations: Record<Language, Translations> = {
 			findingFeedbackRejected: 'The research conclusion review was not recorded.',
 			findingCurationRejected: 'The research conclusion revision was not saved.',
 			findingAuthoringRejected: 'The proposed research conclusion was not published.',
+			evidenceAuthoringRejected: 'The proposed Evidence was not published.',
+			agentObjectiveAnalysisRejected: 'The proposed Agent analysis was not published.',
 			turnFailed: 'The Agent turn stopped with error: {code}'
 		},
 		research: {
@@ -2504,6 +2550,7 @@ const translations: Record<Language, Translations> = {
 			filter: {
 				all: '全部状态',
 				complete: '已完成',
+				ready: '文档已准备',
 				processing: '处理中',
 				attention: '需关注'
 			},
@@ -2522,6 +2569,7 @@ const translations: Record<Language, Translations> = {
 			statusUnknown: '未知',
 			statusDisplay: {
 				complete: '已完成',
+				ready: '文档已准备',
 				processing: '处理中',
 				attention: '需要关注',
 				pending: '待处理'
@@ -2548,6 +2596,8 @@ const translations: Record<Language, Translations> = {
 			actionStartProcessing: '启动处理',
 			actionRetryProcessing: '重新处理',
 			actionProcessing: '处理中',
+			actionReady: '已准备',
+			actionReadyTitle: '文档已经准备好',
 			actionDelete: '删除',
 			indexing: '正在启动处理...',
 			indexStarted: '处理已启动',
@@ -2650,16 +2700,41 @@ const translations: Record<Language, Translations> = {
 			emptyHistory: '暂无历史会话',
 			untitledSession: '新建会话',
 			currentCollection: '当前集合',
-			openWorkspace: '打开工作区',
+			backToWorkspace: '返回工作区',
 			loading: '正在加载会话...',
 			headerPrefix: '文献集合',
 			objectiveScope: '打开当前研究目标',
-			emptyTitle: '从一个研究问题开始',
-			emptyBody: '可以直接提问，也可以要求 Agent 基于当前集合执行研究操作。',
+			welcomeEyebrow: '你的文献研究工作台',
+			emptyTitle: '你好，你想先了解什么？',
+			emptyBody: '我可以帮你理解这些论文、形成聚焦的研究问题，并检查结论背后的证据。',
 			messageLabel: '消息',
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
 			sending: '发送中...',
+			upload: {
+				add: '添加论文',
+				choose: '选择 PDF 论文',
+				panelTitle: '待添加论文',
+				panelBody: 'PDF 会先存入当前集合，再进入论文准备队列。',
+				clear: '清空',
+				uploadOne: '上传并准备 1 篇论文',
+				uploadMany: '上传并准备 {count} 篇论文',
+				retryOne: '重试失败论文',
+				retryMany: '重试 {count} 篇失败论文',
+				uploading: '正在上传论文...',
+				openProgress: '打开集合进度',
+				unsupportedFile: '此处仅支持上传 PDF 论文。',
+				queuedSummary: '已启动 {count} 个论文准备任务。',
+				failedSummary: '有 {count} 篇论文需要处理后才能继续准备。',
+				status: {
+					selected: '等待上传',
+					uploading: '正在上传',
+					preparing: '正在启动论文准备',
+					queued: '已进入准备队列',
+					upload_failed: '上传失败',
+					preparation_failed: '已上传，但未能进入准备队列'
+				}
+			},
 			sourceContext: {
 				remove: '移除原文上下文',
 				truncated: '摘录已缩短 · 完整内容请打开原文'
@@ -2685,9 +2760,14 @@ const translations: Record<Language, Translations> = {
 				researchProcessUnavailable: '暂时无法读取文献分析进度。',
 				findings: '已发布研究发现',
 				findingReview: '审阅研究发现与证据',
+				statusSucceeded: '已完成',
+				statusQueued: '进行中',
+				statusFailed: '需要处理',
 				findingFeedback: '研究发现反馈',
 				findingCuration: '研究发现修订',
 				findingAuthoring: '创建研究发现',
+				evidenceAuthoring: '创建研究证据',
+				agentObjectiveAnalysis: 'Agent 逐篇分析',
 				proposals: '研究目标草稿',
 				createObjective: '创建研究目标候选',
 				previewResearchScope: '预览相关论文范围',
@@ -2702,6 +2782,8 @@ const translations: Record<Language, Translations> = {
 				curationRecorded: '研究发现修订已记录',
 				findingPublished: '研究者撰写的 Finding 已发布到新的分析版本',
 				findingAbstentionPublished: '证据不足决定已发布到新的分析版本',
+				evidencePublished: '研究者确认的 Evidence 已发布到新的分析版本',
+				agentAnalysisPublished: 'Agent 分析已发布，共 {count} 条 Evidence',
 				absence: '没有返回已发布的研究发现或证据。',
 				draftCount: '{count} 个研究目标草稿',
 				objectiveCreated: '研究目标候选已创建',
@@ -2756,6 +2838,10 @@ const translations: Record<Language, Translations> = {
 					'请核对完整的修订后研究发现；其身份、论文范围、证据和原文来源关系不会改变。',
 				findingAuthoringBody: '将这条结论发布为新的不可变分析版本；当前系统结果会保持不变。',
 				findingAbstentionBody: '将证据不足决定发布为新的不可变分析版本，不创建占位 Finding。',
+				evidenceAuthoringBody:
+					'将这条有原文依据的 Evidence 发布为新的不可变分析版本；修订会保留旧 Evidence 和 Finding。',
+				agentObjectiveAnalysisBody:
+					'发布 Agent 的逐篇论文分析；Lens 会重新核对每条原文摘录和 Evidence，本次不会创建 Finding。',
 				arguments: '拟写入内容',
 				approve: '确认并创建',
 				startResearch: '确认并开始',
@@ -2764,6 +2850,9 @@ const translations: Record<Language, Translations> = {
 				saveCuration: '确认并保存修订',
 				publishFinding: '确认并发布 Finding',
 				publishAbstention: '确认并发布证据决定',
+				publishEvidence: '确认并发布 Evidence',
+				publishAgentAnalysis: '确认并发布分析',
+				status: '等待你的确认',
 				reject: '拒绝',
 				processing: '正在记录决定...'
 			},
@@ -2773,6 +2862,8 @@ const translations: Record<Language, Translations> = {
 			findingFeedbackRejected: '已取消记录研究发现审阅。',
 			findingCurationRejected: '已取消保存研究发现修订。',
 			findingAuthoringRejected: '已取消发布拟议的研究发现。',
+			evidenceAuthoringRejected: '已取消发布拟议的 Evidence。',
+			agentObjectiveAnalysisRejected: '已取消发布 Agent 拟议的分析。',
 			turnFailed: 'Agent 本轮执行停止，错误：{code}'
 		},
 		research: {

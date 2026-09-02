@@ -5,6 +5,7 @@
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
 	import FindingAuthoringEditor from '../../_components/FindingAuthoringEditor.svelte';
+	import EvidenceAuthoringEditor from '../../_components/EvidenceAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
@@ -42,6 +43,9 @@
 	let authoringEvidence: ObjectiveEvidence[] = [];
 	let authoringEvidenceVersion: number | null = null;
 	let authoringParent: ObjectiveFinding | null = null;
+	let evidenceAuthoringOpen = false;
+	let evidenceAuthoringSource: ObjectiveEvidence | null = null;
+	let evidenceAuthoringMode: 'create' | 'revise' = 'create';
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
@@ -169,12 +173,32 @@
 		authoringLoading = false;
 	}
 
+	function openEvidenceAuthoring(item: ObjectiveEvidence, mode: 'create' | 'revise') {
+		closeAuthoring();
+		evidenceAuthoringOpen = true;
+		evidenceAuthoringSource = item;
+		evidenceAuthoringMode = mode;
+	}
+
+	function closeEvidenceAuthoring() {
+		evidenceAuthoringOpen = false;
+		evidenceAuthoringSource = null;
+	}
+
 	async function handleFindingSaved(result: FindingAuthoringResult) {
 		const findingId = result.finding?.finding_id ?? '';
 		closeAuthoring();
 		authoringEvidence = [];
 		authoringEvidenceVersion = null;
 		await loadObjective(findingId, Boolean(findingId));
+	}
+
+	async function handleEvidenceSaved() {
+		const selectedId = selectedFindingId;
+		closeEvidenceAuthoring();
+		authoringEvidence = [];
+		authoringEvidenceVersion = null;
+		await loadObjective(selectedId, Boolean(selectedId));
 	}
 
 	async function selectFinding(findingId: string, updateUrl = true) {
@@ -250,6 +274,7 @@
 
 	function findingOriginLabel(value: ObjectiveFinding['origin'] | undefined) {
 		if (value === 'human_authored') return '研究者创建';
+		if (value === 'agent_authored') return 'Agent 分析';
 		if (value === 'hybrid') return '研究者修订';
 		return '系统分析';
 	}
@@ -472,7 +497,18 @@
 					aria-label="Finding 详情"
 					aria-busy={findingLoading || authoringLoading}
 				>
-					{#if authoringOpen && authoringLoading}
+					{#if evidenceAuthoringOpen && evidenceAuthoringSource}
+						<EvidenceAuthoringEditor
+							{collectionId}
+							{objectiveId}
+							analysisVersion={published.analysis_version}
+							sourceEvidence={evidenceAuthoringSource}
+							documentTitle={documentTitles[evidenceAuthoringSource.document_id] ?? '当前文献'}
+							mode={evidenceAuthoringMode}
+							onSaved={handleEvidenceSaved}
+							onCancel={closeEvidenceAuthoring}
+						/>
+					{:else if authoringOpen && authoringLoading}
 						<p class="page-state">正在加载当前版本的 Evidence...</p>
 					{:else if authoringOpen && authoringError}
 						<div class="finding-error" role="alert">
@@ -514,6 +550,7 @@
 							{collectionId}
 							{documentTitles}
 							onDerive={(finding) => openAuthoring(finding)}
+							onAuthorEvidence={openEvidenceAuthoring}
 						/>
 					{:else}
 						<div class="page-state page-state--complete">

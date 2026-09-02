@@ -113,17 +113,10 @@ class PostgresObjectiveRepository:
                         confirmation_status=existing.confirmation_status,
                         active_analysis_version=existing.active_analysis_version,
                         published_analysis_version=existing.published_analysis_version,
-                        created_at=existing.created_at,
-                        updated_at=now,
                     )
                     self._write_objective(row, objective, now=now)
                     continue
-                created = replace(
-                    objective,
-                    created_at=objective.created_at or now,
-                    updated_at=objective.updated_at or now,
-                )
-                session.add(self._new_objective_row(created, now=now))
+                session.add(self._new_objective_row(objective, now=now))
 
     async def read(self, collection_id: str) -> ObjectiveFactSet:
         async with self.session_factory() as session:
@@ -176,6 +169,24 @@ class PostgresObjectiveRepository:
             )
             return tuple(self._objective_from_row(row) for row in rows)
 
+    async def list_objective_records(
+        self,
+        collection_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        async with self.session_factory() as session:
+            rows = tuple(
+                await session.scalars(
+                    select(ObjectiveResearchRecord)
+                    .where(ObjectiveResearchRecord.collection_id == collection_id)
+                    .order_by(
+                        ObjectiveResearchRecord.rank,
+                        ObjectiveResearchRecord.created_at,
+                        ObjectiveResearchRecord.objective_id,
+                    )
+                )
+            )
+            return tuple(self._objective_record_from_row(row) for row in rows)
+
     async def create_authored_candidate(
         self,
         objective: ResearchObjective,
@@ -222,8 +233,6 @@ class PostgresObjectiveRepository:
             created = replace(
                 objective,
                 rank=int(maximum_rank or 0) + 1,
-                created_at=objective.created_at or now,
-                updated_at=objective.updated_at or now,
             )
             session.add(self._new_objective_row(created, now=now))
             return created
@@ -240,6 +249,18 @@ class PostgresObjectiveRepository:
             )
             return self._objective_from_row(row) if row is not None else None
 
+    async def read_objective_record(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any] | None:
+        async with self.session_factory() as session:
+            row = await session.get(
+                ObjectiveResearchRecord,
+                (collection_id, objective_id),
+            )
+            return self._objective_record_from_row(row) if row is not None else None
+
     async def queue_analysis(
         self,
         collection_id: str,
@@ -249,6 +270,9 @@ class PostgresObjectiveRepository:
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        origin: str = "system_generated",
+        created_by_user_id: str | None = None,
+        created_by_tool_call_id: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         now = datetime.now(timezone.utc)
         async with self.session_factory.begin() as session:
@@ -272,6 +296,14 @@ class PostgresObjectiveRepository:
                     raise ValueError(
                         "an active analysis already uses a different document scope"
                     )
+                if (
+                    active.origin != origin
+                    or active.created_by_user_id != created_by_user_id
+                    or active.created_by_tool_call_id != created_by_tool_call_id
+                ):
+                    raise ValueError(
+                        "an active analysis already uses different authoring provenance"
+                    )
                 self._write_objective(row, objective, now=now)
                 return objective, active
             maximum_version = await session.scalar(
@@ -292,6 +324,9 @@ class PostgresObjectiveRepository:
                 total_document_count=len(document_inputs),
                 progress_message="Objective analysis is queued.",
                 created_at=now,
+                origin=origin,
+                created_by_user_id=created_by_user_id,
+                created_by_tool_call_id=created_by_tool_call_id,
             )
             objective = objective.queue_analysis(version)
             self._write_objective(row, objective, now=now)
@@ -845,6 +880,15 @@ class PostgresObjectiveRepository:
         return ResearchObjective.from_mapping(row.payload)
 
     @staticmethod
+    def _objective_record_from_row(
+        row: ObjectiveResearchRecord,
+    ) -> dict[str, Any]:
+        record = PostgresObjectiveRepository._objective_from_row(row).to_record()
+        record["created_at"] = row.created_at.isoformat()
+        record["updated_at"] = row.updated_at.isoformat()
+        return record
+
+    @staticmethod
     def _analysis_from_row(row: ObjectiveAnalysisRecord) -> ObjectiveAnalysis:
         return ObjectiveAnalysis.from_mapping(row.payload)
 
@@ -861,8 +905,8 @@ class PostgresObjectiveRepository:
             origin=objective.origin,
             created_by_tool_call_id=objective.created_by_tool_call_id,
             payload=objective.to_record(),
-            created_at=objective.created_at or now,
-            updated_at=objective.updated_at or now,
+            created_at=now,
+            updated_at=now,
         )
 
     @staticmethod
@@ -876,7 +920,7 @@ class PostgresObjectiveRepository:
         row.origin = objective.origin
         row.created_by_tool_call_id = objective.created_by_tool_call_id
         row.payload = objective.to_record()
-        row.updated_at = objective.updated_at or now
+        row.updated_at = now
 
     @staticmethod
     def _new_analysis_row(

@@ -15,6 +15,9 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import (
+    PublishAgentObjectiveAnalysisCapability,
+    CreateEvidenceVersionArguments,
+    CreateEvidenceVersionCapability,
     CreateFindingVersionArguments,
     CreateFindingVersionCapability,
     CreateObjectiveCandidateArguments,
@@ -354,6 +357,7 @@ def _canonical_finding_record() -> dict:
         "source_analysis_version": None,
         "parent_finding_id": None,
         "created_by_user_id": None,
+        "created_by_tool_call_id": None,
         "created_at": None,
     }
 
@@ -614,6 +618,8 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
     )
 
     assert result.status.value == "succeeded"
+    assert "bounded table Markdown" in InspectDocumentSourcesCapability.spec.description
+    assert "complete table Markdown" not in InspectDocumentSourcesCapability.spec.description
     assert result.data["document"] == {
         "document_id": "paper-1",
         "title": "Energy input and tensile response",
@@ -630,6 +636,9 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
     assert result.data["sources"][0]["content"].startswith(
         "| Condition | Elongation (%) |"
     )
+    assert result.data["sources"][0]["source_kind"] == "table"
+    assert len(result.data["sources"][0]["source_digest"]) == 64
+    assert result.data["sources"][1]["source_kind"] == "figure"
     assert [ref.resource_type for ref in result.resource_refs] == [
         "document",
         "source",
@@ -740,6 +749,109 @@ def test_finding_authoring_arguments_separate_finding_and_abstention() -> None:
             statement="An unsupported conclusion.",
             assertion_strength="associative",
         )
+
+
+def test_evidence_authoring_arguments_require_complete_source_and_result_shape() -> None:
+    draft = CreateEvidenceVersionArguments(
+        objective_id="obj-1",
+        source_analysis_version=1,
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-result",
+        source_excerpt="Elongation decreased as the combined energy input increased.",
+        source_digest="a" * 64,
+        evidence_role="direct_result",
+        changed_variables=[{"name": "energy input"}],
+        comparison=None,
+        reported_result={
+            "outcome": "elongation",
+            "direction": "decrease",
+            "result_text": "Elongation decreased.",
+        },
+        attribution_scope="association_only",
+    )
+    assert draft.source_digest == "a" * 64
+
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        CreateEvidenceVersionArguments(
+            objective_id="obj-1",
+            source_analysis_version=1,
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="block-result",
+            source_excerpt="Elongation decreased.",
+            source_digest="z" * 64,
+            evidence_role="direct_result",
+            attribution_scope="association_only",
+        )
+
+    with pytest.raises(ValidationError, match="requires a reported result"):
+        CreateEvidenceVersionArguments(
+            objective_id="obj-1",
+            source_analysis_version=1,
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="block-result",
+            source_excerpt="Elongation decreased.",
+            source_digest="a" * 64,
+            evidence_role="direct_result",
+            attribution_scope="association_only",
+        )
+
+
+async def test_agent_evidence_write_waits_for_approval_and_reuses_service() -> None:
+    class _EvidenceService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def create_version(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                analysis=SimpleNamespace(
+                    analysis_version=2,
+                    to_record=lambda: {"analysis_version": 2, "status": "succeeded"},
+                ),
+                evidence=SimpleNamespace(
+                    evidence_id="evidence-manual-1",
+                    page_numbers=(5,),
+                    to_record=lambda: {
+                        "evidence_id": "evidence-manual-1",
+                        "analysis_version": 2,
+                        "source_ref": "block-result",
+                    },
+                    supports_finding=True,
+                ),
+            )
+
+    evidence_service = _EvidenceService()
+    capability = CreateEvidenceVersionCapability(
+        evidence_authoring_service=evidence_service,
+    )
+    arguments = capability.spec.input_model(
+        objective_id="obj-1",
+        source_analysis_version=1,
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-result",
+        source_excerpt="Elongation decreased as the combined energy input increased.",
+        source_digest="a" * 64,
+        evidence_role="direct_result",
+        changed_variables=[{"name": "energy input"}],
+        reported_result={
+            "outcome": "elongation",
+            "direction": "decrease",
+            "result_text": "Elongation decreased.",
+        },
+        attribution_scope="association_only",
+    )
+    result = await capability.execute(_context("call-evidence"), arguments)
+    assert capability.spec.risk.value == "write"
+    assert result.data["evidence"]["evidence_id"] == "evidence-manual-1"
+    assert result.resource_refs[0].resource_type == "objective_analysis"
+    assert result.resource_refs[1].resource_type == "evidence"
+    assert evidence_service.calls[0]["created_by_user_id"] == "user-1"
+    assert evidence_service.calls[0]["created_by_tool_call_id"] == "call-evidence"
+    assert evidence_service.calls[0]["source_digest"] == "a" * 64
     with pytest.raises(ValidationError, match="abstention cannot contain"):
         CreateFindingVersionArguments(
             objective_id="obj-1",
@@ -750,6 +862,124 @@ def test_finding_authoring_arguments_separate_finding_and_abstention() -> None:
             abstention_reason="insufficient_evidence",
             limitations=["Evidence is insufficient."],
         )
+
+
+async def test_agent_objective_analysis_uses_approved_grounded_payload() -> None:
+    class _AgentAnalysisService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def publish(self, **kwargs):
+            self.calls.append(kwargs)
+            analysis = SimpleNamespace(
+                analysis_version=1,
+                to_record=lambda: {
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "origin": "agent_authored",
+                },
+            )
+            contribution = SimpleNamespace(
+                to_record=lambda: {"document_id": "paper-1"}
+            )
+            evidence = SimpleNamespace(
+                evidence_id="evidence-agent-1",
+                document_id="paper-1",
+                source_ref="block-result",
+                to_record=lambda: {
+                    "evidence_id": "evidence-agent-1",
+                    "document_id": "paper-1",
+                    "origin": "agent_authored",
+                },
+            )
+            return SimpleNamespace(
+                analysis=analysis,
+                contributions=(contribution,),
+                evidence_records=(evidence,),
+            )
+
+    service = _AgentAnalysisService()
+    capability = PublishAgentObjectiveAnalysisCapability(
+        agent_analysis_service=service,
+        model_name="zai-org/glm-5.2",
+        prompt_version="research-agent-v13",
+    )
+    arguments = capability.spec.input_model(
+        objective_id="obj-1",
+        document_ids=["paper-1"],
+        paper_summaries=[
+            {
+                "document_id": "paper-1",
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "contribution_summary": "Reports one source-backed result.",
+                "confidence": 0.9,
+            }
+        ],
+        evidence_drafts=[
+            {
+                "draft_id": "draft-1",
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-result",
+                "source_excerpt": "Porosity decreased from 1.8% to 0.7%.",
+                "source_digest": "a" * 64,
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": 180,
+                        "target_value": 220,
+                        "unit": "W",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "180 W",
+                    "target_label": "220 W",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                    "incomparability_reasons": [],
+                },
+                "reported_result": {
+                    "outcome": "porosity",
+                    "baseline_value": 1.8,
+                    "target_value": 0.7,
+                    "unit": "%",
+                    "direction": "decrease",
+                    "result_text": "Porosity decreased from 1.8% to 0.7%.",
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {
+                    "material": [{"name": "alloy", "value": "Ti-6Al-4V"}]
+                },
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    result = await capability.execute(_context("call-agent-analysis"), arguments)
+
+    assert capability.spec.risk.value == "write"
+    assert result.data["analysis"]["origin"] == "agent_authored"
+    assert result.data["evidence_count"] == 1
+    assert result.data["finding_count"] == 0
+    assert service.calls == [
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-1",
+            "document_ids": ("paper-1",),
+            "paper_summaries": tuple(
+                item.model_dump() for item in arguments.paper_summaries
+            ),
+            "evidence_drafts": tuple(
+                item.model_dump() for item in arguments.evidence_drafts
+            ),
+            "model_name": "zai-org/glm-5.2",
+            "prompt_version": "research-agent-v13",
+            "created_by_user_id": "user-1",
+            "created_by_tool_call_id": "call-agent-analysis",
+        }
+    ]
 
 
 async def test_agent_publishes_authored_finding_only_after_exact_approval() -> None:
@@ -840,9 +1070,12 @@ async def test_agent_publishes_authored_finding_only_after_exact_approval() -> N
         "Higher temperature was associated with greater strength."
     )
     assert result.data["analysis"]["analysis_version"] == 2
-    assert result.data["finding"]["origin"] == "human_authored"
+    assert result.data["finding"]["origin"] == "agent_authored"
     assert result.data["finding"]["source_analysis_version"] == 1
     assert result.data["finding"]["created_by_user_id"] == "user-1"
+    assert result.data["finding"]["created_by_tool_call_id"] == (
+        proposed.pending_approval.tool_call_id
+    )
     assert {ref.resource_type for ref in result.resource_refs} == {
         "objective_analysis",
         "finding",

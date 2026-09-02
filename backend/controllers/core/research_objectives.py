@@ -59,12 +59,14 @@ async def list_collection_objectives(
     limit: int | None = Query(default=None, ge=1, le=100),
 ) -> PaginatedObjectiveListResponse:
     try:
-        objectives = await request.app.state.objective_repository.list_objectives(
-            collection_id
+        objectives = await (
+            request.app.state.objective_repository.list_objective_records(
+                collection_id
+            )
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    ranked_objectives = [objective.to_record() for objective in objectives]
+    ranked_objectives = list(objectives)
     page = (
         ranked_objectives[offset:]
         if limit is None
@@ -283,7 +285,7 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
     published = payload.get("published_analysis")
     return ObjectiveAnalysisResponse(
         collection_id=payload["collection_id"],
-        objective=objective.to_record(),
+        objective=payload.get("objective_record") or objective.to_record(),
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
         paper_contributions=[

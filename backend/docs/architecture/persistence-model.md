@@ -83,7 +83,10 @@ hierarchy.
 `tasks` stores observable execution history. A document-preparation task carries
 `collection_id`, `document_id`, `task_type`, `input_fingerprint`, mode, status,
 progress, warnings, errors, and timestamps. A partial unique index permits at
-most one queued or running task for one `(document_id, task_type)`.
+most one queued or running task for one `(document_id, task_type)`. Task-specific
+admission metadata stays nested in `details`; Objective discovery records its
+exact selected `document_ids` there. Tasks do not own scientific artifacts or
+filesystem output paths.
 
 Active task reuse is based on Document ownership: a second request receives the
 existing queued or running task. A completed task can be reused only if its

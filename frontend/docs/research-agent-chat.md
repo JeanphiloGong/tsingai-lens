@@ -51,6 +51,13 @@ scientific fact store.
   `FindingAuthoringService` publishes a new immutable analysis version. The
   Agent cannot alter the source version, parent Finding, Evidence, or Source
   identities.
+- `create_evidence_version` is a `write` capability. It accepts one exact
+  Source returned by `inspect_document_sources`, a verbatim excerpt, and the
+  structured Evidence fields. The Agent must supply the Source digest; the
+  backend verifies the canonical Source, analysis scope, and scientific shape.
+  Exact user approval publishes a new immutable analysis version. A revision
+  records supersession lineage and never changes the previous Evidence or any
+  Finding that cites it.
 - General Agent prose cannot be saved as an Experiment Plan. New plans are
   authored manually until a dedicated scientifically validated capability
   exists.
@@ -66,6 +73,16 @@ GET  /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 ```
+
+The composer also exposes an explicit PDF-paper upload action for the current
+Collection. It calls the same `POST /collections/{collection_id}/documents`
+and per-document preparation endpoint used by the Collection workspace. The
+upload is a user action outside the Chat trajectory: PDF bytes are never sent
+to the model or stored as a Chat attachment, and uploading does not create an
+Objective, Evidence, or Finding. Each file reports its own stored, preparing,
+queued, upload-failed, or preparation-failed state. A preparation retry reuses
+the stored document ID, while the Collection workspace remains the canonical
+view for long-running task progress.
 
 Message submission uses `Accept: text/event-stream` on the existing `POST
 /messages` endpoint. The browser appends `text_delta` events to one temporary
@@ -127,8 +144,13 @@ answer. The result panel shows:
 - structured Objective drafts when present;
 - the observable research stages and active paper when process status is read;
 - per-paper stored, processing, ready, and failed states;
+- selected PDF papers and their upload/preparation state when papers are added
+  from the composer;
 - warnings and scientific absence;
-- links to canonical collection, Objective, Finding, or Evidence records.
+- links to canonical collection, Objective, Finding, or Evidence records;
+- a distinct Agent paper-analysis activity whose completed summary reports the
+  number of published Source-grounded Evidence records and links to the
+  canonical Objective analysis.
 
 A `queued` capability result is rendered as started rather than completed. It
 shows the canonical analysis or task link and lets the researcher continue the
@@ -141,12 +163,15 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 ### Write approval
 
 For `start_research_process`, `create_objective_candidate`,
-`start_objective_analysis`, `record_finding_feedback`, `curate_finding`, and
-`create_finding_version`, the page renders the exact persisted arguments and
-exposes explicit Reject and Approve actions. Finding feedback and curation are
+`start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
+`create_finding_version`, `create_evidence_version`, and
+`publish_agent_objective_analysis`, the page renders the exact persisted
+arguments and exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
 separate Evidence-to-conclusion decision that publishes a new immutable
-analysis version. While approval is pending:
+analysis version. Agent-authored Objective analysis is also distinct from the
+automatic analysis command: it publishes the Agent's reviewed Evidence first
+and creates no Finding. While approval is pending:
 
 - the message composer is disabled;
 - refresh restores the pending decision from the server;
@@ -205,6 +230,9 @@ The focused browser suite covers:
     write;
 16. exact Evidence roles and statement before approval publishes a new Finding
     version.
+17. Agent-authored paper analysis shown as a separate approval, rejection, and
+    completed Evidence publication state without changing the automatic
+    Objective-analysis presentation.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

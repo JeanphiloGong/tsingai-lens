@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from typing import Any
 
 from domain.core import (
     Finding,
@@ -17,12 +18,18 @@ from domain.core import (
 )
 
 
+_MIN_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
+
+
 class MemoryObjectiveRepository:
     backend_name = "memory"
 
     def __init__(self) -> None:
         self._facts: dict[str, ObjectiveFactSet] = {}
         self._objectives: dict[tuple[str, str], ResearchObjective] = {}
+        self._objective_timestamps: dict[
+            tuple[str, str], tuple[datetime, datetime]
+        ] = {}
         self._analyses: dict[tuple[str, str, int], ObjectiveAnalysis] = {}
         self._document_evidence: dict[
             tuple[str, str, str, str], ObjectiveDocumentEvidence
@@ -53,6 +60,7 @@ class MemoryObjectiveRepository:
         self._replace_now(collection_id, facts)
 
     def _replace_now(self, collection_id: str, facts: ObjectiveFactSet) -> None:
+        now = datetime.now(timezone.utc)
         for objective in facts.research_objectives:
             if objective.collection_id != collection_id:
                 raise ValueError("objective belongs to another collection")
@@ -70,6 +78,7 @@ class MemoryObjectiveRepository:
                 and objective.objective_id not in generated_ids
             ):
                 del self._objectives[key]
+                self._objective_timestamps.pop(key, None)
 
         current_objectives: list[ResearchObjective] = []
         for objective in facts.research_objectives:
@@ -81,9 +90,11 @@ class MemoryObjectiveRepository:
                     confirmation_status=existing.confirmation_status,
                     active_analysis_version=existing.active_analysis_version,
                     published_analysis_version=existing.published_analysis_version,
-                    created_at=existing.created_at,
-                    updated_at=existing.updated_at,
                 )
+                created_at = self._objective_timestamps.get(key, (now, now))[0]
+                self._objective_timestamps[key] = (created_at, now)
+            else:
+                self._objective_timestamps[key] = (now, now)
             self._objectives[key] = objective
             current_objectives.append(objective)
         self._facts[collection_id] = replace(
@@ -116,11 +127,21 @@ class MemoryObjectiveRepository:
                 records,
                 key=lambda item: (
                     item.rank if item.rank is not None else 2**31,
-                    item.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                    self._objective_timestamps.get(
+                        (collection_id, item.objective_id),
+                        (_MIN_TIMESTAMP, _MIN_TIMESTAMP),
+                    )[0],
                     item.objective_id,
                 ),
             )
         )
+
+    async def list_objective_records(
+        self,
+        collection_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        objectives = await self.list_objectives(collection_id)
+        return tuple(self._objective_record(objective) for objective in objectives)
 
     async def create_authored_candidate(
         self,
@@ -164,10 +185,9 @@ class MemoryObjectiveRepository:
         created = replace(
             objective,
             rank=rank,
-            created_at=objective.created_at or now,
-            updated_at=objective.updated_at or now,
         )
         self._objectives[key] = created
+        self._objective_timestamps[key] = (now, now)
         return created
 
     async def read_objective(
@@ -176,6 +196,14 @@ class MemoryObjectiveRepository:
         objective_id: str,
     ) -> ResearchObjective | None:
         return self._objectives.get((collection_id, objective_id))
+
+    async def read_objective_record(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any] | None:
+        objective = await self.read_objective(collection_id, objective_id)
+        return self._objective_record(objective) if objective is not None else None
 
     async def queue_analysis(
         self,
@@ -186,8 +214,12 @@ class MemoryObjectiveRepository:
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        origin: str = "system_generated",
+        created_by_user_id: str | None = None,
+        created_by_tool_call_id: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id)
+        now = datetime.now(timezone.utc)
         objective = self._require_objective(*key)
         if objective.confirmation_status == "candidate":
             objective = objective.confirm()
@@ -204,7 +236,16 @@ class MemoryObjectiveRepository:
                 raise ValueError(
                     "an active analysis already uses a different document scope"
                 )
+            if (
+                existing.origin != origin
+                or existing.created_by_user_id != created_by_user_id
+                or existing.created_by_tool_call_id != created_by_tool_call_id
+            ):
+                raise ValueError(
+                    "an active analysis already uses different authoring provenance"
+                )
             self._objectives[key] = objective
+            self._touch_objective(key, now)
             return objective, existing
         version = max(
             (
@@ -225,9 +266,13 @@ class MemoryObjectiveRepository:
             total_document_count=len(document_inputs),
             progress_message="Objective analysis is queued.",
             created_at=datetime.now(timezone.utc),
+            origin=origin,
+            created_by_user_id=created_by_user_id,
+            created_by_tool_call_id=created_by_tool_call_id,
         )
         objective = objective.queue_analysis(version)
         self._objectives[key] = objective
+        self._touch_objective(key, now)
         self._analyses[analysis.key] = analysis
         return objective, analysis
 
@@ -376,6 +421,7 @@ class MemoryObjectiveRepository:
         objective = self._require_objective(*objective_key).publish_analysis(analysis)
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
+        self._touch_objective(objective_key, datetime.now(timezone.utc))
         self._contributions[key] = contributions
         self._evidence[key] = evidence_records
         self._findings[key] = findings
@@ -431,6 +477,7 @@ class MemoryObjectiveRepository:
         objective = objective.publish_analysis(analysis)
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
+        self._touch_objective(objective_key, datetime.now(timezone.utc))
         self._contributions[key] = contributions
         self._evidence[key] = evidence_records
         self._findings[key] = findings
@@ -557,6 +604,27 @@ class MemoryObjectiveRepository:
                 f"research objective not found: {collection_id}/{objective_id}"
             )
         return objective
+
+    def _objective_record(
+        self,
+        objective: ResearchObjective,
+    ) -> dict[str, Any]:
+        record = objective.to_record()
+        created_at, updated_at = self._objective_timestamps.get(
+            (objective.collection_id, objective.objective_id),
+            (None, None),
+        )
+        record["created_at"] = created_at.isoformat() if created_at else None
+        record["updated_at"] = updated_at.isoformat() if updated_at else None
+        return record
+
+    def _touch_objective(
+        self,
+        key: tuple[str, str],
+        updated_at: datetime,
+    ) -> None:
+        created_at = self._objective_timestamps.get(key, (updated_at, updated_at))[0]
+        self._objective_timestamps[key] = (created_at, updated_at)
 
     def _require_analysis(
         self,

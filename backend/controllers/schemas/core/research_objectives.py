@@ -157,11 +157,14 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
-    origin: Literal["system_generated", "human_authored", "hybrid"] = (
+    origin: Literal[
+        "system_generated", "human_authored", "agent_authored", "hybrid"
+    ] = (
         "system_generated"
     )
     source_analysis_version: int | None = Field(default=None, ge=1)
     created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
     abstention_reason: Literal[
         "no_comparable_evidence",
         "no_grounded_evidence",
@@ -272,12 +275,15 @@ class FindingResponse(BaseModel):
     paper_contributions: list[FindingPaperContributionResponse] = Field(
         ..., min_length=1
     )
-    origin: Literal["system_generated", "human_authored", "hybrid"] = (
+    origin: Literal[
+        "system_generated", "human_authored", "agent_authored", "hybrid"
+    ] = (
         "system_generated"
     )
     source_analysis_version: int | None = Field(default=None, ge=1)
     parent_finding_id: str | None = None
     created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
     created_at: str | None = None
 
 
@@ -309,6 +315,16 @@ class ObjectiveEvidenceResponse(BaseModel):
     failure_reason: str | None = None
     confidence: float
     supports_finding: bool = False
+    origin: Literal[
+        "system_generated", "human_authored", "human_revised", "agent_authored"
+    ] = "system_generated"
+    source_analysis_version: int | None = Field(default=None, ge=1)
+    supersedes_evidence_id: str | None = None
+    superseded_by_evidence_id: str | None = None
+    created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
+    created_at: str | None = None
+    authoring_note: str | None = None
 
 
 class ObjectiveEvidenceMapObjectiveNodeResponse(BaseModel):

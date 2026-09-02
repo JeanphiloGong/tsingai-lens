@@ -37,6 +37,135 @@ FindingAbstentionReason = Literal[
     "no_grounded_evidence",
     "insufficient_evidence",
 ]
+EvidenceSourceKind = Literal["text_window", "table", "figure"]
+EvidenceRole = Literal[
+    "direct_result",
+    "condition_context",
+    "mechanism_context",
+    "baseline_context",
+    "comparison_context",
+    "background_context",
+    "contradictory_result",
+    "irrelevant",
+]
+EvidenceAttributionScope = Literal[
+    "isolated_effect",
+    "joint_effect",
+    "association_only",
+    "descriptive_only",
+    "not_attributable",
+]
+EvidenceResultDirection = Literal[
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "changed",
+    "no_change",
+    "mixed",
+    "unknown",
+]
+ScientificScalar = str | int | float | bool
+
+
+class EvidenceVariableCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=240)
+    baseline_value: ScientificScalar | None = None
+    target_value: ScientificScalar | None = None
+    unit: str | None = Field(default=None, max_length=80)
+
+
+class EvidenceComparisonCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_label: str = Field(..., min_length=1, max_length=500)
+    target_label: str = Field(..., min_length=1, max_length=500)
+    axis_names: list[str] = Field(default_factory=list, max_length=20)
+    comparable: bool
+    incomparability_reasons: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_text_lengths(self) -> "EvidenceComparisonCreate":
+        if any(not value.strip() or len(value) > 240 for value in self.axis_names):
+            raise ValueError("comparison axes must be non-empty and at most 240 characters")
+        if any(len(value) > 1000 for value in self.incomparability_reasons):
+            raise ValueError("incomparability reasons cannot exceed 1000 characters")
+        return self
+
+
+class EvidenceResultCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: str = Field(..., min_length=1, max_length=500)
+    value: ScientificScalar | None = None
+    baseline_value: ScientificScalar | None = None
+    target_value: ScientificScalar | None = None
+    unit: str | None = Field(default=None, max_length=80)
+    direction: EvidenceResultDirection
+    result_text: str = Field(..., min_length=1, max_length=5000)
+
+
+class EvidenceAttributeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=240)
+    value: ScientificScalar
+    unit: str | None = Field(default=None, max_length=80)
+
+
+class EvidenceContextCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    material: list[EvidenceAttributeCreate] = Field(default_factory=list, max_length=40)
+    sample: list[EvidenceAttributeCreate] = Field(default_factory=list, max_length=40)
+    process: list[EvidenceAttributeCreate] = Field(default_factory=list, max_length=40)
+    test: list[EvidenceAttributeCreate] = Field(default_factory=list, max_length=40)
+
+
+class EvidenceAuthoringCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_analysis_version: int = Field(..., ge=1)
+    document_id: str = Field(..., min_length=1, max_length=240)
+    source_kind: EvidenceSourceKind
+    source_ref: str = Field(..., min_length=1, max_length=240)
+    source_excerpt: str = Field(..., min_length=1, max_length=20_000)
+    evidence_role: EvidenceRole
+    changed_variables: list[EvidenceVariableCreate] = Field(
+        default_factory=list, max_length=20
+    )
+    comparison: EvidenceComparisonCreate | None = None
+    reported_result: EvidenceResultCreate | None = None
+    attribution_scope: EvidenceAttributionScope
+    scientific_context: EvidenceContextCreate = Field(
+        default_factory=EvidenceContextCreate
+    )
+    supersedes_evidence_id: str | None = Field(default=None, max_length=128)
+    authoring_note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_scientific_shape(self) -> "EvidenceAuthoringCreateRequest":
+        result_role = self.evidence_role in {
+            "direct_result",
+            "contradictory_result",
+        }
+        if result_role and self.reported_result is None:
+            raise ValueError("result Evidence requires a reported result")
+        if not result_role and self.reported_result is not None:
+            raise ValueError("context Evidence cannot contain a reported result")
+        if self.attribution_scope in {"isolated_effect", "joint_effect"}:
+            if self.comparison is None or not self.comparison.comparable:
+                raise ValueError("experimental attribution requires a comparison")
+            if not self.changed_variables:
+                raise ValueError("experimental attribution requires changed variables")
+        return self
+
+
+class EvidenceAuthoringResponse(BaseModel):
+    analysis: ObjectiveAnalysisStateResponse
+    evidence: ObjectiveEvidenceResponse
 
 
 class FindingAuthoringCreateRequest(BaseModel):

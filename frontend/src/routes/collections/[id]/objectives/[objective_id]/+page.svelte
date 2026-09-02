@@ -13,6 +13,7 @@
 		fetchObjectiveAnalysis,
 		fetchObjectiveEvidence,
 		fetchObjectiveFindings,
+		objectiveFindingDatasetUrl,
 		runObjectiveAnalysis,
 		type ObjectiveAnalysis,
 		type ObjectiveEvidence,
@@ -365,8 +366,8 @@
 		return items.length ? items.join(', ') : '-';
 	}
 
-	function datasetUrl() {
-		return `/api/v1/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset?format=training_jsonl`;
+	function datasetUrl(format: 'training_jsonl' | 'llamafactory_alpaca') {
+		return objectiveFindingDatasetUrl(collectionId, objectiveId, format);
 	}
 </script>
 
@@ -488,7 +489,10 @@
 					{/if}
 					<details class="secondary-actions">
 						<summary>更多</summary>
-						<a href={datasetUrl()} rel="external">导出训练数据</a>
+						<a href={datasetUrl('training_jsonl')} rel="external">导出 Lens 训练数据</a>
+						<a href={datasetUrl('llamafactory_alpaca')} rel="external"
+							>导出 LlamaFactory 数据</a
+						>
 					</details>
 				</aside>
 

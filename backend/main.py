@@ -130,6 +130,8 @@ logger = setup_logger("lens")
 
 PUBLIC_API_PREFIX = "/api"
 PUBLIC_API_V1_PREFIX = f"{PUBLIC_API_PREFIX}/v1"
+_DEFAULT_AGENT_MAX_MODEL_STEPS = 6
+_MAX_AGENT_MAX_MODEL_STEPS = 32
 _AUTH_EXEMPT_PATHS = {
     f"{PUBLIC_API_V1_PREFIX}/auth/login",
     f"{PUBLIC_API_V1_PREFIX}/auth/logout",
@@ -141,6 +143,30 @@ def _parse_cors_allowed_origins() -> list[str]:
     if not raw:
         return []
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def _parse_agent_max_model_steps() -> int:
+    raw = os.getenv("LENS_AGENT_MAX_MODEL_STEPS", "").strip()
+    if not raw:
+        return _DEFAULT_AGENT_MAX_MODEL_STEPS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid LENS_AGENT_MAX_MODEL_STEPS=%s; using default=%s",
+            raw,
+            _DEFAULT_AGENT_MAX_MODEL_STEPS,
+        )
+        return _DEFAULT_AGENT_MAX_MODEL_STEPS
+    if not 1 <= value <= _MAX_AGENT_MAX_MODEL_STEPS:
+        logger.warning(
+            "Unsafe LENS_AGENT_MAX_MODEL_STEPS=%s; expected 1..%s, using default=%s",
+            raw,
+            _MAX_AGENT_MAX_MODEL_STEPS,
+            _DEFAULT_AGENT_MAX_MODEL_STEPS,
+        )
+        return _DEFAULT_AGENT_MAX_MODEL_STEPS
+    return value
 
 
 AppLifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -330,6 +356,7 @@ async def build_application_runtime(
                 repository=chat_repository,
                 runner=ResearchAgentRunner(
                     model=chat_model,
+                    max_model_steps=_parse_agent_max_model_steps(),
                     capabilities=CapabilityRegistry(
                         (
                             GetCollectionContextCapability(

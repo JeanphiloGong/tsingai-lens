@@ -33,6 +33,7 @@ export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export DOCUMENT_PREPARATION_MAX_CONCURRENCY=10
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
+export LENS_AGENT_MAX_MODEL_STEPS=12
 ```
 
 `CORE_EXTRACTION_MAX_CONCURRENCY` is optional. When unset, Core extraction uses
@@ -56,6 +57,11 @@ curl "$LLM_BASE_URL/models"
 
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.
+`LENS_AGENT_MAX_MODEL_STEPS` controls the maximum number of model-tool decision
+cycles in one Research Agent turn. It is optional and defaults to `6`; accepted
+values are `1` through `32`. Invalid or out-of-range values are logged and use
+the default. A value such as `12` gives a research turn more room to inspect
+multiple sources while retaining a bounded execution and cost limit.
 
 ## Initialize Or Upgrade The Schema
 

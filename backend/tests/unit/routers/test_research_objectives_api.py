@@ -197,6 +197,10 @@ class _Repository:
     async def list_objectives(self, collection_id):
         return self.facts.research_objectives
 
+    async def list_objective_records(self, collection_id):
+        objectives = await self.list_objectives(collection_id)
+        return tuple(objective.to_record() for objective in objectives)
+
 
 class _DiscoveryService:
     def __init__(self, *, scope_error: Exception | None = None) -> None:

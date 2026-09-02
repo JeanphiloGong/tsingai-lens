@@ -234,6 +234,9 @@ class FakeObjectiveRepository:
     async def read_objective(self, collection_id, objective_id):
         return self.objective
 
+    async def read_objective_record(self, collection_id, objective_id):
+        return self.objective.to_record()
+
     async def queue_analysis(self, collection_id, objective_id, **_kwargs):
         if self.objective.confirmation_status == "candidate":
             self.objective = self.objective.confirm()

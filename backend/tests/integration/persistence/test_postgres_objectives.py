@@ -280,6 +280,16 @@ async def test_authored_candidate_persists_without_an_objective_discovery_row(
     assert await repository.list_objectives(COLLECTION_ID) == (created,)
     assert (await repository.read(COLLECTION_ID)).research_objectives_ready is False
 
+    records = await repository.list_objective_records(COLLECTION_ID)
+    assert len(records) == 1
+    assert records[0]["objective_id"] == created.objective_id
+    assert records[0]["created_at"]
+    assert records[0]["updated_at"]
+    assert await repository.read_objective_record(
+        COLLECTION_ID,
+        created.objective_id,
+    ) == records[0]
+
 
 async def test_active_analysis_reuses_only_the_same_document_manifest(
     objective_repository,

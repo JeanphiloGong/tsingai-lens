@@ -521,9 +521,14 @@ class ObjectiveAnalysisService:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
+        objective_record = await self.objective_repository.read_objective_record(
+            collection_id,
+            objective.objective_id,
+        )
         return {
             "collection_id": collection_id,
             "objective": objective,
+            "objective_record": objective_record,
             "analysis": active,
             "published_analysis": published,
             "findings": findings,

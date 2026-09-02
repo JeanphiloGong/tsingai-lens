@@ -911,8 +911,6 @@ class ResearchObjective:
     confirmation_status: str = "candidate"
     active_analysis_version: int | None = None
     published_analysis_version: int | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
     origin: str = "system_discovered"
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
@@ -1042,8 +1040,6 @@ class ResearchObjective:
             published_analysis_version=_positive_int_or_none(
                 payload.get("published_analysis_version")
             ),
-            created_at=_datetime_or_none(payload.get("created_at")),
-            updated_at=_datetime_or_none(payload.get("updated_at")),
             origin=_choice(
                 payload.get("origin"),
                 OBJECTIVE_ORIGINS,
@@ -1104,8 +1100,6 @@ class ResearchObjective:
             "confirmation_status": self.confirmation_status,
             "active_analysis_version": self.active_analysis_version,
             "published_analysis_version": self.published_analysis_version,
-            "created_at": _datetime_record(self.created_at),
-            "updated_at": _datetime_record(self.updated_at),
             "origin": self.origin,
             "created_by_user_id": self.created_by_user_id,
             "created_by_tool_call_id": self.created_by_tool_call_id,

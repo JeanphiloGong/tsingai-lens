@@ -2,8 +2,10 @@
 
 ## Summary
 
-Comparable-result and comparison-row persistence and projection code have been
-removed. They are not maintained runtime, evaluation, or browser resources.
+The retired material-first comparison substrate has been removed. Comparable
+results, collection overlays, row projections, and their assembly and
+assessment helpers are not maintained runtime, evaluation, or browser
+resources.
 
 The product chain is:
 
@@ -35,10 +37,11 @@ comparison-semantics, or graph endpoint is registered.
 
 ## Current Ownership In Code
 
-Objective analysis now owns comparison directly through its Evidence and
-Finding modules. The retired comparison domain helpers may remain as private
-scientific utilities only where directly imported by Objective analysis; there
-is no comparison repository or Core-fact projection service.
+Objective analysis owns comparison directly through its Evidence and Finding
+modules. `ObjectiveEvidenceComparison` records the conditions of one grounded
+within-paper comparison; `Finding` synthesizes agreement, conflict, and limits
+across those versioned Evidence records. There is no comparison repository,
+comparison domain module, Core-fact projection service, or fallback substrate.
 
 ## Current Contract Notes
 

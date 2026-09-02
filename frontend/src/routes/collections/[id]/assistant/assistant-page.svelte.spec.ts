@@ -267,6 +267,18 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockReset();
 	});
 
+	it('opens with a welcoming research prompt and a top-left workspace return link', async () => {
+		installApi();
+		await renderReady();
+
+		await expect
+			.element(browserPage.getByText('Hello. What would you like to investigate?'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Back to workspace' }))
+			.toHaveAttribute('href', '/collections/col_123');
+	});
+
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
 		installApi({
 			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 201),
@@ -802,6 +814,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await send('Start understanding these papers');
 
 		await expect.element(browserPage.getByText('Literature analysis started')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('In progress')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Task queued. You can continue while it runs.'))
 			.toBeInTheDocument();

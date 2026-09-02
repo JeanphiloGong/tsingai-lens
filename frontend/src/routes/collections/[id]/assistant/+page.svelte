@@ -718,6 +718,17 @@
 		return $t('researchAgent.capability.succeeded', { name });
 	}
 
+	function resultStatusLabel(message: ChatMessage) {
+		switch (message.tool_result?.status) {
+			case 'queued':
+				return $t('researchAgent.capability.statusQueued');
+			case 'failed':
+				return $t('researchAgent.capability.statusFailed');
+			default:
+				return $t('researchAgent.capability.statusSucceeded');
+		}
+	}
+
 	function resultResearchSteps(message: ChatMessage): ResearchProcessStep[] {
 		if (resultToolName(message) !== 'inspect_research_process') return [];
 		const process = message.tool_result?.data.process;
@@ -962,6 +973,10 @@
 
 <section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
 	<aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
+		<a class="back-workspace" href={resolve('/collections/[id]', { id: collectionId })}>
+			<span aria-hidden="true">←</span>
+			{$t('researchAgent.backToWorkspace')}
+		</a>
 		<div class="brand">
 			<span class="brand-mark" aria-hidden="true">L</span>
 			<h1>{$t('researchAgent.title')}</h1>
@@ -997,13 +1012,12 @@
 			</div>
 		</section>
 
-		<a class="collection-link" href={resolve('/collections/[id]', { id: collectionId })}>
+		<div class="collection-context">
 			<span>
 				<small>{$t('researchAgent.currentCollection')}</small>
 				<strong>{collectionId}</strong>
 			</span>
-			<span>{$t('researchAgent.openWorkspace')}</span>
-		</a>
+		</div>
 	</aside>
 
 	<main class="conversation">
@@ -1039,7 +1053,9 @@
 						<h3>{$t('researchAgent.loading')}</h3>
 					</div>
 				{:else if messages.length === 0}
-					<div class="empty-state">
+					<div class="empty-state welcome-state">
+						<div class="welcome-avatar" aria-hidden="true">AI</div>
+						<p class="welcome-eyebrow">{$t('researchAgent.welcomeEyebrow')}</p>
 						<h3>{$t('researchAgent.emptyTitle')}</h3>
 						<p>{$t('researchAgent.emptyBody')}</p>
 						<div class="suggestions">
@@ -1122,6 +1138,7 @@
 									{/if}
 									{#if message.tool_call_id}
 										<p class="capability-request">
+											<span class="capability-request-dot" aria-hidden="true"></span>
 											{capabilityRequestLabel(message.tool_name)}
 										</p>
 									{/if}
@@ -1134,6 +1151,7 @@
 							>
 								<header>
 									<span
+										aria-hidden="true"
 										class:failed={message.tool_result.status === 'failed'}
 										class:queued={message.tool_result.status === 'queued'}
 									>
@@ -1147,6 +1165,13 @@
 										<strong>{resultTitle(message)}</strong>
 										<p>{resultSummary(message)}</p>
 									</div>
+									<span
+										class="capability-status"
+										class:failed={message.tool_result.status === 'failed'}
+										class:queued={message.tool_result.status === 'queued'}
+									>
+										{resultStatusLabel(message)}
+									</span>
 								</header>
 
 								{#if resultDrafts(message).length}
@@ -1216,7 +1241,10 @@
 								<h3 id="approval-title">{$t('researchAgent.approval.title')}</h3>
 								<p>{approvalBody(pendingApproval)}</p>
 							</div>
-							<strong>{capabilityName(pendingApproval.name)}</strong>
+							<div class="approval-header-meta">
+								<span class="approval-status">{$t('researchAgent.approval.status')}</span>
+								<strong>{capabilityName(pendingApproval.name)}</strong>
+							</div>
 						</header>
 						{#if approvalArguments(pendingApproval).length}
 							<h4>{$t('researchAgent.approval.arguments')}</h4>
@@ -1421,10 +1449,33 @@
 		background: var(--bg-subtle);
 	}
 
+	.back-workspace {
+		display: inline-flex;
+		align-items: center;
+		align-self: flex-start;
+		gap: 7px;
+		min-height: 30px;
+		padding: 0 8px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.back-workspace span {
+		font-size: 18px;
+		line-height: 1;
+	}
+
+	.back-workspace:hover {
+		color: var(--brand-primary);
+	}
+
 	.brand {
 		display: flex;
 		align-items: center;
 		gap: 12px;
+		margin-top: 18px;
 	}
 
 	.brand-mark,
@@ -1532,32 +1583,31 @@
 		font-size: 11px;
 	}
 
-	.collection-link {
+	.collection-context {
 		display: grid;
 		gap: 10px;
 		padding-top: 16px;
 		border-top: 1px solid var(--border-default);
-		color: var(--brand-primary);
 		font-size: 12px;
 		font-weight: 700;
-		text-decoration: none;
 	}
 
-	.collection-link span:first-child {
+	.collection-context span {
 		display: grid;
 		gap: 2px;
 		min-width: 0;
 	}
 
-	.collection-link small {
+	.collection-context small {
 		color: var(--text-secondary);
 		font-weight: 500;
 	}
 
-	.collection-link strong {
+	.collection-context strong {
 		overflow: hidden;
 		color: var(--text-primary);
 		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.conversation {
@@ -1635,8 +1685,37 @@
 
 	.empty-state {
 		max-width: 620px;
-		margin: 100px auto 0;
+		margin: 88px auto 0;
 		text-align: center;
+	}
+
+	.welcome-state {
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+	}
+
+	.welcome-avatar {
+		display: grid;
+		place-items: center;
+		width: 48px;
+		height: 48px;
+		border: 1px solid var(--brand-border);
+		border-radius: 50%;
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+		font-size: 12px;
+		font-weight: 800;
+		letter-spacing: 0;
+	}
+
+	.welcome-eyebrow {
+		margin: 16px 0 0;
+		color: var(--brand-primary);
+		font-size: 11px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: uppercase;
 	}
 
 	.empty-state h3 {
@@ -1801,9 +1880,33 @@
 	}
 
 	.capability-request {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
 		margin: 7px 0 0;
 		color: var(--text-secondary);
 		font-size: 12px;
+	}
+
+	.capability-request-dot {
+		width: 7px;
+		height: 7px;
+		border: 1px solid var(--brand-primary);
+		border-radius: 50%;
+		background: var(--brand-primary);
+		animation: capability-pulse 1.2s ease-in-out infinite;
+	}
+
+	@keyframes capability-pulse {
+		50% {
+			opacity: 0.35;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.capability-request-dot {
+			animation: none;
+		}
 	}
 
 	.capability-event {
@@ -1817,7 +1920,37 @@
 	.capability-event > header {
 		display: flex;
 		align-items: flex-start;
+		justify-content: space-between;
 		gap: 10px;
+	}
+
+	.capability-event > header > div {
+		min-width: 0;
+	}
+
+	.capability-status {
+		flex: 0 0 auto;
+		padding: 4px 7px;
+		border: 1px solid var(--success-border);
+		border-radius: 999px;
+		background: var(--success-bg);
+		color: var(--success-text);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.2;
+		white-space: nowrap;
+	}
+
+	.capability-status.queued {
+		border-color: var(--warning-border);
+		background: var(--warning-bg);
+		color: var(--warning-text);
+	}
+
+	.capability-status.failed {
+		border-color: var(--danger-border);
+		background: var(--danger-bg);
+		color: var(--danger-text);
 	}
 
 	.capability-event > header > span {
@@ -1992,9 +2125,28 @@
 		font-size: 13px;
 	}
 
-	.approval > header > strong {
+	.approval-header-meta > strong {
 		color: var(--warning-text);
 		font-size: 12px;
+	}
+
+	.approval-header-meta {
+		display: grid;
+		justify-items: end;
+		gap: 6px;
+		flex: 0 0 auto;
+	}
+
+	.approval-status {
+		padding: 4px 7px;
+		border: 1px solid var(--warning-border);
+		border-radius: 999px;
+		background: var(--surface-card);
+		color: var(--warning-text);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.2;
+		white-space: nowrap;
 	}
 
 	.approval dl {
@@ -2341,6 +2493,7 @@
 		.sidebar {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-rows: auto auto;
 			align-items: center;
 			gap: 12px;
 			padding: 12px 16px;
@@ -2348,13 +2501,26 @@
 			border-bottom: 1px solid var(--border-default);
 		}
 
+		.back-workspace {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		.brand {
+			grid-column: 1;
+			grid-row: 2;
+			margin-top: 0;
+		}
+
 		.new-session {
+			grid-column: 2;
+			grid-row: 1 / span 2;
 			margin: 0;
 			padding: 0 12px;
 		}
 
 		.history,
-		.collection-link {
+		.collection-context {
 			display: none;
 		}
 

@@ -62,6 +62,12 @@ def _finding(**overrides):
                 "condition_boundary_evidence_ids": [],
             }
         ],
+        "origin": "system_generated",
+        "source_analysis_version": None,
+        "parent_finding_id": None,
+        "created_by_user_id": None,
+        "created_by_tool_call_id": None,
+        "created_at": None,
     }
     finding.update(overrides)
     return finding

@@ -249,6 +249,9 @@ class PostgresObjectiveRepository:
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        origin: str = "system_generated",
+        created_by_user_id: str | None = None,
+        created_by_tool_call_id: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         now = datetime.now(timezone.utc)
         async with self.session_factory.begin() as session:
@@ -272,6 +275,14 @@ class PostgresObjectiveRepository:
                     raise ValueError(
                         "an active analysis already uses a different document scope"
                     )
+                if (
+                    active.origin != origin
+                    or active.created_by_user_id != created_by_user_id
+                    or active.created_by_tool_call_id != created_by_tool_call_id
+                ):
+                    raise ValueError(
+                        "an active analysis already uses different authoring provenance"
+                    )
                 self._write_objective(row, objective, now=now)
                 return objective, active
             maximum_version = await session.scalar(
@@ -292,6 +303,9 @@ class PostgresObjectiveRepository:
                 total_document_count=len(document_inputs),
                 progress_message="Objective analysis is queued.",
                 created_at=now,
+                origin=origin,
+                created_by_user_id=created_by_user_id,
+                created_by_tool_call_id=created_by_tool_call_id,
             )
             objective = objective.queue_analysis(version)
             self._write_objective(row, objective, now=now)

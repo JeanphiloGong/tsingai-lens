@@ -80,7 +80,10 @@ Owns one reproducible execution attempt:
 System analysis has `origin=system_generated`. A deliberate researcher Finding
 or evidence-abstention decision publishes a new `human_authored | hybrid`
 analysis version with `source_analysis_version` and authenticated
-`created_by_user_id`. An authored abstention additionally records one bounded
+`created_by_user_id`. A user-approved analysis written by the Research Agent
+uses `origin=agent_authored`, authenticated `created_by_user_id`, and
+`created_by_tool_call_id`; an initial Agent analysis has no source analysis
+version. An authored abstention additionally records one bounded
 `abstention_reason` and explanation. It remains a successful scientific
 decision, not a failed model run.
 
@@ -160,9 +163,12 @@ Finding is the only conclusion identity. It owns:
 It also records authorship lineage. `origin=human_authored` identifies a new
 researcher conclusion over existing Evidence. `origin=hybrid` additionally
 requires a `parent_finding_id` from the immutable source version.
+`origin=agent_authored` identifies a conclusion proposed by the Agent and
+published only after exact user approval.
 `source_analysis_version`, authenticated `created_by_user_id`, and
 `created_at` preserve who made the decision and which published Evidence they
-reviewed. System, human, and hybrid Findings therefore share one canonical
+reviewed; Agent-authored records also preserve `created_by_tool_call_id`.
+System, human, Agent, and hybrid Findings therefore share one canonical
 scientific model and one versioned identity.
 
 Result sets use exact normalized `(factor tuple, outcome)` identity. Jointly
@@ -259,6 +265,31 @@ The browser uses complete scope-screening recommendations by default, lets the
 researcher edit that Objective-local set, and never treats seed papers as a
 fallback recommendation. Retry reuses the failed version's frozen IDs.
 
+### Agent-authored analysis
+
+Direct Agent analysis is a parallel Chat capability, not a replacement for the
+Objective analysis endpoint. When the researcher asks the Agent itself to
+analyze an Objective, the Agent first reads canonical Sources for the approved
+paper scope over one or more conversation turns. It may propose publication
+only after every included ready Document has one paper summary and at least one
+exact Source-grounded Evidence draft.
+
+The exact-argument approval confirms a candidate Objective in the same queue
+transition used by automatic analysis. Before that transition, the backend
+validates ownership, document readiness and preparation fingerprints, complete
+paper-summary coverage, Source locators, complete-content SHA-256 digests,
+normalized excerpt containment, and the structured Evidence contract. Invalid
+input creates no analysis version. A failure after queueing marks that version
+failed.
+
+Successful publication creates one `agent_authored` ObjectiveAnalysis with
+PaperContributions and Evidence and no Finding. Evidence identity, page,
+provenance, and contribution accounting are backend-derived. The Agent's model
+name, prompt version, authenticated user, and approved tool-call identity are
+durable lineage. A conclusion is a separate Evidence-to-Finding decision and
+requires a later exact approval through the existing Finding authoring path.
+The automatic Source extraction and Finding synthesis path remains unchanged.
+
 ### Published result reads
 
 - `POST /objectives/{objective_id}/findings`
@@ -302,8 +333,11 @@ Creating a correction with `supersedes_evidence_id` publishes a new immutable
 analysis snapshot. The prior Evidence and any Finding that cites it remain
 unchanged, while the new record records `origin=human_revised` and explicit
 supersession lineage. A new Source-grounded record uses
-`origin=human_authored`. An Agent uses the same command only after exact-
-argument approval and supplies the `source_digest` obtained from
+`origin=human_authored` when the researcher authors it directly, or
+`origin=agent_authored` when the Agent proposes it and the researcher approves
+the exact write. An Agent-assisted correction remains `human_revised` and is
+distinguished by `created_by_tool_call_id`. An Agent uses the same command only
+after exact-argument approval and supplies the `source_digest` obtained from
 `inspect_document_sources`. Invalid excerpts, stale or out-of-scope Sources,
 concurrent analysis, and attempts to revise a superseded record are conflicts;
 they never create a partial record.

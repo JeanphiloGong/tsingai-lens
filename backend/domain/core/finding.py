@@ -25,7 +25,7 @@ FINDING_SYNTHESIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"agreement", "conflict", "condition_dependent", "insufficient_confirmation"}
 )
 FINDING_ORIGINS: Final[frozenset[str]] = frozenset(
-    {"system_generated", "human_authored", "hybrid"}
+    {"system_generated", "human_authored", "agent_authored", "hybrid"}
 )
 _FINDING_CONTEXT_ROLES: Final[frozenset[str]] = frozenset(
     {
@@ -201,6 +201,7 @@ class Finding:
     source_analysis_version: int | None = None
     parent_finding_id: str | None = None
     created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
     created_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -279,7 +280,11 @@ class Finding:
         if self.origin not in FINDING_ORIGINS:
             raise ValueError(f"unsupported finding origin: {self.origin}")
         if self.origin == "system_generated":
-            if self.created_by_user_id or self.parent_finding_id:
+            if (
+                self.created_by_user_id
+                or self.created_by_tool_call_id
+                or self.parent_finding_id
+            ):
                 raise ValueError(
                     "system-generated Finding cannot have human author provenance"
                 )
@@ -290,10 +295,18 @@ class Finding:
                 raise ValueError("authored Finding source must be an older version")
             if not _text(self.created_by_user_id) or self.created_at is None:
                 raise ValueError("authored Finding requires creator and creation time")
+            if self.origin == "agent_authored" and not _text(
+                self.created_by_tool_call_id
+            ):
+                raise ValueError(
+                    "agent-authored Finding requires tool-call provenance"
+                )
         if self.origin == "hybrid" and not _text(self.parent_finding_id):
             raise ValueError("hybrid Finding requires parent_finding_id")
-        if self.origin == "human_authored" and self.parent_finding_id is not None:
-            raise ValueError("human-authored Finding cannot have a parent Finding")
+        if self.origin in {"human_authored", "agent_authored"} and (
+            self.parent_finding_id is not None
+        ):
+            raise ValueError("authored Finding cannot have a parent Finding")
         if self.parent_finding_id == self.finding_id:
             raise ValueError("Finding cannot derive from itself")
 
@@ -417,6 +430,9 @@ class Finding:
             ),
             parent_finding_id=_text(payload.get("parent_finding_id")),
             created_by_user_id=_text(payload.get("created_by_user_id")),
+            created_by_tool_call_id=_text(
+                payload.get("created_by_tool_call_id")
+            ),
             created_at=_datetime_or_none(payload.get("created_at")),
         )
 
@@ -627,6 +643,7 @@ class Finding:
             "source_analysis_version": self.source_analysis_version,
             "parent_finding_id": self.parent_finding_id,
             "created_by_user_id": self.created_by_user_id,
+            "created_by_tool_call_id": self.created_by_tool_call_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

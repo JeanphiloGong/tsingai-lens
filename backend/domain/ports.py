@@ -334,6 +334,9 @@ class ObjectiveRepository(Protocol):
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        origin: str = "system_generated",
+        created_by_user_id: str | None = None,
+        created_by_tool_call_id: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
     async def claim_analysis(

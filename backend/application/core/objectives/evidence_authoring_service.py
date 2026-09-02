@@ -25,9 +25,45 @@ class EvidenceAuthoringResult:
 
 
 @dataclass(frozen=True)
-class _CanonicalSource:
+class CanonicalObjectiveSource:
     content: str
     page: int | None
+
+
+def resolve_canonical_objective_source(
+    document: Any, *, source_kind: str, source_ref: str
+) -> CanonicalObjectiveSource:
+    if source_kind == "text_window":
+        source = next(
+            (item for item in document.blocks if item.block_id == source_ref), None
+        )
+        if source is not None:
+            return CanonicalObjectiveSource(content=source.text, page=source.page)
+    elif source_kind == "table":
+        source = next(
+            (item for item in document.tables if item.table_id == source_ref), None
+        )
+        if source is not None:
+            record = source.to_record()
+            return CanonicalObjectiveSource(
+                content=str(record["table_markdown"] or "").strip(),
+                page=source.page,
+            )
+    elif source_kind == "figure":
+        source = next(
+            (item for item in document.figures if item.figure_id == source_ref), None
+        )
+        if source is not None:
+            return CanonicalObjectiveSource(
+                content=str(source.caption_text or ""), page=source.page
+            )
+    else:
+        raise ValueError(f"unsupported objective evidence source: {source_kind}")
+    raise FileNotFoundError("Source was not found in the requested document")
+
+
+def normalize_source_text(value: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
 
 
 class EvidenceAuthoringService:
@@ -64,6 +100,7 @@ class EvidenceAuthoringService:
         authoring_note: str | None,
         source_digest: str | None = None,
         created_by_user_id: str,
+        created_by_tool_call_id: str | None = None,
     ) -> EvidenceAuthoringResult:
         await self.collection_service.get_collection_for_user(
             collection_id, created_by_user_id
@@ -103,13 +140,13 @@ class EvidenceAuthoringService:
         )
         if source_document is None:
             raise FileNotFoundError("Source document was not found")
-        canonical = self._resolve_source(
+        canonical = resolve_canonical_objective_source(
             source_document, source_kind=source_kind, source_ref=source_ref
         )
-        normalized_excerpt = self._normalized(source_excerpt)
+        normalized_excerpt = normalize_source_text(source_excerpt)
         if not normalized_excerpt:
             raise ValueError("Source excerpt is required")
-        if normalized_excerpt not in self._normalized(canonical.content):
+        if normalized_excerpt not in normalize_source_text(canonical.content):
             raise ValueError("Source excerpt is not contained in the canonical Source")
         if source_digest is not None:
             digest = hashlib.sha256(canonical.content.encode("utf-8")).hexdigest()
@@ -173,12 +210,21 @@ class EvidenceAuthoringService:
                 "resolution_status": "resolved",
                 "failure_reason": None,
                 "confidence": 1.0,
-                "origin": "human_revised" if revision is not None else "human_authored",
+                "origin": (
+                    "human_revised"
+                    if revision is not None
+                    else (
+                        "agent_authored"
+                        if created_by_tool_call_id
+                        else "human_authored"
+                    )
+                ),
                 "source_analysis_version": source_analysis_version,
                 "supersedes_evidence_id": (
                     revision.evidence_id if revision is not None else None
                 ),
                 "created_by_user_id": created_by_user_id,
+                "created_by_tool_call_id": created_by_tool_call_id,
                 "created_at": now,
                 "authoring_note": self._clean_optional(authoring_note),
             }
@@ -231,6 +277,7 @@ class EvidenceAuthoringService:
             origin="hybrid",
             source_analysis_version=source_analysis_version,
             created_by_user_id=created_by_user_id,
+            created_by_tool_call_id=created_by_tool_call_id,
         )
         _objective, published = (
             await self.objective_repository.publish_authored_analysis(
@@ -244,41 +291,6 @@ class EvidenceAuthoringService:
             )
         )
         return EvidenceAuthoringResult(analysis=published, evidence=authored)
-
-    @staticmethod
-    def _resolve_source(
-        document: Any, *, source_kind: str, source_ref: str
-    ) -> _CanonicalSource:
-        if source_kind == "text_window":
-            source = next(
-                (item for item in document.blocks if item.block_id == source_ref), None
-            )
-            if source is not None:
-                return _CanonicalSource(content=source.text, page=source.page)
-        elif source_kind == "table":
-            source = next(
-                (item for item in document.tables if item.table_id == source_ref), None
-            )
-            if source is not None:
-                record = source.to_record()
-                return _CanonicalSource(
-                    # The table Markdown is the canonical table Source. The
-                    # caption remains available as table metadata and is not
-                    # mixed into the hashed content returned by the Agent.
-                    content=str(record["table_markdown"] or "").strip(),
-                    page=source.page,
-                )
-        elif source_kind == "figure":
-            source = next(
-                (item for item in document.figures if item.figure_id == source_ref), None
-            )
-            if source is not None:
-                return _CanonicalSource(
-                    content=str(source.caption_text or ""), page=source.page
-                )
-        else:
-            raise ValueError(f"unsupported objective evidence source: {source_kind}")
-        raise FileNotFoundError("Source was not found in the requested document")
 
     async def _all_evidence(
         self, collection_id: str, objective_id: str, analysis_version: int
@@ -317,13 +329,15 @@ class EvidenceAuthoringService:
                 raise RuntimeError("objective Finding pagination did not advance")
 
     @staticmethod
-    def _normalized(value: str) -> str:
-        return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
-
-    @staticmethod
     def _clean_optional(value: str | None) -> str | None:
         cleaned = " ".join(str(value or "").split())
         return cleaned or None
 
 
-__all__ = ["EvidenceAuthoringResult", "EvidenceAuthoringService"]
+__all__ = [
+    "CanonicalObjectiveSource",
+    "EvidenceAuthoringResult",
+    "EvidenceAuthoringService",
+    "normalize_source_text",
+    "resolve_canonical_objective_source",
+]

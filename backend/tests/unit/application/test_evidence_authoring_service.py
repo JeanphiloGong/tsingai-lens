@@ -155,6 +155,19 @@ async def test_creates_grounded_evidence_in_new_immutable_version() -> None:
     assert cloned_finding.supporting_evidence_ids == ("evidence-1",)
 
 
+async def test_agent_proposal_records_tool_call_authorship() -> None:
+    service, _repository, _source_repository = await _service()
+
+    result = await service.create_version(
+        **_draft(created_by_tool_call_id="call-agent-evidence")
+    )
+
+    assert result.evidence.origin == "agent_authored"
+    assert result.evidence.created_by_user_id == "user-researcher"
+    assert result.evidence.created_by_tool_call_id == "call-agent-evidence"
+    assert result.analysis.created_by_tool_call_id == "call-agent-evidence"
+
+
 async def test_revision_creates_lineage_and_keeps_old_finding_valid() -> None:
     service, repository, _source_repository = await _service()
 

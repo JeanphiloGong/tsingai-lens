@@ -27,11 +27,13 @@ from application.chat.capabilities import (
     InspectResearchProcessCapability,
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
+    PublishAgentObjectiveAnalysisCapability,
     QueryPublishedFindingsCapability,
     RecordFindingFeedbackCapability,
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
+from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
@@ -39,6 +41,9 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.agent_analysis_service import (
+    AgentObjectiveAnalysisService,
+)
 from application.core.objectives.evidence_authoring_service import (
     EvidenceAuthoringService,
 )
@@ -289,6 +294,11 @@ async def build_application_runtime(
             objective_repository=objective_repository,
             source_artifact_repository=source_artifact_repository,
         )
+        agent_analysis_service = AgentObjectiveAnalysisService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+            source_artifact_repository=source_artifact_repository,
+        )
         research_objective_service = ResearchObjectiveService(
             collection_service=collection_service,
             source_artifact_repository=source_artifact_repository,
@@ -314,11 +324,12 @@ async def build_application_runtime(
         )
 
         if overrides.chat_session_service is None:
+            chat_model = OpenAIChatModel()
             chat_session_service = ChatSessionService(
                 collection_service=collection_service,
                 repository=chat_repository,
                 runner=ResearchAgentRunner(
-                    model=OpenAIChatModel(),
+                    model=chat_model,
                     capabilities=CapabilityRegistry(
                         (
                             GetCollectionContextCapability(
@@ -361,6 +372,11 @@ async def build_application_runtime(
                             ),
                             CreateEvidenceVersionCapability(
                                 evidence_authoring_service=evidence_authoring_service,
+                            ),
+                            PublishAgentObjectiveAnalysisCapability(
+                                agent_analysis_service=agent_analysis_service,
+                                model_name=chat_model.model,
+                                prompt_version=RESEARCH_AGENT_PROMPT_VERSION,
                             ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,

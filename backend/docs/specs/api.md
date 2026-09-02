@@ -218,6 +218,19 @@ The production Research Agent currently exposes these automatic capabilities:
   exact approved ready `document_ids`. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
+- `publish_agent_objective_analysis` is a separate `write` capability for the
+  case where the researcher explicitly asks the Agent itself to analyze a
+  bounded paper scope. Before proposing the write, the Agent reads exact
+  Sources through `inspect_document_sources` over one or more turns. The
+  approved payload contains one summary and at least one structured Evidence
+  draft for every selected ready Document. The backend revalidates each Source
+  locator, complete-content SHA-256 digest, normalized verbatim excerpt, and
+  Evidence contract before allocating a version. It then publishes one
+  `agent_authored` analysis through the existing repository queue, claim, and
+  atomic publication lifecycle. The version contains PaperContributions and
+  Evidence but no Finding; any conclusion requires a later approved
+  `create_finding_version` call. This capability has no separate HTTP endpoint,
+  draft store, background extraction, or Finding-synthesis call;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work.
@@ -343,6 +356,13 @@ or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens
 from prompt or response text.
 
+Analysis responses also expose their authoring lineage. `origin` distinguishes
+`system_generated`, `human_authored`, `agent_authored`, and `hybrid` versions;
+`created_by_user_id` identifies the accountable researcher and the optional
+`created_by_tool_call_id` links an Agent-authored version to the approved Chat
+tool call. These fields record authorship only and do not make a statement or
+Source into verified Evidence.
+
 `POST .../analysis` accepts the same required `{"document_ids": [...]}` shape
 as discovery and expresses researcher approval of both the Objective definition
 and the selected ready-paper analysis scope.
@@ -372,10 +392,13 @@ and source-backed Evidence were published but no defensible comparison
 survived; this is a scientific abstention, not a technical failure. The Finding
 list then returns `total=0` without a placeholder Finding.
 
-`ObjectiveAnalysisService` owns queue-and-dispatch for both this HTTP command
-and the Research Agent capability. This keeps confirmation, version allocation,
-the process-local concurrency limit, dispatch-failure persistence, retry, and
-published-state semantics identical for both consumers.
+`ObjectiveAnalysisService` owns queue-and-dispatch for this HTTP command and
+the Agent's automatic `start_objective_analysis` capability. Direct
+Agent-authored analysis does not call that extraction pipeline; its application
+service revalidates the approved Source-grounded payload and uses the same
+Objective repository queue, claim, failure, and publication transitions.
+Both commands therefore share confirmation, version allocation, active-version
+exclusion, and published-pointer semantics without sharing scientific authorship.
 
 Every version stores ordered `document_inputs` containing `document_id` and
 `preparation_fingerprint`. Execution checks these fingerprints against the
@@ -426,6 +449,14 @@ Finding and Evidence list endpoints support `offset` and `limit`. All responses
 include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
+
+Each Finding and Evidence record exposes its `origin`, optional
+`created_by_user_id`, and optional `created_by_tool_call_id`. The tool-call field
+is populated for an `agent_authored` record and for an Agent-assisted revision;
+it is `null` for system-generated and ordinary direct human-authored records.
+It is durable authoring provenance, not scientific support; Evidence remains
+grounded through its Source identity and a Finding remains supported through
+its version-local Evidence bindings.
 
 The Findings POST command records one deliberate researcher Evidence-to-Finding
 decision. It never inserts into the published source version. The request

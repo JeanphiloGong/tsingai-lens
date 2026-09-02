@@ -80,7 +80,7 @@ EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
     {"resolved", "partial", "unresolved", "skipped", "unknown"}
 )
 EVIDENCE_ORIGINS: Final[frozenset[str]] = frozenset(
-    {"system_generated", "human_authored", "human_revised"}
+    {"system_generated", "human_authored", "human_revised", "agent_authored"}
 )
 OBJECTIVE_CONFIRMATION_STATUSES: Final[frozenset[str]] = frozenset(
     {"candidate", "confirmed"}
@@ -92,7 +92,7 @@ OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"queued", "running", "succeeded", "failed"}
 )
 OBJECTIVE_ANALYSIS_ORIGINS: Final[frozenset[str]] = frozenset(
-    {"system_generated", "human_authored", "hybrid"}
+    {"system_generated", "human_authored", "agent_authored", "hybrid"}
 )
 OBJECTIVE_ANALYSIS_ABSTENTION_REASONS: Final[frozenset[str]] = frozenset(
     {"no_comparable_evidence", "no_grounded_evidence", "insufficient_evidence"}
@@ -1137,6 +1137,7 @@ class ObjectiveAnalysis:
     origin: str = "system_generated"
     source_analysis_version: int | None = None
     created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
     abstention_reason: str | None = None
     abstention_note: str | None = None
 
@@ -1158,7 +1159,14 @@ class ObjectiveAnalysis:
         if self.origin not in OBJECTIVE_ANALYSIS_ORIGINS:
             raise ValueError(f"unsupported objective analysis origin: {self.origin}")
         if self.origin == "system_generated":
-            if self.source_analysis_version is not None or self.created_by_user_id:
+            if any(
+                value is not None
+                for value in (
+                    self.source_analysis_version,
+                    self.created_by_user_id,
+                    self.created_by_tool_call_id,
+                )
+            ):
                 raise ValueError(
                     "system-generated analysis cannot have authoring provenance"
                 )
@@ -1166,6 +1174,18 @@ class ObjectiveAnalysis:
                 raise ValueError(
                     "system-generated analysis cannot record an authored abstention"
                 )
+        elif self.origin == "agent_authored":
+            if not _text(self.created_by_user_id) or not _text(
+                self.created_by_tool_call_id
+            ):
+                raise ValueError(
+                    "agent-authored analysis requires user and tool-call provenance"
+                )
+            if (
+                self.source_analysis_version is not None
+                and self.source_analysis_version >= self.analysis_version
+            ):
+                raise ValueError("authored analysis source must be an older version")
         else:
             if self.source_analysis_version is None:
                 raise ValueError("authored analysis requires source_analysis_version")
@@ -1249,6 +1269,9 @@ class ObjectiveAnalysis:
                 payload.get("source_analysis_version")
             ),
             created_by_user_id=_text(payload.get("created_by_user_id")),
+            created_by_tool_call_id=_text(
+                payload.get("created_by_tool_call_id")
+            ),
             abstention_reason=_text(payload.get("abstention_reason")),
             abstention_note=_text(payload.get("abstention_note")),
         )
@@ -1347,6 +1370,7 @@ class ObjectiveAnalysis:
             "origin": self.origin,
             "source_analysis_version": self.source_analysis_version,
             "created_by_user_id": self.created_by_user_id,
+            "created_by_tool_call_id": self.created_by_tool_call_id,
             "abstention_reason": self.abstention_reason,
             "abstention_note": self.abstention_note,
         }
@@ -1765,6 +1789,7 @@ class ObjectiveEvidence:
     supersedes_evidence_id: str | None = None
     superseded_by_evidence_id: str | None = None
     created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
     created_at: datetime | None = None
     authoring_note: str | None = None
 
@@ -1814,14 +1839,22 @@ class ObjectiveEvidence:
             for value in (
                 self.supersedes_evidence_id,
                 self.created_by_user_id,
+                self.created_by_tool_call_id,
                 self.authoring_note,
             )
         ):
             raise ValueError("system-generated evidence cannot contain authoring provenance")
-        if self.origin != "system_generated":
-            if self.source_analysis_version is None or not _text(
-                self.created_by_user_id
+        if self.origin == "agent_authored":
+            if not _text(self.created_by_user_id) or not _text(
+                self.created_by_tool_call_id
             ):
+                raise ValueError(
+                    "agent-authored evidence requires user and tool-call provenance"
+                )
+            if self.created_at is None:
+                raise ValueError("authored evidence requires creation time")
+        elif self.origin != "system_generated":
+            if self.source_analysis_version is None or not _text(self.created_by_user_id):
                 raise ValueError(
                     "authored evidence requires source version and authenticated creator"
                 )
@@ -1943,6 +1976,9 @@ class ObjectiveEvidence:
                 payload.get("superseded_by_evidence_id")
             ),
             created_by_user_id=_text(payload.get("created_by_user_id")),
+            created_by_tool_call_id=_text(
+                payload.get("created_by_tool_call_id")
+            ),
             created_at=_datetime_or_none(payload.get("created_at")),
             authoring_note=_text(payload.get("authoring_note")),
         )
@@ -2078,6 +2114,7 @@ class ObjectiveEvidence:
             "supersedes_evidence_id": self.supersedes_evidence_id,
             "superseded_by_evidence_id": self.superseded_by_evidence_id,
             "created_by_user_id": self.created_by_user_id,
+            "created_by_tool_call_id": self.created_by_tool_call_id,
             "created_at": _datetime_record(self.created_at),
             "authoring_note": self.authoring_note,
         }

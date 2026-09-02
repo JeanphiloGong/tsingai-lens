@@ -186,6 +186,9 @@ class MemoryObjectiveRepository:
         pipeline_version: str,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        origin: str = "system_generated",
+        created_by_user_id: str | None = None,
+        created_by_tool_call_id: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id)
         objective = self._require_objective(*key)
@@ -203,6 +206,14 @@ class MemoryObjectiveRepository:
             if existing.document_inputs != document_inputs:
                 raise ValueError(
                     "an active analysis already uses a different document scope"
+                )
+            if (
+                existing.origin != origin
+                or existing.created_by_user_id != created_by_user_id
+                or existing.created_by_tool_call_id != created_by_tool_call_id
+            ):
+                raise ValueError(
+                    "an active analysis already uses different authoring provenance"
                 )
             self._objectives[key] = objective
             return objective, existing
@@ -225,6 +236,9 @@ class MemoryObjectiveRepository:
             total_document_count=len(document_inputs),
             progress_message="Objective analysis is queued.",
             created_at=datetime.now(timezone.utc),
+            origin=origin,
+            created_by_user_id=created_by_user_id,
+            created_by_tool_call_id=created_by_tool_call_id,
         )
         objective = objective.queue_analysis(version)
         self._objectives[key] = objective

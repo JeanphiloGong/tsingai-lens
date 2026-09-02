@@ -121,6 +121,7 @@ class CreateFindingVersionCapability:
             parent_finding_id=arguments.parent_finding_id,
             abstention_reason=arguments.abstention_reason,
             created_by_user_id=context.user_id,
+            created_by_tool_call_id=context.tool_call_id,
         )
         finding = result.finding
         refs = [

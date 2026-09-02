@@ -176,6 +176,7 @@ class CreateEvidenceVersionCapability:
             supersedes_evidence_id=arguments.supersedes_evidence_id,
             authoring_note=arguments.authoring_note,
             created_by_user_id=context.user_id,
+            created_by_tool_call_id=context.tool_call_id,
         )
         evidence = result.evidence
         refs = (

@@ -474,6 +474,7 @@
 
 	function originLabel(value: ObjectiveFinding['origin'] | undefined) {
 		if (value === 'human_authored') return '研究者创建';
+		if (value === 'agent_authored') return 'Agent 分析';
 		if (value === 'hybrid') return '研究者修订';
 		return '系统分析';
 	}
@@ -543,6 +544,8 @@
 		const origin =
 			item.origin === 'human_authored'
 				? '研究者创建'
+				: item.origin === 'agent_authored'
+					? 'Agent 分析'
 				: item.origin === 'human_revised'
 					? '研究者修订'
 					: '系统提取';

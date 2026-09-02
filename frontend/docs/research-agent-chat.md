@@ -135,7 +135,10 @@ answer. The result panel shows:
 - the observable research stages and active paper when process status is read;
 - per-paper stored, processing, ready, and failed states;
 - warnings and scientific absence;
-- links to canonical collection, Objective, Finding, or Evidence records.
+- links to canonical collection, Objective, Finding, or Evidence records;
+- a distinct Agent paper-analysis activity whose completed summary reports the
+  number of published Source-grounded Evidence records and links to the
+  canonical Objective analysis.
 
 A `queued` capability result is rendered as started rather than completed. It
 shows the canonical analysis or task link and lets the researcher continue the
@@ -149,11 +152,14 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 
 For `start_research_process`, `create_objective_candidate`,
 `start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
-`create_finding_version`, and `create_evidence_version`, the page renders the exact persisted arguments and
-exposes explicit Reject and Approve actions. Finding feedback and curation are
+`create_finding_version`, `create_evidence_version`, and
+`publish_agent_objective_analysis`, the page renders the exact persisted
+arguments and exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
 separate Evidence-to-conclusion decision that publishes a new immutable
-analysis version. While approval is pending:
+analysis version. Agent-authored Objective analysis is also distinct from the
+automatic analysis command: it publishes the Agent's reviewed Evidence first
+and creates no Finding. While approval is pending:
 
 - the message composer is disabled;
 - refresh restores the pending decision from the server;
@@ -212,6 +218,9 @@ The focused browser suite covers:
     write;
 16. exact Evidence roles and statement before approval publishes a new Finding
     version.
+17. Agent-authored paper analysis shown as a separate approval, rejection, and
+    completed Evidence publication state without changing the automatic
+    Objective-analysis presentation.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

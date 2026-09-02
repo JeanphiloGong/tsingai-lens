@@ -895,6 +895,78 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('distinguishes Agent-authored paper analysis from automatic analysis', async () => {
+		const call = pendingCall({
+			name: 'publish_agent_objective_analysis',
+			arguments: {
+				objective_id: 'obj_1',
+				document_ids: ['doc_1'],
+				paper_summaries: [
+					{
+						document_id: 'doc_1',
+						relevance: 'high',
+						paper_role: 'primary_experiment',
+						contribution_summary: 'Reports one source-backed porosity comparison.',
+						confidence: 0.9
+					}
+				],
+				evidence_drafts: [
+					{
+						draft_id: 'draft_1',
+						document_id: 'doc_1',
+						source_kind: 'text_window',
+						source_ref: 'block_results',
+						source_excerpt: 'Porosity decreased from 1.8% to 0.7%.',
+						source_digest: 'a'.repeat(64),
+						evidence_role: 'direct_result',
+						changed_variables: [{ name: 'laser power' }],
+						comparison: null,
+						reported_result: {
+							outcome: 'porosity',
+							direction: 'decrease',
+							result_text: 'Porosity decreased from 1.8% to 0.7%.'
+						},
+						attribution_scope: 'association_only',
+						scientific_context: { material: [], sample: [], process: [], test: [] },
+						confidence: 0.9
+					}
+				]
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Read these papers and analyze the question yourself'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Read these papers and analyze the question yourself');
+
+		await expect
+			.element(browserPage.getByText('Agent paper analysis', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					"Publish the Agent's complete paper-by-paper analysis after Lens revalidates every Source excerpt and Evidence record. No Finding will be created yet."
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and publish analysis' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+	});
+
 	it('presents evidence abstention without implying that a Finding will be created', async () => {
 		const call = pendingCall({
 			name: 'create_finding_version',

@@ -403,6 +403,8 @@
 				return $t('researchAgent.capability.findingAuthoring');
 			case 'create_evidence_version':
 				return $t('researchAgent.capability.evidenceAuthoring');
+			case 'publish_agent_objective_analysis':
+				return $t('researchAgent.capability.agentObjectiveAnalysis');
 			case 'propose_objective_drafts':
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
@@ -518,6 +520,11 @@
 		}
 		if (name === 'create_evidence_version') {
 			return $t('researchAgent.capability.evidencePublished');
+		}
+		if (name === 'publish_agent_objective_analysis') {
+			return $t('researchAgent.capability.agentAnalysisPublished', {
+				count: numberValue(result.data, 'evidence_count')
+			});
 		}
 		if (name === 'propose_objective_drafts') {
 			return $t('researchAgent.capability.draftCount', {
@@ -703,6 +710,9 @@
 		if (call.name === 'create_evidence_version') {
 			return $t('researchAgent.approval.evidenceAuthoringBody');
 		}
+		if (call.name === 'publish_agent_objective_analysis') {
+			return $t('researchAgent.approval.agentObjectiveAnalysisBody');
+		}
 		return $t('researchAgent.approval.body');
 	}
 
@@ -727,6 +737,9 @@
 		if (call.name === 'create_evidence_version') {
 			return $t('researchAgent.approval.publishEvidence');
 		}
+		if (call.name === 'publish_agent_objective_analysis') {
+			return $t('researchAgent.approval.publishAgentAnalysis');
+		}
 		return $t('researchAgent.approval.approve');
 	}
 
@@ -737,6 +750,9 @@
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
 		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
+		if (toolName === 'publish_agent_objective_analysis') {
+			return 'researchAgent.agentObjectiveAnalysisRejected';
+		}
 		return 'researchAgent.rejected';
 	}
 

@@ -46,6 +46,7 @@ const finding = {
 	source_analysis_version: null,
 	parent_finding_id: null,
 	created_by_user_id: null,
+	created_by_tool_call_id: null,
 	created_at: null,
 	statement: 'Higher temperature was associated with greater strength.',
 	factors: ['temperature'],

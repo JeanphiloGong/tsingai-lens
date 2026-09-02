@@ -44,7 +44,11 @@ export type FindingCuration = FindingCurationCreate & {
 	finding_id: string;
 	updated_at: string;
 };
-export type FindingOrigin = 'system_generated' | 'human_authored' | 'hybrid';
+export type FindingOrigin =
+	| 'system_generated'
+	| 'human_authored'
+	| 'agent_authored'
+	| 'hybrid';
 export type FindingAbstentionReason =
 	| 'no_comparable_evidence'
 	| 'no_grounded_evidence'
@@ -158,6 +162,7 @@ export type ObjectiveAnalysisState = {
 	origin: FindingOrigin;
 	source_analysis_version: number | null;
 	created_by_user_id: string | null;
+	created_by_tool_call_id: string | null;
 	abstention_reason: FindingAbstentionReason | null;
 	abstention_note: string | null;
 };
@@ -235,6 +240,7 @@ export type ObjectiveFinding = {
 	source_analysis_version: number | null;
 	parent_finding_id: string | null;
 	created_by_user_id: string | null;
+	created_by_tool_call_id: string | null;
 	created_at: string | null;
 };
 export type ObjectiveEvidence = {
@@ -280,11 +286,12 @@ export type ObjectiveEvidence = {
 	failure_reason: string | null;
 	confidence: number;
 	supports_finding: boolean;
-	origin?: 'system_generated' | 'human_authored' | 'human_revised';
+	origin?: 'system_generated' | 'human_authored' | 'human_revised' | 'agent_authored';
 	source_analysis_version?: number | null;
 	supersedes_evidence_id?: string | null;
 	superseded_by_evidence_id?: string | null;
 	created_by_user_id?: string | null;
+	created_by_tool_call_id?: string | null;
 	created_at?: string | null;
 	authoring_note?: string | null;
 };
@@ -581,9 +588,12 @@ function normalizeObjectiveAnalysisState(value: unknown): ObjectiveAnalysisState
 		created_at: nonEmptyText(record.created_at),
 		started_at: nonEmptyText(record.started_at),
 		completed_at: nonEmptyText(record.completed_at),
-		origin: ['human_authored', 'hybrid'].includes(origin) ? origin : 'system_generated',
+		origin: ['human_authored', 'agent_authored', 'hybrid'].includes(origin)
+			? origin
+			: 'system_generated',
 		source_analysis_version: toOptionalNumber(record.source_analysis_version),
 		created_by_user_id: nonEmptyText(record.created_by_user_id),
+		created_by_tool_call_id: nonEmptyText(record.created_by_tool_call_id),
 		abstention_reason: abstentionReason,
 		abstention_note: nonEmptyText(record.abstention_note)
 	};

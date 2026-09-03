@@ -770,6 +770,17 @@
 		return activity.status === 'failed' || activityHasWarnings(activity);
 	}
 
+	function initializeActivityDisclosure(node: HTMLDetailsElement, initiallyOpen: boolean) {
+		node.open = initiallyOpen;
+		let previousAutomaticOpen = initiallyOpen;
+		return {
+			update(automaticOpen: boolean) {
+				if (!previousAutomaticOpen && automaticOpen) node.open = true;
+				previousAutomaticOpen = automaticOpen;
+			}
+		};
+	}
+
 	function activityStatusLabel(activity: ActivityItem) {
 		if (activity.status === 'failed') return $t('researchAgent.capability.statusFailed');
 		if (activity.status === 'in_progress') return $t('researchAgent.capability.statusQueued');
@@ -1209,7 +1220,7 @@
 									class="research-activity"
 									class:failed={item.status === 'failed'}
 									class:active={item.status === 'in_progress' || item.status === 'pending'}
-									open={activityIsOpen(item)}
+									use:initializeActivityDisclosure={activityIsOpen(item)}
 									data-testid="research-activity"
 								>
 									<summary>

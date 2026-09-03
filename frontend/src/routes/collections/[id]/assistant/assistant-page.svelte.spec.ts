@@ -595,6 +595,65 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(new Headers(post?.[1]?.headers).get('Accept')).toBe('text/event-stream');
 	});
 
+	it('preserves a researcher-expanded activity while the next answer streams', async () => {
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: { query: 'energy input' }
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_read_1',
+						tool_result: {
+							tool_call_id: 'call_read_1',
+							status: 'succeeded',
+							data: { finding_count: 2, evidence_count: 8 },
+							resource_refs: [],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					})
+				],
+				pending_approval: null
+			},
+			messageDeltas: ['Following up', ' with source context.'],
+			messageDelayMs: 100,
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_stream', 'user', 'Explain the first finding'),
+					message('msg_assistant_stream', 'assistant', 'Following up with source context.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+
+		const composer = await renderReady();
+		const activity = document.querySelector<HTMLDetailsElement>(
+			'[data-testid="research-activity"]'
+		);
+		expect(activity?.open).toBe(false);
+		activity?.querySelector<HTMLElement>('summary')?.click();
+		expect(activity?.open).toBe(true);
+
+		await composer.fill('Explain the first finding');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect
+			.element(browserPage.getByText('Following up', { exact: true }))
+			.toBeInTheDocument();
+		expect(activity?.open).toBe(true);
+		await expect
+			.element(browserPage.getByText('Following up with source context.', { exact: true }))
+			.toBeInTheDocument();
+		expect(activity?.open).toBe(true);
+	});
+
 	it('renders a read capability result separately from the final answer', async () => {
 		installApi({
 			messageTurn: {

@@ -619,7 +619,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 									href: '/collections/col_123/objectives/obj_1?finding_id=finding_1'
 								}
 							],
-							warnings: ['One paper used a different heat treatment.'],
+							warnings: [],
 							error_code: null,
 							error_message: null
 						}
@@ -633,19 +633,64 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 		await send('What findings are available?');
 
-		await expect.element(browserPage.getByText('Published findings completed')).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
+		const activity = document.querySelector<HTMLDetailsElement>(
+			'[data-testid="research-activity"]'
+		);
+		expect(document.querySelectorAll('[data-testid="research-activity"]')).toHaveLength(1);
+		expect(activity?.open).toBe(false);
+		activity?.querySelector<HTMLElement>('summary')?.click();
 		await expect
-			.element(browserPage.getByText('2 findings · 8 evidence records'))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('One paper used a different heat treatment.'))
-			.toBeInTheDocument();
+			.element(browserPage.getByText('Published findings completed', { exact: true }))
+			.toBeVisible();
+		await expect.element(browserPage.getByText('2 findings · 8 evidence records')).toBeVisible();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open finding' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?finding_id=finding_1');
 		await expect
 			.element(browserPage.getByText('Two published findings address this question.'))
 			.toBeInTheDocument();
+	});
+
+	it('opens routine research activity when a warning needs review', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Check the published findings'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: {}
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_read_1',
+						tool_result: {
+							tool_call_id: 'call_read_1',
+							status: 'succeeded',
+							data: { finding_count: 2, evidence_count: 8 },
+							resource_refs: [],
+							warnings: ['One paper used a different heat treatment.'],
+							error_code: null,
+							error_message: null
+						}
+					})
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Check the published findings');
+
+		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
+		const activity = document.querySelector<HTMLDetailsElement>(
+			'[data-testid="research-activity"]'
+		);
+		expect(activity?.open).toBe(true);
+		await expect
+			.element(browserPage.getByText('One paper used a different heat treatment.'))
+			.toBeVisible();
 	});
 
 	it('shows one complete published finding and its linked evidence count', async () => {
@@ -871,6 +916,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByText('Proposal context: collection_supported'))
 			.toBeInTheDocument();
+		expect(document.querySelectorAll('[data-testid="research-artifact"]')).toHaveLength(1);
 		expect(
 			fetchMock.mock.calls.some(([input]) =>
 				requestPath(input as string | URL | Request).includes('/objectives')

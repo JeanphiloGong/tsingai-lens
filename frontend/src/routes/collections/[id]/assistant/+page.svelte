@@ -21,6 +21,11 @@
 	import { uploadCollectionDocument } from '../../../_shared/collectionDocuments';
 	import { t } from '../../../_shared/i18n';
 	import { prepareCollectionDocument } from '../../../_shared/tasks';
+	import {
+		buildChatPresentation,
+		type ChatPresentationItem,
+		type ToolActivityOperation
+	} from './conversationPresentation';
 
 	type StoredChatSession = {
 		session_id: string;
@@ -86,6 +91,7 @@
 	let uploadSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
+	$: conversationItems = buildChatPresentation(messages);
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
 	$: uploadCandidates = uploadItems.filter((item) =>
@@ -729,6 +735,67 @@
 		}
 	}
 
+	type ActivityItem = Extract<ChatPresentationItem, { kind: 'activity' }>;
+
+	function activityOperations(activity: ActivityItem) {
+		return activity.operations.filter(
+			(operation) => operation.resultMessage && !activity.artifacts.includes(operation)
+		);
+	}
+
+	function activitySummary(activity: ActivityItem) {
+		const count = activityOperations(activity).length;
+		const baseKey =
+			activity.status === 'failed'
+				? 'researchAgent.capability.activityFailed'
+				: activity.status === 'in_progress'
+					? 'researchAgent.capability.activityInProgress'
+					: activity.status === 'pending'
+						? 'researchAgent.capability.activityPending'
+						: 'researchAgent.capability.activityCompleted';
+		return $t(`${baseKey}${count === 1 ? 'One' : 'Many'}`, { count });
+	}
+
+	function activityCapabilityNames(activity: ActivityItem) {
+		return Array.from(
+			new Set(activityOperations(activity).map((operation) => capabilityName(operation.toolName)))
+		).join(' · ');
+	}
+
+	function activityHasWarnings(activity: ActivityItem) {
+		return activityOperations(activity).some(
+			(operation) => (operation.resultMessage?.tool_result?.warnings.length ?? 0) > 0
+		);
+	}
+
+	function activityIsOpen(activity: ActivityItem) {
+		return activity.status === 'failed' || activityHasWarnings(activity);
+	}
+
+	function activityStatusLabel(activity: ActivityItem) {
+		if (activity.status === 'failed') return $t('researchAgent.capability.statusFailed');
+		if (activity.status === 'in_progress') return $t('researchAgent.capability.statusQueued');
+		if (activity.status === 'pending') return $t('researchAgent.capability.statusPending');
+		return $t('researchAgent.capability.statusSucceeded');
+	}
+
+	function operationTitle(operation: ToolActivityOperation) {
+		return operation.resultMessage
+			? resultTitle(operation.resultMessage)
+			: capabilityRequestLabel(operation.toolName);
+	}
+
+	function operationSummary(operation: ToolActivityOperation) {
+		return operation.resultMessage ? resultSummary(operation.resultMessage) : '';
+	}
+
+	function findingStatement(message: ChatMessage) {
+		const finding = message.tool_result?.data.finding;
+		return finding && typeof finding === 'object' && 'statement' in finding
+			? String(finding.statement ?? '').trim()
+			: '';
+	}
+
 	function resultResearchSteps(message: ChatMessage): ResearchProcessStep[] {
 		if (resultToolName(message) !== 'inspect_research_process') return [];
 		const process = message.tool_result?.data.process;
@@ -1071,13 +1138,13 @@
 						</div>
 					</div>
 				{:else}
-					{#each messages as message (message.message_id)}
-						{#if message.role === 'user'}
+					{#each conversationItems as item (item.id)}
+						{#if item.kind === 'message' && item.message.role === 'user'}
 							<article class="user-message">
 								<div>
-									<time>{formatTime(message.created_at)}</time>
-									{#if message.source_contexts.length}
-										{#each message.source_contexts as source (`${source.document_id}:${source.source_ref}`)}
+									<time>{formatTime(item.message.created_at)}</time>
+									{#if item.message.source_contexts.length}
+										{#each item.message.source_contexts as source (`${source.document_id}:${source.source_ref}`)}
 											<a class="message-source" href={resolve(sourceContextHref(source))}>
 												<strong>{source.document_title}</strong>
 												<small>
@@ -1092,17 +1159,17 @@
 											</a>
 										{/each}
 									{/if}
-									<p>{message.content}</p>
+									<p>{item.message.content}</p>
 								</div>
 							</article>
-						{:else if message.role === 'assistant'}
+						{:else if item.kind === 'message' && item.message.role === 'assistant'}
 							<article class="assistant-message">
 								<div class="assistant-mark" aria-hidden="true">AI</div>
 								<div class="assistant-content">
-									<time>{formatTime(message.created_at)}</time>
-									{#if message.content}
+									<time>{formatTime(item.message.created_at)}</time>
+									{#if item.message.content}
 										<div class="assistant-copy">
-											{#each renderMessageBlocks(message.content) as block, blockIndex (blockIndex)}
+											{#each renderMessageBlocks(item.message.content) as block, blockIndex (blockIndex)}
 												{#if block.kind === 'list'}
 													<ul>
 														{#each block.items as item, itemIndex (itemIndex)}
@@ -1123,11 +1190,11 @@
 													</p>
 												{/if}
 											{/each}
-											{#if message.message_id.startsWith('local-stream-')}
+											{#if item.message.message_id.startsWith('local-stream-')}
 												<span class="stream-cursor" aria-hidden="true"></span>
 											{/if}
 										</div>
-									{:else if message.message_id.startsWith('local-stream-')}
+									{:else if item.message.message_id.startsWith('local-stream-')}
 										<div
 											class="assistant-copy streaming-copy"
 											role="status"
@@ -1136,100 +1203,152 @@
 											<span class="stream-cursor" aria-hidden="true"></span>
 										</div>
 									{/if}
-									{#if message.tool_call_id}
-										<p class="capability-request">
-											<span class="capability-request-dot" aria-hidden="true"></span>
-											{capabilityRequestLabel(message.tool_name)}
-										</p>
-									{/if}
 								</div>
 							</article>
-						{:else if message.tool_result}
-							<section
-								class="capability-event"
-								aria-label={$t('researchAgent.capability.activity')}
-							>
-								<header>
-									<span
-										aria-hidden="true"
-										class:failed={message.tool_result.status === 'failed'}
-										class:queued={message.tool_result.status === 'queued'}
-									>
-										{message.tool_result.status === 'failed'
-											? '!'
-											: message.tool_result.status === 'queued'
-												? '…'
-												: '✓'}
-									</span>
-									<div>
-										<strong>{resultTitle(message)}</strong>
-										<p>{resultSummary(message)}</p>
-									</div>
-									<span
-										class="capability-status"
-										class:failed={message.tool_result.status === 'failed'}
-										class:queued={message.tool_result.status === 'queued'}
-									>
-										{resultStatusLabel(message)}
-									</span>
-								</header>
-
-								{#if resultDrafts(message).length}
-									<ol class="draft-list">
-										{#each resultDrafts(message) as draft, draftIndex (`${String(draft.question ?? '')}-${draftIndex}`)}
-											<li>
-												<strong>{String(draft.question ?? '')}</strong>
-												<p>{draftList(draft, 'variables')} → {draftList(draft, 'outcomes')}</p>
-												<small>
-													{$t('researchAgent.capability.draftSupport', {
-														status: String(draft.support_status ?? 'unknown')
-													})}
-												</small>
-											</li>
+						{:else if item.kind === 'activity'}
+							{#if activityOperations(item).length}
+								<details
+									class="research-activity"
+									class:failed={item.status === 'failed'}
+									class:active={item.status === 'in_progress' || item.status === 'pending'}
+									open={activityIsOpen(item)}
+									data-testid="research-activity"
+								>
+									<summary>
+										<span class="activity-icon" aria-hidden="true">
+											{item.status === 'failed' ? '!' : item.status === 'completed' ? '✓' : '…'}
+										</span>
+										<span class="activity-heading">
+											<strong>{activitySummary(item)}</strong>
+											<small>{activityCapabilityNames(item)}</small>
+										</span>
+										<span class="activity-status">{activityStatusLabel(item)}</span>
+										<span class="activity-toggle" aria-hidden="true"></span>
+									</summary>
+									<div class="activity-operations">
+										{#each activityOperations(item) as operation (operation.toolCallId)}
+											<div class="activity-operation">
+												<span class="operation-mark" aria-hidden="true"></span>
+												<div>
+													<strong>{operationTitle(operation)}</strong>
+													{#if operationSummary(operation)}
+														<p>{operationSummary(operation)}</p>
+													{/if}
+													{#if operation.resultMessage?.tool_result?.warnings.length}
+														<div class="warnings">
+															<strong>{$t('researchAgent.warnings')}</strong>
+															<ul>
+																{#each operation.resultMessage.tool_result.warnings as warning, warningIndex (warningIndex)}
+																	<li>{warning}</li>
+																{/each}
+															</ul>
+														</div>
+													{/if}
+													{#if operation.resultMessage && visibleResources(operation.resultMessage).length}
+														<nav class="resource-links" aria-label={$t('researchAgent.resources')}>
+															{#each visibleResources(operation.resultMessage) as resource (`${resource.resource_type}:${resource.resource_id}`)}
+																<a href={resolve(resource.href)}
+																	>{resourceLabel(resource.resource_type)}</a
+																>
+															{/each}
+														</nav>
+													{/if}
+												</div>
+											</div>
 										{/each}
-									</ol>
-								{/if}
+									</div>
+								</details>
+							{/if}
 
-								{#if resultResearchSteps(message).length}
-									<div class="research-process">
-										{#if researchProcessContext(message)}
-											<p>{researchProcessContext(message)}</p>
+							{#each item.artifacts as artifact (artifact.toolCallId)}
+								{#if artifact.resultMessage?.tool_result}
+									<section
+										class="research-artifact"
+										class:failed={artifact.resultMessage.tool_result.status === 'failed'}
+										class:queued={artifact.resultMessage.tool_result.status === 'queued'}
+										aria-labelledby={`artifact-${artifact.toolCallId}`}
+										data-testid="research-artifact"
+									>
+										<header>
+											<div>
+												<p class="artifact-eyebrow">{$t('researchAgent.capability.artifact')}</p>
+												<h3 id={`artifact-${artifact.toolCallId}`}>
+													{resultTitle(artifact.resultMessage)}
+												</h3>
+												<p>{resultSummary(artifact.resultMessage)}</p>
+											</div>
+											<span
+												class="capability-status"
+												class:failed={artifact.resultMessage.tool_result.status === 'failed'}
+												class:queued={artifact.resultMessage.tool_result.status === 'queued'}
+											>
+												{resultStatusLabel(artifact.resultMessage)}
+											</span>
+										</header>
+
+										{#if findingStatement(artifact.resultMessage)}
+											<blockquote>{findingStatement(artifact.resultMessage)}</blockquote>
 										{/if}
-										<ol aria-label={$t('researchAgent.researchProcess.label')}>
-											{#each resultResearchSteps(message) as step (step.step_id)}
-												<li
-													class:active={step.status === 'running'}
-													class:failed={step.status === 'failed'}
-												>
-													<span aria-hidden="true"></span>
-													<strong>{researchStepName(step.step_id)}</strong>
-													<small>{researchStepStatus(step.status)}</small>
-												</li>
-											{/each}
-										</ol>
-									</div>
-								{/if}
 
-								{#if message.tool_result.warnings.length}
-									<div class="warnings">
-										<strong>{$t('researchAgent.warnings')}</strong>
-										<ul>
-											{#each message.tool_result.warnings as warning, warningIndex (warningIndex)}<li
-												>
-													{warning}
-												</li>{/each}
-										</ul>
-									</div>
-								{/if}
+										{#if resultDrafts(artifact.resultMessage).length}
+											<ol class="draft-list">
+												{#each resultDrafts(artifact.resultMessage) as draft, draftIndex (`${String(draft.question ?? '')}-${draftIndex}`)}
+													<li>
+														<strong>{String(draft.question ?? '')}</strong>
+														<p>{draftList(draft, 'variables')} → {draftList(draft, 'outcomes')}</p>
+														<small>
+															{$t('researchAgent.capability.draftSupport', {
+																status: String(draft.support_status ?? 'unknown')
+															})}
+														</small>
+													</li>
+												{/each}
+											</ol>
+										{/if}
 
-								{#if visibleResources(message).length}
-									<nav class="resource-links" aria-label={$t('researchAgent.resources')}>
-										{#each visibleResources(message) as resource (`${resource.resource_type}:${resource.resource_id}`)}
-											<a href={resolve(resource.href)}>{resourceLabel(resource.resource_type)}</a>
-										{/each}
-									</nav>
+										{#if resultResearchSteps(artifact.resultMessage).length}
+											<div class="research-process">
+												{#if researchProcessContext(artifact.resultMessage)}
+													<p>{researchProcessContext(artifact.resultMessage)}</p>
+												{/if}
+												<ol aria-label={$t('researchAgent.researchProcess.label')}>
+													{#each resultResearchSteps(artifact.resultMessage) as step (step.step_id)}
+														<li
+															class:active={step.status === 'running'}
+															class:failed={step.status === 'failed'}
+														>
+															<span aria-hidden="true"></span>
+															<strong>{researchStepName(step.step_id)}</strong>
+															<small>{researchStepStatus(step.status)}</small>
+														</li>
+													{/each}
+												</ol>
+											</div>
+										{/if}
+
+										{#if artifact.resultMessage.tool_result.warnings.length}
+											<div class="warnings">
+												<strong>{$t('researchAgent.warnings')}</strong>
+												<ul>
+													{#each artifact.resultMessage.tool_result.warnings as warning, warningIndex (warningIndex)}
+														<li>{warning}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+
+										{#if visibleResources(artifact.resultMessage).length}
+											<nav class="resource-links" aria-label={$t('researchAgent.resources')}>
+												{#each visibleResources(artifact.resultMessage) as resource (`${resource.resource_type}:${resource.resource_id}`)}
+													<a href={resolve(resource.href)}
+														>{resourceLabel(resource.resource_type)}</a
+													>
+												{/each}
+											</nav>
+										{/if}
+									</section>
 								{/if}
-							</section>
+							{/each}
 						{/if}
 					{/each}
 				{/if}
@@ -1879,53 +1998,195 @@
 		}
 	}
 
-	.capability-request {
-		display: inline-flex;
+	.research-activity {
+		margin: 0 0 18px 48px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+	}
+
+	.research-activity.failed {
+		border-color: var(--danger-border);
+	}
+
+	.research-activity.active {
+		border-color: var(--warning-border);
+	}
+
+	.research-activity summary {
+		display: grid;
+		grid-template-columns: 24px minmax(0, 1fr) auto 12px;
 		align-items: center;
-		gap: 7px;
-		margin: 7px 0 0;
+		gap: 10px;
+		min-height: 52px;
+		padding: 8px 12px;
+		cursor: pointer;
+		list-style: none;
+	}
+
+	.research-activity summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.research-activity summary:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+
+	.activity-icon {
+		display: grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		background: var(--success-bg);
+		color: var(--success-text);
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.research-activity.failed .activity-icon {
+		background: var(--danger-bg);
+		color: var(--danger-text);
+	}
+
+	.research-activity.active .activity-icon {
+		background: var(--warning-bg);
+		color: var(--warning-text);
+	}
+
+	.activity-heading {
+		display: grid;
+		min-width: 0;
+		gap: 1px;
+	}
+
+	.activity-heading strong {
+		font-size: 13px;
+	}
+
+	.activity-heading small {
+		overflow: hidden;
 		color: var(--text-secondary);
+		font-size: 11px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.activity-status {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.activity-toggle {
+		width: 8px;
+		height: 8px;
+		border-right: 1.5px solid currentColor;
+		border-bottom: 1.5px solid currentColor;
+		color: var(--text-tertiary);
+		transform: rotate(45deg) translate(-2px, -2px);
+		transition: transform 140ms ease;
+	}
+
+	.research-activity[open] .activity-toggle {
+		transform: rotate(225deg) translate(-1px, -1px);
+	}
+
+	.activity-operations {
+		padding: 0 12px 10px 46px;
+		border-top: 1px solid var(--border-default);
+	}
+
+	.activity-operation {
+		display: grid;
+		grid-template-columns: 8px minmax(0, 1fr);
+		gap: 10px;
+		padding: 10px 0 0;
+	}
+
+	.operation-mark {
+		width: 6px;
+		height: 6px;
+		margin-top: 6px;
+		border-radius: 50%;
+		background: var(--border-strong);
+	}
+
+	.activity-operation strong {
 		font-size: 12px;
 	}
 
-	.capability-request-dot {
-		width: 7px;
-		height: 7px;
-		border: 1px solid var(--brand-primary);
-		border-radius: 50%;
-		background: var(--brand-primary);
-		animation: capability-pulse 1.2s ease-in-out infinite;
+	.activity-operation p {
+		margin: 2px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
 	}
 
-	@keyframes capability-pulse {
-		50% {
-			opacity: 0.35;
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.capability-request-dot {
-			animation: none;
-		}
-	}
-
-	.capability-event {
+	.research-artifact {
 		margin: 0 0 22px 48px;
-		padding: 14px 16px;
+		padding: 16px;
 		border: 1px solid var(--border-default);
+		border-left: 3px solid var(--brand-primary);
 		border-radius: 6px;
-		background: var(--bg-subtle);
+		background: var(--surface-card);
 	}
 
-	.capability-event > header {
+	.research-artifact.failed {
+		border-color: var(--danger-border);
+		border-left-color: var(--danger-text);
+	}
+
+	.research-artifact.queued {
+		border-color: var(--warning-border);
+		border-left-color: var(--warning-text);
+	}
+
+	.research-artifact > header {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 10px;
+		gap: 14px;
 	}
 
-	.capability-event > header > div {
+	.research-artifact > header > div {
 		min-width: 0;
+	}
+
+	.research-artifact h3,
+	.research-artifact header p {
+		margin: 0;
+	}
+
+	.research-artifact h3 {
+		font-size: 14px;
+		line-height: 20px;
+	}
+
+	.research-artifact header p:not(.artifact-eyebrow) {
+		margin-top: 3px;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
+	.research-artifact .artifact-eyebrow {
+		margin-bottom: 3px;
+		color: var(--brand-primary);
+		font-size: 10px;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	.research-artifact blockquote {
+		margin: 14px 0 0;
+		padding: 10px 12px;
+		border-left: 2px solid var(--border-strong);
+		background: var(--bg-subtle);
+		font-size: 13px;
+		line-height: 20px;
 	}
 
 	.capability-status {
@@ -1951,38 +2212,6 @@
 		border-color: var(--danger-border);
 		background: var(--danger-bg);
 		color: var(--danger-text);
-	}
-
-	.capability-event > header > span {
-		display: grid;
-		place-items: center;
-		width: 22px;
-		height: 22px;
-		border-radius: 50%;
-		background: var(--success-bg);
-		color: var(--success-text);
-		font-size: 12px;
-		font-weight: 800;
-	}
-
-	.capability-event > header > span.failed {
-		background: var(--danger-bg);
-		color: var(--danger-text);
-	}
-
-	.capability-event > header > span.queued {
-		background: var(--warning-bg);
-		color: var(--warning-text);
-	}
-
-	.capability-event header strong {
-		font-size: 13px;
-	}
-
-	.capability-event header p {
-		margin: 2px 0 0;
-		color: var(--text-secondary);
-		font-size: 13px;
 	}
 
 	.draft-list {
@@ -2547,9 +2776,18 @@
 			max-width: 90%;
 		}
 
-		.capability-event,
+		.research-activity,
+		.research-artifact,
 		.approval {
 			margin-left: 0;
+		}
+
+		.research-activity summary {
+			grid-template-columns: 24px minmax(0, 1fr) 12px;
+		}
+
+		.activity-status {
+			display: none;
 		}
 
 		.approval > header,

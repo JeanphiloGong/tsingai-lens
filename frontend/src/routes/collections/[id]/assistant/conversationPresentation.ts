@@ -76,13 +76,22 @@ function activityStatus(operations: ToolActivityOperation[]) {
 	return 'completed' as const;
 }
 
-export function buildChatPresentation(messages: ChatMessage[]): ChatPresentationItem[] {
+export function buildChatPresentation(
+	messages: ChatMessage[],
+	pendingApprovalToolCallId: string | null = null
+): ChatPresentationItem[] {
 	const items: ChatPresentationItem[] = [];
 	let activityMessages: ChatMessage[] = [];
 
 	const flushActivity = () => {
 		if (!activityMessages.length) return;
-		const operations = operationsFrom(activityMessages);
+		const operations = operationsFrom(activityMessages).filter(
+			(operation) => operation.toolCallId !== pendingApprovalToolCallId
+		);
+		if (!operations.length) {
+			activityMessages = [];
+			return;
+		}
 		const artifacts = operations.filter(
 			(operation) =>
 				operation.resultMessage !== null &&

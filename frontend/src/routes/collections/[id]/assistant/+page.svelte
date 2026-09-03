@@ -91,7 +91,7 @@
 	let uploadSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
-	$: conversationItems = buildChatPresentation(messages);
+	$: conversationItems = buildChatPresentation(messages, pendingApproval?.tool_call_id ?? null);
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
 	$: uploadCandidates = uploadItems.filter((item) =>
@@ -738,9 +738,7 @@
 	type ActivityItem = Extract<ChatPresentationItem, { kind: 'activity' }>;
 
 	function activityOperations(activity: ActivityItem) {
-		return activity.operations.filter(
-			(operation) => operation.resultMessage && !activity.artifacts.includes(operation)
-		);
+		return activity.operations.filter((operation) => !activity.artifacts.includes(operation));
 	}
 
 	function activitySummary(activity: ActivityItem) {

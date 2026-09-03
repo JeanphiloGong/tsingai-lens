@@ -652,6 +652,32 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('keeps a persisted tool request visible while its result is pending', async () => {
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: { query: 'energy input' }
+					})
+				],
+				pending_approval: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+
+		await renderReady();
+
+		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Research action prepared', { exact: true }))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByText('Published findings', { exact: true }))
+			.toBeVisible();
+	});
+
 	it('opens routine research activity when a warning needs review', async () => {
 		installApi({
 			messageTurn: {
@@ -953,6 +979,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByText('energy input', { exact: true }))
 			.toBeInTheDocument();
+		expect(document.querySelectorAll('[data-testid="research-activity"]')).toHaveLength(0);
 		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
 		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect

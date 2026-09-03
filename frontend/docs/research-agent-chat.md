@@ -140,6 +140,8 @@ Successful work is collapsed by default; queued work stays labeled in
 progress, and failed work or work with warnings opens automatically. The
 disclosure names the user-facing research actions and their bounded summaries,
 not provider calls, prompts, model reasoning, JSON payloads, or retry mechanics.
+A checkpointed capability request without a result remains visible as prepared
+research activity after reload.
 
 Reviewable research outputs remain visible outside that disclosure. These
 include Objective drafts, research-scope previews, literature and Objective

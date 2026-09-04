@@ -6,7 +6,12 @@ from typing import Any
 
 import pytest
 
-from application.core.objectives.analysis import evidence_materialization
+from application.core.objectives.analysis import evidence_materialization, paper_experiment
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+    StructuredFindingSynthesis,
+    StructuredFindingSynthesisItem,
+)
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
@@ -14,6 +19,8 @@ from application.core.objectives.analysis.evidence_routing import (
 )
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
+    StructuredEvidenceExtractions,
+    extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
@@ -22,6 +29,7 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.research_objective_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
     ObjectiveDocumentEvidenceArtifacts,
+    ResearchObjectiveService,
     _paper_map_input_fingerprint,
 )
 from domain.core import (
@@ -36,7 +44,7 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
-from domain.source import source_documents_from_records
+from domain.source import SourceFigure, SourceTable, source_documents_from_records
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
@@ -61,6 +69,533 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version():
+    assert (
+        "paper_experiment",
+        "paper-experiment-reconstruction.v13",
+    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+
+
+def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> None:
+    table = SourceTable(
+        table_id="table-mechanical",
+        document_id="paper-1",
+        table_order=1,
+        caption_text="Table 3. Tensile properties after heat treatment.",
+        caption_block_id="caption-table-mechanical",
+        page=5,
+        heading_path="Results / Mechanical properties",
+        column_headers=("Sample", "Yield strength (MPa)", "Elongation (%)"),
+        table_matrix=(
+            ("Sample", "Yield strength (MPa)", "Elongation (%)"),
+            ("HT-1", "1120", "14.2"),
+        ),
+    )
+    figure = SourceFigure(
+        figure_id="figure-microstructure",
+        document_id="paper-1",
+        figure_order=1,
+        figure_label="Figure 4",
+        caption_text="Figure 4. Grain morphology of the heat-treated specimens.",
+        caption_block_id="caption-figure-microstructure",
+        page=6,
+        heading_path="Results / Microstructure",
+        image_path=None,
+        image_mime_type=None,
+        image_width=None,
+        image_height=None,
+        asset_sha256=None,
+    )
+
+    contexts = ResearchObjectiveService._document_contexts_for_evidence(
+        {
+            "blocks_by_document_id": {
+                "paper-1": [
+                    SimpleNamespace(
+                        block_id="block-methods",
+                        text="Specimens were heat treated before tensile testing.",
+                        page=3,
+                        block_type="paragraph",
+                        heading_path="Methods",
+                    )
+                ]
+            },
+            "tables_by_document_id": {"paper-1": [table]},
+            "figures_by_document_id": {"paper-1": [figure]},
+        }
+    )
+
+    by_source = {
+        (item["source_kind"], item["source_ref"]): item
+        for item in contexts["paper-1"]
+    }
+    assert ("text_window", "block-methods") in by_source
+    assert ("table", "table-mechanical") in by_source
+    assert ("figure", "figure-microstructure") in by_source
+    assert by_source[("table", "table-mechanical")]["caption_text"] == (
+        "Table 3. Tensile properties after heat treatment."
+    )
+    assert "| Yield strength (MPa) |" in by_source[("table", "table-mechanical")][
+        "table_markdown"
+    ]
+    assert by_source[("figure", "figure-microstructure")]["text"] == (
+        "Figure 4. Grain morphology of the heat-treated specimens."
+    )
+
+
+def test_table_context_can_complete_material_for_result_reconstruction() -> None:
+    objective = _research_objective(
+        {
+            "collection_id": "col-test",
+            "objective_id": "obj-strength",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["heat treatment temperature"],
+            "outcomes": ["tensile strength"],
+        }
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-table-5",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-ti64",
+            "source_kind": "text_window",
+            "source_ref": "results-block",
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "heat treatment temperature",
+                    "baseline_value": 800,
+                    "target_value": 900,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "800 C",
+                "target_label": "900 C",
+                "axis_names": ["heat treatment temperature"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "tensile strength",
+                "value": 1040,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Tensile strength increased to 1040 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-block",
+                    "supports": ["reported_result", "changed_variables"],
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+    contexts = ResearchObjectiveService._document_contexts_for_evidence(
+        {
+            "blocks_by_document_id": {},
+            "tables_by_document_id": {
+                "paper-ti64": [
+                    SourceTable(
+                        table_id="table-methods",
+                        document_id="paper-ti64",
+                        table_order=1,
+                        caption_text="Table 1. Ti-6Al-4V heat-treatment conditions.",
+                        caption_block_id=None,
+                        page=3,
+                        heading_path="Methods",
+                        column_headers=("Material", "Condition"),
+                        table_matrix=(("Material", "Condition"), ("Ti-6Al-4V", "HT-1")),
+                    )
+                ]
+            },
+            "figures_by_document_id": {},
+        }
+    )
+
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id=objective.collection_id,
+        source_facts=(result,),
+        objectives=(objective,),
+        document_contexts=contexts,
+    )
+
+    bound = next(item for item in reconstructed if item.evidence_id == result.evidence_id)
+    assert [item.to_record() for item in bound.scientific_context.material] == [
+        {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+    ]
+    assert any(
+        ref.get("source_kind") == "table"
+        and ref.get("source_ref") == "table-methods"
+        and "scientific_context.material" in ref.get("supports", ())
+        for ref in bound.source_refs
+    )
+
+
+def test_information_parity_chain_publishes_source_traceable_cross_paper_finding() -> None:
+    """The same decision-relevant facts must survive extraction through synthesis."""
+
+    collection_id = "col-information-parity"
+    objective = _research_objective(
+        {
+            "collection_id": collection_id,
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+            "confirmation_status": "confirmed",
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id=collection_id,
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        document_inputs=(
+            PreparedDocumentInput("paper-a", "prepared-a"),
+            PreparedDocumentInput("paper-b", "prepared-b"),
+        ),
+        pipeline_version="information-parity-test.v1",
+        model_name="information-parity-test-model",
+        prompt_versions={},
+        status="running",
+        phase="finding_synthesis",
+        total_document_count=2,
+    )
+
+    source_text_by_ref = {
+        "paper-a-result": (
+            "Relative density increased from 95% for sample S1 to 98% "
+            "for sample S2. The process conditions are reported in Methods."
+        ),
+        "paper-b-result": (
+            "Relative density increased from 94% for sample S1 to 97% "
+            "for sample S2. The process conditions are reported in Methods."
+        ),
+        "paper-a-methods": (
+            "Ti-6Al-4V samples S1 and S2 were fabricated by LPBF. S1 used "
+            "100 W laser power and S2 used 140 W laser power. Density was "
+            "measured by the Archimedes method."
+        ),
+        "paper-b-methods": (
+            "Ti-6Al-4V samples S1 and S2 were fabricated by LPBF. S1 used "
+            "100 W laser power and S2 used 140 W laser power. Density was "
+            "measured by the Archimedes method."
+        ),
+    }
+    result_values = {
+        "paper-a-result": (95, 98),
+        "paper-b-result": (94, 97),
+    }
+
+    class SourceExtractor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def extract_source(self, payload: dict[str, Any]) -> StructuredEvidenceExtractions:
+            source_ref = str(payload["source"]["source_ref"])
+            self.calls.append(source_ref)
+            if source_ref.endswith("-methods"):
+                return StructuredEvidenceExtractions.model_validate(
+                    {
+                        "extractions": [
+                            {
+                                "evidence_role": "condition_context",
+                                "changed_variables": [],
+                                "comparison": None,
+                                "reported_result": None,
+                                "attribution_scope": "not_attributable",
+                                "scientific_context": {
+                                    "material": [
+                                        {"name": "material", "value": "Ti-6Al-4V"}
+                                    ],
+                                    "sample": [
+                                        {"name": "sample", "value": "S1"},
+                                    ],
+                                    "process": [
+                                        {"name": "laser power", "value": 100, "unit": "W"},
+                                        {
+                                            "name": "process",
+                                            "value": "LPBF",
+                                        },
+                                    ],
+                                    "test": [
+                                        {"name": "method", "value": "Archimedes"}
+                                    ],
+                                },
+                                "resolution_status": "resolved",
+                                "confidence": 0.9,
+                            },
+                            {
+                                "evidence_role": "condition_context",
+                                "changed_variables": [],
+                                "comparison": None,
+                                "reported_result": None,
+                                "attribution_scope": "not_attributable",
+                                "scientific_context": {
+                                    "material": [
+                                        {"name": "material", "value": "Ti-6Al-4V"}
+                                    ],
+                                    "sample": [
+                                        {"name": "sample", "value": "S2"},
+                                    ],
+                                    "process": [
+                                        {"name": "laser power", "value": 140, "unit": "W"},
+                                        {
+                                            "name": "process",
+                                            "value": "LPBF",
+                                        },
+                                    ],
+                                    "test": [
+                                        {"name": "method", "value": "Archimedes"}
+                                    ],
+                                },
+                                "resolution_status": "resolved",
+                                "confidence": 0.9,
+                            },
+                        ]
+                    }
+                )
+
+            baseline, target = result_values[source_ref]
+            if self.calls.count(source_ref) == 1:
+                return StructuredEvidenceExtractions.model_validate(
+                    {
+                        "extractions": [
+                            {
+                                "evidence_role": "direct_result",
+                                "changed_variables": [],
+                                "comparison": None,
+                                "reported_result": {
+                                    "outcome": "relative density",
+                                    "value": target,
+                                    "baseline_value": baseline,
+                                    "target_value": target,
+                                    "unit": "%",
+                                    "direction": "increase",
+                                    "result_text": source_text_by_ref[source_ref],
+                                },
+                                "attribution_scope": "descriptive_only",
+                                "scientific_context": {},
+                                "resolution_status": "partial",
+                                "confidence": 0.8,
+                            }
+                        ]
+                    }
+                )
+            return StructuredEvidenceExtractions.model_validate(
+                {
+                    "extractions": [
+                        {
+                            "evidence_role": "direct_result",
+                            "changed_variables": [
+                                {
+                                    "name": "laser power",
+                                    "baseline_value": 100,
+                                    "target_value": 140,
+                                    "unit": "W",
+                                }
+                            ],
+                                "comparison": {
+                                    "baseline_label": "S1",
+                                    "target_label": "S2",
+                                    "axis_names": ["laser power"],
+                                    "comparable": True,
+                                "incomparability_reasons": [],
+                            },
+                            "reported_result": {
+                                "outcome": "relative density",
+                                "value": target,
+                                "baseline_value": baseline,
+                                "target_value": target,
+                                "unit": "%",
+                                "direction": "increase",
+                                "result_text": source_text_by_ref[source_ref],
+                            },
+                            "attribution_scope": "isolated_effect",
+                            "scientific_context": {
+                                "material": [
+                                    {"name": "alloy", "value": "Ti-6Al-4V"}
+                                ],
+                                "sample": [
+                                    {"name": "state", "value": "as-built"}
+                                ],
+                                "process": [
+                                    {"name": "process", "value": "LPBF"}
+                                ],
+                                "test": [
+                                    {
+                                        "name": "method",
+                                        "value": "Archimedes density",
+                                    }
+                                ],
+                            },
+                            "resolution_status": "resolved",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            )
+
+    routes = tuple(
+        EvidenceCandidate.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": document_id,
+                "source_kind": "text_window",
+                "source_ref": source_ref,
+                "role": "current_experimental_evidence",
+                "extractable": True,
+                "confidence": 0.9,
+            }
+        )
+        for document_id, source_ref in (
+            ("paper-a", "paper-a-result"),
+            ("paper-b", "paper-b-result"),
+        )
+    )
+    blocks = {
+        document_id: [
+            SimpleNamespace(
+                block_id=source_ref,
+                document_id=document_id,
+                page=4,
+                block_type="paragraph",
+                heading_path="Results",
+                text=source_text_by_ref[source_ref],
+            ),
+            SimpleNamespace(
+                block_id=f"{document_id}-methods",
+                document_id=document_id,
+                page=2,
+                block_type="paragraph",
+                heading_path="Methods",
+                text=source_text_by_ref[f"{document_id}-methods"],
+            ),
+        ]
+        for document_id, source_ref in (
+            ("paper-a", "paper-a-result"),
+            ("paper-b", "paper-b-result"),
+        )
+    }
+
+    extractor = SourceExtractor()
+    extracted = extract_and_validate_source_facts(
+        collection_id=collection_id,
+        source_extractor=extractor,
+        objectives=(objective,),
+        objective_paper_frames=(),
+        objective_evidence_routes=routes,
+        blocks_by_document_id=blocks,
+        tables_by_document_id={"paper-a": [], "paper-b": []},
+        document_trees_by_document_id={},
+    )
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id=collection_id,
+        source_facts=extracted,
+        objectives=(objective,),
+    )
+    frames = tuple(
+        PaperAnalysisFrame.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": document_id,
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "material_match": ["Ti-6Al-4V"],
+                "changed_variables": ["laser power"],
+                "measured_property_scope": ["relative density"],
+                "relevant_text_source_refs": [source_ref],
+            }
+        )
+        for document_id, source_ref in (
+            ("paper-a", "paper-a-result"),
+            ("paper-b", "paper-b-result"),
+        )
+    )
+    evidence_records, contributions = evidence_materialization.materialize_evidence(
+        collection_id=collection_id,
+        analysis=analysis,
+        objective=objective,
+        drafts=reconstructed,
+        paper_maps=(),
+        frames=frames,
+        routes=routes,
+        blocks_by_document_id=blocks,
+        tables_by_document_id={"paper-a": [], "paper-b": []},
+        figures_by_document_id={"paper-a": [], "paper-b": []},
+    )
+
+    class FindingJudge:
+        def judge_result_set(self, _payload: dict[str, Any]) -> StructuredFindingSynthesis:
+            return StructuredFindingSynthesis(
+                findings=[
+                    StructuredFindingSynthesisItem(
+                        assertion_strength="causal",
+                        context_evidence_ids=[],
+                        mechanisms=[],
+                    )
+                ]
+            )
+
+    findings = FindingSynthesisService(assertion_judge=FindingJudge()).synthesize(
+        collection_id=collection_id,
+        objective=objective,
+        analysis=analysis,
+        contributions=contributions,
+        evidence_records=evidence_records,
+    )
+    assert len(findings) == 1
+    assert extractor.calls == [
+        "paper-a-result",
+        "paper-b-result",
+        "paper-a-methods",
+        "paper-b-methods",
+        "paper-a-result",
+        "paper-b-result",
+    ]
+    finding = findings[0]
+    assert finding.direction == "increase"
+    assert finding.attribution_scope == "isolated_effect"
+    assert {
+        evidence.document_id for evidence in evidence_records if evidence.reported_result
+    } == {"paper-a", "paper-b"}
+    assert {
+        evidence.source_ref for evidence in evidence_records if evidence.reported_result
+    } == {"paper-a-result", "paper-b-result"}
+    assert {
+        evidence.source_ref
+        for contribution in finding.paper_contributions
+        for evidence_id in contribution.supporting_evidence_ids
+        for evidence in evidence_records
+        if evidence.evidence_id == evidence_id
+    } == {"paper-a-result", "paper-b-result"}
+    assert sum(
+        evidence.evidence_role == "condition_context"
+        for evidence in evidence_records
+    ) == 4
+    for result_ref in ("paper-a-result", "paper-b-result"):
+        result_evidence = next(
+            evidence
+            for evidence in evidence_records
+            if evidence.source_ref == result_ref
+            and evidence.reported_result is not None
+        )
+        assert any(
+            ref.get("source_ref") == result_ref
+            and "reported_result" in ref.get("supports", ())
+            for ref in result_evidence.related_source_refs
+        )
+        assert any(
+            ref.get("source_ref") == result_ref.replace("-result", "-methods")
+            and "changed_variables" in ref.get("supports", ())
+            for ref in result_evidence.related_source_refs
+        )
 
 
 class _FailingRouteExtractor(_ObjectiveExtractor):
@@ -686,6 +1221,7 @@ async def test_objective_contribution_reports_only_final_degraded_source_outcome
         "1 Source unit(s) used deterministic evidence routing fallback.",
         "1 PaperResearchMap Source unit(s) failed extraction before Objective analysis.",
         "1 selected source(s) failed extraction.",
+        "1 selected Source(s) were not inspected for this Objective.",
     )
 
 
@@ -875,7 +1411,7 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
     assert failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
     assert artifacts.contributions[0].warnings == (
-        "1 Source unit(s) used deterministic evidence routing fallback.",
+        "2 Source unit(s) used deterministic evidence routing fallback.",
     )
     assert all(
         evidence.analysis_version == analysis.analysis_version

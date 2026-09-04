@@ -12,7 +12,12 @@ from application.chat.capabilities import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder
-from application.chat.model import ChatModel, ModelToolCall, ModelTurn
+from application.chat.model import (
+    ChatModel,
+    ModelResponseError,
+    ModelToolCall,
+    ModelTurn,
+)
 from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSessionService,
@@ -30,6 +35,7 @@ __all__ = [
     "ChatModel",
     "ChatSessionNotFoundError",
     "ChatSessionService",
+    "ModelResponseError",
     "ModelToolCall",
     "ModelTurn",
     "ResearchAgentRunner",

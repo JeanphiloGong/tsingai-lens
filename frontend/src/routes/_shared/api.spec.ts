@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, errorMessage, requestJson } from './api';
+import { ApiError, errorMessage, requestBlob, requestJson } from './api';
 import { language } from './i18n';
 
 describe('api shared error handling', () => {
@@ -82,5 +82,24 @@ describe('api shared error handling', () => {
 			})
 		).rejects.toMatchObject({ status: 401 });
 		expect(replace).not.toHaveBeenCalled();
+	});
+
+	it('sets JSON content type for a POST blob download', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				new Response('archive', { status: 200, headers: { 'Content-Type': 'application/zip' } })
+			);
+		vi.stubGlobal('fetch', fetchMock);
+
+		await requestBlob('/collections/col_1/source-archives', {
+			method: 'POST',
+			body: JSON.stringify({ document_ids: ['doc_1'] })
+		});
+
+		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(init.method).toBe('POST');
+		expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+		expect(init.credentials).toBe('same-origin');
 	});
 });

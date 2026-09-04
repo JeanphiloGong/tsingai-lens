@@ -14,7 +14,8 @@ This node owns browser-side helpers shared across frontend routes.
 ## Important Files
 
 - `api.ts`
-  Base request helpers and shared HTTP error behavior.
+  Base request helpers, shared HTTP error behavior, and same-origin blob
+  downloads used by source archives and Finding dataset exports.
 - `collections.ts`, `collectionDocuments.ts`, `tasks.ts`
   Collection upload, current Document, independent preparation, and task
   progress contracts. `tasks.ts` also queues collection-level research-question
@@ -30,8 +31,10 @@ This node owns browser-side helpers shared across frontend routes.
   `document_ids` through the same endpoint. It also reads the
   deterministic Evidence Map for one Objective's published analysis; that read
   model does not create a second research identity. Feedback, curation, and
-  dataset export use only
-  `(collection_id, objective_id, analysis_version, finding_id)`.
+  dataset export use only `(collection_id, objective_id, analysis_version,
+finding_id)`. Dataset URLs preserve the selected label and dataset-use
+  filters for JSON or training JSONL downloads; collection-level dataset and
+  gold-draft URLs serve the corresponding collection exports.
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, streamed text
   deltas, capability results, exact write decisions, and the one-item pending

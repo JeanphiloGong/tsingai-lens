@@ -400,6 +400,8 @@ class MemoryObjectiveRepository:
         contributions: tuple[PaperContribution, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id, analysis_version)
         analysis = self._require_analysis(*key)
@@ -416,7 +418,11 @@ class MemoryObjectiveRepository:
             raise ValueError("objective evidence lacks owning paper contribution")
         for finding in findings:
             finding.validate_sources(evidence_records, contributions)
-        analysis = analysis.succeed(completed_at=datetime.now(timezone.utc))
+        analysis = analysis.succeed(
+            completed_at=datetime.now(timezone.utc),
+            abstention_reason=abstention_reason,
+            abstention_note=abstention_note,
+        )
         objective_key = key[:2]
         objective = self._require_objective(*objective_key).publish_analysis(analysis)
         self._analyses[key] = analysis

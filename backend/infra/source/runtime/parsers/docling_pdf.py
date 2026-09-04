@@ -87,6 +87,7 @@ def build_pdf_bundle(
         document=document,
         blocks=final_blocks,
         text_items=text_items,
+        payload=payload,
     )
     final_table_cells = build_pdf_table_cells(
         document_id=document_id,

@@ -202,6 +202,124 @@ def _artifacts(version: int) -> ObjectiveAnalysisArtifacts:
     )
 
 
+async def test_published_analysis_explains_scientific_abstention_for_incomplete_evidence() -> None:
+    """A reported result without a comparison is not an unexplained empty run."""
+
+    descriptive_evidence = replace(
+        _evidence(1),
+        evidence_id="descriptive-evidence",
+        source_ref="block-descriptive-evidence",
+        changed_variables=(),
+        comparison=None,
+        attribution_scope="descriptive_only",
+    )
+    contribution = replace(
+        _artifacts(1).contributions[0],
+        comparable_evidence_count=0,
+        evidence_disposition="no_comparable_evidence",
+        evidence_disposition_reason=(
+            "Selected sources produced no comparable direct result for this Objective."
+        ),
+        evidence_status_counts=(("descriptive", 1),),
+    )
+    artifacts = ObjectiveAnalysisArtifacts(
+        contributions=(contribution,),
+        evidence_records=(descriptive_evidence,),
+        findings=(),
+    )
+    service, _repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "succeeded"
+    assert result["analysis"].abstention_reason == "insufficient_evidence"
+    assert result["analysis"].abstention_note is not None
+    assert "descriptive" in result["analysis"].abstention_note
+
+
+async def test_published_analysis_exposes_all_evidence_statuses_and_actionable_gaps() -> None:
+    """A missing Finding must not hide source-backed results or technical gaps."""
+
+    base = _evidence(1)
+    descriptive = replace(
+        base,
+        evidence_id="descriptive-evidence",
+        source_ref="block-descriptive",
+        changed_variables=(),
+        comparison=None,
+        attribution_scope="descriptive_only",
+    )
+    needs_context = replace(
+        base,
+        evidence_id="needs-context-evidence",
+        source_ref="block-context",
+        selection_status="candidate",
+        selection_reason="Target outcome mentioned but needs same-paper context.",
+        changed_variables=(),
+        comparison=None,
+        reported_result=None,
+        attribution_scope="not_attributable",
+        scientific_context=base.scientific_context.__class__(),
+        resolution_status="unresolved",
+        confidence=0.0,
+    )
+    failed = replace(
+        base,
+        evidence_id="failed-evidence",
+        source_ref="block-failed",
+        selection_status="failed",
+        selection_reason="Selected source requires extraction.",
+        failure_reason="StructuredOutputSaturatedError: output limit",
+        changed_variables=(),
+        comparison=None,
+        reported_result=None,
+        attribution_scope="not_attributable",
+        scientific_context=base.scientific_context.__class__(),
+        resolution_status="unknown",
+        confidence=0.0,
+    )
+    contribution = replace(
+        _artifacts(1).contributions[0],
+        comparable_evidence_count=1,
+        evidence_status_counts=(
+            ("comparable", 1),
+            ("descriptive", 1),
+            ("extraction_failed", 1),
+            ("needs_context", 1),
+        ),
+    )
+    artifacts = ObjectiveAnalysisArtifacts(
+        contributions=(contribution,),
+        evidence_records=(base, descriptive, needs_context, failed),
+        findings=(_finding(1),),
+    )
+    service, _repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    review = result["evidence_review"]
+    assert review["total_evidence_count"] == 4
+    assert review["status_counts"] == {
+        "comparable": 1,
+        "descriptive": 1,
+        "extraction_failed": 1,
+        "needs_context": 1,
+    }
+    assert review["comparable_evidence_count"] == 1
+    assert review["gap_count"] == 3
+    assert {item["evidence_status"] for item in review["gaps"]} == {
+        "descriptive",
+        "extraction_failed",
+        "needs_context",
+    }
+    assert any("output limit" in item["reason"] for item in review["gaps"])
+
+
 class FakeObjectiveRepository:
     def __init__(
         self,
@@ -311,7 +429,10 @@ class FakeObjectiveRepository:
     async def publish_analysis(
         self, collection_id, objective_id, analysis_version, **artifacts
     ):
-        analysis = self.analyses[analysis_version].succeed()
+        analysis = self.analyses[analysis_version].succeed(
+            abstention_reason=artifacts.get("abstention_reason"),
+            abstention_note=artifacts.get("abstention_note"),
+        )
         self.analyses[analysis_version] = analysis
         self.objective = self.objective.publish_analysis(analysis)
         self.findings[analysis_version] = artifacts["findings"]
@@ -839,6 +960,9 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
     assert result["objective"].published_analysis_version == 1
     assert result["findings"] == ()
     assert result["paper_contributions"] == (contribution,)
+    assert result["warnings"] == [
+        "paper-1: No source in this paper was selected for Objective extraction."
+    ]
     assert repository.evidence[1] == ()
     assert repository.published_calls == 1
 

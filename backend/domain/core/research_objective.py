@@ -35,6 +35,7 @@ PAPER_EVIDENCE_DISPOSITIONS: Final[frozenset[str]] = frozenset(
     {
         "excluded",
         "no_routable_evidence",
+        "coverage_incomplete",
         "extraction_failed",
         "no_comparable_evidence",
         "comparable_evidence",
@@ -64,6 +65,16 @@ EVIDENCE_ATTRIBUTION_SCOPES: Final[frozenset[str]] = frozenset(
         "not_attributable",
     }
 )
+EVIDENCE_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {
+        "comparable",
+        "association_only",
+        "descriptive",
+        "needs_context",
+        "non_comparable",
+        "extraction_failed",
+    }
+)
 EVIDENCE_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
     {
         "increase",
@@ -75,6 +86,19 @@ EVIDENCE_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
         "mixed",
         "unknown",
     }
+)
+EVIDENCE_RESULT_KINDS: Final[frozenset[str]] = frozenset(
+    {
+        "measured",
+        "observed",
+        "predicted",
+        "simulated",
+        "modeled",
+        "unknown",
+    }
+)
+EVIDENCE_CONTEXT_SCOPES: Final[frozenset[str]] = frozenset(
+    {"experimental", "simulation", "background", "unknown"}
 )
 EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
     {"resolved", "partial", "unresolved", "skipped", "unknown"}
@@ -367,6 +391,9 @@ _PAPER_RESEARCH_DESIGN_TYPES = frozenset(
 _PAPER_RESEARCH_CLAIM_SCOPES = frozenset(
     {"current_work", "synthesis", "background", "uncertain"}
 )
+_PAPER_RESEARCH_VARIABLE_ROLES = frozenset(
+    {"varied", "compared", "modeled", "fixed", "context", "uncertain"}
+)
 
 
 @dataclass(frozen=True)
@@ -565,6 +592,7 @@ class PaperResearchSignal:
     signal_id: str
     signal_type: str
     label: str
+    variable_role: str
     design_type: str
     claim_scope: str
     experiment_label: str | None
@@ -577,6 +605,12 @@ class PaperResearchSignal:
     def __post_init__(self) -> None:
         if self.signal_type not in {"variable", "outcome"}:
             raise ValueError("paper research signal type must be variable or outcome")
+        if self.signal_type == "variable" and (
+            self.variable_role not in _PAPER_RESEARCH_VARIABLE_ROLES
+        ):
+            raise ValueError("variable signal requires a scientific variable role")
+        if self.signal_type == "outcome" and self.variable_role != "not_applicable":
+            raise ValueError("outcome signal variable role must be not_applicable")
         if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
             raise ValueError(
                 f"unsupported paper research signal design type: {self.design_type}"
@@ -594,6 +628,9 @@ class PaperResearchSignal:
     def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSignal":
         signal_type = _text(payload.get("signal_type")) or ""
         label = _text(payload.get("label")) or ""
+        variable_role = _text(payload.get("variable_role")) or (
+            "not_applicable" if signal_type == "outcome" else "uncertain"
+        )
         design_type = _text(payload.get("design_type")) or "uncertain"
         claim_scope = _text(payload.get("claim_scope")) or "uncertain"
         experiment_label = _text(payload.get("experiment_label"))
@@ -609,6 +646,7 @@ class PaperResearchSignal:
                     ).casefold(),
                     "signal_type": signal_type,
                     "label": label.casefold(),
+                    "variable_role": variable_role,
                     "design_type": design_type,
                     "claim_scope": claim_scope,
                     "experiment_label": (
@@ -633,6 +671,7 @@ class PaperResearchSignal:
             signal_id=signal_id,
             signal_type=signal_type,
             label=label,
+            variable_role=variable_role,
             design_type=design_type,
             claim_scope=claim_scope,
             experiment_label=experiment_label,
@@ -648,6 +687,7 @@ class PaperResearchSignal:
             "signal_id": self.signal_id,
             "signal_type": self.signal_type,
             "label": self.label,
+            "variable_role": self.variable_role,
             "design_type": self.design_type,
             "claim_scope": self.claim_scope,
             "experiment_label": self.experiment_label,
@@ -1164,10 +1204,6 @@ class ObjectiveAnalysis:
                 raise ValueError(
                     "system-generated analysis cannot have authoring provenance"
                 )
-            if self.abstention_reason is not None:
-                raise ValueError(
-                    "system-generated analysis cannot record an authored abstention"
-                )
         elif self.origin == "agent_authored":
             if not _text(self.created_by_user_id) or not _text(
                 self.created_by_tool_call_id
@@ -1195,7 +1231,7 @@ class ObjectiveAnalysis:
                 f"unsupported objective analysis abstention: {self.abstention_reason}"
             )
         if self.abstention_reason is not None and not _text(self.abstention_note):
-            raise ValueError("authored abstention requires an explanation")
+            raise ValueError("analysis abstention requires an explanation")
         if self.abstention_reason is None and self.abstention_note is not None:
             raise ValueError("abstention note requires an abstention reason")
         if self.processed_document_count < 0 or self.total_document_count < 0:
@@ -1303,7 +1339,13 @@ class ObjectiveAnalysis:
             progress_message=_text(progress_message),
         )
 
-    def succeed(self, *, completed_at: datetime | None = None) -> "ObjectiveAnalysis":
+    def succeed(
+        self,
+        *,
+        completed_at: datetime | None = None,
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
+    ) -> "ObjectiveAnalysis":
         return self._transition(
             "succeeded",
             phase="completed",
@@ -1313,6 +1355,8 @@ class ObjectiveAnalysis:
             error_code=None,
             error_message=None,
             completed_at=completed_at or self.completed_at,
+            abstention_reason=_text(abstention_reason),
+            abstention_note=_text(abstention_note),
         )
 
     def fail(
@@ -1392,7 +1436,11 @@ class PaperContribution:
     extracted_source_count: int | None = None
     comparable_evidence_count: int | None = None
     failed_source_count: int | None = None
+    # Optional so persisted contributions from pre-coverage versions remain
+    # readable. New analyses always populate this count.
+    uninspected_source_count: int | None = None
     evidence_disposition_reason: str | None = None
+    evidence_status_counts: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
         if not all(
@@ -1419,6 +1467,13 @@ class PaperContribution:
                 "excluded or failed paper contribution requires a reason or warning"
             )
         self._validate_evidence_accounting()
+        if self.uninspected_source_count is not None and self.uninspected_source_count < 0:
+            raise ValueError("uninspected source count cannot be negative")
+        for status, count in self.evidence_status_counts:
+            if status not in EVIDENCE_STATUS_VALUES:
+                raise ValueError(f"unsupported evidence status: {status}")
+            if count < 0:
+                raise ValueError("evidence status counts cannot be negative")
 
     def _validate_evidence_accounting(self) -> None:
         values = (
@@ -1451,14 +1506,25 @@ class PaperContribution:
         extracted = self.extracted_source_count or 0
         comparable = self.comparable_evidence_count or 0
         failed = self.failed_source_count or 0
+        uninspected = self.uninspected_source_count or 0
         if extracted > routed or failed > routed:
             raise ValueError(
                 "extracted and failed source counts cannot exceed routed sources"
             )
         disposition = self.evidence_disposition
         if disposition == "excluded":
-            if self.analysis_status != "excluded" or any(counts):
+            if self.analysis_status != "excluded" or any(counts) or uninspected:
                 raise ValueError("excluded evidence disposition requires zero counts")
+            return
+        if disposition == "coverage_incomplete":
+            if self.analysis_status != "analyzed" or uninspected <= 0:
+                raise ValueError(
+                    "coverage_incomplete disposition requires uninspected sources"
+                )
+            if not self.evidence_disposition_reason:
+                raise ValueError(
+                    "coverage_incomplete disposition requires an evidence reason"
+                )
             return
         if disposition == "extraction_failed":
             if (
@@ -1475,7 +1541,7 @@ class PaperContribution:
             raise ValueError(
                 "non-excluded evidence disposition requires analyzed paper status"
             )
-        if disposition == "no_routable_evidence" and any(counts):
+        if disposition == "no_routable_evidence" and (any(counts) or uninspected):
             raise ValueError("no_routable_evidence disposition requires zero counts")
         if disposition == "no_comparable_evidence" and (
             routed == 0 or comparable != 0
@@ -1553,8 +1619,14 @@ class PaperContribution:
             failed_source_count=_non_negative_int_or_none(
                 payload.get("failed_source_count")
             ),
+            uninspected_source_count=_non_negative_int_or_none(
+                payload.get("uninspected_source_count")
+            ),
             evidence_disposition_reason=_text(
                 payload.get("evidence_disposition_reason")
+            ),
+            evidence_status_counts=_evidence_status_counts(
+                payload.get("evidence_status_counts")
             ),
         )
 
@@ -1580,7 +1652,11 @@ class PaperContribution:
             "extracted_source_count": self.extracted_source_count,
             "comparable_evidence_count": self.comparable_evidence_count,
             "failed_source_count": self.failed_source_count,
+            "uninspected_source_count": self.uninspected_source_count,
             "evidence_disposition_reason": self.evidence_disposition_reason,
+            "evidence_status_counts": {
+                status: count for status, count in self.evidence_status_counts
+            },
         }
 
 
@@ -1592,10 +1668,15 @@ class ObjectiveEvidenceAttribute:
     name: str
     value: EvidenceScalar
     unit: str | None = None
+    context_scope: str = "unknown"
 
     def __post_init__(self) -> None:
         if not _text(self.name) or _scientific_scalar(self.value) is None:
             raise ValueError("objective evidence attribute requires name and value")
+        if self.context_scope not in EVIDENCE_CONTEXT_SCOPES:
+            raise ValueError(
+                f"unsupported objective evidence context scope: {self.context_scope}"
+            )
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceAttribute":
@@ -1604,14 +1685,33 @@ class ObjectiveEvidenceAttribute:
             name=_text(payload.get("name")) or "",
             value=value if value is not None else "",
             unit=_text(payload.get("unit")),
+            context_scope=_choice(
+                payload.get("context_scope"),
+                EVIDENCE_CONTEXT_SCOPES,
+                "unknown",
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
-        return {"name": self.name, "value": self.value, "unit": self.unit}
+        record = {"name": self.name, "value": self.value, "unit": self.unit}
+        # Omit the backward-compatible default so existing Evidence payloads
+        # retain their established shape. Explicit scope is persisted because
+        # it changes how a researcher may use the context for comparison.
+        if self.context_scope != "unknown":
+            record["context_scope"] = self.context_scope
+        return record
 
 
 @dataclass(frozen=True)
 class ObjectiveEvidenceVariable:
+    """One factor label and its optional comparison endpoints.
+
+    Association evidence can name the intervention without containing a
+    source-local baseline/target pair.  Endpoint completeness is therefore
+    enforced by ``ObjectiveEvidence._validate_attribution`` for experimental
+    attribution, rather than by this value object.
+    """
+
     name: str
     baseline_value: EvidenceScalar | None
     target_value: EvidenceScalar | None
@@ -1620,8 +1720,6 @@ class ObjectiveEvidenceVariable:
     def __post_init__(self) -> None:
         if not _text(self.name):
             raise ValueError("objective evidence variable requires name")
-        if self.baseline_value is None and self.target_value is None:
-            raise ValueError("objective evidence variable requires a reported value")
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceVariable":
@@ -1692,12 +1790,15 @@ class ObjectiveEvidenceResult:
     result_text: str
     baseline_value: EvidenceScalar | None = None
     target_value: EvidenceScalar | None = None
+    result_kind: str = "observed"
 
     def __post_init__(self) -> None:
         if not _text(self.outcome) or not _text(self.result_text):
             raise ValueError("objective evidence result requires outcome and result text")
         if self.direction not in EVIDENCE_RESULT_DIRECTIONS:
             raise ValueError(f"unsupported evidence result direction: {self.direction}")
+        if self.result_kind not in EVIDENCE_RESULT_KINDS:
+            raise ValueError(f"unsupported evidence result kind: {self.result_kind}")
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceResult":
@@ -1711,6 +1812,9 @@ class ObjectiveEvidenceResult:
             result_text=_text(payload.get("result_text")) or "",
             baseline_value=_scientific_scalar(payload.get("baseline_value")),
             target_value=_scientific_scalar(payload.get("target_value")),
+            result_kind=_choice(
+                payload.get("result_kind"), EVIDENCE_RESULT_KINDS, "observed"
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -1722,6 +1826,7 @@ class ObjectiveEvidenceResult:
             "unit": self.unit,
             "direction": self.direction,
             "result_text": self.result_text,
+            "result_kind": self.result_kind,
         }
 
 
@@ -1884,6 +1989,65 @@ class ObjectiveEvidence:
             and self.evidence_role
             not in {"background_context", "irrelevant"}
         )
+
+    @property
+    def evidence_status(self) -> str:
+        """Return the scientific disposition a researcher can act on.
+
+        This is deliberately derived from source-backed fields.  Technical
+        failure, missing context, and non-comparability remain distinct from a
+        valid cross-paper comparison.
+        """
+        if self.selection_status == "failed":
+            return "extraction_failed"
+        if (
+            self.reported_result is not None
+            and self.reported_result.result_kind
+            in {"predicted", "simulated", "modeled"}
+        ):
+            return "descriptive"
+        if self.comparison is not None and not self.comparison.comparable:
+            return "non_comparable"
+        if (
+            self.reported_result is not None
+            and self.attribution_scope in {"isolated_effect", "joint_effect"}
+            and self.comparison is not None
+            and self.comparison.comparable
+            and self.resolution_status in {"resolved", "partial"}
+            and all(
+                variable.baseline_value is not None
+                and variable.target_value is not None
+                for variable in self.changed_variables
+            )
+        ):
+            return "comparable"
+        if self.reported_result is not None:
+            if self.attribution_scope == "descriptive_only":
+                return "descriptive"
+            if self.attribution_scope == "association_only" or self.changed_variables:
+                return "association_only"
+            return "descriptive"
+        return "needs_context"
+
+    @property
+    def evidence_status_reason(self) -> str:
+        if self.evidence_status == "extraction_failed":
+            return self.failure_reason or "Technical extraction failure."
+        if self.evidence_status == "non_comparable":
+            return "; ".join(self.comparison.incomparability_reasons) if self.comparison else "Source conditions cannot be compared."
+        if self.evidence_status == "comparable":
+            return "Source-backed variables, comparison endpoints, and outcome are complete."
+        if self.evidence_status == "association_only":
+            return "The Source supports an observed relationship but not a complete isolated comparison."
+        if self.evidence_status == "descriptive":
+            if (
+                self.reported_result is not None
+                and self.reported_result.result_kind
+                in {"predicted", "simulated", "modeled"}
+            ):
+                return "The Source reports a model or predicted result, not an experimental measurement."
+            return "The Source reports an outcome without a source-local comparison."
+        return self.selection_reason or "Relevant Source retained while same-paper context is needed."
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidence":
@@ -2092,6 +2256,8 @@ class ObjectiveEvidence:
             "evidence_role": self.evidence_role,
             "selection_status": self.selection_status,
             "selection_reason": self.selection_reason,
+            "evidence_status": self.evidence_status,
+            "evidence_status_reason": self.evidence_status_reason,
             "changed_variables": [item.to_record() for item in self.changed_variables],
             "comparison": self.comparison.to_record() if self.comparison else None,
             "reported_result": (
@@ -2582,6 +2748,21 @@ def _non_negative_int_or_none(value: Any) -> int | None:
     if numeric < 0:
         raise ValueError("paper evidence count cannot be negative")
     return numeric
+
+
+def _evidence_status_counts(value: Any) -> tuple[tuple[str, int], ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    counts: list[tuple[str, int]] = []
+    for status, count in sorted(value.items(), key=lambda item: str(item[0])):
+        normalized_status = str(status or "").strip()
+        if not normalized_status:
+            continue
+        normalized_count = _non_negative_int_or_none(count)
+        if normalized_count is None:
+            raise ValueError("evidence status count must be a non-negative integer")
+        counts.append((normalized_status, normalized_count))
+    return tuple(counts)
 
 
 def _positive_ints(value: Any) -> tuple[int, ...]:

@@ -138,6 +138,40 @@ def _contribution(
     )
 
 
+def _needs_context_evidence(
+    evidence_id: str,
+    document_id: str,
+    *,
+    source_ref: str,
+) -> ObjectiveEvidence:
+    return ObjectiveEvidence.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "evidence_id": evidence_id,
+            "document_id": document_id,
+            "source_kind": "text_block",
+            "source_ref": source_ref,
+            "source_excerpt": (
+                "Porosity was measured after the heat-treatment experiments."
+            ),
+            "page_numbers": [8],
+            "evidence_role": "direct_result",
+            "selection_status": "candidate",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": None,
+            "attribution_scope": "not_attributable",
+            "resolution_status": "unresolved",
+            "selection_reason": (
+                "Target outcome mentioned but needs same-paper context."
+            ),
+            "confidence": 0.5,
+        }
+    )
+
+
 def _finding(evidence: tuple[ObjectiveEvidence, ...]) -> Finding:
     contributions = (
         {
@@ -237,6 +271,7 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
         "evidence_count": 3,
         "source_count": 2,
         "unlinked_evidence_count": 0,
+        "evidence_status_counts": {"comparable": 3},
     }
 
     nodes_by_type = {
@@ -302,6 +337,67 @@ def test_evidence_map_is_complete_for_scientific_abstention() -> None:
     assert payload["complete"] is True
     assert payload["coverage"]["failed_document_count"] == 0
     assert payload["coverage"]["direct_evidence_document_count"] == 0
+
+
+def test_evidence_map_keeps_unlinked_needs_context_evidence_with_source_lineage() -> None:
+    evidence = _needs_context_evidence(
+        "evidence-context-1",
+        "paper-1",
+        source_ref="block-results-4",
+    )
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "confidence": 0.8,
+            "evidence_disposition": "no_comparable_evidence",
+            "evidence_disposition_reason": (
+                "Selected sources need same-paper context before comparison."
+            ),
+            "routed_source_count": 1,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+            "evidence_status_counts": {"needs_context": 1},
+        }
+    )
+
+    payload = build_objective_evidence_map(
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(contribution,),
+        findings=(),
+        evidence_records=(evidence,),
+        profiles=(),
+    )
+
+    evidence_nodes = [
+        node for node in payload["nodes"] if node["type"] == "evidence"
+    ]
+    source_nodes = [node for node in payload["nodes"] if node["type"] == "source"]
+    assert len(evidence_nodes) == 1
+    assert evidence_nodes[0]["evidence_status"] == "needs_context"
+    assert evidence_nodes[0]["evidence_status_reason"] == (
+        "Target outcome mentioned but needs same-paper context."
+    )
+    assert len(source_nodes) == 1
+    assert source_nodes[0]["evidence_ids"] == ["evidence-context-1"]
+    assert payload["coverage"]["unlinked_evidence_count"] == 1
+    assert payload["coverage"]["evidence_status_counts"] == {"needs_context": 1}
+
+    lineage_edges = [
+        (edge["relation"], edge["source"], edge["target"])
+        for edge in payload["edges"]
+        if edge["relation"] in {"extracted_from", "reported_in"}
+    ]
+    assert len(lineage_edges) == 2
+    assert lineage_edges[0][0] == "extracted_from"
+    assert lineage_edges[1][0] == "reported_in"
 
 
 def test_evidence_map_rejects_an_unpublished_or_cross_version_projection() -> None:

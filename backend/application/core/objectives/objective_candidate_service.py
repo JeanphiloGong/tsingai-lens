@@ -41,6 +41,9 @@ _AXIS_OBSERVATION_LIMIT = 2
 _AXIS_OBSERVATION_FACTOR_LIMIT = 6
 _AXIS_OBSERVATION_CONTEXT_LIMIT = 2
 _AXIS_OBSERVATION_TEXT_CHARS = 120
+_OBJECTIVE_CANDIDATES_PER_DOCUMENT = 3
+_MIN_OBJECTIVE_CANDIDATES = 12
+_MAX_OBJECTIVE_CANDIDATES = 36
 _VARIABLE_TOPIC_GENERIC_LABEL_TOKENS = frozenset(
     {
         "condition",
@@ -149,9 +152,6 @@ class ObjectiveCandidateService:
         )
 
         accepted_objectives: list[ResearchObjective] = []
-        require_cross_paper_support = (
-            len({paper_map.document_id for paper_map in paper_maps}) > 1
-        )
         for group_number, group in enumerate(relationship_groups, start=1):
             relationship_ids = tuple(
                 str(record["relationship"]["relationship_id"]) for record in group
@@ -161,16 +161,6 @@ class ObjectiveCandidateService:
                 relationship_ids=relationship_ids,
                 relationship_inventory=relationship_inventory,
             )
-            if (
-                objective is not None
-                and require_cross_paper_support
-                and len(objective.seed_document_ids) < 2
-            ):
-                rejection_reason = (
-                    "Relationship does not have shared objective-scope support from "
-                    "multiple collection papers."
-                )
-                objective = None
             if objective is not None:
                 accepted_objectives.append(objective)
                 focused_relationship_ids = set(objective.source_relationship_ids)
@@ -195,10 +185,30 @@ class ObjectiveCandidateService:
                 message="Evaluated one shared-scope study-relationship group.",
             )
 
-        research_objectives = self._rank_objectives(
+        ranked_objectives = self._rank_objectives(
             tuple(accepted_objectives),
             relationship_inventory=relationship_inventory,
         )
+        research_objectives = self._select_review_objectives(
+            ranked_objectives,
+            relationship_inventory=relationship_inventory,
+            document_count=len(document_inputs),
+        )
+        selected_relationship_ids = {
+            relationship_id
+            for objective in research_objectives
+            for relationship_id in objective.source_relationship_ids
+        }
+        for objective in ranked_objectives:
+            if objective in research_objectives:
+                continue
+            for relationship_id in objective.source_relationship_ids:
+                if relationship_id not in selected_relationship_ids:
+                    terminal_rejections.setdefault(
+                        relationship_id,
+                        "Relationship remains in the Paper Map but was not surfaced "
+                        "in the bounded candidate review set.",
+                    )
         research_objectives = tuple(
             ResearchObjective.from_mapping({**objective.to_record(), "rank": rank})
             for rank, objective in enumerate(research_objectives, start=1)
@@ -232,7 +242,8 @@ class ObjectiveCandidateService:
         logger.info(
             "Research objective discovery finished collection_id=%s "
             "paper_map_count=%s relationship_count=%s group_count=%s "
-            "objective_count=%s promoted_relationship_count=%s "
+            "candidate_pool_count=%s objective_count=%s "
+            "promoted_relationship_count=%s "
             "rejected_relationship_count=%s pending_relationship_count=%s "
             "relationship_accounting_complete=%s unresolved_signal_count=%s "
             "relationship_emitted_count=%s unresolved_signal_emitted_count=%s "
@@ -243,6 +254,7 @@ class ObjectiveCandidateService:
             len(relationship_inventory),
             len(relationship_groups),
             len(research_objectives),
+            len(ranked_objectives),
             disposition_counts[PaperStudyDispositionStatus.PROMOTED],
             disposition_counts[PaperStudyDispositionStatus.REJECTED],
             disposition_counts[PaperStudyDispositionStatus.PENDING],
@@ -449,12 +461,16 @@ class ObjectiveCandidateService:
         right_study: PaperResearchScope,
         right: PaperResearchRelationship,
     ) -> _Compatibility:
+        # A shared intervention theme is useful for navigation, but it does not
+        # identify one controlled variable.  Laser power, scan speed, and VED
+        # may all belong to an exposure theme while remaining different
+        # interventions.  Only the complete source-owned factor set can form one
+        # objective group; otherwise a researcher-facing objective would erase
+        # confounding and invent a broad variable that no paper measured.
         factors_share_scope = cls._axis_collections_are_equivalent(
             left.varied_factors,
             right.varied_factors,
-        ) or property_matching.shared_variable_theme(
-            (left.varied_factors, right.varied_factors)
-        ) is not None
+        )
         if not factors_share_scope or not cls._axis_values_are_equivalent(
             left.outcome,
             right.outcome,
@@ -646,31 +662,11 @@ class ObjectiveCandidateService:
         material_scope_was_missing = any(
             not self._known_material_keys(study.material_scope) for study in studies
         )
-        uses_variable_theme = property_matching.shared_variable_theme(
-            relationship.varied_factors for relationship in relationships
-        ) in variables and any(
-            not self._axis_collections_are_equivalent(
-                relationships[0].varied_factors,
-                relationship.varied_factors,
-            )
-            for relationship in relationships[1:]
-        )
         reason_parts = [
-            (
-                "Supported by a bounded paper-owned intervention theme and specific "
-                "outcome; direct comparability remains a later evidence decision."
-                if uses_variable_theme
-                else "Supported by one repeated paper-owned intervention and outcome; "
-                "direct comparability remains a later evidence decision."
-            ),
-            (
-                "Each paper's exact jointly varied factor set and Source lineage "
-                "remain unchanged."
-                if uses_variable_theme
-                else "The complete jointly varied factor set is equivalent across "
-                "every supporting paper; paper-specific Source lineage remains "
-                "unchanged."
-            ),
+            "Supported by a paper-owned intervention and specific outcome; direct "
+            "comparability remains a later evidence decision.",
+            "The complete jointly varied factor set remains unchanged for every "
+            "supporting paper; paper-specific Source lineage remains unchanged.",
             (
                 "Confidence is the minimum available non-zero source confidence."
                 if confidence > 0
@@ -784,8 +780,9 @@ class ObjectiveCandidateService:
                     return False
         return True
 
-    @staticmethod
+    @classmethod
     def _objective_seed_rejection_reason(
+        cls,
         study: PaperResearchScope,
         relationship: PaperResearchRelationship,
     ) -> str | None:
@@ -798,6 +795,14 @@ class ObjectiveCandidateService:
             return (
                 f"Outcome '{relationship.outcome}' requires a specific measurable "
                 "outcome before it can seed a research objective."
+            )
+        if any(
+            cls._axis_values_are_equivalent(factor, relationship.outcome)
+            for factor in relationship.varied_factors
+        ):
+            return (
+                "Relationship uses the same variable and outcome; it does not "
+                "define a meaningful research question."
             )
         return None
 
@@ -1490,6 +1495,105 @@ class ObjectiveCandidateService:
             )
 
         return tuple(sorted(objectives, key=rank))
+
+    @classmethod
+    def _select_review_objectives(
+        cls,
+        ranked_objectives: tuple[ResearchObjective, ...],
+        *,
+        relationship_inventory: RelationshipInventory,
+        document_count: int,
+    ) -> tuple[ResearchObjective, ...]:
+        """Choose a finite, diverse set of questions for human review.
+
+        Paper Map relationships remain the complete discovery ledger.  The
+        researcher-facing candidate list is intentionally bounded and gives
+        each selected paper a chance to contribute a question before filling
+        the remaining slots with the strongest evidence-backed relationships.
+        """
+
+        review_limit = min(
+            _MAX_OBJECTIVE_CANDIDATES,
+            max(
+                _MIN_OBJECTIVE_CANDIDATES,
+                document_count * _OBJECTIVE_CANDIDATES_PER_DOCUMENT,
+            ),
+        )
+        if len(ranked_objectives) <= review_limit:
+            return ranked_objectives
+
+        remaining = list(ranked_objectives)
+        selected: list[ResearchObjective] = []
+        covered_documents: set[str] = set()
+        selected_document_counts: dict[str, int] = {}
+
+        while remaining and len(selected) < review_limit:
+            uncovered = [
+                objective
+                for objective in remaining
+                if set(objective.seed_document_ids) - covered_documents
+            ]
+            pool = uncovered or remaining
+            capacity_limited_pool = [
+                objective
+                for objective in pool
+                if all(
+                    selected_document_counts.get(document_id, 0)
+                    < _OBJECTIVE_CANDIDATES_PER_DOCUMENT
+                    for document_id in objective.seed_document_ids
+                )
+            ]
+            if capacity_limited_pool:
+                pool = capacity_limited_pool
+
+            def selection_key(
+                objective: ResearchObjective,
+            ) -> tuple[int, int, int, int, float, int, str]:
+                supporting_records = [
+                    relationship_inventory[relationship_id]
+                    for relationship_id in objective.source_relationship_ids
+                ]
+                supporting_relationships = [
+                    relationship
+                    for _document_id, _study, relationship in supporting_records
+                ]
+                structured_result_document_count = len(
+                    {
+                        document_id
+                        for document_id, _study, relationship in supporting_records
+                        if cls._structured_result_source_count(relationship)
+                    }
+                )
+                structured_result_source_count = sum(
+                    cls._structured_result_source_count(item)
+                    for item in supporting_relationships
+                )
+                mean_confidence = (
+                    sum(item.confidence for item in supporting_relationships)
+                    / len(supporting_relationships)
+                    if supporting_relationships
+                    else 0.0
+                )
+                return (
+                    len(set(objective.seed_document_ids) - covered_documents),
+                    len(set(objective.seed_document_ids)),
+                    structured_result_document_count,
+                    structured_result_source_count,
+                    mean_confidence,
+                    -len(selected),
+                    objective.objective_id,
+                )
+
+            chosen = max(pool, key=selection_key)
+            selected.append(chosen)
+            covered_documents.update(chosen.seed_document_ids)
+            for document_id in chosen.seed_document_ids:
+                selected_document_counts[document_id] = (
+                    selected_document_counts.get(document_id, 0) + 1
+                )
+            remaining.remove(chosen)
+
+        return tuple(selected)
 
     @staticmethod
     def _structured_result_source_count(

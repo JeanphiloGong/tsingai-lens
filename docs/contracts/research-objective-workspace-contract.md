@@ -115,9 +115,18 @@ Each record contains:
 - one `comparison` with baseline/target labels, every changed axis,
   comparability, and explicit incomparability reasons;
 - at most one `reported_result`, containing one outcome, reported value/unit,
-  direction, and bounded result text;
+  `result_kind` (`measured | observed | predicted | simulated | modeled |
+  unknown`), direction, and bounded result text. Predicted, simulated, and
+  modeled values remain descriptive Evidence and cannot enter a comparable
+  Finding result set;
 - `scientific_context`, containing typed material, sample, process, and test
-  name/value/unit attributes that stayed fixed in the comparison.
+  name/value/unit attributes that stayed fixed in the comparison. Each
+  attribute may carry `context_scope` (`experimental`, `simulation`,
+  `background`, or `unknown`) so a paper's experimental and non-experimental
+  settings remain distinguishable. Simulation or background context is
+  retained for audit but cannot alone satisfy the experimental conditions
+  required for a comparable result; legacy attributes without the field are
+  treated as `unknown`.
 
 The Evidence lifecycle is:
 
@@ -133,9 +142,19 @@ both the source excerpt and structured content.
 `attribution_scope` is `isolated_effect | joint_effect | association_only |
 descriptive_only | not_attributable`. An isolated effect requires exactly one
 changed variable and a comparable baseline/target comparison over the same
-axis. A joint effect requires at least two changed variables and retains every
-changed axis. Incomparable groups require reasons and are always
+axis. An explicit Source claim may retain a joint effect with at least two
+changed variables; a deterministic row-derived multi-factor contrast is
+association-only. Incomparable groups require reasons and are always
 `not_attributable`.
+
+`association_only` is an observed relationship, not an isolated causal effect.
+It may support an associative cross-paper Finding only when each contributing
+Evidence record has a source-grounded outcome, explicit baseline and target
+endpoints, the same factor and outcome axis, the same material and fixed
+scientific context, and at least two papers repeat that condition stratum. The
+published Finding remains `association_only` with `assertion_strength=associative`;
+it cannot be promoted to `causal` or `isolated_effect`. Missing endpoints or
+context keep the result paper-scoped until the missing evidence is supplied.
 
 Extraction state carries only prior role/outcome coverage and Source positions
 between blocks of the same document; scientific values and context are not
@@ -190,6 +209,13 @@ are computed from bindings rather than persisted as independent declarations.
 System-produced limitations are derived from validated factor coupling,
 direct-Evidence coverage, contradiction, condition boundaries, and attribution
 scope. Provider-authored free text is not published as an analysis limitation.
+
+Coverage is a prerequisite for cross-paper confirmation. When a paper's
+`PaperContribution` has `evidence_disposition=coverage_incomplete` or a positive
+`uninspected_source_count`, its extracted direct Evidence remains visible and
+may produce a paper-scoped descriptive Finding, but it is excluded from strict
+cross-paper result sets. Complete papers can still be compared with each other;
+the analysis diagnostic records this gate and its affected Source counts.
 
 ### FindingMechanismRelation
 
@@ -253,8 +279,12 @@ retains its Paper Map reason and whether it was a seed paper.
 inspection and cannot establish a scientific result.
 
 The analysis-state and command responses contain `objective`,
-`active_analysis`, `published_analysis`, and warnings. They never embed all
-Findings or Evidence.
+`active_analysis`, `published_analysis`, an `evidence_review` coverage ledger,
+and warnings. They never embed all Findings or Evidence. `evidence_review`
+summarizes every retained published Evidence item by status and includes a
+bounded set of source-local gap records so a successful analysis with no
+defensible Finding remains scientifically inspectable rather than appearing
+as an unexplained empty result.
 
 `POST .../analysis` is the single approval-and-analysis command. For a
 candidate Objective, it atomically freezes the accepted definition as

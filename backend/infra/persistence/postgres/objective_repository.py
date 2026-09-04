@@ -503,6 +503,8 @@ class PostgresObjectiveRepository:
         contributions: tuple[PaperContribution, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id, analysis_version)
         async with self.session_factory.begin() as session:
@@ -582,7 +584,11 @@ class PostgresObjectiveRepository:
                 )
                 for item in findings
             )
-            analysis = analysis.succeed(completed_at=datetime.now(timezone.utc))
+            analysis = analysis.succeed(
+                completed_at=datetime.now(timezone.utc),
+                abstention_reason=abstention_reason,
+                abstention_note=abstention_note,
+            )
             objective = self._objective_from_row(objective_row).publish_analysis(
                 analysis
             )

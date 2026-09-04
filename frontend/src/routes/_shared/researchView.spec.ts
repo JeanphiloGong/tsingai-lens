@@ -13,8 +13,10 @@ import {
 	fetchObjectiveFinding,
 	fetchObjectiveFindings,
 	fetchObjectiveScope,
-	normalizeObjectiveScope,
+	collectionFindingDatasetUrl,
+	findingGoldDraftUrl,
 	objectiveFindingDatasetUrl,
+	normalizeObjectiveScope,
 	runObjectiveAnalysis
 } from './researchView';
 
@@ -141,6 +143,24 @@ describe('objective Finding API', () => {
 		expect(result.active_analysis?.document_inputs).toEqual([
 			{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' }
 		]);
+	});
+
+	it('builds a filtered Objective dataset export URL', () => {
+		expect(
+			objectiveFindingDatasetUrl('col/1', 'obj 1', 'training_jsonl', {
+				label_status: 'gold',
+				dataset_use_status: 'training_ready'
+			})
+		).toBe(
+			'/api/v1/collections/col%2F1/objectives/obj%201/finding-dataset?label_status=gold&dataset_use_status=training_ready&format=training_jsonl'
+		);
+	});
+
+	it('builds collection-level dataset and gold-draft export URLs', () => {
+		expect(collectionFindingDatasetUrl('col/1', 'json')).toBe(
+			'/api/v1/collections/col%2F1/finding-dataset?format=json'
+		);
+		expect(findingGoldDraftUrl('col/1')).toBe('/api/v1/collections/col%2F1/finding-gold-draft');
 	});
 
 	it('normalizes and fetches the complete Objective scope preview', async () => {

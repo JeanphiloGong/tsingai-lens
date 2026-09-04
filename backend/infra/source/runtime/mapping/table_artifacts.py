@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pandas as pd
@@ -23,7 +24,23 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
 )
 from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.mapping.layout_binding import first_page, normalize_label
+from infra.source.runtime.mapping.layout_binding import (
+    first_bbox,
+    first_page,
+    normalize_label,
+)
+
+
+_TABLE_CONTINUATION_MARKER = re.compile(
+    r"^(?:table|tab\.?)[\s_-]*[A-Za-z0-9][A-Za-z0-9.\-]*"
+    r"\s*(?:\(\s*continued\s*\)|continued)$",
+    re.IGNORECASE,
+)
+
+
+def _is_table_continuation_marker(value: object) -> bool:
+    text = " ".join(str(value or "").split())
+    return bool(_TABLE_CONTINUATION_MARKER.fullmatch(text))
 
 
 def build_pdf_tables(
@@ -32,6 +49,7 @@ def build_pdf_tables(
     document: Any,
     blocks: pd.DataFrame,
     text_items: list[dict[str, Any]],
+    payload: bytes | None = None,
 ) -> pd.DataFrame:
     tables = getattr(document, "tables", []) or []
     if not tables:
@@ -101,11 +119,83 @@ def build_pdf_tables(
                     "table_label": normalize_label(getattr(table, "label", None)),
                     "caption_linkage_method": linkage_method,
                     "column_header_count": len(header_paths),
+                    **(
+                        {"visual_text": visual_text}
+                        if (
+                            visual_text := extract_pdf_table_visual_text(
+                                payload=payload,
+                                table=table,
+                            )
+                        )
+                        else {}
+                    ),
                 },
             ).to_record()
         )
 
     return pd.DataFrame(rows, columns=TABLES_FINAL_COLUMNS)
+
+
+def extract_pdf_table_visual_text(
+    *,
+    payload: bytes | None,
+    table: Any,
+) -> str | None:
+    """Return the table-region text in the order a reader sees on the page.
+
+    Docling's logical grid is the authoritative structured representation, but
+    PDF layout engines can split a wrapped row label or uncertainty across
+    adjacent grid rows.  The clipped page text is retained as an additional
+    Source view so downstream repair can compare the grid with the original
+    reading order.  Failure to obtain this optional view must never discard the
+    structured table artifact.
+    """
+    if not payload:
+        return None
+    page_number = first_page(getattr(table, "prov", None))
+    bbox = first_bbox(getattr(table, "prov", None))
+    if page_number is None or bbox is None:
+        return None
+    try:
+        import fitz
+
+        with fitz.open(stream=payload, filetype="pdf") as pdf:
+            page = pdf[page_number - 1]
+            page_rect = page.rect
+            top_left_bbox = bbox
+            to_top_left_origin = getattr(bbox, "to_top_left_origin", None)
+            if callable(to_top_left_origin):
+                top_left_bbox = to_top_left_origin(page_height=page_rect.height)
+            left = min(
+                float(getattr(top_left_bbox, "l")),
+                float(getattr(top_left_bbox, "r")),
+            )
+            right = max(
+                float(getattr(top_left_bbox, "l")),
+                float(getattr(top_left_bbox, "r")),
+            )
+            top = min(
+                float(getattr(top_left_bbox, "t")),
+                float(getattr(top_left_bbox, "b")),
+            )
+            bottom = max(
+                float(getattr(top_left_bbox, "t")),
+                float(getattr(top_left_bbox, "b")),
+            )
+            clip = fitz.Rect(
+                max(page_rect.x0, left - 4),
+                max(page_rect.y0, top - 4),
+                min(page_rect.x1, right + 4),
+                min(page_rect.y1, bottom + 4),
+            )
+            if clip.is_empty or clip.width <= 0 or clip.height <= 0:
+                return None
+            text = page.get_text("text", clip=clip, sort=True)
+    except Exception:  # noqa: BLE001
+        return None
+    lines = [" ".join(line.split()) for line in str(text or "").splitlines()]
+    normalized = "\n".join(line for line in lines if line)
+    return normalized or None
 
 
 def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
@@ -200,8 +290,8 @@ def build_docling_header_paths(table: Any) -> dict[int, str]:
     for cell in getattr(getattr(table, "data", None), "table_cells", []) or []:
         if not bool(getattr(cell, "column_header", False)):
             continue
-        text = str(getattr(cell, "text", "") or "").strip()
-        if not text:
+        text = " ".join(str(getattr(cell, "text", "") or "").split())
+        if not text or _is_table_continuation_marker(text):
             continue
         start = int(getattr(cell, "start_col_offset_idx", 0))
         end = int(getattr(cell, "end_col_offset_idx", start + 1))
@@ -229,6 +319,7 @@ def build_docling_header_row_count(table: Any) -> int:
         )
         for cell in getattr(getattr(table, "data", None), "table_cells", []) or []
         if bool(getattr(cell, "column_header", False))
+        and not _is_table_continuation_marker(getattr(cell, "text", ""))
     ]
     return max(header_ends, default=0)
 

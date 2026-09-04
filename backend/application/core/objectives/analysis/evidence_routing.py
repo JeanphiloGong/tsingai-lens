@@ -35,6 +35,7 @@ _ROUTE_CANDIDATE_LIMIT = 40
 _ROUTE_TEXT_CANDIDATE_LIMIT = 8
 _ROUTE_TEXT_HINT_LIMIT = 3
 _ROUTE_TREE_TEXT_SECTION_LIMIT = 3
+_ROUTE_CONTEXT_CANDIDATE_LIMIT = 6
 _OBJECTIVE_STATE_TEXT_CHARS = 220
 _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES = {
     "current_experimental_evidence",
@@ -260,6 +261,7 @@ class EvidenceCandidate:
     join_plan: dict[str, Any]
     confidence: float
     used_fallback: bool = False
+    context_fields: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceCandidate":
@@ -276,6 +278,7 @@ class EvidenceCandidate:
             join_plan=_mapping(payload.get("join_plan")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
             used_fallback=bool(payload.get("used_fallback")),
+            context_fields=normalize_objective_terms(payload.get("context_fields")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -292,6 +295,7 @@ class EvidenceCandidate:
             "join_plan": dict(self.join_plan),
             "confidence": self.confidence,
             "used_fallback": self.used_fallback,
+            "context_fields": list(self.context_fields),
         }
 
 
@@ -431,19 +435,6 @@ def route_sources(
             frame_position - 1,
             max(frame_count - frame_position + 1, 0),
         )
-        if frame.relevance == "irrelevant":
-            logger.info(
-                "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
-                collection_id,
-                frame.objective_id,
-                frame.document_id,
-                frame.document_id,
-                frame_position,
-                frame_count,
-                frame_position,
-                max(frame_count - frame_position, 0),
-            )
-            continue
         objective = objective_by_id.get(frame.objective_id)
         if objective is None:
             logger.info(
@@ -458,6 +449,57 @@ def route_sources(
                 max(frame_count - frame_position, 0),
             )
             continue
+
+        source_candidates: list[dict[str, Any]] | None = None
+        if frame.relevance == "irrelevant":
+            # A false-negative frame must not hide a direct result in a paper
+            # already classified as experimental. Re-check the concrete Source
+            # candidates deterministically; only a paper with no objective
+            # signal remains out of scope.
+            if frame.paper_role == "primary_experiment":
+                source_candidates = _build_route_source_candidates(
+                    frame=frame,
+                    objective_context=objective,
+                    blocks=blocks_by_document_id.get(frame.document_id, []),
+                    tables=tables_by_document_id.get(frame.document_id, []),
+                    document_tree=document_trees_by_document_id.get(frame.document_id),
+                    lineage_source_refs=frame.lineage_source_refs,
+                )
+                has_direct_signal = any(
+                    _route_candidate_evidence_role(
+                        objective_context=objective,
+                        candidate=candidate,
+                    )
+                    == "direct_support"
+                    for candidate in source_candidates
+                )
+                if has_direct_signal:
+                    record_analysis_diagnostic(
+                        {
+                            "trace_type": "objective_frame_recall_override",
+                            "collection_id": collection_id,
+                            "objective_id": frame.objective_id,
+                            "document_id": frame.document_id,
+                            "reason": "primary_experiment_contains_direct_objective_signal",
+                            "original_relevance": frame.relevance,
+                        }
+                    )
+                else:
+                    source_candidates = None
+            if source_candidates is None:
+                logger.info(
+                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
+                    collection_id,
+                    frame.objective_id,
+                    frame.document_id,
+                    frame.document_id,
+                    frame_position,
+                    frame_count,
+                    frame_position,
+                    max(frame_count - frame_position, 0),
+                )
+                continue
+
         if frame.paper_role == "review":
             record_analysis_diagnostic(
                 {
@@ -482,13 +524,15 @@ def route_sources(
             )
             continue
         objective_context = objective
-        source_candidates = _build_route_source_candidates(
-            frame=frame,
-            objective_context=objective_context,
-            blocks=blocks_by_document_id.get(frame.document_id, []),
-            tables=tables_by_document_id.get(frame.document_id, []),
-            document_tree=document_trees_by_document_id.get(frame.document_id),
-        )
+        if source_candidates is None:
+            source_candidates = _build_route_source_candidates(
+                frame=frame,
+                objective_context=objective_context,
+                blocks=blocks_by_document_id.get(frame.document_id, []),
+                tables=tables_by_document_id.get(frame.document_id, []),
+                document_tree=document_trees_by_document_id.get(frame.document_id),
+                lineage_source_refs=frame.lineage_source_refs,
+            )
         if not source_candidates:
             logger.info(
                 "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=0 route_count=0 extractable_route_count=0 completed_frames=%s remaining_frames=%s",
@@ -502,6 +546,42 @@ def route_sources(
                 max(frame_count - frame_position, 0),
             )
             continue
+        if frame.paper_role == "primary_experiment":
+            source_scope = _objective_paper_source_scope(
+                objective_context=objective_context,
+                source_candidates=source_candidates,
+            )
+            if not source_scope["eligible"]:
+                record_analysis_diagnostic(
+                    {
+                        "trace_type": "objective_paper_scope_skipped",
+                        "collection_id": collection_id,
+                        "objective_id": frame.objective_id,
+                        "document_id": frame.document_id,
+                        "paper_role": frame.paper_role,
+                        "matched_variables": source_scope["matched_variables"],
+                        "matched_outcomes": source_scope["matched_outcomes"],
+                        "missing_axis_families": source_scope[
+                            "missing_axis_families"
+                        ],
+                        "lineage_preserved": source_scope["lineage_preserved"],
+                        "reason": (
+                            "primary_experiment_lacks_source_backed_objective_scope"
+                        ),
+                    }
+                )
+                logger.info(
+                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=missing_source_backed_objective_scope missing_axis_families=%s completed_frames=%s remaining_frames=%s",
+                    collection_id,
+                    frame.objective_id,
+                    frame.document_id,
+                    frame_position,
+                    frame_count,
+                    ",".join(source_scope["missing_axis_families"]),
+                    frame_position,
+                    max(frame_count - frame_position, 0),
+                )
+                continue
         frame_route_count_before = len(routes)
         candidate_by_key = {
             (candidate["source_kind"], candidate["source_ref"]): candidate
@@ -548,7 +628,14 @@ def route_sources(
             }
             try:
                 parsed = evidence_router.route_source(payload)
-                route_records = [item.model_dump() for item in parsed.selections[:1]]
+                # Preserve whether the model actually supplied a confidence.
+                # A Pydantic default of 0.0 is an implementation default, not a
+                # scientific judgment.  Finalization assigns the conservative
+                # deterministic route confidence only when the field was absent.
+                route_records = [
+                    item.model_dump(exclude_unset=True)
+                    for item in parsed.selections[:1]
+                ]
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Research objective evidence routing model failed; using deterministic route collection_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s",
@@ -565,6 +652,38 @@ def route_sources(
                         candidate=candidate,
                     )
                 ]
+            if not route_records and _route_candidate_is_direct_result_candidate(
+                candidate=candidate,
+                objective_context=objective_context,
+            ):
+                # A router is allowed to rank or annotate a direct result, but
+                # it cannot veto reading a Source that the deterministic
+                # candidate pass identified as current-work target evidence.
+                # Researchers do not skip an explicit result paragraph merely
+                # because a preliminary routing judgment returned no route.
+                route_records = [
+                    {
+                        "role": "current_experimental_evidence",
+                        "extractable": True,
+                        "reason": (
+                            "Deterministic recall override: the Source contains "
+                            "a direct Objective result."
+                        ),
+                        "confidence": 0.72,
+                        "used_fallback": True,
+                    }
+                ]
+                record_analysis_diagnostic(
+                    {
+                        "trace_type": "objective_source_recall_override",
+                        "collection_id": collection_id,
+                        "objective_id": frame.objective_id,
+                        "document_id": frame.document_id,
+                        "source_kind": candidate.get("source_kind"),
+                        "source_ref": candidate.get("source_ref"),
+                        "reason": "router_returned_empty_for_direct_result",
+                    }
+                )
             for record in route_records:
                 source_kind = str(candidate.get("source_kind") or "")
                 source_ref = str(candidate.get("source_ref") or "")
@@ -608,6 +727,70 @@ def route_sources(
             source_candidates=source_candidates,
         )
         frame_routes = routes[frame_route_count_before:]
+        direct_candidates = {
+            (
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            )
+            for candidate in source_candidates
+            if _route_candidate_is_direct_result_candidate(
+                candidate=candidate,
+                objective_context=objective_context,
+            )
+        }
+        routed_candidate_keys = {
+            (route.source_kind, route.source_ref)
+            for route in frame_routes
+        }
+        omitted_direct_candidates = sorted(direct_candidates - routed_candidate_keys)
+        record_analysis_diagnostic(
+            {
+                "trace_type": "objective_source_coverage_audit",
+                "collection_id": collection_id,
+                "objective_id": frame.objective_id,
+                "document_id": frame.document_id,
+                "paper_role": frame.paper_role,
+                "source_candidate_count": len(source_candidates),
+                "direct_candidate_count": len(direct_candidates),
+                "direct_routed_count": len(direct_candidates & routed_candidate_keys),
+                "omitted_direct_candidate_count": len(omitted_direct_candidates),
+                "omitted_direct_candidates": [
+                    {"source_kind": source_kind, "source_ref": source_ref}
+                    for source_kind, source_ref in omitted_direct_candidates[:20]
+                ],
+            }
+        )
+        all_candidate_keys = {
+            (
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            )
+            for candidate in source_candidates
+        }
+        context_candidates = all_candidate_keys - direct_candidates
+        omitted_context_candidates = sorted(context_candidates - routed_candidate_keys)
+        if omitted_context_candidates:
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_initial_context_scope_bounded",
+                    "collection_id": collection_id,
+                    "objective_id": frame.objective_id,
+                    "document_id": frame.document_id,
+                    "context_candidate_count": len(context_candidates),
+                    "context_routed_count": len(
+                        context_candidates & routed_candidate_keys
+                    ),
+                    "omitted_context_candidate_count": len(omitted_context_candidates),
+                    "omitted_context_candidates": [
+                        {"source_kind": source_kind, "source_ref": source_ref}
+                        for source_kind, source_ref in omitted_context_candidates[:20]
+                    ],
+                    "reason": (
+                        "Initial analysis keeps a bounded context bundle; missing "
+                        "fields trigger same-paper expansion."
+                    ),
+                }
+            )
         logger.info(
             "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
             collection_id,
@@ -693,6 +876,16 @@ def _finalize_objective_route_record(
             "extractable": _normalize_route_extractable(finalized),
         }
     )
+    if evidence_role == "direct_support" and not finalized.get("reason"):
+        # The model schema intentionally omits free-form routing prose, but a
+        # direct route still needs an explicit audit reason when an empty
+        # extraction is retained for same-paper context expansion.
+        finalized["reason"] = "Selected direct Objective result Source."
+    if finalized.get("extractable") and "confidence" not in finalized:
+        # Keep a routable Source useful when a provider omits its optional
+        # self-assessment.  This is a conservative routing quality, not a claim
+        # that the scientific result is proven.
+        finalized["confidence"] = 0.62
     if source_kind == "table":
         table_schema = _route_table_schema_record(candidate=dict(route_candidate))
         role = str(finalized.get("role") or "low_value_or_irrelevant")
@@ -1076,6 +1269,14 @@ def _route_candidate_evidence_role(
     text = _route_candidate_text(candidate)
     if not text:
         return "irrelevant"
+    if _route_text_candidate_is_secondary_citation(candidate):
+        # Results quoted from prior work are useful context, but they are not
+        # evidence of the current paper's experiment.
+        return "background_context"
+    if candidate.get("lineage_match"):
+        # Lineage guarantees inspection, not scientific validity. The Source
+        # still goes through source-local extraction and grounding.
+        return "direct_support"
     target_axes = objective_context.outcomes
     mechanisms = objective_context.mechanisms
     context_axes = (
@@ -1083,13 +1284,59 @@ def _route_candidate_evidence_role(
         *objective_context.constraints,
     )
     variable_axes = objective_context.variables
-    if _route_text_mentions_any_axis(text, target_axes):
+    if candidate.get("source_kind") == "text_window":
+        # A Methods sentence can name both the manipulated variable and the
+        # measured outcome (for example, "before porosity measurement") while
+        # reporting no observation.  Only result language makes a text Source
+        # a direct-result anchor; source-local context remains background.
+        if _route_text_candidate_is_direct_result(
+            objective_context=objective_context,
+            candidate=candidate,
+        ):
+            return "direct_support"
+        # Results and conclusion prose can still report an objective outcome
+        # without repeating the variable name. Keep that recall path outside
+        # the document's explicit context sections; Methods, specimen, and
+        # test paragraphs remain source-local context even when they mention
+        # the outcome being measured.
+        if (
+            _route_text_mentions_any_axis(text, target_axes)
+            and not _route_text_candidate_is_context_section(
+                str(candidate.get("section_label") or "")
+            )
+        ):
+            return "direct_support"
+    elif _route_text_mentions_any_axis(text, target_axes):
+        # Tables and figure captions often express a result through headers or
+        # labels rather than a comparison verb. They remain eligible for
+        # direct extraction and deterministic validation.
         return "direct_support"
     if _route_text_mentions_any_axis(text, mechanisms):
         return "mediator_context"
     if _route_text_mentions_any_axis(text, (*variable_axes, *context_axes)):
         return "background_context"
     return "irrelevant"
+
+
+def _route_candidate_matches_lineage(
+    candidate: Mapping[str, Any],
+    lineage_refs: Iterable[tuple[str, str]],
+) -> bool:
+    """Match Paper Map Source kinds to their analysis candidate equivalents."""
+
+    candidate_kind = str(candidate.get("source_kind") or "").strip()
+    candidate_ref = str(candidate.get("source_ref") or "").strip()
+    if not candidate_ref:
+        return False
+    for lineage_kind, lineage_ref in lineage_refs:
+        if lineage_ref != candidate_ref:
+            continue
+        if lineage_kind in {"block", "text_window", "section"}:
+            if candidate_kind == "text_window":
+                return True
+        elif lineage_kind == candidate_kind:
+            return True
+    return False
 
 
 def _apply_route_evidence_role(
@@ -1133,6 +1380,49 @@ def _route_candidate_text(candidate: Mapping[str, Any]) -> str:
         )
         if str(value or "").strip()
     )
+
+
+def _objective_paper_source_scope(
+    *,
+    objective_context: ResearchObjective,
+    source_candidates: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    matched_variables: list[str] = []
+    matched_outcomes: list[str] = []
+    lineage_preserved = False
+    for candidate in source_candidates:
+        lineage_preserved = lineage_preserved or bool(candidate.get("lineage_match"))
+        text = _route_candidate_text(candidate)
+        if not text:
+            continue
+        for axis in objective_context.variables:
+            if (
+                axis not in matched_variables
+                and property_matching.source_text_mentions_objective_variable(
+                    text,
+                    axis,
+                )
+            ):
+                matched_variables.append(axis)
+        for axis in objective_context.outcomes:
+            if (
+                axis not in matched_outcomes
+                and property_matching.source_text_mentions_axis(text, axis)
+            ):
+                matched_outcomes.append(axis)
+
+    missing_axis_families: list[str] = []
+    if objective_context.variables and not matched_variables:
+        missing_axis_families.append("variable")
+    if objective_context.outcomes and not matched_outcomes:
+        missing_axis_families.append("outcome")
+    return {
+        "eligible": not missing_axis_families or lineage_preserved,
+        "matched_variables": matched_variables,
+        "matched_outcomes": matched_outcomes,
+        "missing_axis_families": missing_axis_families,
+        "lineage_preserved": lineage_preserved,
+    }
 
 
 def _route_text_mentions_any_axis(
@@ -1218,14 +1508,31 @@ def _build_route_source_candidates(
     blocks: list[Any],
     tables: list[Any],
     document_tree: SourceDocumentTree | None = None,
+    lineage_source_refs: Iterable[tuple[str, str]] = (),
 ) -> list[dict[str, Any]]:
     candidates_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    lineage_refs = tuple(
+        (str(source_kind or "").strip(), str(source_ref or "").strip())
+        for source_kind, source_ref in lineage_source_refs
+        if str(source_kind or "").strip() and str(source_ref or "").strip()
+    )
     table_by_id = {
         str(getattr(table, "table_id", "") or ""): table
         for table in tables
         if str(getattr(table, "table_id", "") or "")
     }
-    for table_id in (*frame.relevant_tables, *frame.excluded_tables):
+    table_ids = list((*frame.relevant_tables, *frame.excluded_tables))
+    # A primary experimental paper is a recall-first inspection scope. The
+    # frame is a prioritization judgment, so an unlisted table must remain
+    # available for deterministic role classification and same-paper context
+    # binding even when the model only assigned medium relevance.
+    if frame.paper_role == "primary_experiment":
+        table_ids.extend(
+            str(getattr(table, "table_id", "") or "")
+            for table in tables
+            if str(getattr(table, "table_id", "") or "")
+        )
+    for table_id in dict.fromkeys(table_ids):
         table = table_by_id.get(table_id)
         if table is None:
             continue
@@ -1234,13 +1541,21 @@ def _build_route_source_candidates(
             "source_kind": "table",
             "source_ref": table_id,
             "frame_status": (
-                "excluded" if table_id in frame.excluded_tables else "relevant"
+                "relevant"
+                if frame.paper_role == "primary_experiment"
+                else (
+                    "excluded" if table_id in frame.excluded_tables else "relevant"
+                )
             ),
             "caption_text": getattr(table, "caption_text", None),
             "heading_path": getattr(table, "heading_path", None),
             "table_schema": table_schema,
             "sample_rows": table_schema["sample_rows"],
         }
+        candidate["lineage_match"] = _route_candidate_matches_lineage(
+            candidate,
+            lineage_refs,
+        )
         candidates_by_key[("table", table_id)] = _attach_route_tree_position(
             candidate,
             document_tree=document_tree,
@@ -1263,10 +1578,51 @@ def _build_route_source_candidates(
             blocks=blocks,
             limit=text_candidate_limit,
         )
+    # Relationship lineage is an explicit reason to inspect a Source. Add
+    # matching blocks after lexical/tree selection so synonyms and sparse
+    # result wording cannot be hidden by the bounded text candidate budget.
+    existing_text_refs = {
+        str(candidate.get("source_ref") or "") for candidate in text_candidates
+    }
+    for source_kind, source_ref in lineage_refs:
+        if source_kind not in {"block", "text_window", "section"}:
+            continue
+        if source_ref in existing_text_refs:
+            continue
+        block = next(
+            (
+                item
+                for item in blocks
+                if str(getattr(item, "block_id", "") or "") == source_ref
+            ),
+            None,
+        )
+        if block is None:
+            continue
+        block_type = str(getattr(block, "block_type", "") or "")
+        text = str(getattr(block, "text", "") or "").strip()
+        if not text or block_type not in {"paragraph", "list_item", "figure_caption"}:
+            continue
+        text_candidates.append(
+            {
+                "source_kind": "text_window",
+                "source_ref": source_ref,
+                "frame_status": "relevant",
+                "section_label": _block_section_label(block),
+                "block_type": block_type,
+                "text": text[:_ROUTE_TEXT_CHARS],
+                "lineage_match": True,
+            }
+        )
+        existing_text_refs.add(source_ref)
     for candidate in text_candidates:
         source_ref = str(candidate.get("source_ref") or "")
         if not source_ref:
             continue
+        candidate["lineage_match"] = _route_candidate_matches_lineage(
+            candidate,
+            lineage_refs,
+        )
         candidates_by_key[("text_window", source_ref)] = _attach_route_tree_position(
             candidate,
             document_tree=document_tree,
@@ -1275,9 +1631,90 @@ def _build_route_source_candidates(
         candidates_by_key.values(),
         document_tree=document_tree,
     )
-    if document_tree is not None:
-        return candidates
-    return candidates[:_ROUTE_CANDIDATE_LIMIT]
+    if frame.paper_role != "primary_experiment":
+        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+
+    # A route budget is appropriate for contextual reading, but it must not
+    # discard an explicit result Source merely because many unrelated tables
+    # were listed first. Preserve every deterministic direct-result candidate
+    # and apply the budget only to the remaining context candidates.
+    direct_candidates = [
+        candidate
+        for candidate in candidates
+        if _route_candidate_is_direct_result_candidate(
+            candidate=candidate,
+            objective_context=objective_context,
+        )
+    ]
+    if not direct_candidates:
+        return candidates[:_ROUTE_CANDIDATE_LIMIT]
+    direct_keys = {
+        (
+            str(candidate.get("source_kind") or ""),
+            str(candidate.get("source_ref") or ""),
+        )
+        for candidate in direct_candidates
+    }
+    context_candidates = [
+        candidate
+        for candidate in candidates
+        if (
+            str(candidate.get("source_kind") or ""),
+            str(candidate.get("source_ref") or ""),
+        )
+        not in direct_keys
+    ]
+    # Direct result Sources are the recall boundary.  Context Sources are a
+    # starting bundle only; missing fields trigger same-paper expansion after
+    # extraction.  Keeping this bound here prevents every Methods/background
+    # paragraph from becoming a model call before we know what is missing.
+    # Keep recall-first selection separate from execution order.  The model
+    # may classify direct results before context, but extraction should still
+    # follow the paper's source order so the resulting trajectory mirrors how
+    # a researcher reads and binds Methods, Results, tables, and captions.
+    selected_keys = direct_keys | {
+        (
+            str(candidate.get("source_kind") or ""),
+            str(candidate.get("source_ref") or ""),
+        )
+        for candidate in context_candidates[:_ROUTE_CONTEXT_CANDIDATE_LIMIT]
+    }
+    return [
+        candidate
+        for candidate in candidates
+        if (
+            str(candidate.get("source_kind") or ""),
+            str(candidate.get("source_ref") or ""),
+        )
+        in selected_keys
+    ]
+
+
+def _route_candidate_is_direct_result_candidate(
+    *,
+    candidate: Mapping[str, Any],
+    objective_context: ResearchObjective,
+) -> bool:
+    if candidate.get("source_kind") == "text_window":
+        if _route_text_candidate_is_secondary_citation(candidate):
+            return False
+        if candidate.get("lineage_match"):
+            return True
+        return _route_text_candidate_is_direct_result(
+            objective_context=objective_context,
+            candidate=candidate,
+        )
+    if candidate.get("lineage_match"):
+        # A lineage hint keeps a non-text Source in the inspection scope, but
+        # citation attribution still takes precedence for text candidates.
+        return True
+    return (
+        _route_candidate_evidence_role(
+            objective_context=objective_context,
+            candidate=candidate,
+        )
+        == "direct_support"
+    )
 
 
 def _attach_route_tree_position(
@@ -1508,7 +1945,7 @@ def _build_ranked_route_text_candidates(
     blocks: list[Any],
     limit: int,
 ) -> list[dict[str, Any]]:
-    if limit <= 0:
+    if limit <= 0 and frame.paper_role != "primary_experiment":
         return []
     scored_candidates: list[tuple[int, int, dict[str, Any]]] = []
     selected_source_refs = set(frame.relevant_text_source_refs)
@@ -1527,7 +1964,17 @@ def _build_ranked_route_text_candidates(
             or block_type not in {"paragraph", "list_item", "figure_caption"}
         ):
             continue
-        if selected_source_refs and block_id not in selected_source_refs:
+        if (
+            frame.paper_role == "primary_experiment"
+            and frame.relevant_text_source_refs
+            and _route_text_candidate_is_secondary_citation({"text": text})
+        ):
+            continue
+        if (
+            selected_source_refs
+            and frame.paper_role != "primary_experiment"
+            and block_id not in selected_source_refs
+        ):
             continue
         score = _route_text_candidate_score(
             frame=frame,
@@ -1536,8 +1983,12 @@ def _build_ranked_route_text_candidates(
             section_label=section_label,
             text=text,
         )
-        if score <= 0:
+        if score <= 0 and not _route_text_candidate_is_context_section(
+            section_label
+        ):
             continue
+        if score <= 0:
+            score = 1
         scored_candidates.append(
             (
                 -score,
@@ -1553,12 +2004,71 @@ def _build_ranked_route_text_candidates(
             )
         )
     scored_candidates.sort()
-    return [
+    if frame.paper_role == "primary_experiment":
+        # Primary experimental papers use the frame as a prioritization hint.
+        # Preserve every paragraph that contains an explicit objective result;
+        # the bounded quota is reserved for contextual paragraphs only.
+        direct_candidates = [
+            candidate
+            for _score, _order, candidate in scored_candidates
+            if _route_text_candidate_is_direct_result(
+                objective_context=objective_context,
+                candidate=candidate,
+            )
+        ]
+        if len(direct_candidates) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
+            direct_refs = {
+                str(candidate.get("source_ref") or "")
+                for candidate in direct_candidates
+            }
+            context_candidates = [
+                candidate
+                for _score, _order, candidate in scored_candidates
+                if str(candidate.get("source_ref") or "") not in direct_refs
+                and _route_text_candidate_is_context_section(
+                    str(candidate.get("section_label") or "")
+                )
+            ]
+            return [
+                *direct_candidates,
+                *context_candidates[:_ROUTE_TEXT_HINT_LIMIT],
+            ]
+        if limit <= 0:
+            return direct_candidates
+        selected = [
+            candidate
+            for _score, _order, candidate in scored_candidates[
+                : min(limit, _ROUTE_TEXT_CANDIDATE_LIMIT)
+            ]
+        ]
+        selected_refs = {
+            str(candidate.get("source_ref") or "") for candidate in selected
+        }
+        for candidate in direct_candidates:
+            source_ref = str(candidate.get("source_ref") or "")
+            if source_ref and source_ref not in selected_refs:
+                selected.append(candidate)
+                selected_refs.add(source_ref)
+        return _reserve_context_route_candidates(
+            selected=selected,
+            candidates=[candidate for _, _, candidate in scored_candidates],
+            limit=min(limit, _ROUTE_TEXT_CANDIDATE_LIMIT),
+            protected_source_refs={
+                str(candidate.get("source_ref") or "")
+                for candidate in direct_candidates
+            },
+        )
+    selected = [
         candidate
         for _, _, candidate in scored_candidates[
             : min(limit, _ROUTE_TEXT_CANDIDATE_LIMIT)
         ]
     ]
+    return _reserve_context_route_candidates(
+        selected=selected,
+        candidates=[candidate for _, _, candidate in scored_candidates],
+        limit=min(limit, _ROUTE_TEXT_CANDIDATE_LIMIT),
+    )
 
 
 def _build_tree_route_text_candidates(
@@ -1594,6 +2104,14 @@ def _build_tree_route_text_candidates(
             text = str(getattr(node, "text", "") or "").strip()
         if not source_ref or not text or not any(char.isalpha() for char in text):
             continue
+        if (
+            frame.paper_role == "primary_experiment"
+            and frame.relevant_text_source_refs
+            and _route_text_candidate_is_secondary_citation({"text": text})
+        ):
+            # When framing identified the current-work Source explicitly, keep
+            # cited literature from being mistaken for the paper's own result.
+            continue
         section_label = _tree_section_label_for_route_node(
             document_tree=document_tree,
             node=node,
@@ -1605,7 +2123,7 @@ def _build_tree_route_text_candidates(
                     document_tree=document_tree,
                     node=node,
                     frame=frame,
-                ):
+                ) and not _route_text_candidate_is_context_section(section_label):
                     continue
             elif not _route_section_matches_frame(
                 section_label=section_label,
@@ -1619,8 +2137,12 @@ def _build_tree_route_text_candidates(
             section_label=section_label,
             text=text,
         )
-        if score <= 0:
+        if score <= 0 and not _route_text_candidate_is_context_section(
+            section_label
+        ):
             continue
+        if score <= 0:
+            score = 1
         scored_candidates.append(
             (
                 -score,
@@ -1652,6 +2174,69 @@ def _build_tree_route_text_candidates(
     ]
 
 
+def _route_text_candidate_is_context_section(section_label: str) -> bool:
+    section_key = _objective_column_key(section_label)
+    return any(
+        marker in section_key
+        for marker in (
+            "method",
+            "material",
+            "experimental",
+            "processing",
+            "fabricat",
+            "specimen",
+            "sample",
+            "test_condition",
+            "characteriz",
+        )
+    )
+
+
+def _reserve_context_route_candidates(
+    *,
+    selected: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    limit: int,
+    protected_source_refs: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    selected_by_ref = {
+        str(candidate.get("source_ref") or ""): candidate for candidate in selected
+    }
+    protected_source_refs = protected_source_refs or set()
+    context_candidates = [
+        candidate
+        for candidate in candidates
+        if _route_text_candidate_is_context_section(
+            str(candidate.get("section_label") or "")
+        )
+    ]
+    for context_candidate in context_candidates:
+        context_ref = str(context_candidate.get("source_ref") or "")
+        if not context_ref or context_ref in selected_by_ref:
+            continue
+        if len(selected_by_ref) < limit:
+            selected_by_ref[context_ref] = context_candidate
+            continue
+        removable_ref = next(
+            (
+                ref
+                for ref, candidate in reversed(tuple(selected_by_ref.items()))
+                if ref not in protected_source_refs
+                if not _route_text_candidate_is_context_section(
+                    str(candidate.get("section_label") or "")
+                )
+            ),
+            None,
+        )
+        if removable_ref is None:
+            break
+        del selected_by_ref[removable_ref]
+        selected_by_ref[context_ref] = context_candidate
+    return list(selected_by_ref.values())
+
+
 def _bounded_tree_route_text_candidates(
     *,
     frame: PaperAnalysisFrame,
@@ -1660,7 +2245,7 @@ def _bounded_tree_route_text_candidates(
 ) -> list[tuple[int, int, dict[str, Any]]]:
     if len(scored_candidates) <= _ROUTE_TEXT_CANDIDATE_LIMIT:
         return scored_candidates
-    if not (frame.relevance == "high" and frame.paper_role == "primary_experiment"):
+    if frame.paper_role != "primary_experiment":
         return sorted(scored_candidates)[:_ROUTE_TEXT_CANDIDATE_LIMIT]
     selected: dict[tuple[str, str], tuple[int, int, dict[str, Any]]] = {}
     selected_keys: set[tuple[str, str]] = set()
@@ -1673,6 +2258,10 @@ def _bounded_tree_route_text_candidates(
             candidate=item[2],
         )
     ]
+    # Direct result paragraphs are the scientific recall boundary. Keep all of
+    # them; only contextual paragraphs remain subject to the bounded prompt
+    # budget below. This prevents a generic conclusion or evenly-spaced sample
+    # from displacing a concrete result.
     for item in direct_result_candidates:
         candidate = item[2]
         source_key = (
@@ -1683,8 +2272,17 @@ def _bounded_tree_route_text_candidates(
         selected_keys.add(source_key)
         section_key = _objective_column_key(candidate.get("section_label"))
         section_counts[section_key] = section_counts.get(section_key, 0) + 1
-        if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT // 2:
-            break
+        continue
+    if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
+        direct_refs = {
+            str(candidate.get("source_ref") or "")
+            for _score, _order, candidate in direct_result_candidates
+        }
+        return [
+            item
+            for item in scored_candidates
+            if str(item[2].get("source_ref") or "") in direct_refs
+        ]
     for item in sorted(scored_candidates):
         candidate = item[2]
         source_key = (
@@ -1699,7 +2297,7 @@ def _bounded_tree_route_text_candidates(
         selected[source_key] = item
         selected_keys.add(source_key)
         section_counts[section_key] = section_counts.get(section_key, 0) + 1
-        if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT // 2:
+        if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
             break
     ordered_candidates = sorted(
         scored_candidates,
@@ -1735,7 +2333,24 @@ def _bounded_tree_route_text_candidates(
         selected_keys.add(source_key)
         if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
             break
-    return list(selected.values())
+    selected_candidates = _reserve_context_route_candidates(
+        selected=[item[2] for item in selected.values()],
+        candidates=[item[2] for item in scored_candidates],
+        limit=_ROUTE_TEXT_CANDIDATE_LIMIT,
+        protected_source_refs={
+            str(item[2].get("source_ref") or "")
+            for item in direct_result_candidates
+        },
+    )
+    selected_refs = {
+        str(candidate.get("source_ref") or "")
+        for candidate in selected_candidates
+    }
+    return [
+        item
+        for item in scored_candidates
+        if str(item[2].get("source_ref") or "") in selected_refs
+    ]
 
 
 def _route_text_candidate_is_direct_result(
@@ -1745,6 +2360,8 @@ def _route_text_candidate_is_direct_result(
 ) -> bool:
     text = str(candidate.get("text") or "")
     if not text:
+        return False
+    if _route_text_candidate_is_secondary_citation(candidate):
         return False
     mentions_variable = any(
         property_matching.source_text_mentions_objective_variable(text, axis)
@@ -1803,8 +2420,92 @@ def _route_text_candidate_is_direct_result(
             "unchanged",
         )
     )
+    # A Results sentence can report an absolute measurement without using a
+    # comparison verb (for example, "relative density was 99.1% at ...").
+    # Researchers still inspect that sentence before deciding whether a
+    # comparator is available.  Treat a measured value in a result-oriented
+    # section as a direct candidate; later grounding and comparability checks
+    # decide how strong the Evidence may be.
+    result_section = _objective_column_key(
+        str(candidate.get("section_label") or "")
+    )
+    reports_measurement = bool(_NUMBER_PATTERN.search(text_haystack)) and any(
+        marker in text_haystack
+        for marker in (
+            "was",
+            "were",
+            "measured",
+            "value",
+            "ranged",
+            "showed",
+            "obtained",
+            "reached",
+        )
+    )
+    if reports_measurement and any(
+        marker in result_section for marker in ("result", "discussion", "conclusion")
+    ):
+        has_result_comparison = True
     return has_result_comparison and (
         mentions_variable or "compared" in text_haystack or "comparing" in text_haystack
+        or reports_measurement
+    )
+
+
+def _route_text_candidate_is_secondary_citation(
+    candidate: Mapping[str, Any],
+) -> bool:
+    """Return whether a result sentence explicitly attributes values to prior work."""
+
+    text = " ".join(
+        str(value or "")
+        for value in (
+            candidate.get("text"),
+            candidate.get("caption_text"),
+            candidate.get("section_label"),
+        )
+        if str(value or "").strip()
+    ).casefold()
+    secondary_context = re.search(
+        r"\b(?:cited|previous|prior)\s+(?:study|work|research)|"
+        r"\b(?:literature|reported)\s+(?:value|result|study)|"
+        r"\breported\s+by\s+[^\W\d_][\w'’-]*",
+        text,
+    )
+    if secondary_context and not re.search(
+        r"\b(?:we|our|this\s+(?:study|work)|the\s+present\s+study|"
+        r"current\s+(?:work|study))\b",
+        text,
+    ):
+        return True
+
+    # Papers commonly attribute a result with an author and citation marker
+    # (for example, ``Rottger et al. [49] compared ...``).  This is distinct
+    # from current-work language such as ``we compared ...``; the citation
+    # marker or the ``et al.`` form is the provenance signal, not the reporting
+    # verb alone.
+    citation = r"(?:\[\s*\d+(?:\s*[-,]\s*\d+)*\s*\]|\(\s*\d{4}[a-z]?\s*\))"
+    reporting_verbs = (
+        r"reported|compared|showed|found|observed|revealed|demonstrated|"
+        r"identified|measured|indicated|investigated|studied|concluded"
+    )
+    author = r"[^\W\d_][\w'’-]*"
+    citation_context = re.search(
+        rf"\b(?!we\b|our\b|this\b|the\b|current\b)"
+        rf"{author}\s+et\s+al\.?"
+        rf"(?:\s*,?\s*{citation})?\s+(?:{reporting_verbs})\b|"
+        rf"\b(?!we\b|our\b|this\b|the\b|current\b)"
+        rf"{author}\s+{citation}\s+(?:{reporting_verbs})\b|"
+        rf"{citation}\s+(?:{reporting_verbs})\b",
+        text,
+    )
+    return bool(
+        citation_context
+        and not re.search(
+            r"\b(?:we|our|this\s+(?:study|work)|the\s+present\s+study|"
+            r"current\s+(?:work|study))\b",
+            text,
+        )
     )
 
 
@@ -1833,11 +2534,13 @@ def _evenly_spaced_tree_route_candidates(
 def _route_text_candidates_use_frame_sections(
     frame: PaperAnalysisFrame,
 ) -> bool:
+    if frame.paper_role == "primary_experiment":
+        # A model-selected section list is a prioritization hint for primary
+        # papers, not an exclusion boundary for objective-relevant results.
+        return False
     if frame.relevant_text_source_refs:
         return True
     if not frame.relevant_sections:
-        return False
-    if frame.relevance == "high" and frame.paper_role == "primary_experiment":
         return False
     return True
 

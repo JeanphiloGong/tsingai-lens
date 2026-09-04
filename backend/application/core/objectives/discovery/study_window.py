@@ -20,22 +20,26 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 
-PAPER_RESEARCH_MAP_PROMPT_VERSION = "paper_map.v5"
-PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v2"
+PAPER_RESEARCH_MAP_PROMPT_VERSION = "paper_map.v6"
+PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v3"
 PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT = 12
 PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT = 4
 PAPER_RESEARCH_MAP_WARNING_LIMIT = (2, 240)
 PAPER_RESEARCH_MAP_SCOPE_LIMIT = 4
 PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT = 6
-PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT = 8
+# A bounded paper-map window can legitimately mention more than eight distinct
+# variables/outcomes. Keep the map lightweight, but do not turn a valid scope
+# response into a JSON failure merely because one batch contains nine or ten
+# unresolved signals. Downstream reconciliation still caps work per document.
+PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT = 12
 
 _STUDY_CONTEXT_LIMIT = 12
 _STUDY_CONTEXT_VALUE_CHARS = 160
 _VARIED_FACTOR_LIMIT = 12
 _PAPER_MAP_STUDY_LIMIT = 2
 _PAPER_MAP_RELATIONSHIP_LIMIT = 6
-_PAPER_MAP_SIGNAL_LIMIT = 4
+_PAPER_MAP_SIGNAL_LIMIT = PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT
 _PAPER_MAP_CONTEXT_LIMIT = 4
 _PAPER_MAP_VARIED_FACTOR_LIMIT = 6
 _SOURCE_SIGNAL_CONTEXT_LIMIT = 4
@@ -121,6 +125,89 @@ def _normalize_warnings(value: object) -> object:
         if text:
             normalized.append(text[: PAPER_RESEARCH_MAP_WARNING_LIMIT[1]])
     return normalized
+
+
+def _bounded_unique_items(
+    value: object,
+    *,
+    limit: int,
+    path: str,
+    overflows: list[str],
+) -> object:
+    if not isinstance(value, list):
+        return value
+    unique: list[object] = []
+    identities: set[str] = set()
+    for item in value:
+        try:
+            identity = json.dumps(
+                item,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            identity = repr(item)
+        if identity in identities:
+            continue
+        identities.add(identity)
+        unique.append(item)
+    if len(unique) > limit:
+        overflows.append(f"{path} omitted {len(unique) - limit}")
+    return unique[:limit]
+
+
+def _bounded_mapping_list(
+    payload: dict[str, Any],
+    field_name: str,
+    *,
+    limit: int,
+    path: str,
+    overflows: list[str],
+) -> list[object]:
+    bounded = _bounded_unique_items(
+        payload.get(field_name),
+        limit=limit,
+        path=path,
+        overflows=overflows,
+    )
+    if isinstance(bounded, list):
+        payload[field_name] = bounded
+        return bounded
+    return []
+
+
+def _mark_bounded_output(
+    payload: dict[str, Any],
+    *,
+    overflows: list[str],
+) -> dict[str, Any]:
+    if not overflows:
+        return payload
+    omitted_by_field: dict[str, int] = {}
+    for overflow in overflows:
+        path, _, count_text = overflow.rpartition(" omitted ")
+        field_name = path.rsplit(".", 1)[-1].split("[", 1)[0]
+        omitted_by_field[field_name] = omitted_by_field.get(field_name, 0) + int(
+            count_text
+        )
+    overflow_summary = ", ".join(
+        f"{field_name}={omitted_by_field[field_name]}"
+        for field_name in sorted(omitted_by_field)
+    )
+    warning = (
+        "Backend bounded list overflow; omitted item counts: "
+        + overflow_summary
+        + ". Retained source-grounded items within the paper-map contract."
+    )[: PAPER_RESEARCH_MAP_WARNING_LIMIT[1]]
+    existing_warnings = (
+        payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    )
+    payload["warnings"] = [warning, *existing_warnings][
+        : PAPER_RESEARCH_MAP_WARNING_LIMIT[0]
+    ]
+    payload["output_saturated"] = True
+    return payload
 
 
 class _PaperResearchMapResponse(BaseModel):
@@ -249,6 +336,15 @@ class StructuredPaperResearchScope(_PaperResearchMapResponse):
 class StructuredPaperResearchSignal(_PaperResearchMapResponse):
     signal_type: Literal["variable", "outcome"]
     label: Annotated[str, Field(min_length=1, max_length=80)]
+    variable_role: Literal[
+        "varied",
+        "compared",
+        "modeled",
+        "fixed",
+        "context",
+        "uncertain",
+        "not_applicable",
+    ]
     experiment_label: str | None = Field(default=None, max_length=120)
     design_type: Literal[
         "experimental",
@@ -274,6 +370,19 @@ class StructuredPaperResearchSignal(_PaperResearchMapResponse):
     ] = Field(min_length=1, max_length=PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT)
     confidence: float = 0.0
 
+    @model_validator(mode="before")
+    @classmethod
+    def _default_persisted_variable_role(cls, value: object) -> object:
+        if not isinstance(value, Mapping) or value.get("variable_role") is not None:
+            return value
+        normalized = dict(value)
+        normalized["variable_role"] = (
+            "not_applicable"
+            if str(value.get("signal_type") or "").strip() == "outcome"
+            else "uncertain"
+        )
+        return normalized
+
     @field_validator(
         "material_scope",
         "process_context",
@@ -291,14 +400,42 @@ class StructuredPaperResearchSignal(_PaperResearchMapResponse):
             raise ValueError("paper signal source-unit ids cannot be empty")
         if len(normalized) != len(set(normalized)):
             raise ValueError("paper signal source-unit ids must be unique")
+        if self.signal_type == "variable" and self.variable_role == "not_applicable":
+            raise ValueError("variable signal requires a scientific variable role")
+        if self.signal_type == "outcome" and self.variable_role != "not_applicable":
+            raise ValueError("outcome signal variable role must be not_applicable")
+        return self
+
+
+class StructuredPaperMapFactorAssertion(_PaperResearchMapResponse):
+    """One Source-linked factor role inside a candidate paper relationship."""
+
+    label: Annotated[str, Field(min_length=1, max_length=80)]
+    role: Literal["varied", "compared", "modeled"]
+    source_labels: list[
+        Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
+    ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
+
+    @field_validator("source_labels", mode="before")
+    @classmethod
+    def _normalize_source_labels(cls, value: object) -> object:
+        return _normalize_list(value)
+
+    @model_validator(mode="after")
+    def _validate_source_labels(self) -> "StructuredPaperMapFactorAssertion":
+        normalized = [value.strip() for value in self.source_labels]
+        if any(not value for value in normalized):
+            raise ValueError("paper-map factor Source labels cannot be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("paper-map factor Source labels must be unique")
         return self
 
 
 class StructuredPaperMapRelationship(_PaperResearchMapResponse):
     """One compact factor-to-outcome axis used only during paper mapping."""
 
-    varied_factors: list[
-        Annotated[str, Field(max_length=80)]
+    factor_assertions: list[
+        StructuredPaperMapFactorAssertion
     ] = Field(min_length=1, max_length=_PAPER_MAP_VARIED_FACTOR_LIMIT)
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
     source_labels: list[
@@ -306,7 +443,7 @@ class StructuredPaperMapRelationship(_PaperResearchMapResponse):
     ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
     confidence: float = 0.0
 
-    @field_validator("varied_factors", "source_labels", mode="before")
+    @field_validator("factor_assertions", "source_labels", mode="before")
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list(value)
@@ -318,6 +455,12 @@ class StructuredPaperMapRelationship(_PaperResearchMapResponse):
             raise ValueError("paper-map relationship Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
             raise ValueError("paper-map relationship Source labels must be unique")
+        factor_labels = [
+            assertion.label.strip().casefold()
+            for assertion in self.factor_assertions
+        ]
+        if len(factor_labels) != len(set(factor_labels)):
+            raise ValueError("paper-map relationship factors must be unique")
         return self
 
 
@@ -365,6 +508,15 @@ class StructuredPaperMapSignal(_PaperResearchMapResponse):
 
     signal_type: Literal["variable", "outcome"]
     label: Annotated[str, Field(min_length=1, max_length=80)]
+    variable_role: Literal[
+        "varied",
+        "compared",
+        "modeled",
+        "fixed",
+        "context",
+        "uncertain",
+        "not_applicable",
+    ]
     experiment_label: str | None = Field(default=None, max_length=120)
     design_type: Literal[
         "experimental",
@@ -406,6 +558,10 @@ class StructuredPaperMapSignal(_PaperResearchMapResponse):
             raise ValueError("paper-map signal Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
             raise ValueError("paper-map signal Source labels must be unique")
+        if self.signal_type == "variable" and self.variable_role == "not_applicable":
+            raise ValueError("variable signal requires a scientific variable role")
+        if self.signal_type == "outcome" and self.variable_role != "not_applicable":
+            raise ValueError("outcome signal variable role must be not_applicable")
         return self
 
 
@@ -463,6 +619,15 @@ class StructuredPaperSourceSignal(_PaperResearchMapResponse):
 
     signal_type: Literal["variable", "outcome"]
     label: Annotated[str, Field(min_length=1, max_length=80)]
+    variable_role: Literal[
+        "varied",
+        "compared",
+        "modeled",
+        "fixed",
+        "context",
+        "uncertain",
+        "not_applicable",
+    ]
     experiment_label: str | None = Field(default=None, max_length=120)
     design_type: Literal[
         "experimental",
@@ -509,6 +674,7 @@ class StructuredPaperSourceSignal(_PaperResearchMapResponse):
         return (
             self.signal_type,
             self.label.strip().casefold(),
+            self.variable_role,
             self.experiment_label.strip().casefold()
             if self.experiment_label
             else None,
@@ -517,6 +683,14 @@ class StructuredPaperSourceSignal(_PaperResearchMapResponse):
             normalized_values(self.material_scope),
             normalized_values(self.process_context),
         )
+
+    @model_validator(mode="after")
+    def _validate_variable_role(self) -> "StructuredPaperSourceSignal":
+        if self.signal_type == "variable" and self.variable_role == "not_applicable":
+            raise ValueError("variable signal requires a scientific variable role")
+        if self.signal_type == "outcome" and self.variable_role != "not_applicable":
+            raise ValueError("outcome signal variable role must be not_applicable")
+        return self
 
 
 class StructuredPaperSourceSignalScreen(_PaperResearchMapResponse):
@@ -830,12 +1004,24 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
                 if not isinstance(relationship, Mapping):
                     retained_relationships.append(relationship)
                     continue
-                varied_factors = relationship.get("varied_factors")
-                has_varied_factor = not isinstance(varied_factors, list) or (
-                    bool(varied_factors)
+                factor_values = (
+                    relationship.get("factor_assertions")
+                    if "factor_assertions" in relationship
+                    else relationship.get("varied_factors")
+                )
+                has_varied_factor = not isinstance(factor_values, list) or (
+                    bool(factor_values)
                     and all(
-                        0 < len(str(item).strip()) <= 80
-                        for item in varied_factors
+                        0
+                        < len(
+                            str(
+                                item.get("label")
+                                if isinstance(item, Mapping)
+                                else item
+                            ).strip()
+                        )
+                        <= 80
+                        for item in factor_values
                     )
                 )
                 outcome = str(relationship.get("outcome") or "").strip()
@@ -862,6 +1048,7 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
                 signal = {
                     "signal_type": "outcome",
                     "label": outcome,
+                    "variable_role": "not_applicable",
                     lineage_field: list(lineage_values),
                     "confidence": relationship.get(
                         "confidence",
@@ -922,6 +1109,117 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
         if len(study_identities) != len(set(study_identities)):
             raise ValueError("studies contain duplicate study identities")
         return self
+
+
+def _normalize_experimental_paper_map_payload(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    payload = dict(value)
+    overflows: list[str] = []
+    studies = _bounded_mapping_list(
+        payload,
+        "studies",
+        limit=_PAPER_MAP_STUDY_LIMIT,
+        path="studies",
+        overflows=overflows,
+    )
+    normalized_studies: list[object] = []
+    for study_index, study in enumerate(studies):
+        if not isinstance(study, Mapping):
+            normalized_studies.append(study)
+            continue
+        normalized_study = dict(study)
+        for field_name in ("material_scope", "process_context"):
+            _bounded_mapping_list(
+                normalized_study,
+                field_name,
+                limit=_PAPER_MAP_CONTEXT_LIMIT,
+                path=f"studies[{study_index}].{field_name}",
+                overflows=overflows,
+            )
+        relationships = _bounded_mapping_list(
+            normalized_study,
+            "relationships",
+            limit=_PAPER_MAP_RELATIONSHIP_LIMIT,
+            path=f"studies[{study_index}].relationships",
+            overflows=overflows,
+        )
+        normalized_relationships: list[object] = []
+        for relationship_index, relationship in enumerate(relationships):
+            if not isinstance(relationship, Mapping):
+                normalized_relationships.append(relationship)
+                continue
+            normalized_relationship = dict(relationship)
+            _bounded_mapping_list(
+                normalized_relationship,
+                "factor_assertions",
+                limit=_PAPER_MAP_VARIED_FACTOR_LIMIT,
+                path=(
+                    f"studies[{study_index}].relationships[{relationship_index}]"
+                    ".factor_assertions"
+                ),
+                overflows=overflows,
+            )
+            normalized_relationships.append(normalized_relationship)
+        normalized_study["relationships"] = normalized_relationships
+        normalized_studies.append(normalized_study)
+    payload["studies"] = normalized_studies
+
+    signals = _bounded_mapping_list(
+        payload,
+        "unresolved_signals",
+        limit=_PAPER_MAP_SIGNAL_LIMIT,
+        path="unresolved_signals",
+        overflows=overflows,
+    )
+    normalized_signals: list[object] = []
+    for signal_index, signal in enumerate(signals):
+        if not isinstance(signal, Mapping):
+            normalized_signals.append(signal)
+            continue
+        normalized_signal = dict(signal)
+        for field_name in ("material_scope", "process_context"):
+            _bounded_mapping_list(
+                normalized_signal,
+                field_name,
+                limit=_PAPER_MAP_CONTEXT_LIMIT,
+                path=f"unresolved_signals[{signal_index}].{field_name}",
+                overflows=overflows,
+            )
+        normalized_signals.append(normalized_signal)
+    payload["unresolved_signals"] = normalized_signals
+    return _mark_bounded_output(payload, overflows=overflows)
+
+
+def _normalize_source_signal_screen_payload(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    payload = dict(value)
+    overflows: list[str] = []
+    signals = _bounded_mapping_list(
+        payload,
+        "signals",
+        limit=_SOURCE_SIGNAL_LIMIT,
+        path="signals",
+        overflows=overflows,
+    )
+    normalized_signals: list[object] = []
+    for signal_index, signal in enumerate(signals):
+        if not isinstance(signal, Mapping):
+            normalized_signals.append(signal)
+            continue
+        normalized_signal = dict(signal)
+        for field_name in ("material_scope", "process_context"):
+            _bounded_mapping_list(
+                normalized_signal,
+                field_name,
+                limit=_SOURCE_SIGNAL_CONTEXT_LIMIT,
+                path=f"signals[{signal_index}].{field_name}",
+                overflows=overflows,
+            )
+        normalized_signals.append(normalized_signal)
+    payload["signals"] = normalized_signals
+    return _mark_bounded_output(payload, overflows=overflows)
 
 
 def _review_synthesis_only(response: StructuredPaperResearchMap) -> StructuredPaperResearchMap:
@@ -1037,8 +1335,18 @@ def _paper_map_response(
         payload = response.model_dump()
         for study in payload["studies"]:
             for relationship in study["relationships"]:
+                factor_assertions = relationship.pop("factor_assertions")
+                relationship["varied_factors"] = [
+                    assertion["label"] for assertion in factor_assertions
+                ]
+                source_labels = list(relationship.pop("source_labels"))
+                source_labels.extend(
+                    source_label
+                    for assertion in factor_assertions
+                    for source_label in assertion["source_labels"]
+                )
                 relationship["source_unit_ids"] = _source_unit_ids_from_labels(
-                    relationship.pop("source_labels"),
+                    list(dict.fromkeys(source_labels)),
                     source_units_by_label,
                 )
         for signal in payload["unresolved_signals"]:
@@ -1106,6 +1414,11 @@ def _paper_map_response(
                     {
                         "signal_type": signal_type,
                         "label": label,
+                        "variable_role": (
+                            "uncertain"
+                            if signal_type == "variable"
+                            else "not_applicable"
+                        ),
                         "design_type": "observational",
                         "claim_scope": "synthesis",
                         "material_scope": list(material_scope),
@@ -1274,23 +1587,29 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "3. Keep only explicitly changed, compared, or modeled factors and explicitly "
         "measured, observed, or predicted outcomes. Use neutral scientific axis names, "
         "not levels, values, directions, settings, samples, controls, or test details.\n"
-        "4. When the Source explicitly links factors to outcomes, return one "
+        "4. For every retained factor, classify its paper-stated role as `varied`, "
+        "`compared`, or `modeled` and copy the Source labels that establish that role. "
+        "A parameter that is fixed, merely mentioned, or whose role is uncertain cannot "
+        "appear in a relationship; keep it as an unresolved variable signal with "
+        "variable_role=`fixed`, `context`, or `uncertain` only when retaining it helps "
+        "explain incomplete scope. Outcome signals use `not_applicable`.\n"
+        "5. When the Source explicitly links factors to outcomes, return one "
         "relationship per outcome. Preserve the full jointly varied, compared, or "
         "modeled factor set. Do not demote an explicit configuration-to-outcome link "
         "to unresolved signals.\n"
-        "5. Do not promote causal explanations or intermediate mechanisms introduced "
+        "6. Do not promote causal explanations or intermediate mechanisms introduced "
         "by phrases such as 'attributed to', 'due to', or 'allowing' unless the Source "
         "separately states that they were measured, observed, or predicted outcomes.\n"
-        "6. If only one axis is explicit, or an outcome is a broad family such as "
+        "7. If only one axis is explicit, or an outcome is a broad family such as "
         "microstructure or mechanical properties or combines distinct measurements, "
         "return the explicit axis in `unresolved_signals` instead of inventing a "
         "metric or link.\n"
-        "7. Keep one study unless the Source explicitly names distinct experiments or "
+        "8. Keep one study unless the Source explicitly names distinct experiments or "
         "designs. Do not invent an experiment label to split one paper-owned study by "
         "Source or axis family.\n"
-        "8. Record material_scope and concise process_context only when explicit. "
+        "9. Record material_scope and concise process_context only when explicit. "
         "Detailed experiment fields are intentionally absent.\n"
-        "9. Copy every directly supporting Source label. Use uncertainty or empty "
+        "10. Copy every directly supporting Source label. Use uncertainty or empty "
         "arrays rather than filling gaps.\n\n"
         "HARD RULES\n"
         "- Use only supplied Source content; do not infer from filenames, headings, or "
@@ -1306,8 +1625,8 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         f"most {PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} per item.\n"
         "- Return empty arrays rather than guessing unsupported study structure.\n\n"
         "BOUNDARY EXAMPLES\n"
-        "- Joint factors: power and speed changed together. Keep "
-        "varied_factors=['power','speed'] and return one relationship per outcome.\n"
+        "- Joint factors: temperature and pressure changed together. Return both as "
+        "factor_assertions with role=`varied` and return one relationship per outcome.\n"
         "- Explicit configuration effect: 'PTA leading with front wire feeding gave "
         "stable deposition and good bead appearance.' Return two relationships with "
         "the full factors ['heat-source configuration','wire-feeding direction'] and "
@@ -1318,8 +1637,8 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "distribution and melt pool size.' Keep deposition rate; do not create energy "
         "distribution or melt pool size outcomes unless the Source says they were "
         "measured, observed, or predicted.\n"
-        "- Factor levels: L-VED, M-VED, and H-VED are levels. Return "
-        "varied_factors=['volumetric energy density'].\n"
+        "- Factor levels: low, medium, and high input are levels. Return one varied "
+        "factor assertion for the input axis, not three factor names.\n"
         "- Result direction: 'fatigue strength decreases with lower VED.' Return "
         "outcome='fatigue strength'; result direction, value, or comparison sentence "
         "belongs to later Evidence extraction.\n"
@@ -1331,18 +1650,25 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- General background: 'Additive manufacturing is widely used in aerospace.' "
         "Return empty studies and unresolved_signals; usage context is not a measured "
         "outcome.\n"
-        "- Fixed settings only: 'sample A used 200 W and 900 mm/s.' Return no axis.\n\n"
+        "- Fixed versus varied: 'All groups used 25 C while pressure varied from 1 to "
+        "3 MPa.' Return only pressure as a varied factor assertion; temperature may be "
+        "an unresolved fixed signal but cannot enter the relationship.\n"
+        "- Generic parameter list: 'Parameters such as temperature, pressure, and time "
+        "can matter. Here, time was varied and conversion was measured.' Only time is a "
+        "varied factor; the generic list does not make temperature or pressure study "
+        "axes.\n\n"
         "OUTPUT CONTRACT\n"
         "Return one compact schema object with doc_role, studies, unresolved_signals, "
         "output_saturated, evidence_density, confidence, and warnings.\n"
         "A study contains optional experiment_label only when explicitly named, plus "
         "design_type, claim_scope, material_scope, process_context, relationships, and "
-        "confidence. A relationship contains varied_factors, one outcome, "
-        "source_labels, and confidence.\n"
+        "confidence. A relationship contains factor_assertions, one outcome, "
+        "source_labels, and confidence. Each factor assertion contains label, role, and "
+        "the Source labels establishing that role.\n"
         f"Limits: up to {_PAPER_MAP_STUDY_LIMIT} studies, up to "
         f"{_PAPER_MAP_RELATIONSHIP_LIMIT} relationships per study, up to "
         f"{_PAPER_MAP_SIGNAL_LIMIT} unresolved signals, at most "
-        f"{_PAPER_MAP_VARIED_FACTOR_LIMIT} varied-factor labels, at most "
+        f"{_PAPER_MAP_VARIED_FACTOR_LIMIT} factor assertions, at most "
         f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} unique `source_labels`, and up to 2 "
         "`warnings`, each at most 240 characters. Set output_saturated=true only if a "
         "distinct supported item exceeds these limits.\n\n"
@@ -1379,7 +1705,11 @@ def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "DECISION PROCESS\n"
         "1. Decide whether the Source explicitly names a changed, compared, or modeled "
         "variable and/or a measured, observed, or predicted outcome.\n"
-        "2. Return each explicit research axis as one neutral, concise signal. An "
+        "2. Return each explicit research axis as one neutral, concise signal. For a "
+        "variable, set variable_role to `varied`, `compared`, or `modeled` only when "
+        "this Source establishes that role. Use `fixed` for a controlled setting, "
+        "`context` for a generic or background parameter mention, and `uncertain` when "
+        "the role cannot be established. Outcome signals use `not_applicable`. An "
         "axis is what was changed or measured, not a value, direction, phase, grain "
         "shape, or other observation on that axis. Group multiple morphology or phase "
         "observations from one characterization result under one outcome such as "
@@ -1406,8 +1736,9 @@ def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "- Keep cited studies in reviews separate from the review authors' synthesis "
         "and from this paper's own experiments.\n\n"
         "BOUNDARY EXAMPLES\n"
-        "- Primary result: 'We varied laser power and measured porosity.' Return a "
-        "current_work variable signal 'laser power' and outcome signal 'porosity'.\n"
+        "- Primary result: 'We varied pressure and measured conversion.' Return a "
+        "current_work variable signal 'pressure' with variable_role=`varied` and an "
+        "outcome signal 'conversion' with variable_role=`not_applicable`.\n"
         "- Review citation: 'Miranda et al. increased build plate temperature and "
         "reported lower residual stress.' Return background signals with "
         "experiment_label='Miranda et al.'; do not treat them as current_work.\n"
@@ -1421,7 +1752,13 @@ def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "ductility, and fatigue.' Return one IHT variable and four distinct outcome "
         "signals; do not also return 'mechanical properties'.\n"
         "- Background only: 'Additive manufacturing is widely used in aerospace.' "
-        "Return signals=[].\n\n"
+        "Return signals=[].\n"
+        "- Fixed versus varied: 'All groups used 25 C while pressure varied from 1 to "
+        "3 MPa.' Temperature is `fixed` and pressure is `varied`; only pressure may "
+        "later enter a relationship.\n"
+        "- Generic list: 'Temperature, pressure, and time can affect conversion. In this "
+        "work time was varied.' Temperature and pressure are `context`; time is "
+        "`varied`.\n\n"
         "OUTPUT CONTRACT\n"
         "Return doc_role, signals, output_saturated, evidence_density, confidence, and "
         f"warnings. Return at most {_SOURCE_SIGNAL_LIMIT} signals and at most four "
@@ -1470,10 +1807,13 @@ class PaperResearchMapExtractor:
                 f"{repair_detail}. Preserve every distinct supported paper-scope "
                 "group, relationship, and unresolved signal. Do not reconstruct "
                 "samples, tests, comparators, fixed conditions, or factor levels. "
-                "Those detailed fields are not part of this output contract. Copy only "
+                "Those detailed fields are not part of this output contract. Every "
+                "relationship factor requires a factor_assertion with an eligible "
+                "paper-stated role and its supporting Source labels. Fixed, contextual, "
+                "or uncertain parameters cannot enter relationships. Copy only "
                 "unique Source labels from the input, with at most "
                 f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} labels per relationship or signal. "
-                f"Keep at most {_PAPER_MAP_VARIED_FACTOR_LIMIT} varied factors per "
+                f"Keep at most {_PAPER_MAP_VARIED_FACTOR_LIMIT} factor assertions per "
                 "relationship. Set output_saturated=true "
                 "instead of silently omitting a scientific item. Return only compact "
                 "schema-valid JSON.\n"
@@ -1507,6 +1847,11 @@ class PaperResearchMapExtractor:
             return self.response_client.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
+                payload_normalizer=(
+                    _normalize_experimental_paper_map_payload
+                    if kwargs.get("response_model") is StructuredExperimentalPaperMap
+                    else None
+                ),
                 parsed_validator=validate_output_contract,
                 fail_on_output_saturation=True,
             )
@@ -1544,12 +1889,21 @@ class PaperResearchMapExtractor:
             raise ValueError("source signal screening requires a Source-unit id")
 
         system_prompt, user_prompt = build_paper_source_signal_prompt(payload)
+
+        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self.response_client.complete_json(
+                **kwargs,
+                payload_normalizer=_normalize_source_signal_screen_payload,
+                fail_on_output_saturation=True,
+            )
+
         try:
             response = self.response_client.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=StructuredPaperSourceSignalScreen,
                 max_completion_tokens=_SOURCE_SIGNAL_MAX_COMPLETION_TOKENS,
+                json_text_parser=parse_json_text_with_contract,
                 fail_on_output_saturation=True,
                 task_type="paper_source_signal",
                 prompt_version=PAPER_SOURCE_SIGNAL_PROMPT_VERSION,

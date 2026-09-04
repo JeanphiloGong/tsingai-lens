@@ -291,6 +291,16 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
         paper_contributions=[
             item.to_record() for item in payload.get("paper_contributions") or ()
         ],
+        evidence_review=payload.get("evidence_review")
+        or {
+            "total_evidence_count": 0,
+            "result_count": 0,
+            "comparable_evidence_count": 0,
+            "gap_count": 0,
+            "omitted_gap_count": 0,
+            "status_counts": {},
+            "gaps": [],
+        },
         warnings=payload.get("warnings") or [],
     )
 

@@ -385,7 +385,13 @@ def test_author_evidence_api_uses_authenticated_creator_and_structured_source() 
             },
             "attribution_scope": "isolated_effect",
             "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "material": [
+                    {
+                        "name": "alloy",
+                        "value": "Alloy A",
+                        "context_scope": "experimental",
+                    }
+                ],
                 "sample": [],
                 "process": [],
                 "test": [],
@@ -401,6 +407,9 @@ def test_author_evidence_api_uses_authenticated_creator_and_structured_source() 
     assert service.authoring_kwargs is not None
     assert service.authoring_kwargs["created_by_user_id"] == "user-researcher"
     assert service.authoring_kwargs["changed_variables"][0]["name"] == "temperature"
+    assert service.authoring_kwargs["scientific_context"]["material"][0][
+        "context_scope"
+    ] == "experimental"
 
 
 def test_author_evidence_api_rejects_oversized_or_unknown_input() -> None:

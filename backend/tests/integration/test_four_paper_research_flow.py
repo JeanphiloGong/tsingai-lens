@@ -171,7 +171,13 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
                     ],
                     "relationships": [
                         {
-                            "varied_factors": ["laser exposure condition"],
+                            "factor_assertions": [
+                                {
+                                    "label": "laser exposure condition",
+                                    "role": "varied",
+                                    "source_labels": source_labels,
+                                }
+                            ],
                             "outcome": "porosity",
                             "source_labels": source_labels,
                             "confidence": 0.94,
@@ -410,7 +416,18 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             json={"document_ids": list(document_ids)},
         )
         assert discovered.status_code == 200, discovered.text
-        objectives = discovered.json()["objectives"]
+        discovery_task = discovered.json()
+        assert discovery_task["task_id"]
+        completed_discovery = _wait_for_task(
+            client,
+            discovery_task["task_id"],
+        )
+        assert completed_discovery["status"] == "completed", completed_discovery
+        listed_objectives = client.get(
+            f"{API_PREFIX}/collections/{collection_id}/objectives"
+        )
+        assert listed_objectives.status_code == 200, listed_objectives.text
+        objectives = listed_objectives.json()["objectives"]
         objective = next(
             item
             for item in objectives
@@ -441,6 +458,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             for item in evidence.json()["items"]
             if item["reported_result"] is not None
         ]
+        assert all(item["scientific_context"]["process"] for item in direct_evidence), direct_evidence
         assert {item["document_id"] for item in direct_evidence} == {
             paper_a_id,
             paper_b_id,
@@ -466,23 +484,49 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/findings"
         )
         assert findings.status_code == 200
-        assert findings.json()["total"] == 1
-        finding = findings.json()["items"][0]
-
-        finding_contributions = {
-            item["document_id"]: item for item in finding["paper_contributions"]
+        assert findings.json()["total"] == 2
+        finding_items = findings.json()["items"]
+        assert {
+            tuple(
+                attribute["value"]
+                for attribute in finding["scientific_context"]["sample"]
+            )
+            for finding in finding_items
+        } == {("as-built",), ("stress-relieved",)}
+        finding_by_supporting_documents = {
+            tuple(
+                sorted(
+                    item["document_id"]
+                    for item in finding["paper_contributions"]
+                    if item["supporting_evidence_ids"]
+                )
+            ): finding
+            for finding in finding_items
         }
-        assert set(finding_contributions) == {
-            paper_a_id,
-            paper_b_id,
-            paper_c_id,
-            review_id,
+        assert set(finding_by_supporting_documents) == {
+            tuple(sorted((paper_a_id, paper_b_id))),
+            (paper_c_id,),
         }
-        assert finding_contributions[paper_a_id]["supporting_evidence_ids"]
-        assert finding_contributions[paper_b_id]["supporting_evidence_ids"]
-        assert not finding_contributions[paper_c_id]["supporting_evidence_ids"]
-        assert finding_contributions[review_id]["analysis_status"] == "excluded"
-        assert not finding_contributions[review_id]["supporting_evidence_ids"]
+        shared_finding = finding_by_supporting_documents[
+            tuple(sorted((paper_a_id, paper_b_id)))
+        ]
+        assert shared_finding["attribution_scope"] == "association_only"
+        assert shared_finding["assertion_strength"] == "associative"
+        stress_finding = finding_by_supporting_documents[(paper_c_id,)]
+        assert stress_finding["attribution_scope"] == "association_only"
+        assert stress_finding["assertion_strength"] == "descriptive"
+        for finding in finding_items:
+            finding_contributions = {
+                item["document_id"]: item for item in finding["paper_contributions"]
+            }
+            assert set(finding_contributions) == {
+                paper_a_id,
+                paper_b_id,
+                paper_c_id,
+                review_id,
+            }
+            assert finding_contributions[review_id]["analysis_status"] == "excluded"
+            assert not finding_contributions[review_id]["supporting_evidence_ids"]
 
         contributions = {
             item["document_id"]: item for item in analysis["paper_contributions"]
@@ -508,11 +552,10 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         assert published_again.json()["published_analysis"] == analysis[
             "published_analysis"
         ]
-        assert any(
-            {
-                str(item.get("document_id") or "")
-                for item in payload["result_set"]["document_evidence_summaries"]
-            }
-            == {paper_c_id}
-            for payload in model.finding_payloads
-        )
+        assert len(model.finding_payloads) == 1
+        assert {
+            item["document_id"]
+            for item in model.finding_payloads[0]["result_set"][
+                "document_evidence_summaries"
+            ]
+        } == {paper_a_id, paper_b_id}

@@ -182,6 +182,7 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
 
+    # define a method that return a single document record
     async def get_document(
         self,
         collection_id: str,

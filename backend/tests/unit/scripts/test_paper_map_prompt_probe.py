@@ -104,13 +104,35 @@ def test_scientific_evaluator_accepts_joint_factor_scope() -> None:
                     "process_context": ["LPBF"],
                     "relationships": [
                         {
-                            "varied_factors": ["laser power", "scan speed"],
+                            "factor_assertions": [
+                                {
+                                    "label": "laser power",
+                                    "role": "varied",
+                                    "source_labels": ["S1"],
+                                },
+                                {
+                                    "label": "scan speed",
+                                    "role": "varied",
+                                    "source_labels": ["S1"],
+                                },
+                            ],
                             "outcome": "porosity",
                             "source_labels": ["S1"],
                             "confidence": 0.9,
                         },
                         {
-                            "varied_factors": ["laser power", "scan speed"],
+                            "factor_assertions": [
+                                {
+                                    "label": "laser power",
+                                    "role": "varied",
+                                    "source_labels": ["S1"],
+                                },
+                                {
+                                    "label": "scan speed",
+                                    "role": "varied",
+                                    "source_labels": ["S1"],
+                                },
+                            ],
                             "outcome": "tensile strength",
                             "source_labels": ["S1"],
                             "confidence": 0.9,
@@ -136,7 +158,13 @@ def test_scientific_evaluator_rejects_broad_outcome_as_complete_relationship() -
         if item.scenario_id == "broad_outcome"
     )
     relationship = StructuredPaperMapRelationship.model_construct(
-        varied_factors=["heat treatment"],
+        factor_assertions=[
+            SimpleNamespace(
+                label="heat treatment",
+                role="varied",
+                source_labels=["S1"],
+            )
+        ],
         outcome="microstructure",
         source_labels=["S1"],
         confidence=0.8,
@@ -174,7 +202,13 @@ def test_scientific_evaluator_rejects_cited_work_as_current_work() -> None:
                     "claim_scope": "current_work",
                     "relationships": [
                         {
-                            "varied_factors": ["build plate temperature"],
+                            "factor_assertions": [
+                                {
+                                    "label": "build plate temperature",
+                                    "role": "varied",
+                                    "source_labels": ["S1"],
+                                }
+                            ],
                             "outcome": "residual stress",
                             "source_labels": ["S1"],
                         }
@@ -259,10 +293,11 @@ def test_structural_evaluator_accepts_schema_valid_saturated_stress_output() -> 
             "doc_role": "experimental",
             "studies": [],
             "unresolved_signals": [
-                {
-                    "signal_type": "variable",
-                    "label": "wire position",
-                    "source_labels": ["S2"],
+                    {
+                        "signal_type": "variable",
+                        "label": "wire position",
+                        "variable_role": "uncertain",
+                        "source_labels": ["S2"],
                 }
             ],
             "output_saturated": True,
@@ -329,6 +364,7 @@ def test_scientific_evaluator_requires_each_explicit_configuration_relationship(
                 {
                     "signal_type": "outcome",
                     "label": "deposition stability and bead appearance",
+                    "variable_role": "not_applicable",
                     "source_labels": ["S1"],
                 }
             ],
@@ -369,7 +405,13 @@ def test_scientific_evaluator_rejects_mechanisms_and_invented_study_splits() -> 
                     "claim_scope": "current_work",
                     "relationships": [
                         {
-                            "varied_factors": ["heat source type"],
+                            "factor_assertions": [
+                                {
+                                    "label": "heat source type",
+                                    "role": "compared",
+                                    "source_labels": ["S1"],
+                                }
+                            ],
                             "outcome": "deposition rate",
                             "source_labels": ["S1"],
                         }
@@ -381,7 +423,13 @@ def test_scientific_evaluator_rejects_mechanisms_and_invented_study_splits() -> 
                     "claim_scope": "current_work",
                     "relationships": [
                         {
-                            "varied_factors": ["heat source type"],
+                            "factor_assertions": [
+                                {
+                                    "label": "heat source type",
+                                    "role": "compared",
+                                    "source_labels": ["S1"],
+                                }
+                            ],
                             "outcome": "energy distribution",
                             "source_labels": ["S1"],
                         }
@@ -415,7 +463,13 @@ def test_compact_provider_prompt_teaches_explicit_configuration_relationships() 
 
 def test_paper_map_study_accepts_six_relationships_but_rejects_seven() -> None:
     relationship = {
-        "varied_factors": ["process configuration"],
+        "factor_assertions": [
+            {
+                "label": "process configuration",
+                "role": "varied",
+                "source_labels": ["S1"],
+            }
+        ],
         "outcome": "deposition rate",
         "source_labels": ["S1"],
     }

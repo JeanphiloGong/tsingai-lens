@@ -53,6 +53,7 @@ from application.core.objectives.discovery.study_window import (
     PaperResearchMapExtractor,
     StructuredExperimentalPaperMap,
     StructuredPaperResearchMap,
+    StructuredPaperSourceSignal,
     StructuredPaperSourceSignalScreen,
     StructuredReviewPaperMap,
     build_paper_research_map_prompt,
@@ -78,7 +79,7 @@ def test_paper_research_map_contract_bounds_model_output():
     schema = experimental_schema["properties"]
 
     assert schema["studies"]["maxItems"] == 2
-    assert schema["unresolved_signals"]["maxItems"] == 4
+    assert schema["unresolved_signals"]["maxItems"] == 12
     assert schema["output_saturated"]["type"] == "boolean"
     study_schema = experimental_schema["$defs"]["StructuredPaperMapStudy"][
         "properties"
@@ -94,7 +95,14 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "comparator" not in study_schema
     assert "fixed_conditions" not in study_schema
     assert study_schema["relationships"]["maxItems"] == 6
-    assert relationship_schema["varied_factors"]["maxItems"] == 6
+    assert "varied_factors" not in relationship_schema
+    assert relationship_schema["factor_assertions"]["maxItems"] == 6
+    factor_schema = experimental_schema["$defs"][
+        "StructuredPaperMapFactorAssertion"
+    ]["properties"]
+    assert factor_schema["role"]["enum"] == ["varied", "compared", "modeled"]
+    assert factor_schema["source_labels"]["minItems"] == 1
+    assert factor_schema["source_labels"]["maxItems"] == 4
     assert "source_unit_ids" not in relationship_schema
     assert relationship_schema["source_labels"]["minItems"] == 1
     assert relationship_schema["source_labels"]["maxItems"] == 4
@@ -102,6 +110,15 @@ def test_paper_research_map_contract_bounds_model_output():
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
+    assert signal_schema["variable_role"]["enum"] == [
+        "varied",
+        "compared",
+        "modeled",
+        "fixed",
+        "context",
+        "uncertain",
+        "not_applicable",
+    ]
     assert signal_schema["process_context"]["maxItems"] == 4
     assert signal_schema["process_context"]["items"]["maxLength"] == 160
     assert "sample_context" not in signal_schema
@@ -126,10 +143,37 @@ def test_paper_research_map_contract_bounds_model_output():
     assert review_schema["disputes"]["maxItems"] == 2
     assert review_schema["evidence_gaps"]["maxItems"] == 2
     assert review_schema["citation_leads"]["maxItems"] == 3
+    assert review_item_schema["source_labels"]["maxItems"] == 4
     assert review_item_schema["content"]["maxLength"] == 240
     assert "source_unit_ids" not in review_item_schema
     assert review_item_schema["source_labels"]["minItems"] == 1
     assert review_item_schema["source_labels"]["maxItems"] == 4
+
+
+def test_experimental_paper_map_accepts_five_unresolved_signals_without_failure():
+    """A bounded overflow must not discard a paper map at the fourth signal."""
+
+    payload = {
+        "doc_role": "experimental",
+        "studies": [],
+        "unresolved_signals": [
+            {
+                "signal_type": "variable",
+                "label": f"variable-{index}",
+                "variable_role": "uncertain",
+                "source_labels": [f"S{index}"],
+                "confidence": 0.8,
+            }
+            for index in range(1, 6)
+        ],
+        "output_saturated": False,
+        "evidence_density": "medium",
+        "confidence": 0.8,
+    }
+
+    parsed = StructuredExperimentalPaperMap.model_validate(payload)
+
+    assert len(parsed.unresolved_signals) == 5
 
 
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
@@ -142,6 +186,15 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     assert schema["signals"]["maxItems"] == 8
     assert schema["output_saturated"]["type"] == "boolean"
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
+    assert signal_schema["variable_role"]["enum"] == [
+        "varied",
+        "compared",
+        "modeled",
+        "fixed",
+        "context",
+        "uncertain",
+        "not_applicable",
+    ]
     assert signal_schema["material_scope"]["maxItems"] == 4
     assert signal_schema["process_context"]["maxItems"] == 4
     assert "sample_context" not in signal_schema
@@ -151,6 +204,125 @@ def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     assert "source_unit_ids" not in signal_schema
     assert "relationships" not in schema
     assert "studies" not in schema
+
+
+def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_lineage():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "experimental",
+                "studies": [
+                    {
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["alloy"],
+                        "process_context": ["powder processing"],
+                        "relationships": [
+                            {
+                                "factor_assertions": [
+                                    {
+                                        "label": "processing speed",
+                                        "role": "varied",
+                                        "source_labels": ["S1"],
+                                    }
+                                ],
+                                "outcome": "relative density",
+                                "source_labels": ["S2"],
+                                "confidence": 0.9,
+                            }
+                        ],
+                        "confidence": 0.9,
+                    }
+                ],
+                "unresolved_signals": [],
+                "output_saturated": False,
+                "evidence_density": "high",
+                "confidence": 0.9,
+                "warnings": [],
+            }
+        )
+    )
+    extractor = PaperResearchMapExtractor(_response_client(client))
+
+    paper_map = extractor.extract(
+        {
+            "collection_id": "collection-1",
+            "document_id": "paper-1",
+            "title": "Processing study",
+            "window_id": "scope-1",
+            "window_role": "overview",
+            "document_profile": {"doc_type": "experimental"},
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-1",
+                    "source_kind": "block",
+                    "source_ref": "methods-1",
+                    "section_path": "Methods",
+                    "content": "Processing speed was varied across three levels.",
+                },
+                {
+                    "source_unit_id": "source-unit-2",
+                    "source_kind": "block",
+                    "source_ref": "results-1",
+                    "section_path": "Results",
+                    "content": "Relative density was measured for those conditions.",
+                },
+            ],
+        }
+    )
+
+    relationship = paper_map.studies[0].relationships[0]
+    assert relationship.varied_factors == ["processing speed"]
+    assert relationship.source_unit_ids == ["source-unit-2", "source-unit-1"]
+
+
+@pytest.mark.parametrize(
+    ("signal_type", "variable_role"),
+    [
+        ("variable", "varied"),
+        ("variable", "fixed"),
+        ("variable", "context"),
+        ("outcome", "not_applicable"),
+    ],
+)
+def test_paper_source_signal_contract_requires_scientific_variable_role(
+    signal_type: str,
+    variable_role: str,
+):
+    parsed = StructuredPaperSourceSignalScreen.model_validate(
+        {
+            "signals": [
+                {
+                    "signal_type": signal_type,
+                    "label": "processing speed" if signal_type == "variable" else "density",
+                    "variable_role": variable_role,
+                }
+            ]
+        }
+    )
+
+    assert parsed.signals[0].variable_role == variable_role
+
+
+@pytest.mark.parametrize(
+    ("signal_type", "variable_role"),
+    [
+        ("variable", "not_applicable"),
+        ("outcome", "varied"),
+    ],
+)
+def test_paper_source_signal_contract_rejects_role_type_mismatch(
+    signal_type: str,
+    variable_role: str,
+):
+    with pytest.raises(ValidationError, match="variable role"):
+        StructuredPaperSourceSignal.model_validate(
+            {
+                "signal_type": signal_type,
+                "label": "research axis",
+                "variable_role": variable_role,
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -171,6 +343,7 @@ def test_paper_source_signal_identity_preserves_distinct_experiment_context(
     common = {
         "signal_type": "outcome",
         "label": "yield strength",
+        "variable_role": "not_applicable",
         "experiment_label": "tensile test",
         "claim_scope": "current_work",
         "material_scope": ["Ti-6Al-4V"],
@@ -192,11 +365,20 @@ def test_paper_source_signal_screen_isolates_one_malformed_signal():
     parsed = StructuredPaperSourceSignalScreen.model_validate(
         {
             "signals": [
-                {"signal_type": "variable", "label": "reheating cycle"},
-                {"signal_type": "outcome", "label": "grain morphology"},
+                {
+                    "signal_type": "variable",
+                    "label": "reheating cycle",
+                    "variable_role": "varied",
+                },
+                {
+                    "signal_type": "outcome",
+                    "label": "grain morphology",
+                    "variable_role": "not_applicable",
+                },
                 {
                     "signal_type": "outcome",
                     "label": "a complete observation sentence " * 4,
+                    "variable_role": "not_applicable",
                 },
             ]
         }
@@ -277,6 +459,7 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
                     {
                         "signal_type": "variable",
                         "label": "build plate temperature",
+                        "variable_role": "compared",
                         "experiment_label": "Miranda et al.",
                         "claim_scope": "background",
                         "material_scope": ["Ti-6Al-4V"],
@@ -286,6 +469,7 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
                     {
                         "signal_type": "outcome",
                         "label": "residual stress",
+                        "variable_role": "not_applicable",
                         "experiment_label": "Miranda et al.",
                         "claim_scope": "background",
                         "material_scope": ["Ti-6Al-4V"],
@@ -540,13 +724,13 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 2 studies" in user_prompt
     assert "up to 6 relationships per study" in user_prompt
-    assert "up to 4 unresolved signals" in user_prompt
+    assert "up to 12 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
     assert "not relationship overflow" in user_prompt
     assert "neutral scientific axis" in user_prompt
-    assert "at most 6 varied-factor labels" in user_prompt
-    assert "L-VED, M-VED, and H-VED" in user_prompt
-    assert "varied_factors=['volumetric energy density']" in user_prompt
+    assert "at most 6 factor assertions" in user_prompt
+    assert "low, medium, and high input" in user_prompt
+    assert "one varied factor assertion for the input axis" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
     assert "result direction, value, or comparison sentence" in user_prompt
     assert "Do not promote causal explanations or intermediate mechanisms" in user_prompt
@@ -616,7 +800,13 @@ def test_paper_research_map_rebinds_model_source_labels_to_backend_lineage():
                         "claim_scope": "current_work",
                         "relationships": [
                             {
-                                "varied_factors": ["laser power"],
+                                "factor_assertions": [
+                                    {
+                                        "label": "laser power",
+                                        "role": "varied",
+                                        "source_labels": ["S1"],
+                                    }
+                                ],
                                 "outcome": "porosity",
                                 "source_labels": ["S1"],
                             }
@@ -1909,7 +2099,13 @@ def test_domain_model_extractors_validates_paper_research_map_response():
               "process_context": ["LPBF", "heat treatment"],
               "relationships": [
                 {
-                  "varied_factors": ["heat treatment"],
+                  "factor_assertions": [
+                    {
+                      "label": "heat treatment",
+                      "role": "compared",
+                      "source_labels": ["S1"]
+                    }
+                  ],
                       "outcome": "corrosion current density",
                   "source_labels": ["S1"],
                   "confidence": 0.91
@@ -1983,13 +2179,19 @@ def test_paper_research_map_downgrades_empty_factor_relationship_without_losing_
                 "process_context": ["LPBF"],
                 "relationships": [
                     {
-                        "varied_factors": ["laser power"],
+                        "factor_assertions": [
+                            {
+                                "label": "laser power",
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                            }
+                        ],
                         "outcome": "porosity",
                         "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
-                        "varied_factors": [],
+                        "factor_assertions": [],
                         "outcome": "microhardness",
                         "source_labels": ["S2"],
                         "confidence": 0.84,
@@ -2210,7 +2412,13 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
         "process_context": ["LPBF"],
         "relationships": [
             {
-                "varied_factors": ["laser power"],
+                "factor_assertions": [
+                    {
+                        "label": "laser power",
+                        "role": "varied",
+                        "source_labels": ["S1"],
+                    }
+                ],
                 "outcome": "porosity",
                 "source_labels": ["S1"],
             }
@@ -2293,7 +2501,13 @@ def test_paper_research_map_repairs_unknown_source_labels_before_returning():
                 "claim_scope": "current_work",
                 "relationships": [
                     {
-                        "varied_factors": ["HIP temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "HIP temperature",
+                                "role": "varied",
+                                "source_labels": ["S9"],
+                            }
+                        ],
                         "outcome": "yield strength",
                         "source_labels": ["S9"],
                     }
@@ -2309,6 +2523,13 @@ def test_paper_research_map_repairs_unknown_source_labels_before_returning():
                 "relationships": [
                     {
                         **invalid["studies"][0]["relationships"][0],
+                        "factor_assertions": [
+                            {
+                                "label": "HIP temperature",
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                            }
+                        ],
                         "source_labels": ["S1"],
                     }
                 ],
@@ -2352,6 +2573,7 @@ def test_paper_research_map_repairs_unknown_signal_source_labels_before_returnin
             {
                 "signal_type": "outcome",
                 "label": "elongation",
+                "variable_role": "not_applicable",
                 "source_labels": ["S9"],
             }
         ],
@@ -2398,7 +2620,13 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
         "process_context": ["LPBF"],
         "relationships": [
             {
-                "varied_factors": ["laser power"],
+                "factor_assertions": [
+                    {
+                        "label": "laser power",
+                        "role": "varied",
+                        "source_labels": ["S1"],
+                    }
+                ],
                 "outcome": "porosity",
                 "source_labels": ["S1"],
             }
@@ -2487,8 +2715,12 @@ def test_paper_research_map_preserves_multi_material_multi_outcome_study():
                         "process_context": ["selective laser melting"],
                         "relationships": [
                             {
-                                "varied_factors": [
-                                    "base plate preheating temperature"
+                                "factor_assertions": [
+                                    {
+                                        "label": "base plate preheating temperature",
+                                        "role": "varied",
+                                        "source_labels": ["S1"],
+                                    }
                                 ],
                                 "outcome": outcome,
                                 "source_labels": ["S1"],
@@ -2550,58 +2782,52 @@ def test_paper_research_map_preserves_multi_material_multi_outcome_study():
     assert len(skim.warnings[0]) <= 240
 
 
-def test_paper_research_map_retries_oversized_study_without_truncating_relationships():
+def test_paper_research_map_bounds_overflow_and_marks_output_saturated():
     invalid = {
         "doc_role": "experimental",
         "studies": [
             {
+                "experiment_label": f"study-{study_index}",
                 "design_type": "experimental",
                 "claim_scope": "current_work",
                 "material_scope": [f"material-{index}" for index in range(5)],
-                "process_context": ["selective laser melting"],
+                "process_context": [f"process-{index}" for index in range(5)],
                 "relationships": [
                     {
-                        "varied_factors": ["preheating temperature"],
-                        "outcome": "density",
+                        "factor_assertions": [
+                            {
+                                "label": f"variable-{relationship_index}",
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                            }
+                        ],
+                        "outcome": f"outcome-{relationship_index}",
                         "source_labels": ["S1"],
                         "confidence": 0.8,
                     }
+                    for relationship_index in range(7)
                 ],
                 "confidence": 0.8,
             }
+            for study_index in range(3)
         ],
-        "unresolved_signals": [],
+        "unresolved_signals": [
+            {
+                "signal_type": "outcome",
+                "label": f"unresolved-{index}",
+                "variable_role": "not_applicable",
+                "material_scope": [f"material-{item}" for item in range(5)],
+                "process_context": [f"process-{item}" for item in range(5)],
+                "source_labels": ["S1"],
+                "confidence": 0.7,
+            }
+            for index in range(13)
+        ],
         "evidence_density": "medium",
         "confidence": 0.8,
         "warnings": [],
     }
-    valid = {
-        **invalid,
-        "studies": [
-            {
-                **invalid["studies"][0],
-                "material_scope": [f"material-{index}" for index in range(4)],
-            },
-            {
-                "design_type": "experimental",
-                "claim_scope": "current_work",
-                "material_scope": ["material-4"],
-                "process_context": ["selective laser melting"],
-                "relationships": [
-                    {
-                        "varied_factors": ["scan speed"],
-                        "outcome": "porosity",
-                        "source_labels": ["S1"],
-                        "confidence": 0.75,
-                    }
-                ],
-                "confidence": 0.75,
-            },
-        ],
-    }
-    client = _FakeOpenAIClient(
-        [json.dumps(invalid), json.dumps(valid)]
-    )
+    client = _FakeOpenAIClient(json.dumps(invalid))
     extractor = _response_client(client)
 
     skim = PaperResearchMapExtractor(extractor).extract(
@@ -2619,12 +2845,27 @@ def test_paper_research_map_retries_oversized_study_without_truncating_relations
         }
     )
 
+    assert skim.output_saturated is True
     assert len(skim.studies) == 2
     assert skim.studies[0].material_scope == [
         f"material-{index}" for index in range(4)
     ]
-    assert skim.studies[1].relationships[0].varied_factors == ["scan speed"]
-    assert len(client.chat.completions.calls) == 2
+    assert skim.studies[0].process_context == [
+        f"process-{index}" for index in range(4)
+    ]
+    assert len(skim.studies[0].relationships) == 6
+    assert len(skim.unresolved_signals) == 12
+    assert skim.unresolved_signals[0].material_scope == [
+        f"material-{index}" for index in range(4)
+    ]
+    assert skim.unresolved_signals[0].process_context == [
+        f"process-{index}" for index in range(4)
+    ]
+    assert "bounded list overflow" in skim.warnings[0]
+    assert "studies" in skim.warnings[0]
+    assert "relationships" in skim.warnings[0]
+    assert "unresolved_signals" in skim.warnings[0]
+    assert len(client.chat.completions.calls) == 1
 
 
 def test_domain_model_extractors_validates_paper_signal_reconciliation():
@@ -3077,6 +3318,67 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
     assert "source_accounting_origin" not in frame_schema["properties"]
     assert "source_accounting_errors" not in frame_schema["properties"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+
+
+def test_objective_paper_frame_preserves_more_than_eight_explicit_outcomes():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "material_match": [],
+                "changed_variables": ["laser power"],
+                "measured_property_scope": [
+                    "yield strength",
+                    "tensile strength",
+                    "elongation",
+                    "hardness",
+                    "fatigue life",
+                    "porosity",
+                    "grain size",
+                    "phase fraction",
+                    "residual stress",
+                    "surface roughness",
+                ],
+                "test_environment_scope": [],
+                "relevant_source_labels": ["S1"],
+                "excluded_source_labels": [],
+            }
+        )
+    )
+    extractor = _response_client(client)
+
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
+        {
+            "collection_id": "col-1",
+            "objective": {
+                "question": "Which properties were measured under different laser powers?"
+            },
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "section_label": "Results",
+                    "text": "The study reports ten measured properties.",
+                }
+            ],
+        }
+    )
+
+    assert frame.measured_property_scope == [
+        "yield strength",
+        "tensile strength",
+        "elongation",
+        "hardness",
+        "fatigue life",
+        "porosity",
+        "grain size",
+        "phase fraction",
+        "residual stress",
+        "surface roughness",
+    ]
+    assert len(client.chat.completions.calls) == 1
 
 
 def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_ids():
@@ -3564,6 +3866,7 @@ def test_table_matrix_repair_prompt_hides_backend_lineage_and_slice_offsets():
                     "| --- | --- |\n"
                     "| HT | 900 |"
                 ),
+                "table_visual_text": "Specimen Yield strength (MPa)\nHT 900",
                 "table_slice": {
                     "first_source_row_index": 4,
                     "end_source_row_index": 5,
@@ -3575,6 +3878,7 @@ def test_table_matrix_repair_prompt_hides_backend_lineage_and_slice_offsets():
 
     assert "Mechanical properties." in user_prompt
     assert "| HT | 900 |" in user_prompt
+    assert "HT 900" in user_prompt
     for internal_value in (
         "table-internal",
         "document-internal",
@@ -3802,7 +4106,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     assert extraction.reported_result.outcome == "corrosion current density"
     assert extraction.attribution_scope == "association_only"
     assert extractions.extractions[0].resolution_status == "resolved"
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 3072
 
 
 def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
@@ -3864,6 +4168,7 @@ def test_structured_objective_evidence_normalizes_compact_context_attributes():
         "name": "material",
         "value": "316L stainless steel",
         "unit": None,
+        "context_scope": "unknown",
     }
     assert json.loads(str(context.sample[0].value)) == {
         "shape": "cylindrical",
@@ -4039,6 +4344,88 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
     assert parsed.extractions[0].reported_result is not None
 
 
+def test_objective_evidence_retries_direct_result_missing_reported_result():
+    invalid = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "scientific_context": {
+                        "material": [{"name": "alloy", "value": "Ti6Al4V"}]
+                    },
+                }
+            ]
+        }
+    )
+    repaired = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [
+                        {
+                            "name": "annealing temperature",
+                            "baseline_value": "as-built",
+                            "target_value": "850 C",
+                        }
+                    ],
+                    "comparison": {
+                        "baseline_label": "as-built",
+                        "target_label": "850 C",
+                        "axis_names": ["annealing temperature"],
+                        "comparable": True,
+                        "incomparability_reasons": [],
+                    },
+                    "reported_result": {
+                        "outcome": "elongation",
+                        "value": None,
+                        "direction": "increase",
+                        "result_text": (
+                            "After annealing at 850 C, the elongation continues to increase"
+                        ),
+                    },
+                    "attribution_scope": "association_only",
+                    "scientific_context": {
+                        "material": [{"name": "alloy", "value": "Ti6Al4V"}]
+                    },
+                    "resolution_status": "resolved",
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient([invalid, repaired])
+    extractor = _response_client(client)
+
+    parsed = ObjectiveSourceExtractor(extractor).extract_source(
+        {
+            "objective": {
+                "question": "How does heat treatment affect elongation?",
+                "variables": ["heat treatment"],
+                "outcomes": ["elongation"],
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "role": "current_experimental_evidence",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": (
+                    "After annealing at 850 C, the elongation continues to increase."
+                ),
+            },
+        }
+    )
+
+    assert parsed.extractions[0].reported_result is not None
+    assert parsed.extractions[0].reported_result.outcome == "elongation"
+    assert len(client.chat.completions.calls) == 2
+    repair_instruction = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "means `direct_result` requires reported_result" in repair_instruction
+
+
 def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
     response = json.dumps(
         {
@@ -4187,7 +4574,7 @@ def test_structured_objective_evidence_allows_unbound_variable_draft():
     assert extraction.changed_variables[0].target_value is None
 
 
-def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
+def test_objective_evidence_prompt_preserves_multiple_atomic_extractions():
     system_prompt, prompt = build_objective_evidence_prompt(
         {
             "collection_id": "col-1",
@@ -4210,9 +4597,13 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     )
     contract = " ".join(system_prompt.split())
 
-    assert "Extract at most one objective-relevant, source-local fact" in contract
-    assert "`SOURCE` is the only scientific authority" in contract
-    assert "Return at most one extraction" in contract
+    assert "Extract every objective-relevant, source-local atomic fact" in contract
+    assert (
+        "The current `SOURCE` is the sole authority for reported result values"
+        in contract
+    )
+    assert "A bundle Source may support only explicit context fields" in contract
+    assert "Return at most eight extractions" in contract
     assert "one top-level key: `extractions`" in contract
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
@@ -4222,8 +4613,12 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "document_state" not in prompt
     assert "must not become evidence" not in prompt
     assert "must not be copied" not in prompt
-    assert "Return a changed variable only when this SOURCE explicitly names" in contract
-    assert "the backend may bind another grounded Source later" in contract
+    assert "Return a changed variable when either" in contract
+    assert "explicit, unique one-to-one mapping" in contract
+    assert (
+        "the SAME-PAPER CONTEXT BUNDLE contains an explicit, unique one-to-one mapping"
+        in contract
+    )
     assert "absent, off, or without condition to numeric 0" in contract
     assert "one baseline-to-target comparison interval" in contract
     assert "Never repeat a changed-variable name" in contract
@@ -4546,7 +4941,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
     assert units == StructuredEvidenceExtractions()
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 2048
+    assert text_call["max_completion_tokens"] == 3072
     assert text_call["response_format"]["type"] == "json_schema"
     assert text_call["response_format"]["json_schema"]["name"] == (
         "structured_evidence_extractions"
@@ -4712,7 +5107,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
     assert invalid_item in repair_prompt
     assert "Correct only values supported by SOURCE" in repair_prompt
     assert "do not invent comparison endpoints" in repair_prompt
-    assert "Return only {\"extractions\":[<one corrected extraction>]}" in repair_prompt
+    assert "up to eight corrected atomic extractions" in repair_prompt
     assert "fixed context, not a changed variable" in repair_prompt
     assert "choose one complete source-supported interval" in repair_prompt
     assert "never merge separate intervals" in repair_prompt

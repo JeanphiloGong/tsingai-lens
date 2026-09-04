@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from controllers.schemas.core.research_objectives import (
+    EvidenceContextScope,
     FindingResponse,
     ObjectiveAnalysisStateResponse,
     ObjectiveEvidenceResponse,
@@ -113,6 +114,7 @@ class EvidenceAttributeCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=240)
     value: ScientificScalar
     unit: str | None = Field(default=None, max_length=80)
+    context_scope: EvidenceContextScope = "unknown"
 
 
 class EvidenceContextCreate(BaseModel):

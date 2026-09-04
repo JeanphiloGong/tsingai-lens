@@ -57,6 +57,10 @@ curl "$LLM_BASE_URL/models"
 
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.
+If the provider returns an empty, reasoning-only, or structurally invalid
+streamed response, the runner retries once when no user-visible text was
+received. A second invalid response returns `model_response_invalid`; this is
+distinct from provider connectivity or availability failure.
 `LENS_AGENT_MAX_MODEL_STEPS` controls the maximum number of model-tool decision
 cycles in one Research Agent turn. It is optional and defaults to `6`; accepted
 values are `1` through `32`. Invalid or out-of-range values are logged and use

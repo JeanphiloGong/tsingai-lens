@@ -4,10 +4,11 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import FindingAuthoringEditor from '../../_components/FindingAuthoringEditor.svelte';
 	import EvidenceAuthoringEditor from '../../_components/EvidenceAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
-	import { errorMessage } from '../../../../_shared/api';
+	import { downloadBlob, errorMessage } from '../../../../_shared/api';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
 		fetchObjectiveAnalysis,
@@ -15,6 +16,8 @@
 		fetchObjectiveFindings,
 		objectiveFindingDatasetUrl,
 		runObjectiveAnalysis,
+		type FindingDatasetLabelStatus,
+		type FindingDatasetUseStatus,
 		type ObjectiveAnalysis,
 		type ObjectiveEvidence,
 		type ObjectiveFinding,
@@ -47,6 +50,10 @@
 	let evidenceAuthoringOpen = false;
 	let evidenceAuthoringSource: ObjectiveEvidence | null = null;
 	let evidenceAuthoringMode: 'create' | 'revise' = 'create';
+	let datasetLabelStatus: FindingDatasetLabelStatus | '' = '';
+	let datasetUseStatus: FindingDatasetUseStatus | '' = '';
+	let datasetDownloading = false;
+	let datasetError = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
@@ -290,6 +297,34 @@
 		);
 	}
 
+	function evidenceStatusLabel(value: string) {
+		return (
+			{
+				comparable: '可直接比较',
+				association_only: '只能说明关联',
+				descriptive: '仅描述结果',
+				needs_context: '需要补充上下文',
+				non_comparable: '条件不可直接比较',
+				extraction_failed: '技术提取失败'
+			}[value] ?? '待判断'
+		);
+	}
+
+	function evidenceGapHref(gap: ObjectiveAnalysis['evidence_review']['gaps'][number]) {
+		const base = resolve('/collections/[id]/documents/[document_id]', {
+			id: collectionId,
+			document_id: gap.document_id
+		});
+		const params = new SvelteURLSearchParams({
+			view: 'parsed-paper',
+			evidence_id: gap.evidence_id,
+			source_ref: gap.source_ref,
+			quote: gap.source_excerpt
+		});
+		if (gap.page_numbers[0]) params.set('page', String(gap.page_numbers[0]));
+		return `${base}?${params.toString()}` as `/collections/${string}/documents/${string}`;
+	}
+
 	async function startAnalysis() {
 		if (!analysis || actionRunning || isProcessing) return;
 		const documentIds = (
@@ -366,8 +401,28 @@
 		return items.length ? items.join(', ') : '-';
 	}
 
-	function datasetUrl(format: 'training_jsonl' | 'llamafactory_alpaca') {
-		return objectiveFindingDatasetUrl(collectionId, objectiveId, format);
+	function datasetFilters() {
+		return {
+			...(datasetLabelStatus ? { label_status: datasetLabelStatus } : {}),
+			...(datasetUseStatus ? { dataset_use_status: datasetUseStatus } : {})
+		};
+	}
+
+	async function downloadDataset(format: 'json' | 'training_jsonl' | 'llamafactory_alpaca') {
+		if (!published || datasetDownloading) return;
+		datasetDownloading = true;
+		datasetError = '';
+		try {
+			const extension = format === 'json' ? 'json' : 'jsonl';
+			await downloadBlob(
+				objectiveFindingDatasetUrl(collectionId, objectiveId, format, datasetFilters()),
+				`objective-${objectiveId}-finding-dataset.${extension}`
+			);
+		} catch (err) {
+			datasetError = errorMessage(err);
+		} finally {
+			datasetDownloading = false;
+		}
 	}
 </script>
 
@@ -439,6 +494,55 @@
 			</section>
 		{/if}
 
+		{#if published && analysis.evidence_review.total_evidence_count > 0}
+			<section class="evidence-review" aria-label="证据覆盖审阅">
+				<div class="evidence-review__header">
+					<div>
+						<h2>证据覆盖</h2>
+						<p>保留每条原文记录，并把暂时不能支撑结论的原因列出来。</p>
+					</div>
+					<span class="evidence-review__total">
+						{analysis.evidence_review.total_evidence_count} 条原文记录 ·
+						{analysis.evidence_review.result_count} 条结果
+					</span>
+				</div>
+				<div class="evidence-review__counts" aria-label="证据状态统计">
+					{#each Object.entries(analysis.evidence_review.status_counts) as [status, count] (status)}
+						<span class="evidence-count">
+							<strong>{count}</strong>
+							{evidenceStatusLabel(status)}
+						</span>
+					{/each}
+				</div>
+				{#if analysis.evidence_review.gaps.length}
+					<div class="evidence-review__gaps">
+						<h3>需要研究者判断的记录</h3>
+						{#each analysis.evidence_review.gaps as gap (gap.evidence_id)}
+							<article class="evidence-gap">
+								<div class="evidence-gap__heading">
+									<strong>{evidenceStatusLabel(gap.evidence_status)}</strong>
+									<span>
+										{documentTitles[gap.document_id] || gap.document_id}
+										{#if gap.page_numbers.length}
+											· p.{gap.page_numbers.join(', ')}{/if}
+									</span>
+								</div>
+								<p>{gap.reason}</p>
+								{#if gap.outcome}<small>结果轴：{gap.outcome}</small>{/if}
+								{#if gap.source_excerpt}<blockquote>{gap.source_excerpt}</blockquote>{/if}
+								<a href={resolve(evidenceGapHref(gap))}>查看原文</a>
+							</article>
+						{/each}
+						{#if analysis.evidence_review.omitted_gap_count > 0}
+							<p class="evidence-review__omitted">
+								还有 {analysis.evidence_review.omitted_gap_count} 条记录未展开，请从原文和 Evidence 列表继续审阅。
+							</p>
+						{/if}
+					</div>
+				{/if}
+			</section>
+		{/if}
+
 		{#if published}
 			<section class="findings-workspace" aria-label="Finding 审阅工作区">
 				<aside class="findings-sidebar" aria-label="Finding 列表">
@@ -487,13 +591,67 @@
 					{:else}
 						<p class="empty-findings">当前版本尚无 Finding。</p>
 					{/if}
-					<details class="secondary-actions">
-						<summary>更多</summary>
-						<a href={datasetUrl('training_jsonl')} rel="external">导出 Lens 训练数据</a>
-						<a href={datasetUrl('llamafactory_alpaca')} rel="external"
-							>导出 LlamaFactory 数据</a
-						>
-					</details>
+					<section class="export-panel" aria-label="导出 Finding 数据">
+						<div class="export-panel__heading">
+							<div>
+								<h3>导出研究结果</h3>
+								<p>
+									下载当前已发布分析 v{published.analysis_version} 的 Finding 数据，用于复核或后续标注。
+								</p>
+							</div>
+						</div>
+						<div class="export-filters">
+							<label>
+								<span>标注状态</span>
+								<select bind:value={datasetLabelStatus} disabled={datasetDownloading}>
+									<option value="">全部</option>
+									<option value="candidate">候选</option>
+									<option value="silver">银标</option>
+									<option value="gold">金标</option>
+									<option value="rejected">已拒绝</option>
+								</select>
+							</label>
+							<label>
+								<span>数据用途</span>
+								<select bind:value={datasetUseStatus} disabled={datasetDownloading}>
+									<option value="">全部</option>
+									<option value="training_ready">可训练</option>
+									<option value="review_candidate">待审阅</option>
+									<option value="rejected">已拒绝</option>
+								</select>
+							</label>
+						</div>
+						<div class="export-actions">
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={datasetDownloading}
+								on:click={() => downloadDataset('json')}
+							>
+								导出 JSON
+							</button>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={datasetDownloading}
+								on:click={() => downloadDataset('training_jsonl')}
+							>
+								导出训练 JSONL
+							</button>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={datasetDownloading}
+								on:click={() => downloadDataset('llamafactory_alpaca')}
+							>
+								导出 LlamaFactory JSONL
+							</button>
+							{#if datasetDownloading}<span class="export-status" role="status"
+									>正在准备下载...</span
+								>{/if}
+						</div>
+						{#if datasetError}<p class="export-error" role="alert">{datasetError}</p>{/if}
+					</section>
 				</aside>
 
 				<section
@@ -664,6 +822,93 @@
 		color: var(--text-secondary);
 		white-space: pre-line;
 	}
+	.evidence-review {
+		display: grid;
+		gap: 14px;
+		padding: 16px 18px;
+		border: 1px solid var(--border-default);
+		background: var(--surface-subtle);
+	}
+	.evidence-review__header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 16px;
+	}
+	.evidence-review h2 {
+		font-size: 17px;
+	}
+	.evidence-review h3 {
+		font-size: 14px;
+	}
+	.evidence-review p,
+	.evidence-review__total,
+	.evidence-gap span,
+	.evidence-gap small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 1.5;
+	}
+	.evidence-review__header p {
+		margin-top: 4px;
+	}
+	.evidence-review__total {
+		white-space: nowrap;
+	}
+	.evidence-review__counts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.evidence-count {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 5px;
+		padding: 5px 8px;
+		border: 1px solid var(--border-default);
+		background: var(--surface-card);
+		font-size: 12px;
+	}
+	.evidence-count strong {
+		font-size: 14px;
+	}
+	.evidence-review__gaps {
+		display: grid;
+		gap: 8px;
+	}
+	.evidence-gap {
+		display: grid;
+		gap: 5px;
+		padding: 10px 12px;
+		border-left: 3px solid #8a6d1d;
+		background: var(--surface-card);
+	}
+	.evidence-gap__heading {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 10px;
+		align-items: baseline;
+	}
+	.evidence-gap__heading strong {
+		font-size: 12px;
+	}
+	.evidence-gap blockquote {
+		margin: 2px 0 0;
+		padding-left: 10px;
+		border-left: 2px solid var(--border-default);
+		font-size: 13px;
+		line-height: 1.55;
+		white-space: pre-line;
+	}
+	.evidence-gap a {
+		width: fit-content;
+		color: var(--accent, #2d6a4f);
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.evidence-review__omitted {
+		margin-top: 2px;
+	}
 	.analysis-state .version-note {
 		color: var(--text-primary);
 		font-weight: 600;
@@ -746,21 +991,58 @@
 		font-style: normal;
 		line-height: 1.45;
 	}
-	.secondary-actions {
-		margin-top: 12px;
+	.export-panel {
+		margin-top: 18px;
+		padding-top: 16px;
+		border-top: 1px solid var(--border-default);
+	}
+	.export-panel__heading {
+		display: grid;
+		gap: 5px;
+	}
+	.export-panel h3 {
+		font-size: 14px;
+	}
+	.export-panel p,
+	.export-panel label span,
+	.export-status {
 		color: var(--text-secondary);
 		font-size: 12px;
+		line-height: 1.5;
+	}
+	.export-filters {
+		display: grid;
+		gap: 8px;
+		margin-top: 12px;
+	}
+	.export-filters label {
+		display: grid;
+		gap: 4px;
+	}
+	.export-filters select {
+		width: 100%;
+		min-height: 34px;
+		padding: 6px 8px;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: inherit;
+		font: inherit;
+		font-size: 12px;
+	}
+	.export-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		margin-top: 12px;
+	}
+	.export-error {
+		margin-top: 10px;
+		color: var(--danger, #b42318) !important;
 	}
 	.finding-workspace {
 		min-width: 0;
-	}
-	.secondary-actions summary {
-		cursor: pointer;
-	}
-	.secondary-actions a {
-		display: inline-block;
-		margin-top: 8px;
-		color: var(--accent);
 	}
 	.finding-error {
 		display: grid;
@@ -807,6 +1089,12 @@
 		}
 		.scope-strip {
 			grid-template-columns: 1fr 1fr;
+		}
+		.evidence-review__header {
+			flex-direction: column;
+		}
+		.evidence-review__total {
+			white-space: normal;
 		}
 	}
 </style>

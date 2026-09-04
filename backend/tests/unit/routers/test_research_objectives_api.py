@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import UTC, datetime
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -15,6 +18,9 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopePreview,
 )
 from controllers.core.research_objectives import router
+from controllers.schemas.core.research_objectives import (
+    ObjectiveEvidenceAttributeResponse,
+)
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
@@ -161,7 +167,13 @@ def _evidence() -> ObjectiveEvidence:
             "scientific_context": {
                 "material": [],
                 "sample": [],
-                "process": [],
+                "process": [
+                    {
+                        "name": "solver",
+                        "value": "ANSYS",
+                        "context_scope": "simulation",
+                    }
+                ],
                 "test": [],
             },
             "resolution_status": "resolved",
@@ -188,6 +200,23 @@ def _paper_contribution() -> PaperContribution:
             "failed_source_count": 1,
         }
     )
+
+
+def test_evidence_attribute_response_preserves_context_scope_and_legacy_default() -> None:
+    simulation = ObjectiveEvidenceAttributeResponse.model_validate(
+        {
+            "name": "solver",
+            "value": "ANSYS",
+            "unit": None,
+            "context_scope": "simulation",
+        }
+    )
+    legacy = ObjectiveEvidenceAttributeResponse.model_validate(
+        {"name": "alloy", "value": "Ti-6Al-4V", "unit": None}
+    )
+
+    assert simulation.context_scope == "simulation"
+    assert legacy.context_scope == "unknown"
 
 
 class _Repository:
@@ -764,6 +793,7 @@ def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
     assert payload["items"][0]["paper_contributions"][0]["supporting_evidence_ids"] == [
         "evidence-1"
     ]
+    assert payload["items"][0]["created_by_tool_call_id"] is None
     assert "finding_level" not in str(payload)
     assert "claim_id" not in str(payload)
     assert "logic_chain_id" not in str(payload)
@@ -782,7 +812,102 @@ def test_evidence_api_returns_exact_source_excerpt_and_locator() -> None:
     )
     assert evidence["source_ref"] == "block-7"
     assert evidence["page_numbers"] == [7]
+    assert evidence["reported_result"]["result_kind"] == "observed"
+    assert evidence["scientific_context"]["process"][0]["context_scope"] == (
+        "simulation"
+    )
+    assert evidence["created_by_tool_call_id"] is None
     assert "evidence_unit_id" not in evidence
+
+
+def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
+    created_at = datetime(2026, 9, 1, tzinfo=UTC)
+
+    class AgentAuthoredService(_Service):
+        async def get_analysis_state(self, collection_id, objective_id):
+            analysis = replace(
+                _analysis(),
+                origin="agent_authored",
+                created_by_user_id="user-1",
+                created_by_tool_call_id="call-agent-analysis",
+            )
+            return {
+                "collection_id": collection_id,
+                "objective": _objective(),
+                "analysis": analysis,
+                "published_analysis": analysis,
+                "paper_contributions": (_paper_contribution(),),
+                "warnings": [],
+            }
+
+        async def list_findings(self, collection_id, objective_id, **kwargs):
+            finding = replace(
+                _finding(),
+                analysis_version=2,
+                origin="agent_authored",
+                source_analysis_version=1,
+                created_by_user_id="user-1",
+                created_by_tool_call_id="call-agent-finding",
+                created_at=created_at,
+            )
+            return {
+                "collection_id": collection_id,
+                "objective_id": objective_id,
+                "analysis_version": 2,
+                "items": [finding.to_record()],
+                "offset": kwargs["offset"],
+                "limit": kwargs["limit"],
+                "total": 1,
+            }
+
+        async def list_evidence(self, collection_id, objective_id, **kwargs):
+            evidence = replace(
+                _evidence(),
+                analysis_version=2,
+                origin="agent_authored",
+                source_analysis_version=1,
+                created_by_user_id="user-1",
+                created_by_tool_call_id="call-agent-evidence",
+                created_at=created_at,
+            )
+            return {
+                "collection_id": collection_id,
+                "objective_id": objective_id,
+                "analysis_version": 2,
+                "finding_id": kwargs["finding_id"],
+                "items": [evidence.to_record()],
+                "offset": kwargs["offset"],
+                "limit": kwargs["limit"],
+                "total": 1,
+            }
+
+    client = _client(AgentAuthoredService())
+
+    analysis_response = client.get(
+        "/collections/col-1/objectives/obj-1/analysis"
+    )
+    findings_response = client.get(
+        "/collections/col-1/objectives/obj-1/findings"
+    )
+    evidence_response = client.get(
+        "/collections/col-1/objectives/obj-1/evidence"
+    )
+
+    assert analysis_response.status_code == 200
+    assert findings_response.status_code == 200
+    assert evidence_response.status_code == 200
+    assert (
+        analysis_response.json()["published_analysis"]["created_by_tool_call_id"]
+        == "call-agent-analysis"
+    )
+    assert (
+        findings_response.json()["items"][0]["created_by_tool_call_id"]
+        == "call-agent-finding"
+    )
+    assert (
+        evidence_response.json()["items"][0]["created_by_tool_call_id"]
+        == "call-agent-evidence"
+    )
 
 
 def test_evidence_map_api_returns_the_published_objective_projection() -> None:

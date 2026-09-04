@@ -95,6 +95,12 @@ describe('current collection document workflow', () => {
 			if (url.pathname.endsWith('/objectives') && method === 'GET') {
 				return jsonResponse({ collection_id: 'col_123', objectives: [] });
 			}
+			if (url.pathname.endsWith('/source-archives') && method === 'POST') {
+				return new Response(new Blob(['archive']), {
+					status: 200,
+					headers: { 'Content-Type': 'application/zip' }
+				});
+			}
 			if (url.pathname.includes('/preparation') && method === 'POST') {
 				return jsonResponse(task({ status: 'queued' }));
 			}
@@ -117,6 +123,23 @@ describe('current collection document workflow', () => {
 			}
 			throw new Error(`unexpected request: ${method} ${url.pathname}`);
 		});
+	});
+
+	it('downloads a selected source archive without changing the research flow', async () => {
+		render(Page);
+
+		await browserPage.getByText('Export collection materials').click();
+		await browserPage.getByLabelText('Select paper for archive ready-paper.pdf').click();
+		await browserPage.getByRole('button', { name: 'Download source ZIP' }).click();
+
+		const archiveCall = fetchMock.mock.calls.find(([input]) =>
+			String(input).includes('/source-archives')
+		);
+		expect(archiveCall).toBeDefined();
+		expect(JSON.parse(String(archiveCall?.[1]?.body))).toEqual({
+			document_ids: ['doc_ready']
+		});
+		await expect.element(browserPage.getByText('Source archive downloaded.')).toBeInTheDocument();
 	});
 
 	it('keeps upload available while another document is preparing', async () => {

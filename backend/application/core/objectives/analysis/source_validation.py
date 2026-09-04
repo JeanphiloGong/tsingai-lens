@@ -37,9 +37,8 @@ _OBJECTIVE_ASSOCIATION_RELATION_MARKERS = re.compile(
     r"\b(?:associated|association|correlat(?:e|ed|es|ion)|relationship|"
     r"influence|influenced|effect|effects|impact|sensitivity|dependent|"
     r"dependence|compared|comparison|different|varied|varying|as|while|"
-    r"with|between|higher|lower|increase|increased|increasing|decrease|"
-    r"decreased|decreasing|reduce|reduced|reducing|improve|improved|"
-    r"improves|improving|enhance|enhanced|enhances|enhancing)\b",
+    r"with|between|from|higher|lower|improve|improved|improves|improving|"
+    r"enhance|enhanced|enhances|enhancing)\b",
     re.IGNORECASE,
 )
 _OBJECTIVE_INTERVENTION_RELATION_MARKERS = re.compile(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -550,6 +552,36 @@ def test_training_jsonl_excludes_non_training_ready_samples() -> None:
     response = _client(_RejectedDatasetService()).get(
         "/collections/col-1/objectives/obj-1/finding-dataset",
         params={"format": "training_jsonl"},
+    )
+
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+def test_llamafactory_alpaca_jsonl_maps_training_messages_and_keeps_lineage() -> None:
+    response = _client().get(
+        "/collections/col-1/objectives/obj-1/finding-dataset",
+        params={"format": "llamafactory_alpaca"},
+    )
+
+    assert response.status_code == 200
+    row = json.loads(response.text)
+    assert row["instruction"].startswith("Evidence: At 500 C")
+    assert row["input"] == ""
+    assert json.loads(row["output"]) == {}
+    assert row["metadata"]["analysis_version"] == 1
+
+
+def test_llamafactory_alpaca_jsonl_excludes_non_training_ready_samples() -> None:
+    class _RejectedDatasetService(_Service):
+        async def export_dataset(self, **kwargs):
+            payload = await super().export_dataset(**kwargs)
+            payload["items"][0]["dataset_use_status"] = "rejected"
+            return payload
+
+    response = _client(_RejectedDatasetService()).get(
+        "/collections/col-1/objectives/obj-1/finding-dataset",
+        params={"format": "llamafactory_alpaca"},
     )
 
     assert response.status_code == 200

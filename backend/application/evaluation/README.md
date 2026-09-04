@@ -46,8 +46,12 @@ sample includes:
 - label and dataset-use status.
 
 `training_jsonl` emits only `{messages, metadata}` rows with non-empty training
-messages. IDs alone are never used as model input. The newest feedback or
-curation event controls label and training readiness for the exact Finding
+messages. `llamafactory_alpaca` emits the same training-ready samples as
+`{instruction, input, output, metadata}` JSONL for LlamaFactory datasets
+registered with `formatting: alpaca`; `instruction` is the Lens user message,
+`input` is an empty string, and `output` is the canonical Finding JSON from the
+assistant message. IDs alone are never used as model input. The newest feedback
+or curation event controls label and training readiness for the exact Finding
 version; an older acceptance cannot override a newer rejection or correction.
 
 Persistence details belong to `infra/persistence/`; HTTP request and response

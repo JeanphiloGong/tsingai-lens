@@ -19,7 +19,10 @@ This node owns the Collection route family.
   preparation tasks are queued or running, adds an aggregate progress bar with
   ready/total papers, active task count, and weighted task completion. It does
   not present one task as the progress of the entire collection, and it does
-  not count collection-level Objective discovery as paper preparation.
+  not count collection-level Objective discovery as paper preparation. A
+  collapsed export section can download a user-selected set of original paper
+  files as a bounded ZIP with its manifest; it does not change the research
+  scope or preparation state.
 - `collections/[id]/objectives/+page.svelte`
   Candidate and confirmed research Objectives plus analysis progress/retry.
   Confirming or restarting analysis updates that Objective row immediately and
@@ -33,7 +36,11 @@ This node owns the Collection route family.
   exact Source links stay visible in the editor. Saving publishes a new
   immutable analysis snapshot, reloads that version, and selects the authored
   Finding; the prior Finding remains unchanged. The same editor can record an
-  explicit evidence abstention without creating a placeholder Finding.
+  explicit evidence abstention without creating a placeholder Finding. The
+  sidebar can export the published Finding dataset as JSON or training JSONL
+  with label and dataset-use filters. The collection workspace also exposes
+  collection-level Finding JSON/JSONL and expert gold-draft downloads beside
+  the original paper archive.
 - `collections/[id]/comparisons/+page.svelte`
   Published cross-paper Finding overview grouped by Objective.
 - `collections/[id]/graph/+page.svelte`

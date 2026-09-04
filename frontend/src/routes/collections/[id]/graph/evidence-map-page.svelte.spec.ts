@@ -1,6 +1,7 @@
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import type { ObjectiveEvidenceMap } from '../../../_shared/researchView';
 
 type EvidenceMapPageState = {
 	params: { id: string };
@@ -71,7 +72,7 @@ function objectivesPayload(published = true) {
 	};
 }
 
-function evidenceMapPayload() {
+function evidenceMapPayload(): ObjectiveEvidenceMap {
 	return {
 		collection_id: 'col_123',
 		objective_id: 'obj_1',
@@ -230,8 +231,56 @@ function evidenceMapPayload() {
 	};
 }
 
+function evidenceMapWithUnlinkedContext() {
+	const payload = evidenceMapPayload();
+	payload.coverage.evidence_count = 3;
+	payload.coverage.unlinked_evidence_count = 1;
+	payload.coverage.evidence_status_counts = { comparable: 2, needs_context: 1 };
+	payload.nodes.push({
+		id: 'evidence:ev-context',
+		type: 'evidence',
+		label: 'Porosity was measured after heat treatment.',
+		evidence_id: 'ev-context',
+		document_id: 'paper-1',
+		evidence_role: 'direct_result',
+		evidence_status: 'needs_context',
+		evidence_status_reason: 'Target outcome mentioned but needs same-paper context.',
+		confidence: 0.5,
+		source_excerpt: 'Porosity was measured after heat treatment.'
+	});
+	payload.nodes.push({
+		id: 'source:source-3',
+		type: 'source',
+		label: 'Text block · block-results-4',
+		document_id: 'paper-1',
+		source_kind: 'text_block',
+		source_ref: 'block-results-4',
+		source_excerpt: 'Porosity was measured after heat treatment.',
+		page_numbers: [8],
+		evidence_ids: ['ev-context']
+	});
+	payload.edges.push(
+		{
+			id: 'edge-6',
+			source: 'evidence:ev-context',
+			target: 'source:source-3',
+			relation: 'extracted_from',
+			condition_boundary: false
+		},
+		{
+			id: 'edge-7',
+			source: 'source:source-3',
+			target: 'document:paper-1',
+			relation: 'reported_in',
+			condition_boundary: false
+		}
+	);
+	return payload;
+}
+
 describe('collections/[id]/graph/+page.svelte', () => {
 	let published = true;
+	let includeUnlinkedContext = false;
 
 	beforeEach(() => {
 		setPage({
@@ -239,6 +288,7 @@ describe('collections/[id]/graph/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/graph')
 		});
 		published = true;
+		includeUnlinkedContext = false;
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
@@ -248,10 +298,38 @@ describe('collections/[id]/graph/+page.svelte', () => {
 				return jsonResponse(objectivesPayload(published));
 			}
 			if (url.pathname === '/api/v1/collections/col_123/objectives/obj_1/evidence-map') {
-				return jsonResponse(evidenceMapPayload());
+				return jsonResponse(
+					includeUnlinkedContext ? evidenceMapWithUnlinkedContext() : evidenceMapPayload()
+				);
 			}
 			return jsonResponse({ detail: `unexpected request: ${url.pathname}` }, 404, 'Not Found');
 		});
+	});
+
+	it('labels evidence that still needs context instead of implying a Finding relation', async () => {
+		includeUnlinkedContext = true;
+		render(Page);
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Objective evidence map' }))
+			.toBeInTheDocument();
+
+		await expect
+			.element(browserPage.getByText('Needs same-paper context', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Target outcome mentioned but needs same-paper context.', {
+					exact: true
+				})
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('1 Evidence record(s) are not used by a published Finding.', {
+					exact: false
+				})
+			)
+			.toBeInTheDocument();
 	});
 
 	it('shows support, contradiction, source lineage, and failed paper coverage', async () => {

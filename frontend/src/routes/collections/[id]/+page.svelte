@@ -2,14 +2,19 @@
 	import { onDestroy } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { errorMessage } from '../../_shared/api';
+	import { downloadBlob, errorMessage } from '../../_shared/api';
 	import {
 		listCollectionDocuments,
 		uploadCollectionDocuments,
 		type CollectionDocument
 	} from '../../_shared/collectionDocuments';
 	import { t } from '../../_shared/i18n';
-	import { fetchCollectionObjectives, type ObjectiveList } from '../../_shared/researchView';
+	import {
+		collectionFindingDatasetUrl,
+		fetchCollectionObjectives,
+		findingGoldDraftUrl,
+		type ObjectiveList
+	} from '../../_shared/researchView';
 	import {
 		formCollectionResearchQuestions,
 		getTask,
@@ -33,6 +38,14 @@
 	let fileInput: HTMLInputElement | null = null;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let collectionId = '';
+	let selectedArchiveDocumentIds: string[] = [];
+	let archiveDownloading = false;
+	let archiveError = '';
+	let archiveNotice = '';
+	let archivePanelOpen = false;
+	let findingExportDownloading = false;
+	let findingExportError = '';
+	let findingExportNotice = '';
 
 	type PreparationProgressSummary = {
 		ready: number;
@@ -76,6 +89,8 @@
 						? 'ready'
 						: 'empty';
 	$: preparationProgress = buildPreparationProgress(documents, activePreparationTasks);
+	$: archiveSelectionCount = selectedArchiveDocumentIds.length;
+	$: archiveSelectionTooMany = archiveSelectionCount > 100;
 
 	const unsubscribePage = page.subscribe((currentPage) => {
 		const nextCollectionId = currentPage.params.id ?? '';
@@ -146,7 +161,12 @@
 	}
 
 	async function loadDocuments() {
-		documents = (await listCollectionDocuments(collectionId)).items;
+		const items = (await listCollectionDocuments(collectionId)).items;
+		documents = items;
+		const availableIds = new Set(items.map((document) => document.document_id));
+		selectedArchiveDocumentIds = selectedArchiveDocumentIds.filter((documentId) =>
+			availableIds.has(documentId)
+		);
 	}
 
 	async function loadTasks() {
@@ -219,6 +239,61 @@
 			error = errorMessage(err);
 		} finally {
 			uploadLoading = false;
+		}
+	}
+
+	function toggleAllArchiveSelection() {
+		if (archiveSelectionCount === documents.length) {
+			selectedArchiveDocumentIds = [];
+			return;
+		}
+		selectedArchiveDocumentIds = documents.map((document) => document.document_id);
+	}
+
+	async function downloadSourceArchive() {
+		if (!selectedArchiveDocumentIds.length || archiveSelectionTooMany || archiveDownloading) return;
+		archivePanelOpen = true;
+		archiveDownloading = true;
+		archiveError = '';
+		archiveNotice = '';
+		try {
+			await downloadBlob(
+				`/collections/${encodeURIComponent(collectionId)}/source-archives`,
+				`collection-${collectionId}-sources.zip`,
+				{
+					method: 'POST',
+					body: JSON.stringify({ document_ids: selectedArchiveDocumentIds })
+				}
+			);
+			archiveNotice = $t('overview.currentModel.export.archiveDownloaded');
+		} catch (err) {
+			archiveError = errorMessage(err);
+		} finally {
+			archiveDownloading = false;
+		}
+	}
+
+	async function downloadFindingExport(kind: 'json' | 'training_jsonl' | 'gold_draft') {
+		if (findingExportDownloading) return;
+		findingExportDownloading = true;
+		findingExportError = '';
+		findingExportNotice = '';
+		try {
+			const isGoldDraft = kind === 'gold_draft';
+			const extension = kind === 'training_jsonl' ? 'jsonl' : 'json';
+			const path =
+				kind === 'gold_draft'
+					? findingGoldDraftUrl(collectionId)
+					: collectionFindingDatasetUrl(collectionId, kind);
+			await downloadBlob(
+				path,
+				`collection-${collectionId}-${isGoldDraft ? 'finding-gold-draft' : 'finding-dataset'}.${extension}`
+			);
+			findingExportNotice = $t('overview.currentModel.export.findingDownloaded');
+		} catch (err) {
+			findingExportError = errorMessage(err);
+		} finally {
+			findingExportDownloading = false;
 		}
 	}
 
@@ -464,6 +539,110 @@
 		</div>
 	</div>
 
+	{#if documents.length}
+		<details class="export-panel" bind:open={archivePanelOpen} aria-label="导出集合资料">
+			<summary class="export-panel__summary">
+				<div>
+					<h3>{$t('overview.currentModel.export.title')}</h3>
+					<p>{$t('overview.currentModel.export.lead')}</p>
+				</div>
+			</summary>
+			{#if archivePanelOpen}<div class="export-panel__body">
+					<label class="export-select-all">
+						<input
+							type="checkbox"
+							checked={archiveSelectionCount === documents.length}
+							disabled={archiveDownloading}
+							on:change={toggleAllArchiveSelection}
+						/>
+						<span>{$t('overview.currentModel.export.selectAll')}</span>
+					</label>
+					<div class="export-document-list">
+						{#each documents as document (document.document_id)}
+							<label class="export-document">
+								<input
+									type="checkbox"
+									value={document.document_id}
+									bind:group={selectedArchiveDocumentIds}
+									disabled={archiveDownloading}
+									aria-label={`${$t('overview.currentModel.export.selectDocument')} ${document.original_filename}`}
+								/>
+								<span>
+									<strong>{document.original_filename}</strong>
+									<small>{documentStatus(document)}</small>
+								</span>
+							</label>
+						{/each}
+					</div>
+					<div class="export-panel__actions">
+						<span class="export-selection" role="status">
+							{$t('overview.currentModel.export.selected', { count: archiveSelectionCount })}
+						</span>
+						<button
+							class="btn btn--ghost btn--small"
+							type="button"
+							disabled={!archiveSelectionCount || archiveSelectionTooMany || archiveDownloading}
+							on:click={downloadSourceArchive}
+						>
+							{archiveDownloading
+								? $t('overview.currentModel.export.downloading')
+								: $t('overview.currentModel.export.downloadArchive')}
+						</button>
+					</div>
+					{#if archiveSelectionTooMany}
+						<p class="export-error" role="alert">
+							{$t('overview.currentModel.export.selectionLimit')}
+						</p>
+					{:else if !archiveSelectionCount}
+						<p class="export-help">{$t('overview.currentModel.export.selectionHelp')}</p>
+					{/if}
+					{#if archiveNotice}<p class="export-success" role="status">{archiveNotice}</p>{/if}
+					{#if archiveError}<p class="export-error" role="alert">{archiveError}</p>{/if}
+					<div class="export-finding-section">
+						<div>
+							<strong>{$t('overview.currentModel.export.findingTitle')}</strong>
+							<p>{$t('overview.currentModel.export.findingLead')}</p>
+						</div>
+						<div class="export-panel__actions">
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={findingExportDownloading}
+								on:click={() => downloadFindingExport('json')}
+							>
+								{$t('overview.currentModel.export.downloadFindingJson')}
+							</button>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={findingExportDownloading}
+								on:click={() => downloadFindingExport('training_jsonl')}
+							>
+								{$t('overview.currentModel.export.downloadFindingJsonl')}
+							</button>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={findingExportDownloading}
+								on:click={() => downloadFindingExport('gold_draft')}
+							>
+								{$t('overview.currentModel.export.downloadGoldDraft')}
+							</button>
+							{#if findingExportDownloading}<span class="export-status" role="status"
+									>{$t('overview.currentModel.export.findingDownloading')}</span
+								>{/if}
+						</div>
+						{#if findingExportNotice}<p class="export-success" role="status">
+								{findingExportNotice}
+							</p>{/if}
+						{#if findingExportError}<p class="export-error" role="alert">
+								{findingExportError}
+							</p>{/if}
+					</div>
+				</div>{/if}
+		</details>
+	{/if}
+
 	{#if attentionDocuments.length}
 		<details class="attention-panel">
 			<summary>
@@ -522,6 +701,112 @@
 	.attention-row {
 		display: flex;
 		align-items: center;
+	}
+
+	.export-panel {
+		padding: 0;
+		border-block: 1px solid var(--border-default);
+	}
+
+	.export-panel__summary {
+		display: block;
+		padding: 18px 4px;
+		cursor: pointer;
+	}
+
+	.export-panel__summary > div {
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+	}
+
+	.export-panel h3 {
+		margin: 0;
+		font-size: 16px;
+	}
+
+	.export-panel p,
+	.export-document small,
+	.export-selection {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.export-panel__heading p {
+		margin-top: 5px;
+	}
+
+	.export-panel__body {
+		display: grid;
+		gap: 12px;
+	}
+
+	.export-select-all,
+	.export-document {
+		display: flex;
+		align-items: flex-start;
+		gap: 9px;
+		cursor: pointer;
+	}
+
+	.export-select-all {
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.export-document-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+		gap: 8px 18px;
+		max-height: 220px;
+		padding: 10px 0;
+		overflow-y: auto;
+		border-block: 1px solid var(--border-default);
+	}
+
+	.export-document span {
+		min-width: 0;
+		display: grid;
+		gap: 2px;
+	}
+
+	.export-document strong {
+		overflow-wrap: anywhere;
+		font-size: 13px;
+	}
+
+	.export-panel__actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		flex-wrap: wrap;
+	}
+
+	.export-help {
+		margin: 0;
+	}
+
+	.export-error {
+		margin: 0;
+		color: var(--danger-text, #b42318) !important;
+	}
+
+	.export-success {
+		margin: 0;
+		color: var(--success-text, #256346) !important;
+	}
+
+	.export-finding-section {
+		display: grid;
+		gap: 10px;
+		padding-top: 12px;
+		border-top: 1px solid var(--border-default);
+	}
+
+	.export-finding-section strong {
+		font-size: 13px;
 	}
 
 	.overview-heading,

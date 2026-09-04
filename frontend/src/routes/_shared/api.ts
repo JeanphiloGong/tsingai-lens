@@ -167,11 +167,30 @@ export async function requestText(path: string, init: RequestInit = {}) {
 
 export async function requestBlob(path: string, init: RequestInit = {}) {
 	const url = buildUrl(path);
-	const response = await fetch(url, { ...init, credentials: 'same-origin' });
+	const headers = new Headers(init.headers ?? {});
+	if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json');
+	}
+	const response = await fetch(url, { ...init, credentials: 'same-origin', headers });
 
 	if (!response.ok) {
 		await throwApiError(response);
 	}
 
 	return response.blob();
+}
+
+/** Download a same-origin response through the browser's file-save flow. */
+export async function downloadBlob(path: string, filename: string, init: RequestInit = {}) {
+	const blob = await requestBlob(path, init);
+	const objectUrl = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement('a');
+		link.href = objectUrl;
+		link.download = filename;
+		link.rel = 'noopener';
+		link.click();
+	} finally {
+		URL.revokeObjectURL(objectUrl);
+	}
 }

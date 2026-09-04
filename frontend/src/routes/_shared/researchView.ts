@@ -44,11 +44,7 @@ export type FindingCuration = FindingCurationCreate & {
 	finding_id: string;
 	updated_at: string;
 };
-export type FindingOrigin =
-	| 'system_generated'
-	| 'human_authored'
-	| 'agent_authored'
-	| 'hybrid';
+export type FindingOrigin = 'system_generated' | 'human_authored' | 'agent_authored' | 'hybrid';
 export type FindingAbstentionReason =
 	| 'no_comparable_evidence'
 	| 'no_grounded_evidence'
@@ -140,6 +136,20 @@ export type ObjectiveEvidenceResultDirection =
 	| 'no_change'
 	| 'mixed'
 	| 'unknown';
+export type ObjectiveEvidenceResultKind =
+	| 'measured'
+	| 'observed'
+	| 'predicted'
+	| 'simulated'
+	| 'modeled'
+	| 'unknown';
+export type ObjectiveEvidenceStatus =
+	| 'comparable'
+	| 'association_only'
+	| 'descriptive'
+	| 'needs_context'
+	| 'non_comparable'
+	| 'extraction_failed';
 export type ObjectiveAnalysisState = {
 	collection_id: string;
 	objective_id: string;
@@ -165,6 +175,26 @@ export type ObjectiveAnalysisState = {
 	created_by_tool_call_id: string | null;
 	abstention_reason: FindingAbstentionReason | null;
 	abstention_note: string | null;
+};
+export type ObjectiveEvidenceGap = {
+	evidence_id: string;
+	document_id: string;
+	source_kind: string;
+	source_ref: string;
+	page_numbers: number[];
+	evidence_status: ObjectiveEvidenceStatus;
+	reason: string;
+	outcome: string | null;
+	source_excerpt: string;
+};
+export type ObjectiveEvidenceReview = {
+	total_evidence_count: number;
+	result_count: number;
+	comparable_evidence_count: number;
+	gap_count: number;
+	omitted_gap_count: number;
+	status_counts: Partial<Record<ObjectiveEvidenceStatus, number>>;
+	gaps: ObjectiveEvidenceGap[];
 };
 export type PreparedDocumentInput = {
 	document_id: string;
@@ -263,6 +293,8 @@ export type ObjectiveEvidence = {
 		target_value: string | number | boolean | null;
 		unit: string | null;
 	}[];
+	evidence_status?: ObjectiveEvidenceStatus;
+	evidence_status_reason?: string;
 	comparison: {
 		baseline_label: string;
 		target_label: string;
@@ -272,6 +304,7 @@ export type ObjectiveEvidence = {
 	} | null;
 	reported_result: {
 		outcome: string;
+		result_kind?: ObjectiveEvidenceResultKind;
 		value: string | number | boolean | null;
 		baseline_value: string | number | boolean | null;
 		target_value: string | number | boolean | null;
@@ -325,6 +358,7 @@ export type EvidenceAuthoringCreate = {
 	} | null;
 	reported_result: {
 		outcome: string;
+		result_kind?: ObjectiveEvidenceResultKind;
 		value: string | number | boolean | null;
 		baseline_value: string | number | boolean | null;
 		target_value: string | number | boolean | null;
@@ -356,6 +390,7 @@ export type ObjectiveAnalysis = {
 	objective: ObjectiveSummary;
 	active_analysis: ObjectiveAnalysisState | null;
 	published_analysis: ObjectiveAnalysisState | null;
+	evidence_review: ObjectiveEvidenceReview;
 	warnings: string[];
 };
 export type ObjectiveFindingPage = {
@@ -411,6 +446,8 @@ export type ObjectiveEvidenceMapNode = {
 	document_id?: string;
 	evidence_role?: string;
 	attribution_scope?: ObjectiveEvidenceAttributionScope;
+	evidence_status?: ObjectiveEvidenceStatus;
+	evidence_status_reason?: string;
 	confidence?: number;
 	source_excerpt?: string;
 	source_kind?: string;
@@ -420,6 +457,7 @@ export type ObjectiveEvidenceMapNode = {
 	analysis_status?: 'pending' | 'analyzed' | 'excluded' | 'failed';
 	evidence_disposition?: string | null;
 	evidence_disposition_reason?: string | null;
+	uninspected_source_count?: number | null;
 };
 export type ObjectiveEvidenceMapEdge = {
 	id: string;
@@ -445,6 +483,7 @@ export type ObjectiveEvidenceMapCoverage = {
 	evidence_count: number;
 	source_count: number;
 	unlinked_evidence_count: number;
+	evidence_status_counts?: Partial<Record<ObjectiveEvidenceStatus, number>>;
 };
 export type ObjectiveEvidenceMap = {
 	collection_id: string;
@@ -599,6 +638,56 @@ function normalizeObjectiveAnalysisState(value: unknown): ObjectiveAnalysisState
 	};
 }
 
+function normalizeObjectiveEvidenceReview(value: unknown): ObjectiveEvidenceReview {
+	const record = asRecord(value);
+	const statusCounts = asRecord(record?.status_counts);
+	const statuses: ObjectiveEvidenceStatus[] = [
+		'comparable',
+		'association_only',
+		'descriptive',
+		'needs_context',
+		'non_comparable',
+		'extraction_failed'
+	];
+	const normalizedStatusCounts = Object.fromEntries(
+		statuses
+			.map((status): [ObjectiveEvidenceStatus, number] => [
+				status,
+				Math.max(0, toNumber(statusCounts?.[status]))
+			])
+			.filter(([, count]) => count > 0)
+	) as Partial<Record<ObjectiveEvidenceStatus, number>>;
+	const gaps = asArray(record?.gaps)
+		.map((item) => {
+			const gap = asRecord(item);
+			const status = toText(gap?.evidence_status) as ObjectiveEvidenceStatus;
+			if (!toText(gap?.evidence_id) || !statuses.includes(status)) return null;
+			return {
+				evidence_id: toText(gap?.evidence_id),
+				document_id: toText(gap?.document_id),
+				source_kind: toText(gap?.source_kind),
+				source_ref: toText(gap?.source_ref),
+				page_numbers: asArray(gap?.page_numbers)
+					.map((page) => toNumber(page))
+					.filter((page) => page > 0),
+				evidence_status: status,
+				reason: toText(gap?.reason, '该证据暂不能用于直接比较。'),
+				outcome: nonEmptyText(gap?.outcome),
+				source_excerpt: toText(gap?.source_excerpt)
+			};
+		})
+		.filter((item): item is ObjectiveEvidenceGap => item !== null);
+	return {
+		total_evidence_count: Math.max(0, toNumber(record?.total_evidence_count)),
+		result_count: Math.max(0, toNumber(record?.result_count)),
+		comparable_evidence_count: Math.max(0, toNumber(record?.comparable_evidence_count)),
+		gap_count: Math.max(0, toNumber(record?.gap_count)),
+		omitted_gap_count: Math.max(0, toNumber(record?.omitted_gap_count)),
+		status_counts: normalizedStatusCounts,
+		gaps
+	};
+}
+
 export function normalizeObjectiveList(value: unknown, collectionId: string): ObjectiveList {
 	const record = asRecord(value);
 	return {
@@ -699,6 +788,7 @@ function normalizeObjectiveAnalysis(value: unknown, collectionId: string): Objec
 			} satisfies ObjectiveSummary),
 		active_analysis: normalizeObjectiveAnalysisState(record.active_analysis),
 		published_analysis: normalizeObjectiveAnalysisState(record.published_analysis),
+		evidence_review: normalizeObjectiveEvidenceReview(record.evidence_review),
 		warnings: toStringList(record.warnings)
 	};
 }
@@ -888,6 +978,20 @@ export function objectiveFindingDatasetUrl(
 	const params = findingDatasetParams(filters);
 	params.set('format', format);
 	return `/api/v1/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset?${params.toString()}`;
+}
+
+export function collectionFindingDatasetUrl(
+	collectionId: string,
+	format: 'json' | 'training_jsonl',
+	filters: FindingDatasetFilters = {}
+): string {
+	const params = findingDatasetParams(filters);
+	params.set('format', format);
+	return `/api/v1/collections/${encodeURIComponent(collectionId)}/finding-dataset?${params.toString()}`;
+}
+
+export function findingGoldDraftUrl(collectionId: string): string {
+	return `/api/v1/collections/${encodeURIComponent(collectionId)}/finding-gold-draft`;
 }
 
 export async function fetchObjectiveFindingDataset(

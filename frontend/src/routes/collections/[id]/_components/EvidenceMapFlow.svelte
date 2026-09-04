@@ -37,6 +37,23 @@
 		return 'context';
 	}
 
+	function evidenceStatusLabel(status: ObjectiveEvidenceMapNode['evidence_status']) {
+		if (status === 'comparable') return $t('research.evidenceMap.statusComparable');
+		if (status === 'association_only') return $t('research.evidenceMap.statusAssociationOnly');
+		if (status === 'descriptive') return $t('research.evidenceMap.statusDescriptive');
+		if (status === 'needs_context') return $t('research.evidenceMap.statusNeedsContext');
+		if (status === 'non_comparable') return $t('research.evidenceMap.statusNonComparable');
+		if (status === 'extraction_failed') return $t('research.evidenceMap.statusExtractionFailed');
+		return $t('research.evidenceMap.statusUnknown');
+	}
+
+	function evidenceStatusTone(status: ObjectiveEvidenceMapNode['evidence_status']) {
+		if (status === 'extraction_failed' || status === 'non_comparable') return 'status-warning';
+		if (status === 'needs_context' || status === 'association_only') return 'status-context';
+		if (status === 'descriptive') return 'status-descriptive';
+		return 'status-neutral';
+	}
+
 	function sourceHref(
 		node: ObjectiveEvidenceMapNode
 	): `/collections/${string}/documents/${string}` {
@@ -100,6 +117,18 @@
 			</span>
 		</div>
 	</div>
+	{#if map.coverage.evidence_status_counts && Object.keys(map.coverage.evidence_status_counts).length}
+		<div class="status-summary" aria-label={$t('research.evidenceMap.evidenceStatusLabel')}>
+			{#each Object.entries(map.coverage.evidence_status_counts) as [status, count] (status)}
+				<span
+					>{$t('research.evidenceMap.statusCount', {
+						status: evidenceStatusLabel(status as ObjectiveEvidenceMapNode['evidence_status']),
+						count: count ?? 0
+					})}</span
+				>
+			{/each}
+		</div>
+	{/if}
 
 	{#if map.coverage.failed_document_count > 0 || map.coverage.unlinked_evidence_count > 0}
 		<p class="coverage-note">
@@ -170,9 +199,13 @@
 			</header>
 			{#each evidence as item (item.id)}
 				{@const edge = incomingFindingEdge(item.id)}
-				<article class="node node--evidence">
-					<div class="relation relation--{relationTone(edge)}">
-						{relationLabel(edge)}
+				<article class="node node--evidence" class:node--unlinked={!edge}>
+					<div
+						class="relation relation--{edge
+							? relationTone(edge)
+							: evidenceStatusTone(item.evidence_status)}"
+					>
+						{#if edge}{relationLabel(edge)}{:else}{evidenceStatusLabel(item.evidence_status)}{/if}
 						{#if edge?.condition_boundary}
 							<span>{$t('research.evidenceMap.conditionBoundary')}</span>
 						{/if}
@@ -185,6 +218,9 @@
 					</div>
 					{#if item.source_excerpt && item.source_excerpt !== item.label}
 						<blockquote>{item.source_excerpt}</blockquote>
+					{/if}
+					{#if !edge && item.evidence_status_reason}
+						<p class="limitation">{item.evidence_status_reason}</p>
 					{/if}
 				</article>
 			{/each}
@@ -268,6 +304,17 @@
 	}
 
 	.coverage span {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.status-summary {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 14px;
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--border-default);
+		background: var(--surface-card);
 		color: var(--text-secondary);
 		font-size: 12px;
 	}
@@ -405,6 +452,10 @@
 		background: var(--warning-bg);
 	}
 
+	.node--unlinked {
+		border-left: 3px solid var(--warning-text);
+	}
+
 	.node--excluded {
 		opacity: 0.78;
 	}
@@ -466,6 +517,19 @@
 
 	.relation--context {
 		color: var(--info-text);
+	}
+
+	.relation--status-warning {
+		color: var(--warning-text);
+	}
+
+	.relation--status-context {
+		color: var(--info-text);
+	}
+
+	.relation--status-descriptive,
+	.relation--status-neutral {
+		color: var(--text-secondary);
 	}
 
 	.limitation,

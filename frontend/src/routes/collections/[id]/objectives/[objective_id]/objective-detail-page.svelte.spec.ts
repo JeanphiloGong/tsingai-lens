@@ -576,6 +576,34 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		).toBe(false);
 	});
 
+	it('downloads the published Finding dataset with the selected filters', async () => {
+		installPublishedResponses();
+		const installed = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/finding-dataset')) {
+				return new Response('{"messages":[]}', {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+			return installed(input, init);
+		});
+
+		render(Page);
+		await browserPage.getByLabelText('标注状态').selectOptions('gold');
+		await browserPage.getByLabelText('数据用途').selectOptions('training_ready');
+		await browserPage.getByRole('button', { name: '导出 JSON' }).click();
+
+		const datasetCall = fetchMock.mock.calls.find(([input]) =>
+			String(input).includes('/finding-dataset')
+		);
+		expect(datasetCall).toBeDefined();
+		expect(String(datasetCall?.[0])).toContain('label_status=gold');
+		expect(String(datasetCall?.[0])).toContain('dataset_use_status=training_ready');
+		expect(String(datasetCall?.[0])).toContain('format=json');
+	});
+
 	it('renders a categorical result transition and qualitative direction', async () => {
 		const phaseFinding = {
 			...finding,
@@ -618,6 +646,69 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('v1 · 模型 model-1')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('本次分析失败')).not.toBeInTheDocument();
+	});
+
+	it('shows retained Evidence gaps when no Finding is formed', async () => {
+		installPublishedResponses(
+			objectiveResponse({
+				evidence_review: {
+					total_evidence_count: 3,
+					result_count: 2,
+					comparable_evidence_count: 0,
+					gap_count: 3,
+					omitted_gap_count: 0,
+					status_counts: {
+						descriptive: 1,
+						needs_context: 1,
+						extraction_failed: 1
+					},
+					gaps: [
+						{
+							evidence_id: 'gap-1',
+							document_id: 'paper-1',
+							source_kind: 'text_window',
+							source_ref: 'results-7',
+							page_numbers: [7],
+							evidence_status: 'needs_context',
+							reason: '缺少样品状态，不能判断是否可以比较。',
+							outcome: 'yield strength',
+							source_excerpt: 'Yield strength increased after treatment.'
+						}
+					]
+				}
+			}),
+			null,
+			[]
+		);
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: '证据覆盖' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('3 条原文记录 · 2 条结果')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('需要补充上下文', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('缺少样品状态，不能判断是否可以比较。'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage
+					.getByRole('blockquote')
+					.filter({ hasText: 'Yield strength increased after treatment.' })
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: '查看原文' }))
+			.toHaveAttribute(
+				'href',
+				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=gap-1&source_ref=results-7&quote=Yield+strength+increased+after+treatment.&page=7'
+			);
+		await expect
+			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
+			.toBeInTheDocument();
 	});
 
 	it('loads every Finding and selected Evidence page', async () => {

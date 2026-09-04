@@ -167,7 +167,7 @@ async def test_export_prediction_bundle_uses_current_published_results(
 
     bundle = json.loads(output.read_text(encoding="utf-8"))
     assert result == output
-    assert bundle["metadata"]["schema_version"] == "prediction-bundle-v0.3"
+    assert bundle["metadata"]["schema_version"] == "prediction-bundle-v0.4"
     assert bundle["metadata"]["fact_source"] == "published_objectives"
     assert bundle["papers"][0]["paper_id"] == "paper-1"
     assert bundle["objective_evidence"][0]["evidence_id"] == "ev-1"
@@ -208,6 +208,112 @@ def test_prediction_bundle_preserves_exact_evidence_and_uncertainty(tmp_path):
         "row": 1,
     }
     assert bundle["uncertainties"][0]["limitations"] == ["single paper"]
+
+
+def test_prediction_bundle_projects_source_backed_samples_measurements_and_comparisons(
+    tmp_path,
+):
+    exporter = _load_exporter_module()
+    records = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records["objective_evidence"] = [
+        {
+            "evidence_id": "ev-contrast",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "source_excerpt": "As-built 95.4% and HIP 98.2%.",
+            "source_refs": [
+                {"source_kind": "table", "source_ref": "table-2"},
+            ],
+            "evidence_role": "direct_result",
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "sample": [{"name": "sample", "value": "as-built"}],
+                "material": [{"name": "material", "value": "316L stainless steel"}],
+                "process": [{"name": "heat treatment", "value": "HIP"}],
+                "test": [{"name": "method", "value": "density measurement"}],
+            },
+            "comparison": {
+                "baseline_label": "as-built",
+                "target_label": "HIP",
+                "comparable": True,
+            },
+            "changed_variables": [
+                {
+                    "name": "heat treatment",
+                    "baseline_value": "as-built",
+                    "target_value": "HIP",
+                    "unit": None,
+                }
+            ],
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 98.2,
+                "baseline_value": 95.4,
+                "target_value": 98.2,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased.",
+            },
+        }
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-test",
+        source_output_dir=tmp_path,
+        records_by_artifact=records,
+        missing_artifacts=[],
+    )
+
+    labels = {row["label_in_paper"] for row in bundle["samples"]}
+    assert labels == {"as-built", "HIP"}
+    assert {row["metric_name"] for row in bundle["measurement_results"]} == {
+        "relative density"
+    }
+    assert {row["value_payload"] for row in bundle["measurement_results"]} == {
+        95.4,
+        98.2,
+    }
+    assert len(bundle["comparisons"]) == 1
+    assert bundle["comparisons"][0]["evidence_ids"] == ["ev-contrast"]
+
+
+def test_prediction_bundle_preserves_scalar_measurement_when_target_value_is_null(
+    tmp_path,
+):
+    exporter = _load_exporter_module()
+    records = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records["objective_evidence"] = [
+        {
+            "evidence_id": "ev-row-result",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-results",
+            "scientific_context": {
+                "sample": [{"name": "sample_number", "value": "2"}],
+            },
+            "reported_result": {
+                "outcome": "elongation",
+                "value": 82.0,
+                "baseline_value": None,
+                "target_value": None,
+                "unit": "%",
+                "direction": "unknown",
+                "result_text": "elongation = 82 %",
+            },
+        }
+    ]
+
+    bundle = exporter.build_prediction_bundle(
+        collection_id="col-test",
+        source_output_dir=tmp_path,
+        records_by_artifact=records,
+        missing_artifacts=[],
+    )
+
+    assert len(bundle["measurement_results"]) == 1
+    assert bundle["measurement_results"][0]["value_payload"] == 82.0
+    assert bundle["measurement_results"][0]["value_or_trend"] == 82.0
 
 
 @pytest.mark.anyio

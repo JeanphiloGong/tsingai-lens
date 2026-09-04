@@ -64,7 +64,7 @@ Return one JSON object without commentary.
 
 _COMPACT_OUTPUT_CONTRACT = r"""
 OUTPUT SHAPE
-{"doc_role":"experimental|modeling|mixed|uncertain","studies":[{"experiment_label":null,"design_type":"experimental|observational|modeling|mixed|uncertain","claim_scope":"current_work|background|uncertain","material_scope":[],"process_context":[],"relationships":[{"varied_factors":[],"outcome":"","source_labels":["S1"],"confidence":0.0}],"confidence":0.0}],"unresolved_signals":[{"signal_type":"variable|outcome","label":"","experiment_label":null,"design_type":"experimental|observational|modeling|mixed|uncertain","claim_scope":"current_work|background|uncertain","material_scope":[],"process_context":[],"source_labels":["S1"],"confidence":0.0}],"output_saturated":false,"evidence_density":"high|medium|low|unknown","confidence":0.0,"warnings":[]}
+{"doc_role":"experimental|modeling|mixed|uncertain","studies":[{"experiment_label":null,"design_type":"experimental|observational|modeling|mixed|uncertain","claim_scope":"current_work|background|uncertain","material_scope":[],"process_context":[],"relationships":[{"factor_assertions":[{"label":"","role":"varied|compared|modeled","source_labels":["S1"]}],"outcome":"","source_labels":["S1"],"confidence":0.0}],"confidence":0.0}],"unresolved_signals":[{"signal_type":"variable|outcome","label":"","variable_role":"varied|compared|modeled|fixed|context|uncertain|not_applicable","experiment_label":null,"design_type":"experimental|observational|modeling|mixed|uncertain","claim_scope":"current_work|background|uncertain","material_scope":[],"process_context":[],"source_labels":["S1"],"confidence":0.0}],"output_saturated":false,"evidence_density":"high|medium|low|unknown","confidence":0.0,"warnings":[]}
 
 Limits: at most 2 studies, 6 relationships per study, 4 unresolved signals, 6 factors per relationship, 4 unique Source labels per item, and 2 short warnings. Use empty arrays when unsupported. Unresolved signals represent incomplete links, not relationship overflow. Set output_saturated=true if a supported relationship or other scientific item exceeds these limits.
 """.strip()
@@ -74,19 +74,19 @@ _COMPACT_FEW_SHOTS = r"""
 BOUNDARY FEW-SHOTS
 JOINT FACTORS
 Source: "We jointly varied laser power and scan speed and measured porosity."
-Output: {"doc_role":"experimental","studies":[{"design_type":"experimental","claim_scope":"current_work","relationships":[{"varied_factors":["laser power","scan speed"],"outcome":"porosity","source_labels":["S1"],"confidence":0.9}]}],"unresolved_signals":[],"output_saturated":false,"evidence_density":"high","confidence":0.9,"warnings":[]}
+Output: {"doc_role":"experimental","studies":[{"design_type":"experimental","claim_scope":"current_work","relationships":[{"factor_assertions":[{"label":"laser power","role":"varied","source_labels":["S1"]},{"label":"scan speed","role":"varied","source_labels":["S1"]}],"outcome":"porosity","source_labels":["S1"],"confidence":0.9}]}],"unresolved_signals":[],"output_saturated":false,"evidence_density":"high","confidence":0.9,"warnings":[]}
 
 BROAD OUTCOME
 Source: "Heat treatment changed the microstructure." No measurement identity is named.
-Output: {"doc_role":"experimental","studies":[],"unresolved_signals":[{"signal_type":"variable","label":"heat treatment","claim_scope":"current_work","source_labels":["S1"],"confidence":0.7},{"signal_type":"outcome","label":"microstructure","claim_scope":"current_work","source_labels":["S1"],"confidence":0.7}],"output_saturated":false,"evidence_density":"low","confidence":0.7,"warnings":[]}
+Output: {"doc_role":"experimental","studies":[],"unresolved_signals":[{"signal_type":"variable","label":"heat treatment","variable_role":"varied","claim_scope":"current_work","source_labels":["S1"],"confidence":0.7},{"signal_type":"outcome","label":"microstructure","variable_role":"not_applicable","claim_scope":"current_work","source_labels":["S1"],"confidence":0.7}],"output_saturated":false,"evidence_density":"low","confidence":0.7,"warnings":[]}
 
 CITED BACKGROUND
 Source: "Miranda et al. increased build plate temperature and reduced residual stress."
-Output: {"doc_role":"uncertain","studies":[{"experiment_label":"Miranda et al.","design_type":"uncertain","claim_scope":"background","relationships":[{"varied_factors":["build plate temperature"],"outcome":"residual stress","source_labels":["S1"],"confidence":0.8}]}],"unresolved_signals":[],"output_saturated":false,"evidence_density":"low","confidence":0.8,"warnings":[]}
+Output: {"doc_role":"uncertain","studies":[{"experiment_label":"Miranda et al.","design_type":"uncertain","claim_scope":"background","relationships":[{"factor_assertions":[{"label":"build plate temperature","role":"varied","source_labels":["S1"]}],"outcome":"residual stress","source_labels":["S1"],"confidence":0.8}]}],"unresolved_signals":[],"output_saturated":false,"evidence_density":"low","confidence":0.8,"warnings":[]}
 
 EXPLICIT CONFIGURATION EFFECT
 Source: "PTA leading with front wire feeding gave stable deposition and good bead appearance."
-Output: {"doc_role":"experimental","studies":[{"design_type":"experimental","claim_scope":"current_work","relationships":[{"varied_factors":["heat-source configuration","wire-feeding direction"],"outcome":"deposition stability","source_labels":["S1"],"confidence":0.9},{"varied_factors":["heat-source configuration","wire-feeding direction"],"outcome":"bead appearance","source_labels":["S1"],"confidence":0.9}]}],"unresolved_signals":[],"output_saturated":false,"evidence_density":"high","confidence":0.9,"warnings":[]}
+Output: {"doc_role":"experimental","studies":[{"design_type":"experimental","claim_scope":"current_work","relationships":[{"factor_assertions":[{"label":"heat-source configuration","role":"compared","source_labels":["S1"]},{"label":"wire-feeding direction","role":"compared","source_labels":["S1"]}],"outcome":"deposition stability","source_labels":["S1"],"confidence":0.9},{"factor_assertions":[{"label":"heat-source configuration","role":"compared","source_labels":["S1"]},{"label":"wire-feeding direction","role":"compared","source_labels":["S1"]}],"outcome":"bead appearance","source_labels":["S1"],"confidence":0.9}]}],"unresolved_signals":[],"output_saturated":false,"evidence_density":"high","confidence":0.9,"warnings":[]}
 
 NO SIGNAL
 Source: "Additive manufacturing is widely used in aerospace."
@@ -382,6 +382,13 @@ def evaluate_scenario_output(
     scenario: ProbeScenario,
     parsed: StructuredExperimentalPaperMap,
 ) -> dict[str, Any]:
+    def relationship_factor_labels(relationship: Any) -> tuple[str, ...]:
+        return tuple(
+            str(assertion.label).strip()
+            for assertion in relationship.factor_assertions
+            if str(assertion.label).strip()
+        )
+
     allowed_labels = {
         f"S{index}"
         for index, source in enumerate(scenario.payload.get("source_units") or (), 1)
@@ -424,7 +431,7 @@ def evaluate_scenario_output(
         ]
         checks["expected_outcomes_present"] = expected_outcomes <= returned_outcomes
         checks["joint_factor_set_preserved"] = bool(expected_relationships) and all(
-            _normalized_set(relationship.varied_factors) == expected_factors
+            _normalized_set(relationship_factor_labels(relationship)) == expected_factors
             for relationship in expected_relationships
         )
     elif expectation_kind == "broad_outcome":
@@ -470,7 +477,7 @@ def evaluate_scenario_output(
                             term
                             in " ".join(
                                 _normalized_label(factor)
-                                for factor in relationship.varied_factors
+                                for factor in relationship_factor_labels(relationship)
                             )
                             for term in factor_terms
                         )

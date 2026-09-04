@@ -34,7 +34,10 @@ Export current system output:
 
 The Objective portion of the prediction bundle reads the published
 `ObjectiveAnalysis`, Findings, and Finding-specific Evidence directly. It
-includes exact Source excerpts and locators.
+includes exact Source excerpts and locators. The generic `samples`,
+`measurement_results`, and `comparisons` sections are deterministic projections
+of those same Evidence records for recall evaluation; they are not a second
+extraction path.
 
 Evaluate prediction against gold:
 

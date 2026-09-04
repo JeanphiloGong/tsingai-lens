@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import inspect
 from pathlib import Path
 import sys
 from typing import Any
@@ -128,12 +130,16 @@ def run_objective_gold_benchmark(
         input_dir=gold_input_dir,
         output_path=gold_path,
     )
-    exported_prediction_path = export_prediction_bundle.export_prediction_bundle(
+    exported_prediction = export_prediction_bundle.export_prediction_bundle(
         backend_root=backend_root,
         collection_id=collection_id,
         source_output_dir=source_output_dir,
         output_path=prediction_path,
     )
+    if inspect.isawaitable(exported_prediction):
+        exported_prediction_path = asyncio.run(exported_prediction)
+    else:
+        exported_prediction_path = exported_prediction
     evaluation_report_path = evaluate_gold_vs_prediction.evaluate_gold_vs_prediction(
         gold_path=converted_gold_path,
         prediction_path=exported_prediction_path,

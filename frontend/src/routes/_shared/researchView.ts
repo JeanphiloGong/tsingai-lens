@@ -972,7 +972,7 @@ function findingDatasetParams(filters: FindingDatasetFilters): URLSearchParams {
 export function objectiveFindingDatasetUrl(
 	collectionId: string,
 	objectiveId: string,
-	format: 'json' | 'training_jsonl',
+	format: 'json' | 'training_jsonl' | 'llamafactory_alpaca',
 	filters: FindingDatasetFilters = {}
 ): string {
 	const params = findingDatasetParams(filters);

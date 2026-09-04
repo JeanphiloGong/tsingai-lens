@@ -285,6 +285,12 @@ describe('objective Finding API', () => {
 		expect(result.projection_version).toBe('objective-evidence-map.v1');
 	});
 
+	it('builds the LlamaFactory Alpaca dataset export URL', () => {
+		expect(objectiveFindingDatasetUrl('col/1', 'obj 1', 'llamafactory_alpaca')).toBe(
+			'/api/v1/collections/col%2F1/objectives/obj%201/finding-dataset?format=llamafactory_alpaca'
+		);
+	});
+
 	it('records feedback using analysis_version and finding_id only', async () => {
 		request.mockResolvedValue({ feedback_id: 'feedback-1' });
 

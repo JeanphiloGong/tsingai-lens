@@ -408,7 +408,7 @@
 		};
 	}
 
-	async function downloadDataset(format: 'json' | 'training_jsonl') {
+	async function downloadDataset(format: 'json' | 'training_jsonl' | 'llamafactory_alpaca') {
 		if (!published || datasetDownloading) return;
 		datasetDownloading = true;
 		datasetError = '';
@@ -637,6 +637,14 @@
 								on:click={() => downloadDataset('training_jsonl')}
 							>
 								导出训练 JSONL
+							</button>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								disabled={datasetDownloading}
+								on:click={() => downloadDataset('llamafactory_alpaca')}
+							>
+								导出 LlamaFactory JSONL
 							</button>
 							{#if datasetDownloading}<span class="export-status" role="status"
 									>正在准备下载...</span

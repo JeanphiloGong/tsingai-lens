@@ -8108,6 +8108,132 @@ def test_source_validation_does_not_promote_observed_mediator_to_objective_varia
     assert records[0]["attribution_scope"] == "descriptive_only"
 
 
+def test_source_validation_does_not_promote_mediator_with_causal_as_clause() -> None:
+    """A causal ``as`` clause still keeps a process-mediated result descriptive."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-as-clause",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating-as-clause",
+            "source_kind": "text_window",
+            "source_ref": "results-preheating-as-clause",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = (
+        "Porosity decreased as preheating increased, while elongation increased."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "increase",
+                "result_text": result_text,
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records[0]["changed_variables"] == []
+    assert records[0]["attribution_scope"] == "descriptive_only"
+
+
+def test_source_validation_downgrades_model_supplied_mediator_endpoints() -> None:
+    """Grounded endpoint values do not make a measured mediator an intervention."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-model-mediator",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating-model-mediator",
+            "source_kind": "text_window",
+            "source_ref": "results-preheating-model-mediator",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = (
+        "Porosity decreased from 1.2% to 0.4% after preheating, while elongation "
+        "increased."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "porosity",
+                    "baseline_value": 1.2,
+                    "target_value": 0.4,
+                    "unit": "%",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "1.2%",
+                "target_label": "0.4%",
+                "axis_names": ["porosity"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "increase",
+                "result_text": result_text,
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records[0]["changed_variables"] == []
+    assert records[0]["comparison"] is None
+    assert records[0]["attribution_scope"] == "descriptive_only"
+    assert "observed mediator" in records[0]["selection_reason"]
+
+
 def test_source_validation_keeps_explicit_mediator_outcome_association() -> None:
     """An explicit porosity-elongation clause remains reviewable as an association."""
 

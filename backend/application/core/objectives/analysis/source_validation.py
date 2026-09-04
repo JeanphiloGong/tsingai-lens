@@ -54,7 +54,7 @@ _OBJECTIVE_OBSERVED_CHANGE_MARKERS = re.compile(
 )
 _OBJECTIVE_MEDIATOR_CAUSE_MARKERS = re.compile(
     r"\b(?:by|due to|because of|after|following|result(?:ed|s)? from|"
-    r"as a result of)\b",
+    r"as a result of|as|while)\b",
     re.IGNORECASE,
 )
 
@@ -223,6 +223,7 @@ def validate_source_fact(
         extracted_record,
         source=grounding_source,
     )
+    record = _objective_remove_observed_mediator_variables(record)
     record = _objective_retain_source_grounded_context(
         record,
         source=grounding_source,
@@ -557,6 +558,7 @@ def _objective_source_sentences(text: str) -> tuple[str, ...]:
 def _objective_variable_is_observed_mediator(
     text: str,
     variable: str,
+    outcome: str | None = None,
 ) -> bool:
     """Detect a variable described as an observed change caused by another factor.
 
@@ -581,12 +583,17 @@ def _objective_variable_is_observed_mediator(
     for term in variable_terms:
         term_pattern = re.escape(term.casefold()).replace(r"\ ", r"\s+")
         pattern = re.compile(
-            rf"\b{term_pattern}\b.{{0,80}}"
-            rf"{_OBJECTIVE_OBSERVED_CHANGE_MARKERS.pattern}.{{0,50}}"
-            rf"{_OBJECTIVE_MEDIATOR_CAUSE_MARKERS.pattern}",
+            rf"\b{term_pattern}\b.{{0,80}}?"
+            rf"{_OBJECTIVE_OBSERVED_CHANGE_MARKERS.pattern}.{{0,50}}?"
+            rf"(?P<cause>{_OBJECTIVE_MEDIATOR_CAUSE_MARKERS.pattern})",
             re.IGNORECASE | re.DOTALL,
         )
-        if pattern.search(lowered):
+        for match in pattern.finditer(lowered):
+            if outcome:
+                cause_tail = lowered[match.end() :].split(",", 1)[0]
+                cause_tail = re.split(r"\bwhile\b", cause_tail, maxsplit=1)[0]
+                if property_matching.source_text_mentions_axis(cause_tail, outcome):
+                    continue
             return True
     return False
 
@@ -639,7 +646,11 @@ def _objective_source_explicitly_links_variable_to_result(
         variable,
     )
     if result_mentions_variable:
-        if _objective_variable_is_observed_mediator(result, variable):
+        if _objective_variable_is_observed_mediator(
+            result,
+            variable,
+            outcome=outcome_text,
+        ):
             return False
         return bool(_OBJECTIVE_ASSOCIATION_RELATION_MARKERS.search(result))
 
@@ -649,7 +660,11 @@ def _objective_source_explicitly_links_variable_to_result(
             variable,
         ) or not property_matching.source_text_mentions_axis(sentence, outcome):
             continue
-        if _objective_variable_is_observed_mediator(sentence, variable):
+        if _objective_variable_is_observed_mediator(
+            sentence,
+            variable,
+            outcome=outcome_text,
+        ):
             continue
         if not _OBJECTIVE_INTERVENTION_RELATION_MARKERS.search(sentence):
             continue
@@ -667,6 +682,82 @@ def _objective_source_explicitly_links_variable_to_result(
                 continue
         return True
     return False
+
+
+def _objective_remove_observed_mediator_variables(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove model-labelled variables that SOURCE presents as observations.
+
+    Model output is a candidate transcription, not a scientific authority. A
+    complete-looking endpoint pair can still describe a measured mediator (for
+    example, porosity changing after preheating). Drop only that variable and
+    keep any remaining explicit intervention variables in the same extraction.
+    """
+
+    normalized = dict(record)
+    variables = normalized.get("changed_variables")
+    result = normalized.get("reported_result")
+    if not isinstance(variables, list) or not isinstance(result, Mapping):
+        return normalized
+    result_text = str(result.get("result_text") or "").strip()
+    outcome = str(result.get("outcome") or "").strip()
+    if not result_text or not outcome:
+        return normalized
+    retained: list[Any] = []
+    removed_names: list[str] = []
+    for variable in variables:
+        if not isinstance(variable, Mapping):
+            retained.append(variable)
+            continue
+        name = str(variable.get("name") or "").strip()
+        if name and _objective_variable_is_observed_mediator(
+            result_text,
+            name,
+            outcome=outcome,
+        ):
+            removed_names.append(name)
+            continue
+        retained.append(variable)
+    if not removed_names:
+        return normalized
+
+    normalized["changed_variables"] = retained
+    comparison = normalized.get("comparison")
+    if isinstance(comparison, Mapping):
+        remaining_names = {
+            str(variable.get("name") or "").strip().casefold()
+            for variable in retained
+            if isinstance(variable, Mapping) and str(variable.get("name") or "").strip()
+        }
+        normalized_comparison = dict(comparison)
+        axes = comparison.get("axis_names")
+        if isinstance(axes, list):
+            normalized_comparison["axis_names"] = [
+                axis
+                for axis in axes
+                if str(axis).strip().casefold() in remaining_names
+            ]
+        if not normalized_comparison.get("axis_names"):
+            normalized["comparison"] = None
+        else:
+            normalized["comparison"] = normalized_comparison
+    remaining_comparison = normalized.get("comparison")
+    if retained and isinstance(remaining_comparison, Mapping):
+        normalized["attribution_scope"] = (
+            "association_only"
+            if remaining_comparison.get("comparable") is True
+            else "not_attributable"
+        )
+    else:
+        normalized["attribution_scope"] = "descriptive_only"
+    normalized["resolution_status"] = "partial"
+    normalized["selection_reason"] = (
+        "SOURCE describes the removed Objective variable as an observed "
+        "mediator caused by another factor; the result is retained without "
+        "attributing it to that mediator."
+    )
+    return normalized
 
 
 def _objective_source_association_variable(

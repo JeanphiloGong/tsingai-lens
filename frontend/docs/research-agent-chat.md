@@ -133,8 +133,21 @@ exact-argument approval contract.
 
 ### Capability activity
 
-An assistant capability request and its result are separate from the final
-answer. The result panel shows:
+Assistant capability work remains separate from the final answer, but the
+browser does not give every technical operation equal visual weight.
+Consecutive routine reads are combined into one compact native disclosure.
+Successful work is collapsed by default; queued work stays labeled in
+progress, and failed work or work with warnings opens automatically. The
+disclosure names the user-facing research actions and their bounded summaries,
+not provider calls, prompts, model reasoning, JSON payloads, or retry mechanics.
+A checkpointed capability request without a result remains visible as prepared
+research activity after reload.
+
+Reviewable research outputs remain visible outside that disclosure. These
+include Objective drafts, research-scope previews, literature and Objective
+analysis status, a complete Finding inspection, and the canonical outcome of
+an approved Objective, Evidence, Finding, or Agent-authored analysis write.
+Their result panels show:
 
 - the named Lens capability;
 - a bounded human-readable summary;
@@ -151,6 +164,12 @@ answer. The result panel shows:
 - a distinct Agent paper-analysis activity whose completed summary reports the
   number of published Source-grounded Evidence records and links to the
   canonical Objective analysis.
+
+A tool request paused for approval is represented by the approval panel only;
+the browser does not duplicate it as a second activity row. Images or embedded
+media are presented only when a capability returns a real inspectable research
+artifact. The browser does not synthesize decorative screenshots for routine
+tool work.
 
 A `queued` capability result is rendered as started rather than completed. It
 shows the canonical analysis or task link and lets the researcher continue the
@@ -233,6 +252,10 @@ The focused browser suite covers:
 17. Agent-authored paper analysis shown as a separate approval, rejection, and
     completed Evidence publication state without changing the automatic
     Objective-analysis presentation.
+18. consecutive routine capability work compressed into one collapsed activity
+    disclosure, with warnings opened automatically;
+19. Objective drafts and other reviewable research results kept visible as
+    standalone artifacts while the underlying tool mechanics stay secondary.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

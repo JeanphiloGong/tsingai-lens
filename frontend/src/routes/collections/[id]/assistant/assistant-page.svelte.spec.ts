@@ -595,6 +595,65 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(new Headers(post?.[1]?.headers).get('Accept')).toBe('text/event-stream');
 	});
 
+	it('preserves a researcher-expanded activity while the next answer streams', async () => {
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: { query: 'energy input' }
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_read_1',
+						tool_result: {
+							tool_call_id: 'call_read_1',
+							status: 'succeeded',
+							data: { finding_count: 2, evidence_count: 8 },
+							resource_refs: [],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					})
+				],
+				pending_approval: null
+			},
+			messageDeltas: ['Following up', ' with source context.'],
+			messageDelayMs: 100,
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_stream', 'user', 'Explain the first finding'),
+					message('msg_assistant_stream', 'assistant', 'Following up with source context.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+
+		const composer = await renderReady();
+		const activity = document.querySelector<HTMLDetailsElement>(
+			'[data-testid="research-activity"]'
+		);
+		expect(activity?.open).toBe(false);
+		activity?.querySelector<HTMLElement>('summary')?.click();
+		expect(activity?.open).toBe(true);
+
+		await composer.fill('Explain the first finding');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect
+			.element(browserPage.getByText('Following up', { exact: true }))
+			.toBeInTheDocument();
+		expect(activity?.open).toBe(true);
+		await expect
+			.element(browserPage.getByText('Following up with source context.', { exact: true }))
+			.toBeInTheDocument();
+		expect(activity?.open).toBe(true);
+	});
+
 	it('renders a read capability result separately from the final answer', async () => {
 		installApi({
 			messageTurn: {
@@ -619,7 +678,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 									href: '/collections/col_123/objectives/obj_1?finding_id=finding_1'
 								}
 							],
-							warnings: ['One paper used a different heat treatment.'],
+							warnings: [],
 							error_code: null,
 							error_message: null
 						}
@@ -633,19 +692,90 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 		await send('What findings are available?');
 
-		await expect.element(browserPage.getByText('Published findings completed')).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
+		const activity = document.querySelector<HTMLDetailsElement>(
+			'[data-testid="research-activity"]'
+		);
+		expect(document.querySelectorAll('[data-testid="research-activity"]')).toHaveLength(1);
+		expect(activity?.open).toBe(false);
+		activity?.querySelector<HTMLElement>('summary')?.click();
 		await expect
-			.element(browserPage.getByText('2 findings · 8 evidence records'))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('One paper used a different heat treatment.'))
-			.toBeInTheDocument();
+			.element(browserPage.getByText('Published findings completed', { exact: true }))
+			.toBeVisible();
+		await expect.element(browserPage.getByText('2 findings · 8 evidence records')).toBeVisible();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open finding' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?finding_id=finding_1');
 		await expect
 			.element(browserPage.getByText('Two published findings address this question.'))
 			.toBeInTheDocument();
+	});
+
+	it('keeps a persisted tool request visible while its result is pending', async () => {
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: { query: 'energy input' }
+					})
+				],
+				pending_approval: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+
+		await renderReady();
+
+		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Research action prepared', { exact: true }))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByText('Published findings', { exact: true }))
+			.toBeVisible();
+	});
+
+	it('opens routine research activity when a warning needs review', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Check the published findings'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: {}
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_read_1',
+						tool_result: {
+							tool_call_id: 'call_read_1',
+							status: 'succeeded',
+							data: { finding_count: 2, evidence_count: 8 },
+							resource_refs: [],
+							warnings: ['One paper used a different heat treatment.'],
+							error_code: null,
+							error_message: null
+						}
+					})
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Check the published findings');
+
+		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
+		const activity = document.querySelector<HTMLDetailsElement>(
+			'[data-testid="research-activity"]'
+		);
+		expect(activity?.open).toBe(true);
+		await expect
+			.element(browserPage.getByText('One paper used a different heat treatment.'))
+			.toBeVisible();
 	});
 
 	it('shows one complete published finding and its linked evidence count', async () => {
@@ -871,6 +1001,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByText('Proposal context: collection_supported'))
 			.toBeInTheDocument();
+		expect(document.querySelectorAll('[data-testid="research-artifact"]')).toHaveLength(1);
 		expect(
 			fetchMock.mock.calls.some(([input]) =>
 				requestPath(input as string | URL | Request).includes('/objectives')
@@ -907,6 +1038,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByText('energy input', { exact: true }))
 			.toBeInTheDocument();
+		expect(document.querySelectorAll('[data-testid="research-activity"]')).toHaveLength(0);
 		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
 		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect

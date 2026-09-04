@@ -20,7 +20,7 @@ from application.chat.capabilities import (
     CapabilityRegistry,
 )
 from application.chat.context_builder import ChatContextBuilder
-from application.chat.model import ChatModel
+from application.chat.model import ChatModel, ModelResponseError
 from domain.chat import (
     ChatMessage,
     ChatSourceContext,
@@ -47,6 +47,7 @@ _STEP_LIMIT_MESSAGE = (
     "I reached the Research Agent step limit before completing this request. "
     "Please narrow the question or continue in a new message."
 )
+_MODEL_RESPONSE_RETRY_LIMIT = 1
 
 
 def _now_iso() -> str:
@@ -172,36 +173,89 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None,
     ) -> AgentRunResult:
         for _ in range(self.max_model_steps):
-            try:
-                model_arguments: dict[str, Any] = {
-                    "messages": self.context_builder.for_model(tuple(messages)),
-                    "tool_specs": self.capabilities.specs,
-                }
-                if text_delta_callback is not None:
-                    model_arguments["text_delta_callback"] = text_delta_callback
-                turn = await to_thread(
-                    self.model.respond,
-                    **model_arguments,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Research Agent model call failed exception_type=%s",
-                    type(exc).__name__,
-                )
-                messages.append(
-                    self._assistant(
-                        context,
-                        "The research model is unavailable for this turn.",
+            response_retries = 0
+            while True:
+                try:
+                    model_arguments: dict[str, Any] = {
+                        "messages": self.context_builder.for_model(tuple(messages)),
+                        "tool_specs": self.capabilities.specs,
+                    }
+                    if text_delta_callback is not None:
+                        model_arguments["text_delta_callback"] = text_delta_callback
+                    turn = await to_thread(
+                        self.model.respond,
+                        **model_arguments,
                     )
-                )
-                await self._checkpoint(checkpoint, messages, calls, results)
-                return self._result(
-                    AgentRunStatus.FAILED,
-                    messages,
-                    calls,
-                    results,
-                    "model_unavailable",
-                )
+                except ModelResponseError as exc:
+                    model_name = str(
+                        getattr(self.model, "model", None)
+                        or type(self.model).__name__
+                    )
+                    logger.warning(
+                        "Research Agent model response invalid model=%s reason=%s "
+                        "retryable=%s partial_content=%s",
+                        model_name,
+                        exc.reason,
+                        exc.retryable,
+                        exc.partial_content,
+                        exc_info=True,
+                    )
+                    if (
+                        exc.retryable
+                        and not exc.partial_content
+                        and response_retries < _MODEL_RESPONSE_RETRY_LIMIT
+                    ):
+                        response_retries += 1
+                        logger.info(
+                            "Retrying Research Agent model response model=%s "
+                            "attempt=%d",
+                            model_name,
+                            response_retries + 1,
+                        )
+                        continue
+                    messages.append(
+                        self._assistant(
+                            context,
+                            "The research model returned an invalid response for "
+                            "this turn. Please retry.",
+                        )
+                    )
+                    await self._checkpoint(checkpoint, messages, calls, results)
+                    return self._result(
+                        AgentRunStatus.FAILED,
+                        messages,
+                        calls,
+                        results,
+                        "model_response_invalid",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    model_name = str(
+                        getattr(self.model, "model", None)
+                        or type(self.model).__name__
+                    )
+                    logger.warning(
+                        "Research Agent model call failed model=%s "
+                        "exception_type=%s message=%s",
+                        model_name,
+                        type(exc).__name__,
+                        str(exc)[:240],
+                        exc_info=True,
+                    )
+                    messages.append(
+                        self._assistant(
+                            context,
+                            "The research model is unavailable for this turn.",
+                        )
+                    )
+                    await self._checkpoint(checkpoint, messages, calls, results)
+                    return self._result(
+                        AgentRunStatus.FAILED,
+                        messages,
+                        calls,
+                        results,
+                        "model_unavailable",
+                    )
+                break
 
             if turn.tool_call is None:
                 messages.append(self._assistant(context, turn.content))

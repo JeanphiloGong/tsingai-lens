@@ -221,6 +221,23 @@ class ModelToolCall:
         object.__setattr__(self, "arguments", dict(self.arguments))
 
 
+class ModelResponseError(RuntimeError):
+    """The provider returned a response that cannot form one model turn."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        retryable: bool = True,
+        partial_content: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.reason = str(reason).strip() or "invalid_response"
+        self.retryable = bool(retryable)
+        self.partial_content = bool(partial_content)
+
+
 @dataclass(frozen=True)
 class ModelTurn:
     content: str = ""
@@ -244,6 +261,7 @@ class ChatModel(Protocol):
 
 __all__ = [
     "ChatModel",
+    "ModelResponseError",
     "ModelToolCall",
     "ModelTurn",
     "RESEARCH_AGENT_PROMPT_VERSION",

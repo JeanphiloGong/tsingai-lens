@@ -11,6 +11,7 @@ from application.chat import (
     AgentRunStatus,
     CapabilityExecutionContext,
     CapabilityRegistry,
+    ModelResponseError,
     ModelToolCall,
     ModelTurn,
     ResearchAgentRunner,
@@ -46,7 +47,7 @@ class _QuestionArguments(BaseModel):
 
 
 class _Model:
-    def __init__(self, *turns: ModelTurn) -> None:
+    def __init__(self, *turns: ModelTurn | Exception) -> None:
         self.turns = deque(turns)
 
     def respond(
@@ -59,6 +60,8 @@ class _Model:
         assert messages
         assert tool_specs
         turn = self.turns.popleft()
+        if isinstance(turn, Exception):
+            raise turn
         if text_delta_callback is not None and turn.content:
             for chunk in (turn.content[:2], turn.content[2:]):
                 if chunk:
@@ -511,3 +514,68 @@ async def test_step_limit_stops_repeated_tool_calls() -> None:
     assert len(capability.executed_arguments) == 2
     assert result.messages[-1].role == "assistant"
     assert "step limit" in result.messages[-1].content.lower()
+
+
+async def test_invalid_model_response_is_retried_once_without_unavailable_error() -> None:
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelResponseError(
+                "empty response",
+                reason="empty_response",
+            ),
+            ModelTurn(content="重试后得到有效回答。"),
+        ),
+        capabilities=CapabilityRegistry(
+            (_Capability("get_collection_context", ToolRisk.READ),)
+        ),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="你好",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.error_code is None
+    assert result.messages[-1].content == "重试后得到有效回答。"
+
+
+async def test_repeated_invalid_model_response_is_distinguished_from_unavailable() -> None:
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelResponseError("empty response", reason="empty_response"),
+            ModelResponseError("empty response", reason="empty_response"),
+        ),
+        capabilities=CapabilityRegistry(
+            (_Capability("get_collection_context", ToolRisk.READ),)
+        ),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="你好",
+    )
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "model_response_invalid"
+    assert "invalid response" in result.messages[-1].content
+
+
+async def test_unexpected_model_failure_remains_model_unavailable() -> None:
+    runner = ResearchAgentRunner(
+        model=_Model(RuntimeError("provider connection failed")),
+        capabilities=CapabilityRegistry(
+            (_Capability("get_collection_context", ToolRisk.READ),)
+        ),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="你好",
+    )
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "model_unavailable"

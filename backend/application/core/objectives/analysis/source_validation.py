@@ -33,6 +33,31 @@ _TABLE_CONTINUATION_MARKER = re.compile(
     r"\s*(?:\(\s*continued\s*\)|continued)$",
     re.IGNORECASE,
 )
+_OBJECTIVE_ASSOCIATION_RELATION_MARKERS = re.compile(
+    r"\b(?:associated|association|correlat(?:e|ed|es|ion)|relationship|"
+    r"influence|influenced|effect|effects|impact|sensitivity|dependent|"
+    r"dependence|compared|comparison|different|varied|varying|as|while|"
+    r"with|between|higher|lower|increase|increased|increasing|decrease|"
+    r"decreased|decreasing|reduce|reduced|reducing|improve|improved|"
+    r"improves|improving|enhance|enhanced|enhances|enhancing)\b",
+    re.IGNORECASE,
+)
+_OBJECTIVE_INTERVENTION_RELATION_MARKERS = re.compile(
+    r"\b(?:effect|effects|influence|influenced|impact|role|dependence|"
+    r"relationship|correlation|sensitivity)\b",
+    re.IGNORECASE,
+)
+_OBJECTIVE_OBSERVED_CHANGE_MARKERS = re.compile(
+    r"\b(?:increase|increased|increases|increasing|decrease|decreased|"
+    r"decreases|decreasing|reduce|reduced|reduces|reducing|change|changed|"
+    r"changes|vary|varied|varies|varying)\b",
+    re.IGNORECASE,
+)
+_OBJECTIVE_MEDIATOR_CAUSE_MARKERS = re.compile(
+    r"\b(?:by|due to|because of|after|following|result(?:ed|s)? from|"
+    r"as a result of)\b",
+    re.IGNORECASE,
+)
 
 
 def _source_validation_failure_record(
@@ -317,6 +342,7 @@ def validate_source_fact(
             )
         inferred_association_variable = _objective_source_association_variable(
             record,
+            source=source,
             source_text=source_text,
             objective_context=objective_context,
             candidate_variables=candidate_variables,
@@ -513,9 +539,141 @@ def _objective_source_with_grounding_sources(
     return merged
 
 
+def _objective_source_sentences(text: str) -> tuple[str, ...]:
+    """Return bounded prose units for source-local role checks.
+
+    Association recovery must not treat every fact in a paper-sized Source as
+    one claim. Sentence-sized units are the smallest useful boundary available
+    here; tables and captions remain intact because they are handled by their
+    dedicated grounding paths.
+    """
+
+    return tuple(
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or ""))
+        if sentence.strip()
+    )
+
+
+def _objective_variable_is_observed_mediator(
+    text: str,
+    variable: str,
+) -> bool:
+    """Detect a variable described as an observed change caused by another factor.
+
+    For example, in ``porosity decreased by preheating`` porosity is an
+    observed mediator, not the intervention in a ``porosity -> elongation``
+    Objective. This is deliberately lexical and conservative: uncertain cases
+    remain descriptive instead of being promoted to an attributable result.
+    """
+
+    normalized_variable = property_matching.normalize_property_label(variable)
+    variable_terms = tuple(
+        dict.fromkeys(
+            term
+            for term in (
+                str(variable or "").strip(),
+                normalized_variable or "",
+            )
+            if term
+        )
+    )
+    lowered = str(text or "").casefold()
+    for term in variable_terms:
+        term_pattern = re.escape(term.casefold()).replace(r"\ ", r"\s+")
+        pattern = re.compile(
+            rf"\b{term_pattern}\b.{{0,80}}"
+            rf"{_OBJECTIVE_OBSERVED_CHANGE_MARKERS.pattern}.{{0,50}}"
+            rf"{_OBJECTIVE_MEDIATOR_CAUSE_MARKERS.pattern}",
+            re.IGNORECASE | re.DOTALL,
+        )
+        if pattern.search(lowered):
+            return True
+    return False
+
+
+def _objective_source_explicitly_links_variable_to_result(
+    *,
+    variable: str,
+    outcome: str,
+    result_text: str,
+    source_text: str,
+    source: Mapping[str, Any] | None = None,
+) -> bool:
+    """Require source-local language before recovering a missing variable.
+
+    A result sentence that names the factor can support an association when it
+    contains relationship language. If the result sentence only names the
+    outcome, a separate Source sentence is accepted only for an explicit
+    ``effect/influence/impact of X on Y`` style statement. This prevents
+    unrelated Methods or mechanism sentences from closing an attribution gap.
+    """
+
+    outcome_text = str(outcome or "").strip()
+    result = str(result_text or "").strip()
+    source_prose = str(source_text or "").strip()
+    if not outcome_text or not source_prose:
+        return False
+
+    if source is not None and source.get("source_kind") == "table":
+        headers = tuple(
+            str(header).strip()
+            for header in source.get("column_headers", ())
+            if str(header).strip()
+        )
+        variable_header = any(
+            property_matching.source_text_mentions_objective_variable(
+                header,
+                variable,
+            )
+            for header in headers
+        )
+        outcome_header = any(
+            property_matching.source_text_mentions_axis(header, outcome)
+            for header in headers
+        )
+        if variable_header and outcome_header:
+            return True
+
+    result_mentions_variable = property_matching.source_text_mentions_objective_variable(
+        result,
+        variable,
+    )
+    if result_mentions_variable:
+        if _objective_variable_is_observed_mediator(result, variable):
+            return False
+        return bool(_OBJECTIVE_ASSOCIATION_RELATION_MARKERS.search(result))
+
+    for sentence in _objective_source_sentences(source_prose):
+        if not property_matching.source_text_mentions_objective_variable(
+            sentence,
+            variable,
+        ) or not property_matching.source_text_mentions_axis(sentence, outcome):
+            continue
+        if _objective_variable_is_observed_mediator(sentence, variable):
+            continue
+        if not _OBJECTIVE_INTERVENTION_RELATION_MARKERS.search(sentence):
+            continue
+        # In ``effect of preheating on porosity`` the Objective variable is the
+        # observed target, not the intervention. Reject that orientation when a
+        # source-local label is available verbatim.
+        variable_key = property_matching.normalize_property_label(variable)
+        if variable_key:
+            variable_pattern = re.escape(variable_key).replace("\\ ", "\\s+")
+            target_pattern = re.compile(
+                rf"\bon\s+(?:the\s+)?{variable_pattern}\b",
+                re.IGNORECASE,
+            )
+            if target_pattern.search(sentence):
+                continue
+        return True
+    return False
+
+
 def _objective_source_association_variable(
     record: Mapping[str, Any],
     *,
+    source: Mapping[str, Any],
     source_text: str,
     objective_context: ResearchObjective | None,
     candidate_variables: tuple[str, ...] = (),
@@ -527,14 +685,17 @@ def _objective_source_association_variable(
     if not isinstance(record.get("reported_result"), Mapping):
         return None
     comparison = record.get("comparison")
+    result_text = str(
+        record["reported_result"].get("result_text") or ""
+    ).strip()
+    result_outcome = str(
+        record["reported_result"].get("outcome") or ""
+    ).strip()
     if isinstance(comparison, Mapping) and comparison.get("comparable") is False:
         # An unresolved pair still carries a real scientific observation when
         # the result sentence explicitly names the Objective variable. Keep
         # that observation as an association, but do not infer endpoints from
         # opaque paper-local labels such as S1/S2 or alpha/beta.
-        result_text = str(
-            record["reported_result"].get("result_text") or ""
-        ).strip()
         explicit_result_variables = tuple(
             dict.fromkeys(
                 variable
@@ -548,15 +709,23 @@ def _objective_source_association_variable(
                 )
             )
         )
+        explicit_result_variables = tuple(
+            variable
+            for variable in explicit_result_variables
+            if _objective_source_explicitly_links_variable_to_result(
+                variable=variable,
+                outcome=result_outcome,
+                result_text=result_text,
+                source_text=source_text,
+                source=source,
+            )
+        )
         if not explicit_result_variables:
             return None
     # A comparison can use source-local group labels (for example, Sample S1
     # and Sample S2) while the result sentence still names the actual Objective
     # factor (for example, medium and high VED).  The group labels do not justify
     # a variable by themselves; only one explicit Source match may restore it.
-    result_text = str(
-        record["reported_result"].get("result_text") or ""
-    ).strip()
     frame_candidates = tuple(
         dict.fromkeys(
             str(variable).strip()
@@ -568,6 +737,13 @@ def _objective_source_association_variable(
         variable
         for variable in frame_candidates
         if property_matching.source_text_mentions_axis(result_text, variable)
+        and _objective_source_explicitly_links_variable_to_result(
+            variable=variable,
+            outcome=result_outcome,
+            result_text=result_text,
+            source_text=source_text,
+            source=source,
+        )
     )
     if len(result_candidates) == 1:
         return result_candidates[0]
@@ -577,6 +753,13 @@ def _objective_source_association_variable(
         variable
         for variable in frame_candidates
         if property_matching.source_text_mentions_axis(source_text, variable)
+        and _objective_source_explicitly_links_variable_to_result(
+            variable=variable,
+            outcome=result_outcome,
+            result_text=result_text,
+            source_text=source_text,
+            source=source,
+        )
     )
     if len(source_candidates) == 1:
         return source_candidates[0]
@@ -588,6 +771,13 @@ def _objective_source_association_variable(
         if property_matching.source_text_mentions_objective_variable(
             source_text,
             variable,
+        )
+        and _objective_source_explicitly_links_variable_to_result(
+            variable=variable,
+            outcome=result_outcome,
+            result_text=result_text,
+            source_text=source_text,
+            source=source,
         )
     )
     return matches[0] if len(matches) == 1 else None

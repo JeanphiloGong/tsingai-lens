@@ -8051,6 +8051,120 @@ def test_source_validation_preserves_explicit_objective_association_without_inve
     assert records[0]["resolution_status"] == "partial"
 
 
+def test_source_validation_does_not_promote_observed_mediator_to_objective_variable() -> None:
+    """A process -> porosity -> elongation passage is not porosity intervention evidence."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-mediator",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "results-preheating",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": (
+                "Porosity size and distribution decreased by preheating the build "
+                "platform. Preheating increased elongation from 72% to 82%."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": 82,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Preheating increased elongation from 72% to 82%.",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["changed_variables"] == []
+    assert records[0]["comparison"] is None
+    assert records[0]["attribution_scope"] == "descriptive_only"
+
+
+def test_source_validation_keeps_explicit_mediator_outcome_association() -> None:
+    """An explicit porosity-elongation clause remains reviewable as an association."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-association",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-porosity",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = "Elongation increased as porosity decreased from 1.2% to 0.4%."
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": result_text,
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert [item["name"] for item in records[0]["changed_variables"]] == [
+        "porosity"
+    ]
+    assert records[0]["attribution_scope"] == "association_only"
+    assert records[0]["comparison"] is None
+
+
 def test_source_validation_preserves_table_association_without_row_endpoints() -> None:
     objective = _research_objective(
         {
@@ -9386,6 +9500,7 @@ def test_research_objective_prompt_separates_result_and_context_authority() -> N
     assert "SAME-PAPER CONTEXT BUNDLE" in prompt
     assert "context fields" in system_prompt
     assert "result values" in system_prompt
+    assert "intermediate-to-outcome intervention" in system_prompt
 
 
 def test_research_objective_prompt_requires_context_scope_for_explicit_parameters() -> None:

@@ -115,7 +115,7 @@ _SOURCE_EXTRACTION_MAX_ITEMS = 8
 # Candidate selection and bounded same-paper rereads are part of the scientific
 # extraction contract. Bump it so persisted checkpoints are rebuilt rather than
 # replaying the pre-closure route set.
-OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v17"
+OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v18"
 _ADAPTIVE_CONTEXT_HEADING_MARKERS = (
     "design",
     "method",
@@ -286,6 +286,18 @@ DECISION PROCESS
    are unresolved, and use `descriptive_only` or `not_attributable`. When SOURCE
    explicitly names the varied factor, use that exact factor in `axis_names`;
    otherwise use only a SOURCE-local grouping axis such as `sample`.
+   Only a factor that SOURCE explicitly says was manipulated, assigned, varied,
+   applied, treated, or compared as an experimental condition may appear in
+   `changed_variables`. A measured outcome, mediator, mechanism, defect,
+   porosity, grain size, phase observation, or other intermediate state is not a
+   changed variable merely because it is mentioned near the objective outcome.
+   If SOURCE describes a process causing an intermediate observation and a
+   separate outcome (for example, preheating reduced porosity and increased
+   elongation), preserve those source-backed observations but do not infer an
+   intermediate-to-outcome intervention. Keep an `association_only` variable
+   only when SOURCE explicitly compares that variable with the outcome (for
+   example, elongation increased as porosity decreased); otherwise leave
+   `changed_variables` empty and use a descriptive or non-attributable result.
 5. One extraction represents one baseline-to-target comparison interval. If SOURCE
    reports an ordered condition series and explicitly states how the objective
    outcome changes with that order, choose one adjacent source-supported pair. For

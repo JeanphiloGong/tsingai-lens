@@ -366,3 +366,23 @@ def test_openai_chat_model_marks_empty_stream_as_invalid_response() -> None:
 
     assert exc_info.value.reason == "empty_response"
     assert exc_info.value.partial_content is False
+
+
+def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_response() -> None:
+    class BrokenStream:
+        def __iter__(self):
+            raise ValueError("invalid provider stream")
+            yield  # pragma: no cover
+
+    client, _completions = _client(BrokenStream())
+    model = OpenAIChatModel(client=client, model="test-model")
+
+    with pytest.raises(ModelResponseError) as exc_info:
+        model.respond(
+            messages=(_message(),),
+            tool_specs=(),
+            text_delta_callback=lambda _content: None,
+        )
+
+    assert exc_info.value.reason == "invalid_stream"
+    assert exc_info.value.partial_content is False

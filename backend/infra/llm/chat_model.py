@@ -152,40 +152,51 @@ class OpenAIChatModel:
         tool_call_index: int | None = None
         ignored_tool_call_indexes: set[int] = set()
         last_chunk = None
-        for chunk in chunks:
-            last_chunk = chunk
-            choices = tuple(getattr(chunk, "choices", None) or ())
-            if not choices:
-                continue
-            delta = choices[0].delta
-            content = str(getattr(delta, "content", None) or "")
-            if content:
-                content_parts.append(content)
-                text_delta_callback(content)
-            reasoning = str(
-                getattr(delta, "reasoning_content", None)
-                or getattr(delta, "reasoning", None)
-                or ""
-            )
-            if reasoning:
-                reasoning_parts.append(reasoning)
-            for raw_call in tuple(getattr(delta, "tool_calls", None) or ()):
-                index = int(getattr(raw_call, "index", 0) or 0)
-                if tool_call_index is not None and index != tool_call_index:
-                    ignored_tool_call_indexes.add(index)
+        try:
+            for chunk in chunks:
+                last_chunk = chunk
+                choices = tuple(getattr(chunk, "choices", None) or ())
+                if not choices:
                     continue
-                tool_call_index = index
-                if (getattr(raw_call, "type", None) or "function") != "function":
-                    raise _invalid_response(
-                        "research model returned an unsupported tool call type",
-                        reason="unsupported_tool_call",
-                        partial_content=bool(content_parts),
-                    )
-                function = getattr(raw_call, "function", None)
-                tool_name_parts.append(str(getattr(function, "name", None) or ""))
-                tool_argument_parts.append(
-                    str(getattr(function, "arguments", None) or "")
+                delta = choices[0].delta
+                content = str(getattr(delta, "content", None) or "")
+                if content:
+                    content_parts.append(content)
+                    text_delta_callback(content)
+                reasoning = str(
+                    getattr(delta, "reasoning_content", None)
+                    or getattr(delta, "reasoning", None)
+                    or ""
                 )
+                if reasoning:
+                    reasoning_parts.append(reasoning)
+                for raw_call in tuple(getattr(delta, "tool_calls", None) or ()):
+                    index = int(getattr(raw_call, "index", 0) or 0)
+                    if tool_call_index is not None and index != tool_call_index:
+                        ignored_tool_call_indexes.add(index)
+                        continue
+                    tool_call_index = index
+                    if (getattr(raw_call, "type", None) or "function") != "function":
+                        raise _invalid_response(
+                            "research model returned an unsupported tool call type",
+                            reason="unsupported_tool_call",
+                            partial_content=bool(content_parts),
+                        )
+                    function = getattr(raw_call, "function", None)
+                    tool_name_parts.append(
+                        str(getattr(function, "name", None) or "")
+                    )
+                    tool_argument_parts.append(
+                        str(getattr(function, "arguments", None) or "")
+                    )
+        except ModelResponseError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise _invalid_response(
+                "research model returned an invalid streamed response",
+                reason="invalid_stream",
+                partial_content=bool(content_parts),
+            ) from exc
 
         record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
         record_llm_completion(last_chunk, requested_model=self.model)

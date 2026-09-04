@@ -5,7 +5,7 @@ from typing import Any
 
 PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION = "paper_fact_text_window.v1"
 PAPER_FACT_TABLE_BATCH_PROMPT_VERSION = "paper_fact_table_batch.v1"
-PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v4"
+PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v5"
 
 _COMMON_SYSTEM_PROMPT = """
 You are extracting structured research facts for a materials-literature backend.
@@ -376,6 +376,7 @@ def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]
                 "heading_path",
                 "column_headers",
                 "table_markdown",
+                "table_visual_text",
             )
             if source.get(key) not in (None, "", [], {})
         },
@@ -391,6 +392,9 @@ def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "`source.table_markdown`. Its first row is the canonical flattened header "
         "from `source.column_headers`; caption and heading context apply to every "
         "row in the slice.\n"
+        "`source.table_visual_text` is an additional clipped view of the same "
+        "PDF table region. Use it to resolve visual line wrapping, but never "
+        "change a value that is not present in either supplied table view.\n"
         "`repaired_table_matrix` must contain that header followed by every logical "
         "data row in the Markdown, in the same order and with the same logical "
         "columns. Do not add, reorder, summarize, or truncate logical data rows. "
@@ -402,23 +406,11 @@ def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "mean belongs to the preceding unresolved mean; the new mean receives the "
         "next uncertainty fragment in that column. Never duplicate one uncertainty "
         "to fill another row.\n"
-        "Nearby complete rows can support "
-        "repairs such as `as-SLM (100/` plus following `100)` fragments becoming "
-        "`as-SLM (100/100)` and `100) HT-SLM (100/` becoming "
-        "`HT-SLM (100/100)`. Preserve numeric result cells exactly.\n"
-        "Cross-row specimen-label repair examples:\n"
-        "- Input row: [`as-SLM (100/`, `-`, `100`, `100`, `278`, `97.83`] -> "
-        "[`as-SLM (100/100)`, `-`, `100`, `100`, `278`, `97.83`].\n"
-        "- Input row: [`100) HT-SLM (100/`, `Furnace HT`, `100`, `100`, `278`, "
-        "`98.70`] -> [`HT-SLM (100/100)`, `Furnace HT`, `100`, `100`, `278`, "
-        "`98.70`].\n"
-        "- Input row: [`100) HIP-SLM (100/`, `HIP`, `100`, `100`, `278`, "
-        "`98.15`] -> [`HIP-SLM (100/100)`, `HIP`, `100`, `100`, `278`, "
-        "`98.15`].\n"
-        "Do not output labels like `100) HT-SLM (100/100)` or "
-        "`100) HIP-SLM (100/100)`: the leading `100)` is a carried-over "
-        "closing fragment from the previous row label, not part of the current "
-        "specimen name.\n"
+        "Nearby complete rows may support joining a cell fragment with an adjacent "
+        "fragment from the same table. Preserve every label token that is present "
+        "in the supplied table and do not invent specimen names, process labels, "
+        "or numeric levels. A token may move into its structurally repaired cell "
+        "only when the token already occurs in the supplied table slice.\n"
         "Record each changed cell in `repairs` with its Markdown-local row_index "
         "(header is row 0), column, before, after, and reason. If no confident "
         "repair is possible, return the Markdown matrix unchanged and explain the "

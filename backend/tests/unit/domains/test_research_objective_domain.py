@@ -15,6 +15,7 @@ from domain.core import (
     PaperSourceUnitCoverage,
     PaperSourceUnitCoverageStatus,
     PaperResearchScope,
+    PaperResearchSignal,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
     PaperResearchRelationship,
@@ -27,6 +28,71 @@ from domain.core import (
     normalize_objective_confidence,
     normalize_objective_terms,
 )
+
+
+@pytest.mark.parametrize(
+    "variable_role",
+    ["varied", "compared", "modeled", "fixed", "context", "uncertain"],
+)
+def test_paper_research_variable_signal_round_trips_scientific_role(
+    variable_role: str,
+) -> None:
+    signal = PaperResearchSignal.from_mapping(
+        {
+            "document_id": "paper-1",
+            "signal_type": "variable",
+            "label": "processing speed",
+            "variable_role": variable_role,
+            "design_type": "experimental",
+            "claim_scope": "current_work",
+            "source_refs": [
+                {"source_kind": "block", "source_ref": "methods-1"}
+            ],
+        }
+    )
+
+    assert signal.variable_role == variable_role
+    assert PaperResearchSignal.from_mapping(signal.to_record()) == signal
+
+
+def test_paper_research_outcome_signal_has_no_factor_role() -> None:
+    signal = PaperResearchSignal.from_mapping(
+        {
+            "document_id": "paper-1",
+            "signal_type": "outcome",
+            "label": "relative density",
+            "variable_role": "not_applicable",
+            "design_type": "experimental",
+            "claim_scope": "current_work",
+            "source_refs": [
+                {"source_kind": "block", "source_ref": "results-1"}
+            ],
+        }
+    )
+
+    assert signal.variable_role == "not_applicable"
+
+
+@pytest.mark.parametrize(
+    ("signal_type", "variable_role"),
+    [("variable", "not_applicable"), ("outcome", "varied")],
+)
+def test_paper_research_signal_rejects_role_type_mismatch(
+    signal_type: str,
+    variable_role: str,
+) -> None:
+    with pytest.raises(ValueError, match="variable role"):
+        PaperResearchSignal.from_mapping(
+            {
+                "document_id": "paper-1",
+                "signal_type": signal_type,
+                "label": "research axis",
+                "variable_role": variable_role,
+                "source_refs": [
+                    {"source_kind": "block", "source_ref": "source-1"}
+                ],
+            }
+        )
 
 
 def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> None:
@@ -665,6 +731,114 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert "evidence_unit_id" not in extracted.to_record()
 
 
+def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:
+    evidence = _candidate_evidence(
+        selection_status="extracted",
+        changed_variables=[
+            {
+                "name": "laser exposure condition",
+                "baseline_value": None,
+                "target_value": None,
+            }
+        ],
+        reported_result={
+            "outcome": "residual stress",
+            "value": None,
+            "unit": None,
+            "direction": "decrease",
+            "result_text": "Scanning strategy was associated with lower residual stress.",
+        },
+        attribution_scope="association_only",
+        resolution_status="partial",
+    )
+
+    assert evidence.changed_variables[0].baseline_value is None
+    assert evidence.changed_variables[0].target_value is None
+    assert evidence.supports_finding is True
+
+
+def test_objective_evidence_exposes_research_state_without_promoting_incomplete_facts() -> None:
+    comparable = _candidate_evidence(
+        selection_status="extracted",
+        changed_variables=[
+            {
+                "name": "heat treatment",
+                "baseline_value": "as-built",
+                "target_value": "annealed",
+            }
+        ],
+        comparison={
+            "baseline_label": "as-built",
+            "target_label": "annealed",
+            "axis_names": ["heat treatment"],
+            "comparable": True,
+        },
+        reported_result={
+            "outcome": "yield strength",
+            "value": 610,
+            "unit": "MPa",
+            "direction": "increase",
+            "result_text": "Yield strength increased to 610 MPa.",
+        },
+        attribution_scope="isolated_effect",
+        resolution_status="resolved",
+    )
+    association = _candidate_evidence(
+        selection_status="extracted",
+        changed_variables=[{"name": "laser power"}],
+        reported_result={
+            "outcome": "porosity",
+            "value": None,
+            "unit": None,
+            "direction": "decrease",
+            "result_text": "Higher laser power was associated with lower porosity.",
+        },
+        attribution_scope="association_only",
+        resolution_status="partial",
+    )
+    descriptive = _candidate_evidence(
+        selection_status="extracted",
+        reported_result={
+            "outcome": "microstructure",
+            "value": None,
+            "unit": None,
+            "direction": "mixed",
+            "result_text": "The sample showed a cellular microstructure.",
+        },
+        attribution_scope="descriptive_only",
+        resolution_status="partial",
+    )
+    incomparable = _candidate_evidence(
+        selection_status="extracted",
+        comparison={
+            "baseline_label": "as-built",
+            "target_label": "heat-treated",
+            "axis_names": ["heat treatment"],
+            "comparable": False,
+            "incomparability_reasons": ["Different test methods."],
+        },
+        reported_result={
+            "outcome": "yield strength",
+            "value": 610,
+            "unit": "MPa",
+            "direction": "increase",
+            "result_text": "Yield strength increased.",
+        },
+        attribution_scope="not_attributable",
+        resolution_status="partial",
+    )
+    failed = _candidate_evidence(
+        selection_status="failed",
+        failure_reason="Provider timeout.",
+    )
+
+    assert comparable.evidence_status == "comparable"
+    assert association.evidence_status == "association_only"
+    assert descriptive.evidence_status == "descriptive"
+    assert incomparable.evidence_status == "non_comparable"
+    assert failed.evidence_status == "extraction_failed"
+
+
 def test_objective_evidence_result_preserves_categorical_transition() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
@@ -704,9 +878,10 @@ def test_objective_evidence_result_preserves_categorical_transition() -> None:
         "baseline_value": "alpha-prime",
         "target_value": "alpha+beta",
         "unit": None,
-        "direction": "changed",
-        "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
-    }
+            "direction": "changed",
+            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+            "result_kind": "observed",
+        }
 
 
 def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:

@@ -14,6 +14,7 @@ from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
 from application.core.objectives.analysis.source_extraction import (
+    StructuredDirectEvidenceExtractions,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
 )
@@ -103,6 +104,15 @@ def _source_extraction_payload(user_prompt: str) -> dict[str, Any]:
             source.update(decoded_source)
     else:
         source["text"] = source_text
+    # The extraction prompt appends same-paper context after the authoritative
+    # Source. Keep the test double's Source text source-local so a verbatim
+    # result clause remains valid grounding evidence.
+    source_text_without_bundle = source.get("text")
+    if isinstance(source_text_without_bundle, str):
+        source["text"] = source_text_without_bundle.split(
+            "\nSAME-PAPER CONTEXT BUNDLE (CONTEXT ONLY):",
+            maxsplit=1,
+        )[0].rstrip()
     return {
         "objective": {
             "question": prompt_fields.get("OBJECTIVE QUESTION", ""),
@@ -168,6 +178,17 @@ class FakeDomainModelExtractor:
             response = self.route_source(payload)
         elif response_model is StructuredEvidenceExtractions:
             response = self.extract_source(_source_extraction_payload(user_prompt))
+        elif response_model is StructuredDirectEvidenceExtractions:
+            extracted = self.extract_source(_source_extraction_payload(user_prompt))
+            response = StructuredDirectEvidenceExtractions.model_validate(
+                {
+                    "extractions": [
+                        item.model_dump()
+                        for item in extracted.extractions
+                        if item.reported_result is not None
+                    ]
+                }
+            )
         elif response_model is StructuredFindingSynthesis:
             response = StructuredFindingSynthesis()
         else:

@@ -21,9 +21,10 @@ Findings.
 2. asks `PaperResearchMapExtractor` for paper role, material and process themes,
    variable-to-outcome research axes, review synthesis, gaps, and citation leads;
 3. consolidates the window outputs into one `PaperResearchMap`/Paper Map;
-4. spends a bounded 24-Source expansion budget when unresolved scientific
-   signals require more reading, prioritizing concrete metric terms and stopping
-   early when a round adds no new scope;
+4. expands only when unresolved signals need more reading, prioritizing concrete
+   metric terms and explicit condition or group values; selection stops when the
+   smallest candidate set covers the unresolved map fields or when no remaining
+   Source can add coverage;
 5. reconciles unresolved signals without inventing Source facts;
 6. records map status and limitations.
 
@@ -31,6 +32,13 @@ This is lightweight preparation for scope decisions. It does not reconstruct
 experiments or create `ObjectiveEvidence`. Its contract cannot represent sample
 context, test context, comparators, fixed conditions, parameter levels, or
 measurements.
+
+A mapped relationship may use a factor only when the supplied Source states
+that the paper varied it, compared groups defined by it, or modeled it as an
+independent axis. Fixed settings, generic parameter lists, background context,
+and uncertain roles remain unresolved map signals with Source lineage; neither
+the reconciliation model nor Objective discovery may promote them to
+`varied_factors`.
 
 ## Candidate Discovery
 
@@ -51,6 +59,16 @@ Candidate formation identifies shared scientific themes while preserving each
 paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,
 states, methods, or broad outcome families into a directly comparable question.
+
+The discovered Objective list is a bounded human review set, not the complete
+Paper Map. The map remains the discovery ledger: every emitted relationship,
+unresolved signal, rejection, and relationship that was not surfaced in the
+review set keeps its document and Source lineage. The review set is selected
+with a minimum and maximum budget and first gives each selected paper room to
+contribute concrete questions, then fills remaining slots by cross-paper
+support, structured-result coverage, relationship count, and confidence. A
+researcher can still create another Objective manually from any map
+relationship; the bounded list only controls the first review surface.
 
 The resulting `seed_document_ids` record the papers whose mapped relationships
 caused the question to be formed. They are question provenance, not the complete
@@ -147,12 +165,25 @@ The extraction disposition distinguishes:
 - no grounded outcome Evidence;
 - technical extraction failure.
 
+When a result is missing material, sample, process, comparison, or test
+context, the service performs an adaptive same-paper context expansion. It
+prioritizes Sources with explicit condition values, group identities, and
+Objective terms, then selects the smallest set that can cover the missing field
+families. It does not extract every paper block merely because a heading is a
+Methods or Results heading. If no remaining Source can close the gap, or a
+technical execution budget ends the inspection, the omission is recorded in
+the analysis diagnostic trace and the selected route explains that the scope
+can be expanded later. An omitted Source is therefore an uninspected
+uncertainty, never evidence that the paper lacks the fact.
+
 ### Within-paper binding
 
 Methods, Results, tables, and captions may describe different parts of one real
 experiment. Binding joins them only when sample, process, varied conditions,
-controls, measurement method, and outcome are supportable. Jointly changed
-variables remain a joint effect. Missing context stays missing unless another
+controls, measurement method, and outcome are supportable. Explicitly reported
+jointly changed variables may remain a joint effect; a deterministic
+multi-factor row contrast is retained as an association only. Missing context
+stays missing unless another
 Source inspected for the confirmed Objective supports it; Paper Map values are
 never used to fill an experiment draft.
 
@@ -167,6 +198,32 @@ Evidence.
 A succeeded analysis may publish zero Findings when inspection completed but no
 defensible comparison survived. When all relevant papers fail technically, the
 analysis remains failed and retryable.
+
+## Information-Parity Acceptance
+
+The quality bar is not valid JSON or a fluent summary. Given the same papers,
+the same confirmed question, and the same preparation snapshot, a researcher
+must be able to recover the same decision-relevant material from the published
+analysis: relevant papers, concrete variables and outcomes, sample/process/test
+conditions, numerical values and units, comparison limits, and source
+locators. Each item must be traceable to its Source. Missing or conflicting
+material remains explicit as an uncertainty, non-comparable result, or
+abstention; it cannot be silently filled from the Paper Map or another paper.
+
+Acceptance therefore checks the chain end to end:
+
+```text
+same papers + confirmed Objective
+  -> same relevant-paper and Source recall
+  -> source-local facts with complete lineage
+  -> within-paper experiment binding
+  -> comparable / descriptive / abstained Evidence
+  -> Finding, or an explicit no-defensible-comparison result
+```
+
+Technical failures such as provider timeouts, invalid JSON, token saturation,
+and retry exhaustion are recorded separately as `extraction_failed`. They are
+not converted into scientific absence and do not count as a valid conclusion.
 
 Each document inspection is independently resumable. Its reuse fingerprint
 covers the confirmed Objective's scientific intent, the exact prepared Document,

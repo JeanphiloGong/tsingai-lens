@@ -77,7 +77,8 @@ records.
 - Objective scope is explicit and records preparation fingerprints.
 - Evidence must be grounded in the cited Source before normalization or
   comparison.
-- Jointly varied factors remain joint effects.
+- Explicit Source claims about jointly varied factors remain joint effects;
+  deterministic row-derived multi-factor contrasts remain association-only.
 - Missing or incompatible conditions remain visible.
 - Provider failure is technical failure, not scientific absence.
 

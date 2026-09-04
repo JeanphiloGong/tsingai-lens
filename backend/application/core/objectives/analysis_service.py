@@ -32,6 +32,126 @@ _PIPELINE_VERSION = "objective-analysis.v2"
 _ANALYSIS_MAX_CONCURRENCY = 4
 
 
+_EVIDENCE_REVIEW_GAP_LIMIT = 200
+
+
+def _evidence_review_summary(
+    evidence_records: tuple[Any, ...],
+) -> dict[str, Any]:
+    """Build the researcher-facing disposition of every published Evidence.
+
+    Finding synthesis is intentionally conservative and may return no Finding.
+    The evidence ledger still needs to explain what was observed, what remains
+    incomplete, and which failures are technical.  This summary is derived at
+    read time from the immutable Evidence records, so it does not introduce a
+    second persistence contract or silently discard a scientific state.
+    """
+
+    status_counts: dict[str, int] = {}
+    result_count = 0
+    gaps: list[dict[str, Any]] = []
+    for evidence in evidence_records:
+        status = str(getattr(evidence, "evidence_status", "") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if getattr(evidence, "reported_result", None) is not None:
+            result_count += 1
+        if status == "comparable":
+            continue
+        result = getattr(evidence, "reported_result", None)
+        gaps.append(
+            {
+                "evidence_id": str(getattr(evidence, "evidence_id", "") or ""),
+                "document_id": str(getattr(evidence, "document_id", "") or ""),
+                "source_kind": str(getattr(evidence, "source_kind", "") or ""),
+                "source_ref": str(getattr(evidence, "source_ref", "") or ""),
+                "page_numbers": list(getattr(evidence, "page_numbers", ()) or ()),
+                "evidence_status": status,
+                "reason": str(
+                    getattr(evidence, "evidence_status_reason", "")
+                    or "Evidence is not ready for a strict cross-paper comparison."
+                ),
+                "outcome": (
+                    str(getattr(result, "outcome", "") or "")
+                    if result is not None
+                    else None
+                ),
+                "source_excerpt": str(
+                    getattr(evidence, "source_excerpt", "") or ""
+                )[:1200],
+            }
+        )
+    ordered_gaps = sorted(
+        gaps,
+        key=lambda item: (
+            item["document_id"],
+            item["source_kind"],
+            item["source_ref"],
+            item["evidence_id"],
+        ),
+    )
+    return {
+        "total_evidence_count": len(evidence_records),
+        "result_count": result_count,
+        "comparable_evidence_count": status_counts.get("comparable", 0),
+        "gap_count": len(ordered_gaps),
+        "status_counts": dict(sorted(status_counts.items())),
+        "gaps": ordered_gaps[:_EVIDENCE_REVIEW_GAP_LIMIT],
+        "omitted_gap_count": max(0, len(ordered_gaps) - _EVIDENCE_REVIEW_GAP_LIMIT),
+    }
+
+
+def _scientific_abstention(
+    artifacts: ObjectiveAnalysisArtifacts,
+) -> tuple[str | None, str | None]:
+    """Explain a successful analysis with evidence but no defensible Finding.
+
+    A researcher distinguishes a paper that reports an observation from a
+    comparison that supports an attributed conclusion.  Preserve that
+    distinction in the published analysis instead of exposing ``findings=[]``
+    as if the analysis had no useful result or had silently failed.
+    """
+
+    if artifacts.findings:
+        return None, None
+
+    evidence = tuple(artifacts.evidence_records)
+    status_counts: dict[str, int] = {}
+    for record in evidence:
+        status = record.evidence_status
+        status_counts[status] = status_counts.get(status, 0) + 1
+    status_note = "; ".join(
+        f"{status}={count}" for status, count in sorted(status_counts.items())
+    ) or "none"
+
+    if not evidence:
+        return (
+            "no_grounded_evidence",
+            "No source-backed Evidence was retained, so the Objective cannot support a scientific conclusion.",
+        )
+
+    reported_results = tuple(
+        record
+        for record in evidence
+        if record.selection_status == "extracted" and record.reported_result is not None
+    )
+    if reported_results:
+        return (
+            "insufficient_evidence",
+            f"{len(reported_results)} source-backed result(s) were retained, but none satisfied the comparison conditions for a Finding. Evidence status counts: {status_note}.",
+        )
+
+    if all(record.evidence_status == "extraction_failed" for record in evidence):
+        return (
+            "no_grounded_evidence",
+            f"{len(evidence)} Evidence item(s) were retained, but all failed technical extraction before a source-backed result could be established. Evidence status counts: {status_note}.",
+        )
+
+    return (
+        "no_comparable_evidence",
+        f"{len(evidence)} Evidence item(s) were retained, but none contained a source-backed reported result that could be compared for this Objective. Evidence status counts: {status_note}.",
+    )
+
+
 class ObjectiveAnalysisDispatchError(RuntimeError):
     """A queued Objective analysis could not be handed to an asyncio worker."""
 
@@ -408,6 +528,7 @@ class ObjectiveAnalysisService:
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )
+            abstention_reason, abstention_note = _scientific_abstention(artifacts)
             objective, completed = await self.objective_repository.publish_analysis(
                 collection_id,
                 objective_id,
@@ -415,6 +536,8 @@ class ObjectiveAnalysisService:
                 contributions=artifacts.contributions,
                 evidence_records=artifacts.evidence_records,
                 findings=artifacts.findings,
+                abstention_reason=abstention_reason,
+                abstention_note=abstention_note,
             )
             return await self._result(collection_id, objective, analysis=completed)
         except Exception as exc:  # noqa: BLE001
@@ -499,6 +622,7 @@ class ObjectiveAnalysisService:
             active = None
         findings = ()
         paper_contributions = ()
+        evidence_records = ()
         warnings: list[str] = []
         if published is not None:
             paper_contributions = await self.objective_repository.list_contributions(
@@ -513,6 +637,11 @@ class ObjectiveAnalysisService:
                 offset=0,
                 limit=50,
             )
+            evidence_records = await self._all_published_evidence(
+                collection_id,
+                objective.objective_id,
+                published.analysis_version,
+            )
             seen_warnings: set[str] = set()
             for contribution in paper_contributions:
                 for warning in contribution.warnings:
@@ -521,6 +650,33 @@ class ObjectiveAnalysisService:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
+                for status, count in contribution.evidence_status_counts:
+                    if status == "comparable" or count <= 0:
+                        continue
+                    scoped_status = (
+                        f"{contribution.document_id}: {count} Evidence item(s) "
+                        f"classified as {status}."
+                    )
+                    if scoped_status in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_status)
+                    warnings.append(scoped_status)
+                if (
+                    contribution.evidence_disposition
+                    in {
+                        "no_routable_evidence",
+                        "no_comparable_evidence",
+                        "extraction_failed",
+                    }
+                    and contribution.evidence_disposition_reason
+                ):
+                    scoped_reason = (
+                        f"{contribution.document_id}: "
+                        f"{contribution.evidence_disposition_reason}"
+                    )
+                    if scoped_reason not in seen_warnings:
+                        seen_warnings.add(scoped_reason)
+                        warnings.append(scoped_reason)
         objective_record = await self.objective_repository.read_objective_record(
             collection_id,
             objective.objective_id,
@@ -533,6 +689,7 @@ class ObjectiveAnalysisService:
             "published_analysis": published,
             "findings": findings,
             "paper_contributions": paper_contributions,
+            "evidence_review": _evidence_review_summary(evidence_records),
             "warnings": warnings,
         }
 

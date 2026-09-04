@@ -12,6 +12,7 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import (
+    StructuredExperimentalPaperMap,
     StructuredPaperResearchMap,
 )
 from application.core.objectives.llm.structured_response import (
@@ -19,14 +20,33 @@ from application.core.objectives.llm.structured_response import (
 )
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
+    _PaperSignalInput,
 )
-from domain.core import PaperResearchMap, PaperResearchScope
+from domain.core import PaperResearchMap, PaperResearchScope, PaperResearchSignal
 from domain.source import (
     SourceDocument,
     build_source_document_tree,
     source_documents_from_records,
 )
 from infra.llm.usage import capture_llm_usage, record_llm_completion
+
+
+def test_experimental_paper_map_accepts_bounded_unresolved_signal_overflow() -> None:
+    signals = [
+        {
+            "signal_type": "outcome",
+            "label": f"outcome {index}",
+            "variable_role": "not_applicable",
+            "source_labels": ["S1"],
+        }
+        for index in range(9)
+    ]
+
+    parsed = StructuredExperimentalPaperMap.model_validate(
+        {"unresolved_signals": signals}
+    )
+
+    assert len(parsed.unresolved_signals) == 9
 
 
 class _WindowExtractor:
@@ -136,6 +156,11 @@ class _WindowExtractor:
                     {
                         "signal_type": signal_type,
                         "label": label,
+                        "variable_role": (
+                            "varied"
+                            if signal_type == "variable"
+                            else "not_applicable"
+                        ),
                         "material_scope": ["316L stainless steel"],
                         "process_context": process_context,
                         "source_unit_ids": source_ids(marker),
@@ -280,6 +305,12 @@ class _BoundedSignalReconciliationExtractor(_WindowExtractor):
             signals.append(
                 {
                     **spec,
+                    "variable_role": spec.get(
+                        "variable_role",
+                        "varied"
+                        if spec.get("signal_type") == "variable"
+                        else "not_applicable",
+                    ),
                     "source_unit_ids": [source_unit["source_unit_id"]],
                     "confidence": 0.9,
                 }
@@ -1034,6 +1065,7 @@ def test_short_singleton_saturation_recovers_through_source_local_signals():
                         {
                             "signal_type": "variable",
                             "label": "build plate temperature",
+                            "variable_role": "varied",
                             "experiment_label": "Miranda et al.",
                             "claim_scope": "background",
                             "material_scope": ["Ti-6Al-4V"],
@@ -1044,6 +1076,7 @@ def test_short_singleton_saturation_recovers_through_source_local_signals():
                         {
                             "signal_type": "outcome",
                             "label": "residual stress",
+                            "variable_role": "not_applicable",
                             "experiment_label": "Miranda et al.",
                             "claim_scope": "background",
                             "material_scope": ["Ti-6Al-4V"],
@@ -2457,6 +2490,68 @@ def test_review_cited_experiment_cannot_become_current_work():
     ]
 
 
+def test_resolve_window_result_merges_duplicate_relationships_and_preserves_sources():
+    payload = {
+        "window_id": "results-duplicate-relationship",
+        "source_units": [
+            {
+                "source_unit_id": "source-result-1",
+                "source_kind": "block",
+                "source_ref": "results-1",
+                "content": "Laser power was varied and porosity was measured.",
+            },
+            {
+                "source_unit_id": "source-result-2",
+                "source_kind": "table",
+                "source_ref": "table-1",
+                "content": "Porosity values for the laser-power series.",
+            },
+        ],
+    }
+    parsed = StructuredPaperResearchMap(
+        doc_role="experimental",
+        studies=[
+            {
+                "experiment_label": "laser-power study",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "relationships": [
+                    {
+                        "varied_factors": ["laser power"],
+                        "outcome": "porosity",
+                        "source_unit_ids": ["source-result-1"],
+                        "confidence": 0.7,
+                    },
+                    {
+                        "varied_factors": ["laser power"],
+                        "outcome": "porosity",
+                        "source_unit_ids": ["source-result-2"],
+                        "confidence": 0.9,
+                    },
+                ],
+            }
+        ],
+    )
+
+    skim, signals = PaperResearchMapService()._resolve_window_result(
+        document_id="paper-duplicate-relationship",
+        payload=payload,
+        parsed=parsed,
+    )
+
+    assert signals == ()
+    assert len(skim.studies) == 1
+    assert len(skim.studies[0].relationships) == 1
+    relationship = skim.studies[0].relationships[0]
+    assert relationship.varied_factors == ("laser power",)
+    assert relationship.outcome == "porosity"
+    assert {(item.source_kind, item.source_ref) for item in relationship.source_refs} == {
+        ("block", "results-1"),
+        ("table", "table-1"),
+    }
+    assert relationship.confidence == 0.9
+
+
 def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
     artifacts, tree = _artifacts(
         blocks=[
@@ -2654,6 +2749,126 @@ def test_methods_variable_and_results_outcome_reconcile_into_one_candidate():
     assert any(
         item.get("active_operation") == "paper_reconciliation" for item in progress
     )
+
+
+def test_fixed_and_context_parameters_cannot_form_a_paper_relationship():
+    signal_specs = {
+        "generic-parameter": {
+            "signal_type": "variable",
+            "label": "ambient pressure",
+            "variable_role": "context",
+            "process_context": ["thermal processing"],
+        },
+        "fixed-setting": {
+            "signal_type": "variable",
+            "label": "chamber temperature",
+            "variable_role": "fixed",
+            "process_context": ["thermal processing"],
+        },
+        "varied-factor": {
+            "signal_type": "variable",
+            "label": "holding time",
+            "variable_role": "varied",
+            "process_context": ["thermal processing"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "conversion efficiency",
+            "process_context": ["thermal processing"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            *[
+                _paragraph(source_ref, source_ref, position + 2, "Study")
+                for position, source_ref in enumerate(signal_specs)
+            ],
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.reconciliation_payloads) == 1
+    assert {
+        signal["label"]
+        for signal in extractor.reconciliation_payloads[0]["signals"]
+    } == {"holding time", "conversion efficiency"}
+    assert len(skim.studies) == 1
+    assert skim.studies[0].relationships[0].varied_factors == ("holding time",)
+    assert {
+        (signal.label, signal.variable_role, signal.reason)
+        for signal in skim.unresolved_signals
+    } == {
+        (
+            "ambient pressure",
+            "context",
+            "variable role 'context' is not eligible for relationship construction",
+        ),
+        (
+            "chamber temperature",
+            "fixed",
+            "variable role 'fixed' is not eligible for relationship construction",
+        ),
+    }
+
+
+def test_reconciliation_validation_rejects_an_ineligible_returned_signal():
+    def signal(label: str, signal_type: str, variable_role: str) -> PaperResearchSignal:
+        return PaperResearchSignal.from_mapping(
+            {
+                "document_id": "paper-1",
+                "signal_type": signal_type,
+                "label": label,
+                "variable_role": variable_role,
+                "source_refs": [
+                    {"source_kind": "block", "source_ref": f"source-{label}"}
+                ],
+                "confidence": 0.9,
+            }
+        )
+
+    fixed = signal("reactor volume", "variable", "fixed")
+    varied = signal("residence time", "variable", "varied")
+    outcome = signal("product yield", "outcome", "not_applicable")
+    signal_inputs = tuple(
+        _PaperSignalInput(signal=item, source_contexts=())
+        for item in (fixed, varied, outcome)
+    )
+    parsed = StructuredPaperSignalReconciliation.model_validate(
+        {
+            "studies": [
+                {
+                    "relationships": [
+                        {
+                            "signal_ids": [
+                                fixed.signal_id,
+                                varied.signal_id,
+                                outcome.signal_id,
+                            ],
+                            "confidence": 0.88,
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+
+    studies, unresolved = PaperResearchMapService._validate_signal_reconciliation(
+        parsed,
+        signal_inputs,
+        document_id="paper-1",
+    )
+
+    assert len(studies) == 1
+    assert studies[0].relationships[0].varied_factors == ("residence time",)
+    assert [(item.label, item.reason) for item in unresolved] == [
+        (
+            "reactor volume",
+            "variable role 'fixed' is not eligible for relationship construction",
+        )
+    ]
 
 
 def test_reconciliation_shares_the_paper_judgment_budget(monkeypatch):
@@ -3482,6 +3697,82 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
     hardness = merge_for_experiment("microhardness")
 
     assert tensile.relationships[0].relationship_id != hardness.relationships[0].relationship_id
+
+
+def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids():
+    """Repeated model aliases for one Source fact must not invalidate the paper map."""
+
+    existing = PaperResearchScope.from_mapping(
+        {
+            "document_id": "paper-1",
+            "design_type": "experimental",
+            "claim_scope": "current_work",
+            "experiment_label": "experiment-1",
+            "material_scope": ["316L stainless steel"],
+            "process_context": ["LPBF"],
+            "relationships": [
+                {
+                    "relationship_id": "relationship-laser-power-1",
+                    "varied_factors": ["laser power"],
+                    "outcome": "porosity",
+                    "source_refs": [
+                        {"source_kind": "block", "source_ref": "results-1"}
+                    ],
+                },
+                {
+                    "relationship_id": "relationship-laser-power-2",
+                    "varied_factors": ["laser power"],
+                    "outcome": "Porosity",
+                    "source_refs": [
+                        {"source_kind": "block", "source_ref": "results-1"}
+                    ],
+                },
+            ],
+        }
+    )
+    duplicate = PaperResearchScope.from_mapping(
+        {
+            "document_id": "paper-1",
+            "design_type": "experimental",
+            "claim_scope": "current_work",
+            "experiment_label": "experiment-1",
+            "material_scope": ["316L stainless steel"],
+            "process_context": ["LPBF"],
+            "relationships": [
+                {
+                    "relationship_id": "relationship-scan-speed",
+                    "varied_factors": ["scanning speed"],
+                    "outcome": "porosity",
+                    "source_refs": [
+                        {"source_kind": "block", "source_ref": "results-1"}
+                    ],
+                },
+                {
+                    "relationship_id": "relationship-laser-power-alias",
+                    "varied_factors": ["laser-power"],
+                    "outcome": "porosity",
+                    "source_refs": [
+                        {"source_kind": "block", "source_ref": "results-1"}
+                    ],
+                },
+            ],
+        }
+    )
+
+    merged = PaperResearchMapService._merge_studies(
+        existing,
+        duplicate,
+        document_id="paper-1",
+    )
+
+    assert len(merged.relationships) == 2
+    assert len(
+        {relationship.relationship_id for relationship in merged.relationships}
+    ) == 2
+    assert {
+        tuple(relationship.varied_factors)
+        for relationship in merged.relationships
+    } == {("laser power",), ("scanning speed",)}
 
 
 def test_candidates_with_different_variable_outcome_links_are_not_merged():

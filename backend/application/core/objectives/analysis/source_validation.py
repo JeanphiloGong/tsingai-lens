@@ -1,16 +1,19 @@
-"""Validate model-authored facts against their exact Source."""
+"""Validate model-authored facts against a primary Source and paper bundle."""
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from hashlib import sha1
 from typing import Any
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from domain.core import ResearchObjective
 
-OBJECTIVE_SOURCE_GROUNDING_VERSION = "objective-source-grounding.v1"
+# Source validation now retains explicit associations and uses same-paper
+# material recovery; invalidate checkpoints produced by the previous contract.
+OBJECTIVE_SOURCE_GROUNDING_VERSION = "objective-source-grounding.v3"
 
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _NO_CHANGE_RESULT_KEYS = (
@@ -25,6 +28,64 @@ _NO_CHANGE_RESULT_KEYS = (
     "remained_unchanged",
     "unchanged",
 )
+_TABLE_CONTINUATION_MARKER = re.compile(
+    r"^(?:table|tab\.?)[\s_-]*[A-Za-z0-9][A-Za-z0-9.\-]*"
+    r"\s*(?:\(\s*continued\s*\)|continued)$",
+    re.IGNORECASE,
+)
+
+
+def _source_validation_failure_record(
+    *,
+    route: EvidenceCandidate,
+    errors: tuple[str, ...],
+) -> dict[str, Any]:
+    """Keep a rejected model draft visible without treating it as science.
+
+    A grounding rejection is a technical extraction failure, not evidence that
+    the paper has no result.  Persist a stable, source-linked failed draft so
+    the contribution warning and Evidence Map can distinguish the two cases.
+    """
+
+    identity = "|".join(
+        (
+            route.objective_id,
+            route.document_id,
+            route.source_kind,
+            route.source_ref,
+            "source_grounding_failed",
+        )
+    )
+    detail = "; ".join(error.strip() for error in errors if error.strip())
+    return {
+        "evidence_id": (
+            f"oev_grounding_failed_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+        ),
+        "objective_id": route.objective_id,
+        "document_id": route.document_id,
+        "source_kind": route.source_kind,
+        "source_ref": route.source_ref,
+        "evidence_role": "irrelevant",
+        "selection_status": "failed",
+        "selection_reason": (
+            "Model-authored fields failed deterministic Source grounding; "
+            "the Source remains available for review or retry."
+        ),
+        "attribution_scope": "not_attributable",
+        "scientific_context": {},
+        "source_refs": [
+            {
+                "source_kind": route.source_kind,
+                "source_ref": route.source_ref,
+            }
+        ],
+        "resolution_status": "unknown",
+        "failure_reason": (
+            "Source grounding failed: "
+            f"{detail or 'model output was not supported by the Source.'}"
+        )[:1000],
+        "confidence": 0.0,
+    }
 
 
 def _objective_table_matrix_rows(
@@ -42,9 +103,24 @@ def _objective_table_matrix_rows(
     )
     if not headers or not matrix:
         return (), ()
-    candidate_rows = (
-        matrix[1:] if _objective_row_matches_headers(matrix[0], headers) else matrix
-    )
+    # Docling can expose a repeated continuation header as an additional
+    # header row.  Honor the source's declared header depth first, then fall
+    # back to the legacy first-row check for artifacts produced before that
+    # field was persisted.
+    try:
+        header_row_count = int(source.get("header_row_count", 1) or 0)
+    except (TypeError, ValueError):
+        header_row_count = 1
+    header_row_count = max(0, min(header_row_count, len(matrix)))
+    if header_row_count == 1 and not _objective_row_matches_headers(
+        matrix[0], headers
+    ):
+        # Some legacy rows have no explicit header row despite the default
+        # metadata value.  Preserve the old behavior for those artifacts.
+        header_row_count = 0
+    elif header_row_count <= 0 and _objective_row_matches_headers(matrix[0], headers):
+        header_row_count = 1
+    candidate_rows = matrix[header_row_count:]
     filtered_rows = tuple(
         row
         for row in candidate_rows
@@ -67,6 +143,11 @@ def _objective_table_matrix_continuation_header_row(
 ) -> bool:
     if not headers or not row:
         return False
+    nonempty_cells = tuple(str(cell).strip() for cell in row if str(cell).strip())
+    if nonempty_cells and all(
+        _TABLE_CONTINUATION_MARKER.fullmatch(cell) for cell in nonempty_cells
+    ):
+        return True
     first_header_key = _objective_column_key(headers[0])
     if first_header_key not in {"sample", "sample_id", "sample_number"}:
         return False
@@ -103,18 +184,28 @@ def validate_source_fact(
     source: dict[str, Any],
     objective_context: ResearchObjective | None,
     extracted_record: dict[str, Any],
+    candidate_variables: tuple[str, ...] = (),
+    grounding_sources: tuple[Mapping[str, Any], ...] = (),
+    grounding_source_refs: tuple[Mapping[str, Any], ...] = (),
 ) -> tuple[dict[str, Any], ...]:
+    # A result is often split across Results and Methods in the same paper.
+    # The result Source remains authoritative for measured values and wording;
+    # the bundle is allowed to ground conditions and comparison endpoints.
+    grounding_source = _objective_source_with_grounding_sources(
+        source,
+        grounding_sources,
+    )
     record = _objective_complete_extracted_variable_endpoints(
         extracted_record,
-        source=source,
+        source=grounding_source,
     )
     record = _objective_retain_source_grounded_context(
         record,
-        source=source,
+        source=grounding_source,
     )
     record = _objective_recover_source_bound_objective_material(
         record,
-        source=source,
+        source=grounding_source,
         objective_context=objective_context,
     )
     record = _objective_normalize_explicit_no_change_direction(record)
@@ -185,8 +276,16 @@ def validate_source_fact(
             for candidate_direction, terms in direction_terms.items()
             if any(f"_{term}_" in result_text for term in terms)
         ]
-        if direction == "unknown" and len(explicit_directions) == 1:
-            direction = explicit_directions[0]
+        if direction == "unknown":
+            result_direction = _objective_result_direction_near_outcome(
+                result_text=str(normalized_result.get("result_text") or ""),
+                outcome=str(normalized_result.get("outcome") or ""),
+                direction_terms=direction_terms,
+            )
+            if result_direction is not None:
+                direction = result_direction
+            elif len(explicit_directions) == 1:
+                direction = explicit_directions[0]
             normalized_result["direction"] = direction
         if (
             not _NUMBER_PATTERN.search(str(result_value or ""))
@@ -207,21 +306,61 @@ def validate_source_fact(
             record,
             source=source,
             source_text=source_text,
+            objective_context=objective_context,
         )
         if result_grounding_errors:
-            return ()
-        variable_grounding_errors = _objective_evidence_variable_grounding_errors(
+            return (
+                _source_validation_failure_record(
+                    route=route,
+                    errors=result_grounding_errors,
+                ),
+            )
+        inferred_association_variable = _objective_source_association_variable(
             record,
-            source=source,
             source_text=source_text,
+            objective_context=objective_context,
+            candidate_variables=candidate_variables,
+        )
+        if inferred_association_variable is not None:
+            record["changed_variables"] = [
+                {
+                    "name": inferred_association_variable,
+                    "baseline_value": None,
+                    "target_value": None,
+                    "unit": None,
+                }
+            ]
+            comparison = record.get("comparison")
+            if not isinstance(comparison, Mapping) or comparison.get("comparable") is False:
+                record["comparison"] = None
+            record["attribution_scope"] = "association_only"
+            record["resolution_status"] = "partial"
+            record["selection_reason"] = (
+                "Source explicitly names one Objective variable theme but does not "
+                "provide complete comparison endpoints; retained as an association."
+            )
+        # An association variable is a canonical Objective theme inferred from
+        # an explicitly named Source intervention (for example, "scanning
+        # strategies" -> "laser exposure condition").  Its canonical name is
+        # intentionally not required to occur verbatim in the Source, and its
+        # endpoints remain empty until a later source supplies them.
+        variable_grounding_errors = (
+            ()
+            if inferred_association_variable is not None
+            else _objective_evidence_variable_grounding_errors(
+                record,
+                source=grounding_source,
+                source_text=_objective_source_grounding_text(grounding_source),
+            )
         )
         comparison_grounding_errors = _objective_evidence_comparison_grounding_errors(
             record,
-            source_text=source_text,
+            source_text=_objective_source_grounding_text(grounding_source),
         )
         if (
             not variable_grounding_errors
             and not comparison_grounding_errors
+            and inferred_association_variable is None
             and source.get("source_kind") == "table"
             and source.get("table_matrix")
             and not _objective_extracted_table_result_is_row_grounded(
@@ -229,7 +368,14 @@ def validate_source_fact(
                 source=source,
             )
         ):
-            return ()
+            record["changed_variables"] = []
+            record["comparison"] = None
+            record["attribution_scope"] = "descriptive_only"
+            record["resolution_status"] = "partial"
+            record["selection_reason"] = (
+                "The result is grounded in this table, but its value cannot be "
+                "bound deterministically to the reported comparison rows."
+            )
         if variable_grounding_errors or comparison_grounding_errors:
             record["changed_variables"] = []
             record["resolution_status"] = "partial"
@@ -252,24 +398,44 @@ def validate_source_fact(
                     "Grounded result retained pending same-study process "
                     "context binding."
                 )
-        outcome = property_matching.normalize_objective_unit_property(
+        outcome = property_matching.normalize_source_defined_objective_property(
             reported_result.get("outcome"),
+            source_text=source_text,
             objective_context=objective_context,
         )
         if not outcome:
             return ()
-        if (
-            objective_context is not None
-            and objective_context.outcomes
-            and not property_matching.property_matches_target_axes(
-                outcome,
-                target_axes=property_matching.objective_outcomes(objective_context),
-            )
-        ):
-            return ()
         normalized_result = dict(reported_result)
         normalized_result["outcome"] = outcome
         record["reported_result"] = normalized_result
+        if (
+            objective_context is not None
+            and objective_context.outcomes
+            and not property_matching.outcome_matches_objective_scope(
+                outcome,
+                objective_context.outcomes,
+            )
+        ):
+            source_bound_outcome = _objective_result_text_unique_outcome(
+                str(normalized_result.get("result_text") or "").strip(),
+                objective_context,
+            )
+            if source_bound_outcome is not None:
+                normalized_result["outcome"] = source_bound_outcome
+                record["reported_result"] = normalized_result
+                outcome = source_bound_outcome
+            else:
+                # A researcher records a reported result even when it answers
+                # a neighboring question. Keep the source-backed fact in the
+                # Evidence Bundle for audit and future objective formation, but
+                # do not let this Objective treat it as a comparable result.
+                record["comparison"] = None
+                record["attribution_scope"] = "descriptive_only"
+                record["selection_reason"] = (
+                    "Source-backed result retained for audit, but its outcome is "
+                    "outside the confirmed Objective outcome scope; excluded from "
+                    "Finding comparison."
+                )
     else:
         scientific_context = record.get("scientific_context")
         if not isinstance(scientific_context, Mapping) or not any(
@@ -277,20 +443,9 @@ def validate_source_fact(
             for group in ("material", "sample", "process", "test")
         ):
             return ()
-    supported_fields: list[str] = []
-    if record.get("changed_variables"):
-        supported_fields.extend(("changed_variables", "comparison.axis_names"))
-    if isinstance(record.get("comparison"), Mapping):
-        supported_fields.append("comparison.labels")
-    if isinstance(record.get("reported_result"), Mapping):
-        supported_fields.append("reported_result")
-    scientific_context = record.get("scientific_context")
-    if isinstance(scientific_context, Mapping):
-        supported_fields.extend(
-            f"scientific_context.{group}"
-            for group in ("material", "sample", "process", "test")
-            if scientific_context.get(group)
-        )
+    supported_fields = list(
+        _objective_primary_source_supported_fields(record, source=source)
+    )
     record.update(
         {
             "objective_id": route.objective_id,
@@ -309,9 +464,186 @@ def validate_source_fact(
             ),
         }
     )
+    if grounding_source_refs:
+        source_refs = list(record["source_refs"])
+        seen_refs = {
+            (item.get("source_kind"), item.get("source_ref"))
+            for item in source_refs
+            if isinstance(item, Mapping)
+        }
+        for ref in grounding_source_refs:
+            source_ref = str(ref.get("source_ref") or "").strip()
+            source_kind = str(ref.get("source_kind") or "").strip()
+            if not source_ref or not source_kind:
+                continue
+            key = (source_kind, source_ref)
+            if key in seen_refs:
+                continue
+            context_ref = dict(ref)
+            source_refs.append(context_ref)
+            seen_refs.add(key)
+        record["source_refs"] = source_refs
     if record.get("confidence") is None:
         record["confidence"] = route.confidence
     return (record,)
+
+
+def _objective_source_with_grounding_sources(
+    source: Mapping[str, Any],
+    grounding_sources: tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    """Build a same-paper grounding view without changing the primary Source.
+
+    This view is intentionally text-only for context Sources. It is used for
+    process/material/sample/test fields and never for reported-result checks.
+    Keeping the primary table matrix and headers intact preserves table row
+    validation while allowing a Results paragraph to bind to Methods facts.
+    """
+
+    merged = dict(source)
+    context_texts = [
+        _objective_source_grounding_text(context)
+        for context in grounding_sources
+        if context is not source
+    ]
+    context_texts = [text for text in context_texts if text]
+    if context_texts:
+        primary_text = str(merged.get("text") or "").strip()
+        merged["text"] = "\n".join((primary_text, *context_texts)).strip()
+    return merged
+
+
+def _objective_source_association_variable(
+    record: Mapping[str, Any],
+    *,
+    source_text: str,
+    objective_context: ResearchObjective | None,
+    candidate_variables: tuple[str, ...] = (),
+) -> str | None:
+    """Recover one explicit Objective variable without inventing endpoints."""
+
+    if objective_context is None or record.get("changed_variables"):
+        return None
+    if not isinstance(record.get("reported_result"), Mapping):
+        return None
+    comparison = record.get("comparison")
+    if isinstance(comparison, Mapping) and comparison.get("comparable") is False:
+        # An unresolved pair still carries a real scientific observation when
+        # the result sentence explicitly names the Objective variable. Keep
+        # that observation as an association, but do not infer endpoints from
+        # opaque paper-local labels such as S1/S2 or alpha/beta.
+        result_text = str(
+            record["reported_result"].get("result_text") or ""
+        ).strip()
+        explicit_result_variables = tuple(
+            dict.fromkeys(
+                variable
+                for variable in (
+                    *candidate_variables,
+                    *objective_context.variables,
+                )
+                if property_matching.source_text_mentions_axis(
+                    result_text,
+                    variable,
+                )
+            )
+        )
+        if not explicit_result_variables:
+            return None
+    # A comparison can use source-local group labels (for example, Sample S1
+    # and Sample S2) while the result sentence still names the actual Objective
+    # factor (for example, medium and high VED).  The group labels do not justify
+    # a variable by themselves; only one explicit Source match may restore it.
+    result_text = str(
+        record["reported_result"].get("result_text") or ""
+    ).strip()
+    frame_candidates = tuple(
+        dict.fromkeys(
+            str(variable).strip()
+            for variable in candidate_variables
+            if str(variable).strip()
+        )
+    )
+    result_candidates = tuple(
+        variable
+        for variable in frame_candidates
+        if property_matching.source_text_mentions_axis(result_text, variable)
+    )
+    if len(result_candidates) == 1:
+        return result_candidates[0]
+    if len(result_candidates) > 1:
+        return None
+    source_candidates = tuple(
+        variable
+        for variable in frame_candidates
+        if property_matching.source_text_mentions_axis(source_text, variable)
+    )
+    if len(source_candidates) == 1:
+        return source_candidates[0]
+    if len(source_candidates) > 1:
+        return None
+    matches = tuple(
+        variable
+        for variable in objective_context.variables
+        if property_matching.source_text_mentions_objective_variable(
+            source_text,
+            variable,
+        )
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _objective_result_direction_near_outcome(
+    *,
+    result_text: str,
+    outcome: str,
+    direction_terms: Mapping[str, tuple[str, ...]],
+) -> str | None:
+    """Resolve direction from the clause attached to the reported outcome.
+
+    A Source may report several properties in one sentence. Counting all
+    direction words would make a sentence such as "strength increased while
+    elongation decreased" ambiguous even though the target outcome is clear.
+    The nearest direction word to the target outcome is the source-local
+    signal; conflicting signals remain ``mixed``.
+    """
+
+    text = str(result_text or "").strip().casefold()
+    target = str(outcome or "").strip().casefold()
+    if not text or not target:
+        return None
+    outcome_positions = [
+        match.start() for match in re.finditer(re.escape(target), text)
+    ]
+    direction_matches: list[tuple[int, str]] = []
+    for direction, terms in direction_terms.items():
+        for term in terms:
+            for match in re.finditer(
+                rf"(?<![a-z]){re.escape(term)}(?![a-z])",
+                text,
+            ):
+                direction_matches.append((match.start(), direction))
+    if not direction_matches:
+        return None
+    if not outcome_positions:
+        directions = {direction for _position, direction in direction_matches}
+        return next(iter(directions)) if len(directions) == 1 else None
+    nearest: list[tuple[int, str]] = []
+    for outcome_position in outcome_positions:
+        position, direction = min(
+            direction_matches,
+            key=lambda item: abs(item[0] - outcome_position),
+        )
+        nearest.append((abs(position - outcome_position), direction))
+    nearest_distance = min(distance for distance, _direction in nearest)
+    nearest_directions = {
+        direction
+        for distance, direction in nearest
+        if distance == nearest_distance
+    }
+    if len(nearest_directions) != 1:
+        return None
+    return next(iter(nearest_directions))
 
 
 def _objective_normalize_explicit_no_change_direction(
@@ -388,19 +720,31 @@ def _objective_complete_extracted_variable_endpoints(
     if comparison_labels_are_grounded and (
         not variable_values_are_grounded or not variable_unit_is_grounded
     ):
-        for field, label in endpoints:
-            variable[field] = str(label).strip()
-        variable["unit"] = None
-        completed["changed_variables"] = [variable]
+        normalized_comparison = dict(comparison)
+        incomparability_reasons = list(
+            normalized_comparison.get("incomparability_reasons") or ()
+        )
+        reason = (
+            "SOURCE names comparison labels but does not bind both labels to "
+            "complete levels of the Objective variable"
+        )
+        if reason not in incomparability_reasons:
+            incomparability_reasons.append(reason)
+        normalized_comparison.update(
+            {
+                "comparable": False,
+                "incomparability_reasons": incomparability_reasons,
+            }
+        )
+        completed["changed_variables"] = []
+        completed["comparison"] = normalized_comparison
+        completed["attribution_scope"] = "not_attributable"
+        completed["resolution_status"] = "partial"
+        completed["selection_reason"] = (
+            "Source-backed result retained descriptively: comparison labels are "
+            "not sufficient to establish complete Objective variable levels."
+        )
         return completed
-    for field, label in endpoints:
-        label_text = str(label or "").strip()
-        if (
-            variable.get(field) in (None, "")
-            and label_text
-            and property_matching.axis_label_is_mentioned(source_text, label_text)
-        ):
-            variable[field] = label_text
     if variable.get("baseline_value") == variable.get("target_value"):
         return completed
     completed["changed_variables"] = [variable]
@@ -504,21 +848,74 @@ def _objective_evidence_comparison_grounding_errors(
     return tuple(errors)
 
 
+def _objective_primary_source_supported_fields(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """List fields supported by the current Source itself.
+
+    A same-paper Bundle can make a record complete, but its context must not be
+    attributed to the current Results/table Source.  Bundle refs carry their
+    own ``bundle_context`` marker; this helper keeps the primary ref honest.
+    """
+
+    source_text = _objective_source_grounding_text(source)
+    if not source_text:
+        return ()
+    supported: list[str] = []
+    variables = record.get("changed_variables")
+    variable_errors = _objective_evidence_variable_grounding_errors(
+        record,
+        source=source,
+        source_text=source_text,
+    )
+    if isinstance(variables, list) and variables and not variable_errors:
+        supported.append("changed_variables")
+        if isinstance(record.get("comparison"), Mapping):
+            supported.append("comparison.axis_names")
+    comparison = record.get("comparison")
+    if isinstance(comparison, Mapping) and not _objective_evidence_comparison_grounding_errors(
+        record,
+        source_text=source_text,
+    ):
+        supported.append("comparison.labels")
+    if isinstance(record.get("reported_result"), Mapping):
+        supported.append("reported_result")
+    grounded_context = _objective_retain_source_grounded_context(
+        record,
+        source=source,
+    ).get("scientific_context")
+    if isinstance(grounded_context, Mapping):
+        supported.extend(
+            f"scientific_context.{group}"
+            for group in ("material", "sample", "process", "test")
+            if grounded_context.get(group)
+        )
+    return tuple(dict.fromkeys(supported))
+
+
 def _objective_evidence_result_grounding_errors(
     record: Mapping[str, Any],
     *,
     source: Mapping[str, Any],
     source_text: str,
+    objective_context: ResearchObjective | None = None,
 ) -> tuple[str, ...]:
     reported_result = record.get("reported_result")
     if not isinstance(reported_result, Mapping):
         return ()
     errors: list[str] = []
     outcome = reported_result.get("outcome")
-    if not _objective_axis_is_source_grounded(
+    outcome_grounded = _objective_axis_is_source_grounded(
         outcome,
         source=source,
         source_text=source_text,
+    )
+    result_text = str(reported_result.get("result_text") or "").strip()
+    if not outcome_grounded and not _objective_result_text_is_source_grounded(
+        result_text,
+        source_text,
     ):
         errors.append(f"reported_result.outcome={outcome!r} is not grounded in SOURCE")
     unit = str(reported_result.get("unit") or "").strip()
@@ -534,22 +931,47 @@ def _objective_evidence_result_grounding_errors(
         errors.append(
             f"reported_result.{field}={result_value!r} is not grounded in SOURCE"
         )
-    result_text = str(reported_result.get("result_text") or "").strip()
-    if _NUMBER_PATTERN.search(result_text):
-        result_text_is_grounded = _objective_value_is_source_grounded(
-            result_text,
-            source_text,
-        )
-    else:
-        result_text_is_grounded = property_matching.axis_label_is_mentioned(
-            source_text,
-            result_text,
-        )
+    result_text_is_grounded = _objective_result_text_is_source_grounded(
+        result_text,
+        source_text,
+    )
     if not result_text_is_grounded:
         errors.append(
             f"reported_result.result_text={result_text!r} is not grounded in SOURCE"
         )
     return tuple(errors)
+
+
+def _objective_result_text_is_source_grounded(
+    result_text: str,
+    source_text: str,
+) -> bool:
+    if not result_text:
+        return False
+    if _NUMBER_PATTERN.search(result_text):
+        return _objective_value_is_source_grounded(result_text, source_text)
+    return property_matching.axis_label_is_mentioned(source_text, result_text)
+
+
+def _objective_result_text_unique_outcome(
+    result_text: str,
+    objective_context: ResearchObjective | None,
+) -> str | None:
+    """Allow a composite model label only when the Source names one target outcome."""
+
+    if objective_context is None or not result_text:
+        return None
+    matches = tuple(
+        dict.fromkeys(
+            property_matching.normalize_property_label(objective_outcome)
+            for objective_outcome in objective_context.outcomes
+            if property_matching.source_text_mentions_axis(
+                result_text,
+                objective_outcome,
+            )
+        )
+    )
+    return matches[0] if len(matches) == 1 else None
 
 
 def _objective_extracted_table_result_is_row_grounded(
@@ -674,18 +1096,51 @@ def _objective_retain_source_grounded_context(
         for attribute in scientific_context.get(group) or ():
             if not isinstance(attribute, Mapping):
                 continue
-            if not _objective_axis_is_source_grounded(
+            value = attribute.get("value")
+            value_is_grounded = _objective_value_is_source_grounded(
+                value,
+                source_text,
+            )
+            if group == "material" and value not in (None, ""):
+                value_is_grounded = value_is_grounded or (
+                    property_matching.material_value_matches_objective_comparison_scope(
+                        source_text,
+                        str(value),
+                    )
+                )
+            if value not in (None, "") and not value_is_grounded:
+                continue
+            name_is_grounded = _objective_axis_is_source_grounded(
                 attribute.get("name"),
                 source=source,
                 source_text=source_text,
-            ):
-                continue
-            value = attribute.get("value")
-            if value not in (None, "") and not _objective_value_is_source_grounded(
-                value,
-                source_text,
-            ):
-                continue
+            )
+            if not name_is_grounded:
+                # Papers commonly label a row only as ``S1``/``S2`` or
+                # ``specimen A``. The model's generic context name is valid
+                # when the concrete value is present in the same Source.
+                generic_context_names = {
+                    "material",
+                    "sample",
+                    "specimen",
+                    "coupon",
+                    "group",
+                    "condition",
+                    "process",
+                    "fabrication",
+                    "manufacturing",
+                    "technique",
+                    "test",
+                    "method",
+                    "test method",
+                    "measurement method",
+                }
+                if (
+                    str(attribute.get("name") or "").strip().casefold()
+                    not in generic_context_names
+                    or value in (None, "")
+                ):
+                    continue
             unit = str(attribute.get("unit") or "").strip()
             if unit and _objective_column_key(unit) not in _objective_column_key(
                 source_text
@@ -721,6 +1176,7 @@ def _objective_recover_source_bound_objective_material(
             str(source.get("heading_path") or "").strip(),
             str(source.get("caption_text") or "").strip(),
             str(reported_result.get("result_text") or "").strip(),
+            _objective_source_grounding_text(source),
         )
         if value
     )
@@ -808,7 +1264,13 @@ def _objective_axis_is_source_grounded(
 
 def _objective_source_grounding_text(source: Mapping[str, Any]) -> str:
     values: list[str] = []
-    for field in ("text", "caption_text", "heading_path"):
+    for field in (
+        "text",
+        "caption_text",
+        "heading_path",
+        "table_markdown",
+        "table_visual_text",
+    ):
         value = str(source.get(field) or "").strip()
         if value:
             values.append(value)
@@ -867,6 +1329,19 @@ def _split_property_unit(value: str) -> tuple[str, str | None]:
         name, _, suffix = text.rpartition("(")
         unit = suffix[:-1].strip()
         return name.strip() or text, unit or None
+    # Tables frequently attach a compact unit directly to a metric header
+    # (for example ``El%`` or ``Hardness HV``).  Preserve that source-local
+    # unit without treating ordinary words in a property name as units.
+    compact_suffix = re.search(
+        r"(?P<name>.+?)(?P<unit>%|(?:°|º)?(?:MPa|GPa|kPa|Pa|HV|HRC|HB|J(?:/|\s+)[A-Za-z0-9µμ³²^/-]+|[A-Za-zµμ]+/[A-Za-z0-9µμ³²^/-]+))$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if compact_suffix is not None:
+        name = compact_suffix.group("name").strip()
+        unit = compact_suffix.group("unit").strip()
+        if name and not name.endswith((" ", "-", "/")):
+            return name, unit
     return text, None
 
 

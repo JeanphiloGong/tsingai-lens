@@ -145,6 +145,22 @@ _MULTI_MEASUREMENT_OUTCOME_FAMILIES = frozenset(
     }
 )
 
+# These are linguistic umbrella heads, not scientific outcome names.  A
+# question such as "fatigue behaviour" may be answered only by preserving the
+# paper's concrete result (for example, fatigue life or fatigue strength).
+# The source label remains the published result; this helper only decides
+# whether it belongs in the paper-scoped review set.
+_OUTCOME_UMBRELLA_HEADS = frozenset(
+    {
+        "behavior",
+        "behaviour",
+        "performance",
+        "response",
+        "property",
+        "properties",
+    }
+)
+
 # Source labels include abbreviations, scientific symbols, and observed OCR forms.
 _PROPERTY_LABEL_ALIASES = {
     "ductility": "elongation",
@@ -193,6 +209,23 @@ _PROPERTY_LABEL_ALIASES = {
     "\u03c3y": "yield strength",
 }
 
+# Fatigue strength is commonly reported with the cycle regime in the prose
+# ("high-cycle fatigue strength") but with an operational cycle count in a
+# table header ("fatigue strength at 10^4 cycles").  Keep the regime qualifier
+# when it is explicit; an unqualified measurement is a family match only and
+# must retain its source label for later context validation.
+_FATIGUE_STRENGTH_VARIANT_RE = re.compile(
+    r"^(?:(?P<regime>low|high|very\s+high|ultra\s+high)\s+cycle\s+)?"
+    r"fatigue\s+strength(?:\s+at\s+.+?\s+cycles?)?$",
+    re.IGNORECASE,
+)
+_FATIGUE_STRENGTH_TEXT_RE = re.compile(
+    r"\b(?:(?P<regime>low|high|very\s+high|ultra\s+high)[-\s]+cycle\s+)?"
+    r"fatigue\s+strength(?:\s+at\s+[^.;,|\n]+?\s+cycles?)?\b"
+    r"|\bFAT\s+at\s+[^.;,|\n]+?\s+cycles?\b",
+    re.IGNORECASE,
+)
+
 # These are contextual process-axis hints, not universal meanings for symbols.
 _PROCESS_SYMBOL_AXIS_HINTS = {
     "alpha": ("build orientation alpha angle",),
@@ -203,6 +236,25 @@ _PROCESS_SYMBOL_AXIS_HINTS = {
     "\u03b8": ("scan strategy rotation angle",),
     "\u0275": ("scan strategy rotation angle",),
     "ved": ("volumetric energy density", "energy density"),
+}
+
+# A paper may expose a broad experimental axis through symbol-qualified
+# columns.  These aliases are only for deciding whether a Source axis belongs
+# to the confirmed Objective; they do not make the underlying variables
+# interchangeable for comparison.
+_PROCESS_AXIS_SCOPE_ALIASES = {
+    "scan strategy rotation angle": (
+        "scan strategy",
+        "scanning strategy",
+    ),
+    "build orientation alpha angle": (
+        "build orientation",
+        "build orientation angle",
+    ),
+    "build orientation beta angle": (
+        "build orientation",
+        "build orientation angle",
+    ),
 }
 
 _EXPLICIT_AXIS_SYNONYMS = {
@@ -257,7 +309,8 @@ _VARIABLE_THEME_PATTERNS = (
     (
         "laser exposure condition",
         re.compile(
-            r"(?:\b(?:laser (?:power|energy)|scann?ing (?:speed|strategy)|"
+            r"(?:\b(?:laser (?:power|energy)|scann?ing (?:speed|strateg(?:y|ies)|"
+            r"condition(?:s)?)|"
             r"scan speed|hatch spacing|volumetric energy density|"
             r"energy density|exposure time|"
             r"induct(?:ive|ion(?: heating)?) energy|"
@@ -410,6 +463,55 @@ def property_matches_target_axes(
     )
 
 
+def outcome_matches_objective_scope(
+    source_outcome: Any,
+    objective_outcomes: Iterable[Any],
+) -> bool:
+    """Match a source result to a possibly broad Objective outcome.
+
+    Exact aliases and explicitly declared expansions remain the primary path.
+    For an umbrella outcome phrase, a source result is retained only when it
+    shares the phrase's scientific subject tokens and the source itself is a
+    narrower label.  This preserves the exact Source outcome for display and
+    never invents a canonical measurement name.
+    """
+
+    source = normalize_property_label(source_outcome)
+    if not source:
+        return False
+    targets: list[str] = []
+    for target in objective_outcomes:
+        normalized_target = normalize_property_label(target)
+        if not normalized_target:
+            continue
+        targets.append(normalized_target)
+        # Callers commonly pass the Objective's original outcome tuple here,
+        # while other paths pass ``objective_outcomes(objective)``.  Expand at
+        # this boundary so both paths apply the same scope rule.
+        targets.extend(
+            expanded
+            for expanded in (
+                normalize_property_label(value)
+                for value in broad_outcome_expansions(normalized_target)
+            )
+            if expanded
+        )
+    if property_matches_target_axes(source, target_axes=targets):
+        return True
+    source_tokens = set(source.split())
+    for target in targets:
+        normalized_target = normalize_property_label(target)
+        if not normalized_target:
+            continue
+        target_words = normalized_target.split()
+        if not target_words or target_words[-1] not in _OUTCOME_UMBRELLA_HEADS:
+            continue
+        subject_tokens = set(target_words[:-1])
+        if subject_tokens and subject_tokens <= source_tokens:
+            return True
+    return False
+
+
 def property_label_matches_target(
     property_name: Any,
     *,
@@ -420,10 +522,55 @@ def property_label_matches_target(
         return False
     if any(axis_values_match(normalized, candidate) for candidate in target_axes):
         return True
+    if any(
+        _fatigue_strength_variants_match(normalized, candidate)
+        for candidate in target_axes
+    ):
+        return True
     return _contextual_property_variant_match(
         normalized,
         target_axes=target_axes,
     ) is not None
+
+
+def _fatigue_strength_variants_match(left: Any, right: Any) -> bool:
+    """Match an explicit fatigue-strength measurement to a cycle-qualified axis.
+
+    A bare cycle count is intentionally accepted as a family match because a
+    paper may define the regime in a nearby methods/results Source.  Explicit
+    low/high qualifiers on both sides must agree, so one regime cannot be
+    silently used as evidence for the other.
+    """
+
+    left_text = normalize_property_label(left)
+    right_text = normalize_property_label(right)
+    if not left_text or not right_text:
+        return False
+    left_regime = _fatigue_strength_variant_regime(left_text)
+    right_regime = _fatigue_strength_variant_regime(right_text)
+    if left_regime == "invalid" or right_regime == "invalid":
+        return False
+    return left_regime is None or right_regime is None or left_regime == right_regime
+
+
+def _fatigue_strength_variant_regime(value: Any) -> str | None:
+    normalized = normalize_property_label(value)
+    if not normalized:
+        return "invalid"
+    match = _FATIGUE_STRENGTH_VARIANT_RE.fullmatch(normalized)
+    if match is None:
+        return "invalid"
+    return " ".join(str(match.group("regime") or "").casefold().split()) or None
+
+
+def _fatigue_strength_variants_conflict(left: Any, right: Any) -> bool:
+    left_regime = _fatigue_strength_variant_regime(left)
+    right_regime = _fatigue_strength_variant_regime(right)
+    return (
+        left_regime not in {None, "invalid"}
+        and right_regime not in {None, "invalid"}
+        and left_regime != right_regime
+    )
 
 
 def normalize_objective_unit_property(
@@ -452,6 +599,126 @@ def normalize_objective_unit_property(
             return normalized
         return normalize_property_label(target_axis) or normalized
     return normalized
+
+
+def normalize_objective_result_property(
+    value: Any,
+    *,
+    objective_context: ResearchObjective | None,
+) -> str | None:
+    """Normalize a table result label without retaining result-kind suffixes.
+
+    ``Yield strength Experiment`` and ``Yield strength Prediction`` are two
+    result columns for one scientific outcome.  Their measured/predicted
+    distinction is represented by ``result_kind``; keeping the suffix in the
+    outcome would split one outcome into unrelated axes during synthesis.
+    Other qualifiers, such as a fatigue cycle regime, remain source-defined.
+    """
+
+    normalized = normalize_objective_unit_property(
+        value,
+        objective_context=objective_context,
+    )
+    if not normalized or objective_context is None:
+        return normalized
+    target_axes = objective_outcomes(objective_context)
+    for target_axis in target_axes:
+        target_key = normalize_property_label(target_axis)
+        if not target_key:
+            continue
+        variant = _contextual_property_variant_match(
+            normalized,
+            target_axes=(target_key,),
+        )
+        if variant is None:
+            continue
+        canonical, extra_tokens = variant
+        if extra_tokens and extra_tokens.issubset(_PRESERVED_PROPERTY_QUALIFIERS):
+            return normalize_property_label(canonical) or canonical
+    return normalized
+
+
+def normalize_source_defined_objective_property(
+    value: Any,
+    *,
+    source_text: str,
+    objective_context: ResearchObjective | None,
+) -> str | None:
+    """Resolve an outcome alias only when the exact Source defines it.
+
+    Researchers routinely read a table heading such as ``DIDX`` together with
+    a caption saying ``DIDX means densification index``.  Ordinary property
+    normalization cannot safely infer that relationship.  This helper keeps
+    the Source as the authority: an alias is accepted only when a nearby
+    definition explicitly names exactly one confirmed Objective outcome.
+    """
+
+    normalized = normalize_objective_unit_property(
+        value,
+        objective_context=objective_context,
+    )
+    if (
+        not normalized
+        or objective_context is None
+        or not str(source_text or "").strip()
+    ):
+        return normalized
+    target_axes = tuple(str(axis).strip() for axis in objective_context.outcomes if str(axis).strip())
+    if not target_axes or property_matches_target_axes(
+        normalized,
+        target_axes=objective_outcomes(objective_context),
+    ):
+        return normalized
+    alias_key = axis_key(str(value or ""))
+    if not alias_key:
+        return normalized
+    matched_axes: list[str] = []
+    for alias, definition in _source_defined_axis_aliases(source_text):
+        if axis_key(alias) != alias_key:
+            continue
+        for target_axis in target_axes:
+            if source_text_mentions_axis(definition, target_axis):
+                if target_axis not in matched_axes:
+                    matched_axes.append(target_axis)
+    return (
+        normalize_property_label(matched_axes[0])
+        if len(matched_axes) == 1
+        else normalized
+    )
+
+
+def _source_defined_axis_aliases(source_text: str) -> tuple[tuple[str, str], ...]:
+    text = str(source_text or "")
+    if not text:
+        return ()
+    aliases: list[tuple[str, str]] = []
+    definition_patterns = (
+        re.compile(
+            r"\b(?P<alias>[A-Z][A-Z0-9]{1,8})\s+"
+            r"(?:means|denotes|stands\s+for|refers\s+to|is\s+defined\s+as)\s+"
+            r"(?P<definition>[^.;\n]+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<definition>[A-Za-z][A-Za-z0-9%/()\[\],\-\s]{2,100}?)\s*"
+            r"\(\s*(?P<alias>[A-Z][A-Z0-9]{1,8})\s*\)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<alias>[A-Z][A-Z0-9]{1,8})\s*\(\s*"
+            r"(?P<definition>[A-Za-z][A-Za-z0-9%/()\[\],\-\s]{2,100}?)\s*\)",
+            flags=re.IGNORECASE,
+        ),
+    )
+    for pattern in definition_patterns:
+        for match in pattern.finditer(text):
+            alias = str(match.group("alias") or "").strip()
+            definition = " ".join(
+                str(match.group("definition") or "").split()
+            ).strip(" ,:")
+            if alias and definition:
+                aliases.append((alias, definition))
+    return tuple(dict.fromkeys(aliases))
 
 
 def objective_method_families(
@@ -513,10 +780,25 @@ def density_property_matches_structural_target(
 def source_text_mentions_axis(text: str, axis: str) -> bool:
     if _source_text_mentions_single_axis(text, axis):
         return True
+    if _fatigue_strength_text_mentions_axis(text, axis):
+        return True
     return any(
         _source_text_mentions_single_axis(text, expanded_axis)
         for expanded_axis in broad_outcome_expansions(axis)
     )
+
+
+def _fatigue_strength_text_mentions_axis(text: Any, axis: Any) -> bool:
+    target_regime = _fatigue_strength_variant_regime(axis)
+    if target_regime in {"invalid", None}:
+        return False
+    for match in _FATIGUE_STRENGTH_TEXT_RE.finditer(str(text or "")):
+        observed_regime = " ".join(
+            str(match.group("regime") or "").casefold().split()
+        ) or None
+        if observed_regime is None or observed_regime == target_regime:
+            return True
+    return False
 
 
 def axis_key_set(*values: Any) -> set[str]:
@@ -694,6 +976,8 @@ def axis_alias_matches_canonical(alias: str, canonical: str) -> bool:
 
 
 def axis_values_match(left: str, right: str) -> bool:
+    if _fatigue_strength_variants_conflict(left, right):
+        return False
     if axis_alias_matches_canonical(left, right):
         return True
     left_key = normalize_property_label(left) or axis_key(left)
@@ -755,6 +1039,34 @@ def variable_matches_objective_scope(
     )
 
 
+def process_axis_matches_objective_scope(
+    source_axis: Any,
+    objective_axis: Any,
+) -> bool:
+    """Match a source-specific process axis to a broad Objective axis.
+
+    This is intentionally separate from :func:`axis_values_match`: a scan
+    rotation angle and a build orientation angle remain distinct factors even
+    when both are covered by a broad Objective such as ``scanning strategy``
+    and ``build orientation``.
+    """
+
+    source_key = normalize_property_label(source_axis) or axis_key(source_axis)
+    objective_key = normalize_property_label(objective_axis) or axis_key(objective_axis)
+    if not source_key or not objective_key:
+        return False
+    if axis_values_match(source_key, objective_key):
+        return True
+    if axis_label_is_mentioned(source_key, objective_key):
+        return True
+    return any(
+        axis_values_match(alias, objective_key)
+        or axis_label_is_mentioned(alias, objective_key)
+        or axis_label_is_mentioned(objective_key, alias)
+        for alias in _PROCESS_AXIS_SCOPE_ALIASES.get(source_key, ())
+    )
+
+
 def objective_variable_theme(value: Any) -> str | None:
     """Resolve an explicit umbrella Objective variable to one research theme."""
 
@@ -767,6 +1079,20 @@ def objective_variable_theme(value: Any) -> str | None:
 def source_text_mentions_objective_variable(text: str, objective_variable: str) -> bool:
     if source_text_mentions_axis(text, objective_variable):
         return True
+    objective_key = axis_key(objective_variable)
+    if any(
+        source_text_mentions_axis(text, alias)
+        for alias in _EXPLICIT_AXIS_SYNONYMS.get(objective_key, ())
+    ):
+        return True
+    # A confirmed Objective may use a specific process axis while a paper
+    # names the broader experimental family (for example, ``scanning
+    # strategy`` for ``scan strategy rotation angle``).  Keep that source
+    # fact discoverable for review without treating the labels as equivalent
+    # comparison variables; endpoint binding remains source-local.
+    for alias in _PROCESS_AXIS_SCOPE_ALIASES.get(objective_key, ()):
+        if source_text_mentions_axis(text, alias):
+            return True
     objective_theme = objective_variable_theme(objective_variable)
     if objective_theme is None:
         return False
@@ -995,6 +1321,8 @@ def _normalize_axis_token(token: str) -> str:
         normalized = normalized[:-3]
         if len(normalized) >= 2 and normalized[-1] == normalized[-2]:
             normalized = normalized[:-1]
+        elif normalized.endswith("c"):
+            normalized = f"{normalized}e"
     if len(normalized) > 4 and normalized.endswith("ies"):
         normalized = f"{normalized[:-3]}y"
     elif len(normalized) > 3 and normalized.endswith("s"):

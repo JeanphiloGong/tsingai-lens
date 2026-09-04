@@ -34,6 +34,7 @@ _FRAME_PRIOR_RELATIONSHIP_LIMIT = 12
 _FRAME_TABLE_TEXT_CHARS = 800
 _FRAME_TABLE_VALUE_CHARS = 240
 _FRAME_SCREENING_NOTE_CHARS = 320
+_FRAME_SCOPE_AXIS_LIMIT = 16
 _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY = 10
 OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v4"
@@ -87,19 +88,19 @@ class StructuredPaperFrameBatch(_SourceScreeningResponse):
     screening_note: str | None = None
     material_match: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     changed_variables: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     measured_property_scope: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     test_environment_scope: list[Annotated[str, Field(max_length=160)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     relevant_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
         default_factory=list,
@@ -177,19 +178,19 @@ class _StructuredPaperFrameModelBatch(_SourceScreeningResponse):
     screening_note: str | None = None
     material_match: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     changed_variables: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     measured_property_scope: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     test_environment_scope: list[Annotated[str, Field(max_length=160)]] = Field(
         default_factory=list,
-        max_length=8,
+        max_length=_FRAME_SCOPE_AXIS_LIMIT,
     )
     relevant_source_labels: list[Annotated[str, Field(max_length=12)]] = Field(
         default_factory=list,
@@ -371,7 +372,8 @@ def build_objective_paper_frame_prompt(
         "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
         "3. Put useful or uncertain candidates in `relevant_source_labels`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_labels`.\n"
         "4. Optionally write one short `screening_note` explaining why the current candidates should or should not be inspected. This is a local selection note, not a paper summary or scientific Evidence.\n"
-        "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
+        "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n"
+        "6. Preserve every distinct explicit variable, measured property, and test environment visible in this batch, up to 16 concise items per list. Do not collapse distinct outcomes into a generic umbrella or omit an item merely to fit a smaller list.\n\n"
         "BOUNDARY EXAMPLES\n"
         "- A Methods section defining the objective variable but not reporting the outcome is relevant.\n"
         "- A Results table using a symbol or abbreviation for an objective axis is relevant when headers, caption, or cells establish that meaning.\n"
@@ -388,7 +390,8 @@ def build_objective_paper_frame_prompt(
         '{"relevance":"low","paper_role":"uncertain","screening_note":"This batch contains nominal composition only.","material_match":[],"changed_variables":[],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_labels":[],"excluded_source_labels":["S1"]}\n\n'
         "OUTPUT CONTRACT\n"
         "Return only schema-valid structured data. Every input Source `label` must appear exactly once across `relevant_source_labels` and `excluded_source_labels`. "
-        "Keep `screening_note` to one concise sentence and return no source text, paper-level conclusion, or reasoning transcript."
+        "Keep `screening_note` to one concise sentence and return no source text, paper-level conclusion, or reasoning transcript. "
+        "The scope lists may contain up to 16 concise entries each; the Source-label lists may contain up to 8 entries each."
     )
     return _FRAME_SYSTEM_PROMPT, user_prompt
 
@@ -601,6 +604,10 @@ class PaperAnalysisFrame:
     relevant_tables: tuple[str, ...]
     excluded_tables: tuple[str, ...]
     source_dispositions: tuple[PaperFrameSourceDisposition, ...] = ()
+    # Source refs that caused the confirmed Objective to be proposed.  These
+    # are a recall prior only; the Source must still be inspected and grounded
+    # during Objective analysis.
+    lineage_source_refs: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperAnalysisFrame":
@@ -633,6 +640,16 @@ class PaperAnalysisFrame:
                 for item in payload.get("source_dispositions") or ()
                 if isinstance(item, Mapping)
             ),
+            lineage_source_refs=tuple(
+                (
+                    _text(item.get("source_kind")),
+                    _text(item.get("source_ref")),
+                )
+                for item in payload.get("lineage_source_refs") or ()
+                if isinstance(item, Mapping)
+                and _text(item.get("source_kind"))
+                and _text(item.get("source_ref"))
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -652,6 +669,10 @@ class PaperAnalysisFrame:
             "excluded_tables": list(self.excluded_tables),
             "source_dispositions": [
                 disposition.to_record() for disposition in self.source_dispositions
+            ],
+            "lineage_source_refs": [
+                {"source_kind": source_kind, "source_ref": source_ref}
+                for source_kind, source_ref in self.lineage_source_refs
             ],
         }
 
@@ -951,6 +972,10 @@ def screen_sources(
                     source_units=prepared.payload["source_units"],
                     batch_results=[outcome[0] for outcome in batch_outcomes],
                     paper_map=prepared.paper_map,
+                    lineage_source_refs=_paper_map_lineage_source_refs(
+                        objective=prepared.objective,
+                        paper_map=prepared.paper_map,
+                    ),
                 )
 
             frames.append(frame)
@@ -1019,6 +1044,45 @@ def _paper_framing_max_concurrency() -> int:
         )
         return _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY
     return value
+
+
+def _paper_map_lineage_source_refs(
+    *,
+    objective: ResearchObjective,
+    paper_map: PaperResearchMap | None,
+) -> tuple[dict[str, str], ...]:
+    """Return Source refs that support this Objective's discovery lineage.
+
+    The refs are only a recall prior for Objective analysis.  They never fill
+    an Evidence field and still require Source-local grounding downstream.
+    """
+
+    if paper_map is None:
+        return ()
+    relationship_ids = set(objective.source_relationship_ids)
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for study in paper_map.studies:
+        for relationship in study.relationships:
+            if relationship_ids and relationship.relationship_id not in relationship_ids:
+                continue
+            if not relationship_ids and not _frame_relationship_supports_objective(
+                relationship=relationship,
+                objective=objective,
+            ):
+                continue
+            for source_ref in relationship.source_refs:
+                key = (source_ref.source_kind, source_ref.source_ref)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append(
+                    {
+                        "source_kind": source_ref.source_kind,
+                        "source_ref": source_ref.source_ref,
+                    }
+                )
+    return tuple(refs)
 
 
 def _route_prompt_objective_record(
@@ -1177,6 +1241,7 @@ def _aggregate_objective_paper_frame_batches(
     source_units: Iterable[Mapping[str, Any]],
     batch_results: Iterable[tuple[Mapping[str, Any], str, tuple[str, ...]]],
     paper_map: PaperResearchMap | None,
+    lineage_source_refs: Iterable[Mapping[str, Any]] = (),
 ) -> PaperAnalysisFrame:
     units = tuple(source_units)
     results = tuple(batch_results)
@@ -1349,13 +1414,28 @@ def _aggregate_objective_paper_frame_batches(
     ]
 
     deterministic_paper_role = _deterministic_frame_paper_role(paper_map)
-    if deterministic_paper_role == "review":
-        paper_role = "review"
+    if deterministic_paper_role in {"review", "primary_experiment"}:
+        # DocumentProfile/PaperResearchMap is the paper-level classification.
+        # A frame call may refine relevance, but it must not downgrade an
+        # experimental paper into background and thereby hide its direct
+        # results from the recall-first inspection path.
+        paper_role = deterministic_paper_role
     else:
         paper_role = (
             str(representative.get("paper_role") or "").strip()
             or deterministic_paper_role
         )
+
+    normalized_lineage_source_refs = tuple(
+        {
+            "source_kind": str(item.get("source_kind") or "").strip(),
+            "source_ref": str(item.get("source_ref") or "").strip(),
+        }
+        for item in lineage_source_refs
+        if isinstance(item, Mapping)
+        and str(item.get("source_kind") or "").strip()
+        and str(item.get("source_ref") or "").strip()
+    )
     if relevance != "irrelevant" and paper_role == "irrelevant":
         paper_role = deterministic_paper_role
 
@@ -1377,6 +1457,7 @@ def _aggregate_objective_paper_frame_batches(
             "source_dispositions": [
                 disposition.to_record() for disposition in source_dispositions
             ],
+            "lineage_source_refs": normalized_lineage_source_refs,
         }
     )
 

@@ -49,6 +49,11 @@ _J_PER_CUBIC_MM_RE = re.compile(
     r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
     re.IGNORECASE,
 )
+_VARIABLE_UNIT_SUFFIX_RE = re.compile(
+    r"\s*\((?:%|[a-zA-Z\u00b5\u03bc\u00b0]+"
+    r"(?:\s*/\s*[a-zA-Z0-9\u00b5\u03bc\u00b0]+)?"
+    r"(?:\s*[-^]?\s*[0-9]+)?)\)\s*$"
+)
 
 
 def directions_contradict(direction: str, observed_direction: str) -> bool:
@@ -489,14 +494,43 @@ class Finding:
     @staticmethod
     def common_scientific_context_for(
         supporting_evidence: tuple[ObjectiveEvidence, ...],
+        *,
+        excluded_factors: tuple[str, ...] = (),
     ) -> ObjectiveEvidenceContext:
         if not supporting_evidence:
             return ObjectiveEvidenceContext()
+        excluded_names = {
+            _normalize_term(value)
+            for value in (
+                *excluded_factors,
+                *(
+                    variable.name
+                    for evidence in supporting_evidence
+                    for variable in evidence.changed_variables
+                ),
+            )
+        }
         return ObjectiveEvidenceContext(
-            material=_common_attributes(supporting_evidence, "material"),
-            sample=_common_attributes(supporting_evidence, "sample"),
-            process=_common_attributes(supporting_evidence, "process"),
-            test=_common_attributes(supporting_evidence, "test"),
+            material=_common_attributes(
+                supporting_evidence,
+                "material",
+                excluded_names=excluded_names,
+            ),
+            sample=_common_attributes(
+                supporting_evidence,
+                "sample",
+                excluded_names=excluded_names,
+            ),
+            process=_common_attributes(
+                supporting_evidence,
+                "process",
+                excluded_names=excluded_names,
+            ),
+            test=_common_attributes(
+                supporting_evidence,
+                "test",
+                excluded_names=excluded_names,
+            ),
         )
 
     def validate_sources(
@@ -575,6 +609,15 @@ class Finding:
                 evidence.reported_result.direction,
             ):
                 raise ValueError("finding contradiction does not oppose its direction")
+        direct_evidence = supporting + contradicting
+        structured_factor_union = {
+            _normalize_term(variable.name)
+            for evidence in direct_evidence
+            for variable in evidence.changed_variables
+        }
+        finding_factors = {_normalize_term(item) for item in self.factors}
+        if structured_factor_union and structured_factor_union != finding_factors:
+            raise ValueError("finding factors differ from direct evidence union")
         for evidence_id in self.context_evidence_ids:
             if evidence_by_id[evidence_id].evidence_role not in _FINDING_CONTEXT_ROLES:
                 raise ValueError("finding context references non-context evidence")
@@ -583,14 +626,29 @@ class Finding:
                 raise ValueError("finding mechanism lacks mechanism evidence")
 
         expected_scope = self.attribution_scope_for(self.factors, supporting)
-        if self.attribution_scope != expected_scope:
+        # A synthesized Finding may deliberately be weaker than the raw
+        # Evidence when a same-paper context gap or cross-paper limitation is
+        # discovered. It must never claim a stronger attribution than its
+        # supporting Evidence, while a conservative descriptive/associative
+        # statement remains valid and auditable.
+        weaker_scope_allowed = (
+            self.attribution_scope == "descriptive_only"
+            or (
+                self.attribution_scope == "association_only"
+                and expected_scope in {"isolated_effect", "joint_effect"}
+            )
+        )
+        if self.attribution_scope != expected_scope and not weaker_scope_allowed:
             raise ValueError("finding attribution differs from supporting evidence")
         expected_certainty = self.certainty_for(
             self.synthesis_status, supporting + contradicting
         )
         if self.certainty != expected_certainty:
             raise ValueError("finding certainty differs from direct evidence")
-        expected_context = self.common_scientific_context_for(supporting)
+        expected_context = self.common_scientific_context_for(
+            supporting,
+            excluded_factors=self.factors,
+        )
         if self.scientific_context != expected_context:
             raise ValueError("finding context differs from common supporting evidence")
 
@@ -600,8 +658,13 @@ class Finding:
     ) -> None:
         if evidence.evidence_role not in {"direct_result", "contradictory_result"}:
             raise ValueError("finding direct evidence must have a result role")
-        if evidence.attribution_scope == "not_attributable":
-            raise ValueError("finding cannot use non-attributable direct evidence")
+        if (
+            evidence.attribution_scope == "not_attributable"
+            and self.attribution_scope != "descriptive_only"
+        ):
+            raise ValueError(
+                "non-attributable direct evidence requires a descriptive Finding"
+            )
         if evidence.reported_result is None:
             raise ValueError("finding direct evidence requires reported result")
 
@@ -612,7 +675,15 @@ class Finding:
         )
         finding_factors = tuple(sorted(_normalize_term(item) for item in self.factors))
         if evidence_factors != finding_factors:
-            raise ValueError("finding factors differ from direct evidence")
+            if not (
+                evidence_factors
+                and set(evidence_factors) < set(finding_factors)
+            ) and not (
+                self.attribution_scope == "descriptive_only"
+                and not evidence_factors
+                and _source_contains_factors(evidence, finding_factors)
+            ):
+                raise ValueError("finding factors differ from direct evidence")
         if _normalize_term(evidence.reported_result.outcome) != _normalize_term(
             self.outcome
         ):
@@ -651,13 +722,20 @@ class Finding:
 def _common_attributes(
     evidence_records: tuple[ObjectiveEvidence, ...],
     category: str,
+    *,
+    excluded_names: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[ObjectiveEvidenceAttribute, ...]:
-    first = tuple(getattr(evidence_records[0].scientific_context, category))
+    first = tuple(
+        item
+        for item in getattr(evidence_records[0].scientific_context, category)
+        if _normalize_term(item.name) not in excluded_names
+    )
     common_keys = {_attribute_key(item) for item in first}
     for evidence in evidence_records[1:]:
         common_keys &= {
             _attribute_key(item)
             for item in getattr(evidence.scientific_context, category)
+            if _normalize_term(item.name) not in excluded_names
         }
     return tuple(item for item in first if _attribute_key(item) in common_keys)
 
@@ -781,11 +859,47 @@ def _strings(value: Any) -> tuple[str, ...]:
 
 
 def _normalize_term(value: Any) -> str:
-    text = _J_PER_CUBIC_MM_RE.sub("J/mm3", _text(value) or "")
-    return " ".join(
-        part
-        for part in "".join(
-            character.lower() if character.isalnum() else " "
-            for character in text
-        ).split()
+    text = _text(value) or ""
+    text = _VARIABLE_UNIT_SUFFIX_RE.sub("", text)
+    text = _J_PER_CUBIC_MM_RE.sub("J/mm3", text)
+    parts = "".join(
+        character.lower() if character.isalnum() else " "
+        for character in text
+    ).split()
+    normalized: list[str] = []
+    for part in parts:
+        if len(part) > 5 and part.endswith("ing"):
+            part = part[:-3]
+            if len(part) >= 2 and part[-1] == part[-2]:
+                part = part[:-1]
+            elif part.endswith("c"):
+                part = f"{part}e"
+        if len(part) > 4 and part.endswith("ies"):
+            part = f"{part[:-3]}y"
+        elif len(part) > 3 and part.endswith("s"):
+            part = part[:-1]
+        if part:
+            normalized.append(part)
+    return " ".join(normalized)
+
+
+def _source_contains_factors(
+    evidence: ObjectiveEvidence,
+    finding_factors: tuple[str, ...],
+) -> bool:
+    """Validate descriptive factor labels against the retained Source text."""
+
+    source_text = " ".join(
+        value
+        for value in (
+            evidence.source_excerpt,
+            evidence.reported_result.result_text
+            if evidence.reported_result is not None
+            else "",
+        )
+        if value
+    )
+    source_tokens = set(_normalize_term(source_text).split())
+    return bool(finding_factors) and all(
+        set(factor.split()) <= source_tokens for factor in finding_factors
     )

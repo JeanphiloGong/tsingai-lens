@@ -436,6 +436,17 @@ warnings in paper order, prefixes each entry with `document_id`, and removes
 duplicates within the same paper. A clean published analysis returns an empty
 list.
 
+`ObjectiveAnalysisResponse.evidence_review` is the researcher-facing coverage
+ledger for the published Evidence set. It counts every retained Source-backed
+Evidence record by scientific status (`comparable`, `association_only`,
+`descriptive`, `needs_context`, `non_comparable`, or `extraction_failed`) and
+includes bounded gap records with the document, Source locator, page, reason,
+and excerpt. A gap is not silently converted into a missing Finding: it tells
+the researcher whether to inspect more same-paper context, preserve a
+non-comparable observation, or retry a technical extraction. The field is
+derived from immutable published Evidence and is zero-valued for historical
+responses that predate this ledger.
+
 ### Published Findings And Evidence
 
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
@@ -569,6 +580,13 @@ An Evidence record contains:
 - evidence role and selection/extraction state;
 - normalized material, sample, process, test, value, baseline, interpretation,
   and join fields.
+
+Each scientific-context attribute may include `context_scope`:
+`experimental`, `simulation`, `background`, or `unknown`. This records how the
+paper presents the setting without changing its Source grounding. Simulation
+and background attributes remain visible for audit, but cannot by themselves
+close the experimental process-context requirements for a comparable result.
+Historical Evidence without this field is read as `unknown`.
 
 Failed extraction attempts remain Evidence with their exact Source locator,
 `selection_status=failed`, and a non-empty `failure_reason`. They do not

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v5"
+PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v6"
 PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
 
 _MAX_COMPLETION_TOKENS = 4096
@@ -184,6 +184,7 @@ def _paper_signal_model_payload(
                 for key in (
                     "signal_type",
                     "label",
+                    "variable_role",
                     "experiment_label",
                     "design_type",
                     "claim_scope",
@@ -270,7 +271,8 @@ def build_paper_signal_reconciliation_prompt(
         "INPUT SCHEMA\n"
         "- `signals` contains exactly one outcome anchor and one or more candidate "
         "variables. Each has a request-local `signal_label`, exact scientific label, "
-        "bounded paper-scope context, and high-level Source excerpts.\n"
+        "paper-stated `variable_role`, bounded paper-scope context, and high-level "
+        "Source excerpts.\n"
         "- Signals omitted from this request are outside the current batch; omitted "
         "paper signals are outside this batch, not negative evidence.\n"
         "- Source excerpts are the authority for deciding whether signals describe the "
@@ -296,6 +298,9 @@ def build_paper_signal_reconciliation_prompt(
         "HARD RULES\n"
         "- In every relationship, copy only input `signal_label` values and include at "
         "least one variable signal and one outcome signal.\n"
+        "- A relationship variable must have variable_role=`varied`, `compared`, or "
+        "`modeled`. Never link `fixed`, `context`, or `uncertain` variables, even when "
+        "they share a Source or appear beside the outcome.\n"
         "- Keep `signal_labels` unique inside each relationship, and never return the "
         "same signal membership more than once. Relationship membership is unordered; "
         "reversing the same labels does not create another relationship.\n"

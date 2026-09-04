@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from application.core.objectives import property_matching
 from application.core.objectives.analysis import (
     evidence_routing,
     source_extraction,
     source_screening,
+)
+from application.core.objectives.analysis.diagnostics import (
+    capture_analysis_diagnostics,
 )
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
@@ -122,6 +127,41 @@ def test_research_objective_service_forces_direct_support_route_role():
     assert record["join_plan"] == {"evidence_role": "direct_support"}
 
 
+def test_route_without_model_confidence_gets_conservative_fallback() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    finalized = evidence_routing._finalize_objective_route_record(
+        record={
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        },
+        frame=frame,
+        objective_context=objective,
+        route_candidate={
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+            "evidence_role": "direct_support",
+            "text": "Relative density increased with laser power.",
+        },
+    )
+
+    assert finalized["confidence"] == 0.62
+
+
 def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
     class UnexpectedRouter:
         def route_source(self, payload):  # noqa: ANN001, ARG002
@@ -201,6 +241,739 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
     )
 
     assert routes == ()
+
+
+def test_irrelevant_primary_experiment_is_recalled_when_source_has_direct_result() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "irrelevant",
+            "paper_role": "primary_experiment",
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="result-1",
+            block_order=10,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                "Increasing laser power increased the relative density compared "
+                "with the low-power condition."
+            ),
+        )
+    ]
+
+    with capture_analysis_diagnostics() as diagnostics:
+        routes = evidence_routing.route_sources(
+            collection_id="col-test",
+            evidence_router=_ObjectiveExtractor(),
+            objectives=(objective,),
+            objective_paper_frames=(frame,),
+            blocks_by_document_id={"paper-1": blocks},
+            tables_by_document_id={"paper-1": []},
+            document_trees_by_document_id={},
+        )
+
+    assert any(route.source_ref == "result-1" for route in routes)
+    assert {
+        record["trace_type"]
+        for record in diagnostics.records
+    } == {
+        "objective_frame_recall_override",
+        "objective_source_coverage_audit",
+    }
+    coverage = next(
+        record
+        for record in diagnostics.records
+        if record["trace_type"] == "objective_source_coverage_audit"
+    )
+    assert coverage["omitted_direct_candidate_count"] == 0
+
+
+def test_irrelevant_primary_experiment_without_objective_signal_stays_skipped() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "irrelevant",
+            "paper_role": "primary_experiment",
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="background-1",
+            block_order=10,
+            block_type="paragraph",
+            heading_path="Introduction",
+            text="This paper reviews common additive manufacturing terminology.",
+        )
+    ]
+
+    with capture_analysis_diagnostics() as diagnostics:
+        routes = evidence_routing.route_sources(
+            collection_id="col-test",
+            evidence_router=_ObjectiveExtractor(),
+            objectives=(objective,),
+            objective_paper_frames=(frame,),
+            blocks_by_document_id={"paper-1": blocks},
+            tables_by_document_id={"paper-1": []},
+            document_trees_by_document_id={},
+        )
+
+    assert routes == ()
+
+
+def test_primary_experiment_with_outcome_but_no_objective_variable_is_skipped() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-energy-density",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="unrelated-microstructure-result",
+            block_order=10,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                "Increasing volumetric energy density produced a columnar "
+                "microstructure with larger grains."
+            ),
+        )
+    ]
+
+    class UnexpectedRouter:
+        def route_source(self, payload):  # noqa: ANN001, ARG002
+            raise AssertionError("an out-of-scope paper must not reach routing")
+
+    with capture_analysis_diagnostics() as diagnostics:
+        routes = evidence_routing.route_sources(
+            collection_id="col-test",
+            evidence_router=UnexpectedRouter(),
+            objectives=(objective,),
+            objective_paper_frames=(frame,),
+            blocks_by_document_id={frame.document_id: blocks},
+            tables_by_document_id={frame.document_id: []},
+            document_trees_by_document_id={},
+        )
+
+    assert routes == ()
+    scope_trace = next(
+        record
+        for record in diagnostics.records
+        if record["trace_type"] == "objective_paper_scope_skipped"
+    )
+    assert scope_trace["matched_variables"] == []
+    assert scope_trace["matched_outcomes"] == ["microstructure"]
+    assert scope_trace["missing_axis_families"] == ["variable"]
+
+
+def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="preheating-methods",
+            block_order=10,
+            block_type="paragraph",
+            heading_path="Materials and Methods",
+            text=(
+                "Build platform preheating was applied at 150 C for P150; "
+                "the NP condition was fabricated without preheating."
+            ),
+        ),
+        SimpleNamespace(
+            block_id="microstructure-result",
+            block_order=20,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                "Compared with NP, an equiaxed cellular microstructure was "
+                "observed in P150."
+            ),
+        ),
+    ]
+    extractor = _ObjectiveExtractor()
+
+    routes = evidence_routing.route_sources(
+        collection_id="col-test",
+        evidence_router=extractor,
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={frame.document_id: blocks},
+        tables_by_document_id={frame.document_id: []},
+        document_trees_by_document_id={},
+    )
+
+    assert "microstructure-result" in {route.source_ref for route in routes}
+    assert extractor.route_payloads
+
+
+def test_explicit_relationship_lineage_preserves_abbreviated_result_scope() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "lineage_source_refs": [
+                {"source_kind": "block", "source_ref": "abbreviated-result"}
+            ],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="abbreviated-result",
+            block_order=20,
+            block_type="paragraph",
+            heading_path="Results",
+            text="P150 was more equiaxed than NP.",
+        )
+    ]
+
+    routes = evidence_routing.route_sources(
+        collection_id="col-test",
+        evidence_router=_ObjectiveExtractor(),
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={frame.document_id: blocks},
+        tables_by_document_id={frame.document_id: []},
+        document_trees_by_document_id={},
+    )
+
+    assert "abbreviated-result" in {route.source_ref for route in routes}
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "Rottger et al. [49] compared the porosity of parts made by two scans.",
+        "Röttger et al., [49] compared the porosity of parts made by two scans.",
+        "Rottger [49] reported lower porosity for the alternate scan strategy.",
+        "Prior work [49] showed that porosity decreased after HIP.",
+    ),
+)
+def test_cited_prior_result_is_not_a_current_work_direct_result(text: str) -> None:
+    candidate = {
+        "text": text,
+        "section_label": "Results",
+    }
+
+    assert evidence_routing._route_text_candidate_is_secondary_citation(candidate)
+    assert not evidence_routing._route_text_candidate_is_direct_result(
+        objective_context=_research_objective(
+            {
+                "objective_id": "obj-porosity",
+                "question": "How does scanning strategy affect porosity?",
+                "variables": ["scanning strategy"],
+                "outcomes": ["porosity"],
+            }
+        ),
+        candidate=candidate,
+    )
+
+
+def test_current_work_result_is_not_filtered_as_a_citation() -> None:
+    candidate = {
+        "text": "In this study, we found that increasing laser power reduced porosity.",
+        "section_label": "Results",
+    }
+
+    assert not evidence_routing._route_text_candidate_is_secondary_citation(candidate)
+    assert evidence_routing._route_text_candidate_is_direct_result(
+        objective_context=_research_objective(
+            {
+                "objective_id": "obj-porosity",
+                "question": "How does laser power affect porosity?",
+                "variables": ["laser power"],
+                "outcomes": ["porosity"],
+            }
+        ),
+        candidate=candidate,
+    )
+
+
+def test_direct_result_source_is_recalled_when_router_returns_empty_selection() -> None:
+    """A routing false negative must not hide a source a researcher would read."""
+
+    class EmptyRouter:
+        def route_source(self, payload):  # noqa: ANN001
+            return evidence_routing.StructuredEvidenceSelections(selections=[])
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    result_blocks = [
+        SimpleNamespace(
+            block_id=f"result-direct-{position}",
+            block_order=position,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                f"In this study, condition {position} increased laser power and "
+                "increased relative density compared with the low-power condition."
+            ),
+        )
+        for position in range(1, 6)
+    ]
+
+    with capture_analysis_diagnostics() as diagnostics:
+        routes = evidence_routing.route_sources(
+            collection_id="col-test",
+            evidence_router=EmptyRouter(),
+            objectives=(objective,),
+            objective_paper_frames=(frame,),
+            blocks_by_document_id={"paper-1": result_blocks},
+            tables_by_document_id={"paper-1": []},
+            document_trees_by_document_id={},
+        )
+
+    direct_routes = {
+        route.source_ref: route
+        for route in routes
+        if route.source_ref.startswith("result-direct-")
+    }
+    assert set(direct_routes) == {f"result-direct-{position}" for position in range(1, 6)}
+    assert all(route.extractable for route in direct_routes.values())
+    assert all(
+        route.role == "current_experimental_evidence"
+        for route in direct_routes.values()
+    )
+    recalls = [
+        record
+        for record in diagnostics.records
+        if record["trace_type"] == "objective_source_recall_override"
+    ]
+    assert {record["source_ref"] for record in recalls} == set(direct_routes)
+    assert all(
+        record["reason"] == "router_returned_empty_for_direct_result"
+        for record in recalls
+    )
+
+
+def test_mixed_current_and_cited_paragraph_is_kept_for_source_extraction() -> None:
+    candidate = {
+        "text": (
+            "Ni et al. [28] showed that high scanning speeds increase oxidation. "
+            "In this study, we found that increasing laser power reduced porosity."
+        ),
+        "section_label": "Results",
+    }
+
+    assert not evidence_routing._route_text_candidate_is_secondary_citation(candidate)
+
+
+def test_lineage_does_not_override_citation_attribution() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity",
+            "question": "How does scanning strategy affect porosity?",
+            "variables": ["scanning strategy"],
+            "outcomes": ["porosity"],
+        }
+    )
+    candidate = {
+        "source_kind": "text_window",
+        "text": "Röttger et al. [49] compared the porosity of parts made by two scans.",
+        "section_label": "Results",
+        "lineage_match": True,
+    }
+
+    assert evidence_routing._route_candidate_evidence_role(
+        objective_context=objective,
+        candidate=candidate,
+    ) == "background_context"
+    assert not evidence_routing._route_candidate_is_direct_result_candidate(
+        candidate=candidate,
+        objective_context=objective,
+    )
+
+
+def test_methods_context_with_outcome_measurement_is_not_a_direct_result() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity",
+            "question": "How does laser power affect porosity?",
+            "variables": ["laser power"],
+            "outcomes": ["porosity"],
+        }
+    )
+    candidate = {
+        "source_kind": "text_window",
+        "text": (
+            "Specimens were fabricated at several laser power levels before "
+            "porosity measurement."
+        ),
+        "section_label": "Materials and Methods",
+    }
+
+    assert evidence_routing._route_candidate_evidence_role(
+        objective_context=objective,
+        candidate=candidate,
+    ) == "background_context"
+    assert not evidence_routing._route_candidate_is_direct_result_candidate(
+        candidate=candidate,
+        objective_context=objective,
+    )
+
+
+def test_primary_experiment_keeps_direct_text_result_when_tables_fill_route_budget() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    tables = [
+        SimpleNamespace(
+            table_id=f"tbl-{index}",
+            caption_text="Nominal composition.",
+            heading_path="Materials",
+            column_headers=("Element", "wt.%"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("Fe", "balance"),),
+        )
+        for index in range(evidence_routing._ROUTE_CANDIDATE_LIMIT + 5)
+    ]
+    blocks = [
+        SimpleNamespace(
+            block_id="result-direct",
+            block_order=999,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                "Increasing laser power increased the relative density compared "
+                "with the low-power condition."
+            ),
+        )
+    ]
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=blocks,
+        tables=tables,
+    )
+
+    assert any(
+        candidate["source_kind"] == "text_window"
+        and candidate["source_ref"] == "result-direct"
+        for candidate in candidates
+    )
+
+
+def test_objective_lineage_source_is_recalled_without_matching_objective_terms() -> None:
+    """A mapped relationship is a recall prior, not a lexical filter."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-strength",
+            "question": "How does scan strategy affect yield strength?",
+            "variables": ["scan strategy"],
+            "outcomes": ["yield strength"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "lineage_source_refs": [
+                {"source_kind": "block", "source_ref": "result-1"}
+            ],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="result-1",
+            block_order=10,
+            block_type="paragraph",
+            heading_path="Results",
+            text="The measured value was higher for group B than for group A.",
+        )
+    ]
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=blocks,
+        tables=[],
+        lineage_source_refs=frame.lineage_source_refs,
+    )
+
+    candidate = next(item for item in candidates if item["source_ref"] == "result-1")
+    assert candidate["lineage_match"] is True
+    assert evidence_routing._route_candidate_evidence_role(
+        objective_context=objective,
+        candidate=candidate,
+    ) == "direct_support"
+    assert evidence_routing._route_candidate_is_direct_result_candidate(
+        candidate=candidate,
+        objective_context=objective,
+    ) is True
+
+
+def test_paper_map_relationship_lineage_is_attached_to_objective_frame() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-strength",
+            "variables": ["scan strategy"],
+            "outcomes": ["yield strength"],
+            "source_relationship_ids": ["relationship-scan-strength"],
+        }
+    )
+    paper_map = PaperResearchMap.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "evidence_density": "medium",
+            "studies": [
+                {
+                    "document_id": "paper-1",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": ["LPBF"],
+                    "relationships": [
+                        {
+                            "relationship_id": "relationship-scan-strength",
+                            "varied_factors": ["scan strategy"],
+                            "outcome": "yield strength",
+                            "source_refs": [
+                                {"source_kind": "block", "source_ref": "result-1"}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    source_unit = {
+        "source_unit_id": "unit-result-1",
+        "source_kind": "section",
+        "source_ref": "result-1",
+        "section_label": "Results",
+        "text": "The measured value was higher for group B than for group A.",
+    }
+    frame = source_screening._aggregate_objective_paper_frame_batches(
+        objective_id=objective.objective_id,
+        document_id="paper-1",
+        source_units=(source_unit,),
+        batch_results=(
+            (
+                {
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "relevant_source_unit_ids": ["unit-result-1"],
+                    "excluded_source_unit_ids": [],
+                },
+                "model",
+                (),
+            ),
+        ),
+        paper_map=paper_map,
+        lineage_source_refs=source_screening._paper_map_lineage_source_refs(
+            objective=objective,
+            paper_map=paper_map,
+        ),
+    )
+
+    assert frame.lineage_source_refs == (("block", "result-1"),)
+
+
+def test_primary_experiment_bounds_initial_context_bundle_but_keeps_all_direct_results():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    direct_blocks = [
+        SimpleNamespace(
+            block_id=f"result-{index}",
+            block_order=index,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                f"At {index + 1} W laser power, relative density was "
+                f"{98 + index / 10:.1f}%."
+            ),
+        )
+        for index in range(3)
+    ]
+    context_blocks = [
+        SimpleNamespace(
+            block_id=f"methods-{index}",
+            block_order=100 + index,
+            block_type="paragraph",
+            heading_path="Methods",
+            text=(
+                f"Methods condition {index} used Ti-6Al-4V powder and a "
+                "tensile test specimen."
+            ),
+        )
+        for index in range(12)
+    ]
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=[*direct_blocks, *context_blocks],
+        tables=[],
+    )
+
+    direct_refs = {
+        candidate["source_ref"]
+        for candidate in candidates
+        if candidate["source_ref"].startswith("result-")
+    }
+    context_refs = {
+        candidate["source_ref"]
+        for candidate in candidates
+        if candidate["source_ref"].startswith("methods-")
+    }
+    assert direct_refs == {"result-0", "result-1", "result-2"}
+    assert len(context_refs) <= evidence_routing._ROUTE_CONTEXT_CANDIDATE_LIMIT
+
+
+def test_experimental_paper_role_is_not_downgraded_by_frame_judgment():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    paper_map = PaperResearchMap.from_mapping(
+        {
+            "document_id": "paper-experimental",
+            "doc_role": "experimental",
+            "studies": [],
+            "evidence_density": "medium",
+            "confidence": 0.8,
+        }
+    )
+    source_unit = {
+        "source_unit_id": "result-unit",
+        "source_kind": "section",
+        "source_ref": "result-block",
+        "section_label": "Results",
+        "text": "Relative density increased with laser power.",
+    }
+
+    frame = source_screening._aggregate_objective_paper_frame_batches(
+        objective_id=objective.objective_id,
+        document_id=paper_map.document_id,
+        source_units=(source_unit,),
+        batch_results=(
+            (
+                {
+                    "relevance": "medium",
+                    "paper_role": "supporting_background",
+                    "material_match": [],
+                    "changed_variables": [],
+                    "measured_property_scope": [],
+                    "relevant_source_unit_ids": [source_unit["source_unit_id"]],
+                    "excluded_source_unit_ids": [],
+                },
+                "model",
+                (),
+            ),
+        ),
+        paper_map=paper_map,
+    )
+
+    assert frame.paper_role == "primary_experiment"
 
 
 def test_research_objective_service_treats_energy_density_only_table_as_condition():
@@ -1684,7 +2457,9 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text():
         document_tree=document_tree,
     )
 
-    assert len(candidates) == 8
+    # Direct-result recall is not constrained by the bounded context quota.
+    # The late result must survive alongside the eight scope-only candidates.
+    assert len(candidates) == 9
     assert "direct-result" in {
         candidate["source_ref"] for candidate in candidates
     }
@@ -1890,6 +2665,219 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results():
     assert {"detailed-result", "conclusion-result"} <= selected_refs
 
 
+def test_research_objective_tree_routing_does_not_cap_direct_result_recall():
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["laser power"],
+            "measured_property_scope": ["relative density"],
+        }
+    )
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    direct_results = [
+        (
+            -10,
+            index,
+            {
+                "source_kind": "text_window",
+                "source_ref": f"result-{index}",
+                "section_label": "Results",
+                "text": (
+                    f"Comparing laser power condition {index} with condition {index + 1}, "
+                    "relative density increased."
+                ),
+            },
+        )
+        for index in range(12)
+    ]
+
+    selected = evidence_routing._bounded_tree_route_text_candidates(
+        frame=frame,
+        objective_context=objective_context,
+        scored_candidates=direct_results,
+    )
+
+    assert {item[2]["source_ref"] for item in selected} == {
+        f"result-{index}" for index in range(12)
+    }
+
+
+def test_research_objective_primary_frame_keeps_unlisted_tables_for_recall():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_tables": ["table-1"],
+            "excluded_tables": ["table-2"],
+        }
+    )
+    tables = [
+        SimpleNamespace(
+            table_id="table-1",
+            caption_text="Laser power and relative density.",
+            heading_path="Results",
+            column_headers=("condition", "relative density"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("condition", "relative density"), ("A", "99.1")),
+        ),
+        SimpleNamespace(
+            table_id="table-2",
+            caption_text="Laser power and relative density.",
+            heading_path="Results",
+            column_headers=("condition", "relative density"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("condition", "relative density"), ("B", "99.4")),
+        ),
+        SimpleNamespace(
+            table_id="table-3",
+            caption_text="Process conditions.",
+            heading_path="Methods",
+            column_headers=("laser power", "condition"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("laser power", "condition"), ("200", "A")),
+        ),
+    ]
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=[],
+        tables=tables,
+    )
+
+    assert {item["source_ref"] for item in candidates if item["source_kind"] == "table"} == {
+        "table-1",
+        "table-2",
+        "table-3",
+    }
+
+
+def test_research_objective_medium_primary_frame_keeps_unlisted_tables_for_recall():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "medium",
+            "paper_role": "primary_experiment",
+            "relevant_tables": ["table-1"],
+            "excluded_tables": ["table-2"],
+        }
+    )
+    tables = [
+        SimpleNamespace(
+            table_id="table-1",
+            caption_text="Laser power and relative density.",
+            heading_path="Results",
+            column_headers=("condition", "relative density"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("condition", "relative density"), ("A", "99.1")),
+        ),
+        SimpleNamespace(
+            table_id="table-2",
+            caption_text="Laser power and relative density.",
+            heading_path="Results",
+            column_headers=("condition", "relative density"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("condition", "relative density"), ("B", "99.4")),
+        ),
+        SimpleNamespace(
+            table_id="table-3",
+            caption_text="Process conditions.",
+            heading_path="Methods",
+            column_headers=("laser power", "condition"),
+            row_count=1,
+            col_count=2,
+            table_matrix=(("laser power", "condition"), ("200", "A")),
+        ),
+    ]
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=[],
+        tables=tables,
+    )
+
+    assert {item["source_ref"] for item in candidates if item["source_kind"] == "table"} == {
+        "table-1",
+        "table-2",
+        "table-3",
+    }
+
+
+def test_research_objective_medium_primary_frame_keeps_all_direct_result_text():
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "relevance": "medium",
+            "paper_role": "primary_experiment",
+            "relevant_text_source_refs": ["result-0"],
+        }
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id=f"result-{index}",
+            block_order=index,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                f"Comparing laser power condition {index} with condition {index + 1}, "
+                "relative density increased."
+            ),
+        )
+        for index in range(12)
+    ]
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=blocks,
+        tables=[],
+    )
+
+    assert {item["source_ref"] for item in candidates} == {
+        f"result-{index}" for index in range(12)
+    }
+
+
 def test_research_objective_service_keeps_numeric_mechanism_text_candidates():
     frame = PaperAnalysisFrame.from_mapping(
         {
@@ -1969,4 +2957,55 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates():
         "cooling-rate",
         "melt-pool-ratio",
         "residual-stress",
+    }
+
+
+def test_objective_routing_reserves_same_paper_methods_context() -> None:
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-porosity",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity",
+            "variables": ["laser power"],
+            "outcomes": ["porosity"],
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id=f"result-{index}",
+            block_order=index,
+            block_type="paragraph",
+            heading_path="Results",
+            text=(
+                "Porosity decreased when laser power increased, compared "
+                f"with condition {index}."
+            ),
+        )
+        for index in range(8)
+    ]
+    blocks.append(
+        SimpleNamespace(
+            block_id="methods-context",
+            block_order=99,
+            block_type="paragraph",
+            heading_path="Materials and Methods",
+            text="Cubic specimens were fabricated and tested at room temperature.",
+        )
+    )
+
+    candidates = evidence_routing._build_route_source_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=blocks,
+        tables=[],
+    )
+
+    assert "methods-context" in {
+        candidate["source_ref"] for candidate in candidates
     }

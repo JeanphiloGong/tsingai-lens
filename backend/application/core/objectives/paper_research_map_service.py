@@ -2176,9 +2176,10 @@ class PaperResearchMapService:
                     ),
                 }
             )
-            retained_relationships = []
-            for relationship in study.relationships:
-                retained_relationships.append(relationship)
+            retained_relationships = self._deduplicate_window_relationships(
+                study.relationships
+            )
+            for relationship in retained_relationships:
                 relationship_source_unit_ids.extend(relationship.source_unit_ids)
             if retained_relationships:
                 studies.append(
@@ -2354,6 +2355,58 @@ class PaperResearchMapService:
                 "relationships": relationship_records,
             }
         )
+
+    @staticmethod
+    def _window_relationships_are_duplicates(
+        left: StructuredPaperResearchRelationship,
+        right: StructuredPaperResearchRelationship,
+    ) -> bool:
+        """Identify one paper-local axis repeated across overlapping windows."""
+
+        return property_matching.axis_collections_are_equivalent(
+            left.varied_factors,
+            right.varied_factors,
+        ) and property_matching.axis_values_match(left.outcome, right.outcome)
+
+    @classmethod
+    def _deduplicate_window_relationships(
+        cls,
+        relationships: Iterable[StructuredPaperResearchRelationship],
+    ) -> tuple[StructuredPaperResearchRelationship, ...]:
+        """Fold repeated model rows while retaining every supporting Source unit."""
+
+        merged: list[StructuredPaperResearchRelationship] = []
+        for relationship in relationships:
+            duplicate_position = next(
+                (
+                    position
+                    for position, current in enumerate(merged)
+                    if cls._window_relationships_are_duplicates(current, relationship)
+                ),
+                None,
+            )
+            if duplicate_position is None:
+                merged.append(relationship)
+                continue
+            current = merged[duplicate_position]
+            merged[duplicate_position] = (
+                StructuredPaperResearchRelationship.model_validate(
+                    {
+                        "varied_factors": list(current.varied_factors),
+                        "outcome": current.outcome,
+                        "source_unit_ids": list(
+                            dict.fromkeys(
+                                (*current.source_unit_ids, *relationship.source_unit_ids)
+                            )
+                        ),
+                        "confidence": max(
+                            current.confidence,
+                            relationship.confidence,
+                        ),
+                    }
+                )
+            )
+        return tuple(merged)
 
     @classmethod
     def _review_synthesis_from_window_result(
@@ -2654,7 +2707,12 @@ class PaperResearchMapService:
                 unresolved_signals=tuple(
                     replace(
                         item.signal,
-                        reason="no paper-scope bridge was found in this paper",
+                        reason=(
+                            f"variable role '{item.signal.variable_role}' is not "
+                            "eligible for relationship construction"
+                            if not self._signal_is_relationship_eligible(item.signal)
+                            else "no paper-scope bridge was found in this paper"
+                        ),
                     )
                     for item in unique_inputs
                 ),
@@ -2729,6 +2787,13 @@ class PaperResearchMapService:
                 continue
             reason = unresolved_reasons.get(signal_id)
             if reason is None:
+                if not self._signal_is_relationship_eligible(item.signal):
+                    reason = (
+                        f"variable role '{item.signal.variable_role}' is not "
+                        "eligible for relationship construction"
+                    )
+                    unresolved_signals.append(replace(item.signal, reason=reason))
+                    continue
                 opposite_signals = (
                     other.signal
                     for other in unique_inputs
@@ -2757,6 +2822,14 @@ class PaperResearchMapService:
             ),
             unresolved_signals=tuple(unresolved_signals),
         )
+
+    @staticmethod
+    def _signal_is_relationship_eligible(signal: PaperResearchSignal) -> bool:
+        return signal.signal_type != "variable" or signal.variable_role in {
+            "varied",
+            "compared",
+            "modeled",
+        }
 
     @staticmethod
     def _signal_inputs_share_scope_evidence(
@@ -2834,7 +2907,10 @@ class PaperResearchMapService:
         signal_reconciler: PaperSignalReconciler,
     ) -> tuple[tuple[_PaperSignalInput, ...], ...]:
         variables = tuple(
-            item for item in signal_inputs if item.signal.signal_type == "variable"
+            item
+            for item in signal_inputs
+            if item.signal.signal_type == "variable"
+            and self._signal_is_relationship_eligible(item.signal)
         )
         outcomes = tuple(
             item for item in signal_inputs if item.signal.signal_type == "outcome"
@@ -2984,7 +3060,23 @@ class PaperResearchMapService:
                             "paper signal reconciliation failed",
                         )
                     continue
-                signals = tuple(signals_by_id[signal_id] for signal_id in signal_ids)
+                supplied_signals = tuple(
+                    signals_by_id[signal_id] for signal_id in signal_ids
+                )
+                for signal in supplied_signals:
+                    if cls._signal_is_relationship_eligible(signal):
+                        continue
+                    rejected_reasons_by_id.setdefault(
+                        signal.signal_id,
+                        f"variable role '{signal.variable_role}' is not eligible for "
+                        "relationship construction",
+                    )
+                signals = tuple(
+                    signal
+                    for signal in supplied_signals
+                    if cls._signal_is_relationship_eligible(signal)
+                )
+                signal_ids = tuple(signal.signal_id for signal in signals)
                 variables = cls._unique_text_values(
                     signal.label
                     for signal in signals
@@ -3543,8 +3635,12 @@ class PaperResearchMapService:
         *,
         document_id: str,
     ) -> PaperResearchScope:
-        relationships: list[PaperResearchRelationship] = list(existing.relationships)
-        for relationship in duplicate.relationships:
+        relationships: list[PaperResearchRelationship] = []
+        # A model can emit the same paper-local relationship more than once
+        # using casing, punctuation, or an axis alias. Fold both sides through
+        # one list so re-deriving stable IDs cannot turn duplicate facts into a
+        # domain validation failure.
+        for relationship in (*existing.relationships, *duplicate.relationships):
             duplicate_position = next(
                 (
                     position

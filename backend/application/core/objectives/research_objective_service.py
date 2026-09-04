@@ -105,6 +105,8 @@ from domain.source import (
     SourceDocument,
     SourceReferenceSet,
     build_source_document_tree,
+    render_markdown_table,
+    render_plain_table_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,10 @@ OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
 )
 _OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
 _PAPER_MAP_DOCUMENT_MAX_CONCURRENCY = 10
+# Paper reconstruction needs title/abstract/materials context, not a second
+# copy of the entire document.  Keep this bounded so context recovery cannot
+# inflate every result's lineage or analysis prompt.
+_OBJECTIVE_DOCUMENT_CONTEXT_LIMIT = 96
 PAPER_RESEARCH_MAP_POLICY_VERSION = "+".join(
     (
         "paper_research_map_selection.v2",
@@ -263,18 +269,30 @@ class ResearchObjectiveService:
             )
         return interrupted_count
 
+    # define a method that admits and schedules automatic objective discovery
     async def start_objective_discovery(
         self,
         collection_id: str,
         document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
-        """Queue or reuse one collection-level Objective Discovery task."""
-
+        """
+        Queue or reuse one collection-level Objective Discovery task.
+        Args:
+            collection_id: collection in which objectives will be discovered
+            document_ids: exact papers selected for discovery
+        Returns:
+            dict[str, Any]: return the processing status
+        """
+        # validate and freeze the selected inputs
         document_inputs = await self.resolve_prepared_document_inputs(
             collection_id,
             document_ids,
         )
+
+        # obtain the task service
         task_service = self._require_task_service()
+
+        # create or reuse a task
         task, created = await task_service.get_or_create_collection_task(
             collection_id=collection_id,
             task_type="objective_discovery",
@@ -428,11 +446,13 @@ class ResearchObjectiveService:
 
         return update
 
+    # define a helper to obtain the task service
     def _require_task_service(self) -> TaskService:
         if self.task_service is None:
             raise RuntimeError("Objective Discovery task service is not configured")
         return self.task_service
 
+    # define a helper that calculate the fingerprint of the objective discovery
     @staticmethod
     def _objective_discovery_fingerprint(
         document_inputs: tuple[PreparedDocumentInput, ...],
@@ -814,6 +834,7 @@ class ResearchObjectiveService:
             collection_id=collection_id,
             source_facts=validated_source_facts,
             objectives=(objective,),
+            document_contexts=self._document_contexts_for_evidence(objective_inputs),
         )
         evidence_records, contributions = materialize_evidence(
             collection_id=collection_id,
@@ -826,6 +847,9 @@ class ResearchObjectiveService:
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             figures_by_document_id=objective_inputs["figures_by_document_id"],
+            document_trees_by_document_id=objective_inputs[
+                "document_trees_by_document_id"
+            ],
         )
         if len(contributions) != 1:
             raise RuntimeError(
@@ -835,6 +859,206 @@ class ResearchObjectiveService:
             contribution=contributions[0],
             evidence_records=evidence_records,
         )
+
+    @staticmethod
+    def _document_contexts_for_evidence(
+        objective_inputs: dict[str, Any],
+    ) -> dict[str, tuple[dict[str, Any], ...]]:
+        """Expose bounded, resolvable same-paper context to reconstruction.
+
+        A result is often separated from its material or condition by a table
+        or figure caption.  Keep those artifacts in the same context stream as
+        text blocks so reconstruction has the information a researcher would
+        have while reading the paper.  Source identity remains explicit and
+        no context is imported from another document.
+        """
+
+        contexts: dict[str, tuple[dict[str, Any], ...]] = {}
+        blocks_by_document_id = objective_inputs.get("blocks_by_document_id", {})
+        tables_by_document_id = objective_inputs.get("tables_by_document_id", {})
+        figures_by_document_id = objective_inputs.get("figures_by_document_id", {})
+        document_ids = tuple(
+            dict.fromkeys(
+                (
+                    *blocks_by_document_id.keys(),
+                    *tables_by_document_id.keys(),
+                    *figures_by_document_id.keys(),
+                )
+            )
+        )
+        for document_id in document_ids:
+            ranked: list[tuple[int, int, dict[str, Any]]] = []
+            blocks = blocks_by_document_id.get(document_id, ())
+            for position, block in enumerate(blocks):
+                text = str(getattr(block, "text", "") or "").strip()
+                source_ref = str(getattr(block, "block_id", "") or "").strip()
+                if not text or not source_ref:
+                    continue
+                block_type = str(getattr(block, "block_type", "") or "").casefold()
+                heading = str(getattr(block, "heading_path", "") or "").casefold()
+                priority = (
+                    0
+                    if block_type == "title"
+                    else 1
+                    if "abstract" in heading
+                    else 2
+                    if any(
+                        marker in heading
+                        for marker in ("method", "material", "experimental")
+                    )
+                    else 3
+                )
+                ranked.append(
+                    (
+                        priority,
+                        position,
+                        {
+                            "source_kind": "text_window",
+                            "source_ref": source_ref,
+                            "page": getattr(block, "page", None),
+                            "heading_path": getattr(block, "heading_path", None),
+                            "text": text,
+                        },
+                    )
+                )
+            for position, table in enumerate(
+                tables_by_document_id.get(document_id, ())
+            ):
+                table_id = str(getattr(table, "table_id", "") or "").strip()
+                if not table_id:
+                    continue
+                caption_text = str(getattr(table, "caption_text", "") or "").strip()
+                heading_path = getattr(table, "heading_path", None)
+                column_headers = tuple(
+                    str(value).strip()
+                    for value in (getattr(table, "column_headers", ()) or ())
+                    if str(value).strip()
+                )
+                matrix = tuple(
+                    tuple(str(cell).strip() for cell in row)
+                    for row in (getattr(table, "table_matrix", ()) or ())
+                    if isinstance(row, (list, tuple))
+                )
+                table_markdown = ""
+                table_text = ""
+                table_visual_text = ""
+                to_record = getattr(table, "to_record", None)
+                if callable(to_record):
+                    record = to_record()
+                    table_markdown = str(record.get("table_markdown") or "").strip()
+                    table_text = str(record.get("table_text") or "").strip()
+                    metadata = record.get("metadata")
+                    if isinstance(metadata, dict):
+                        table_visual_text = str(
+                            metadata.get("visual_text") or ""
+                        ).strip()
+                if not table_markdown:
+                    table_markdown = str(
+                        render_markdown_table(
+                            [list(row) for row in matrix],
+                            list(column_headers),
+                            header_row_count=int(
+                                getattr(table, "header_row_count", 1) or 0
+                            ),
+                        )
+                        or ""
+                    ).strip()
+                if not table_text:
+                    table_text = str(
+                        render_plain_table_text([list(row) for row in matrix]) or ""
+                    ).strip()
+                text = "\n".join(
+                    part
+                    for part in (
+                        caption_text,
+                        table_markdown or table_text,
+                        table_visual_text,
+                    )
+                    if part
+                ).strip()
+                if not text:
+                    continue
+                heading = str(heading_path or "").casefold()
+                caption = caption_text.casefold()
+                priority = (
+                    2
+                    if any(
+                        marker in heading or marker in caption
+                        for marker in (
+                            "result",
+                            "mechanical",
+                            "microstructure",
+                            "material",
+                            "method",
+                            "experimental",
+                        )
+                    )
+                    else 3
+                )
+                ranked.append(
+                    (
+                        priority,
+                        len(blocks) + position,
+                        {
+                            "source_kind": "table",
+                            "source_ref": table_id,
+                            "page": getattr(table, "page", None),
+                            "heading_path": heading_path,
+                            "caption_text": caption_text or None,
+                            "column_headers": list(column_headers),
+                            "table_matrix": [list(row) for row in matrix],
+                            "table_markdown": table_markdown or None,
+                            "table_visual_text": table_visual_text or None,
+                            "table_text": table_text or None,
+                            "text": text,
+                        },
+                    )
+                )
+            for position, figure in enumerate(
+                figures_by_document_id.get(document_id, ())
+            ):
+                figure_id = str(getattr(figure, "figure_id", "") or "").strip()
+                caption_text = str(getattr(figure, "caption_text", "") or "").strip()
+                if not figure_id or not caption_text:
+                    continue
+                heading_path = getattr(figure, "heading_path", None)
+                heading = str(heading_path or "").casefold()
+                caption = caption_text.casefold()
+                priority = (
+                    2
+                    if any(
+                        marker in heading or marker in caption
+                        for marker in (
+                            "result",
+                            "mechanical",
+                            "microstructure",
+                            "material",
+                            "method",
+                            "experimental",
+                        )
+                    )
+                    else 3
+                )
+                ranked.append(
+                    (
+                        priority,
+                        len(blocks) + len(tables_by_document_id.get(document_id, ())) + position,
+                        {
+                            "source_kind": "figure",
+                            "source_ref": figure_id,
+                            "page": getattr(figure, "page", None),
+                            "heading_path": heading_path,
+                            "figure_label": getattr(figure, "figure_label", None),
+                            "caption_text": caption_text,
+                            "text": caption_text,
+                        },
+                    )
+                )
+            ranked.sort(key=lambda item: (item[0], item[1]))
+            contexts[document_id] = tuple(
+                item[2] for item in ranked[:_OBJECTIVE_DOCUMENT_CONTEXT_LIMIT]
+            )
+        return contexts
 
     @staticmethod
     def _document_evidence_input_fingerprint(
@@ -1219,29 +1443,49 @@ class ResearchObjectiveService:
             ),
         )
 
+    # define a method that converts a user-provided list of documents IDs into the exact prepared-document records that a research operation is allowed to consume
     async def resolve_prepared_document_inputs(
         self,
         collection_id: str,
         document_ids: tuple[str, ...],
     ) -> tuple[PreparedDocumentInput, ...]:
+        """
+        Args:
+            collection_id: the identifies the literature collection
+            document_ids: the explicit scope selected for the operation
+        """
+        # reject an empty selection
         if not document_ids:
             raise ValueError("Objective discovery requires at least one document")
+
+        # reject duplicate IDs
         if len(document_ids) != len(set(document_ids)):
             raise ValueError("Objective discovery document IDs must be unique")
+
+        # create a mutable local result list
         inputs: list[PreparedDocumentInput] = []
+
+        # process every selected document
         for document_id in document_ids:
+            # load the current document record
             document = await self.collection_service.get_document(
                 collection_id,
                 document_id,
             )
+
+            # require preparation completion
             if document.status != "ready" or not document.preparation_fingerprint:
                 raise ResearchObjectivesNotReadyError(collection_id)
+
+            # capture a prepared input snapshot
             inputs.append(
                 PreparedDocumentInput(
                     document_id=document_id,
                     preparation_fingerprint=document.preparation_fingerprint,
                 )
             )
+
+        # return an immutable ordered tuple
         return tuple(inputs)
 
 

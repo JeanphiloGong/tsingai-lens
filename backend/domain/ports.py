@@ -417,6 +417,8 @@ class ObjectiveRepository(Protocol):
         contributions: tuple[PaperContribution, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
     async def publish_authored_analysis(

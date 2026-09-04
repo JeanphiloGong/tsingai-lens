@@ -33,6 +33,35 @@ def test_broad_objective_matches_specific_measurement() -> None:
     )
 
 
+def test_umbrella_outcome_keeps_source_specific_measurement_in_scope() -> None:
+    assert property_matching.outcome_matches_objective_scope(
+        "fatigue life",
+        ("fatigue behaviour",),
+    )
+    assert not property_matching.outcome_matches_objective_scope(
+        "corrosion current density",
+        ("fatigue behaviour",),
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_label", "objective_outcomes"),
+    (
+        ("cellular-dendritic microstructure", ("microstructure",)),
+        ("relative density", ("densification",)),
+        ("max defect length", ("defect structure",)),
+    ),
+)
+def test_broad_outcome_scope_matches_expanded_source_measurements(
+    source_label: str,
+    objective_outcomes: tuple[str, ...],
+) -> None:
+    assert property_matching.outcome_matches_objective_scope(
+        source_label,
+        objective_outcomes,
+    )
+
+
 @pytest.mark.parametrize(
     ("outcome", "requires_resolution"),
     (
@@ -78,6 +107,30 @@ def test_process_symbol_hints_preserve_current_context_mapping() -> None:
     }
 
 
+def test_specific_process_axes_match_broad_objective_scopes() -> None:
+    assert property_matching.process_axis_matches_objective_scope(
+        "scan strategy rotation angle",
+        "scanning strategy",
+    )
+    assert property_matching.process_axis_matches_objective_scope(
+        "build orientation alpha angle",
+        "build orientation",
+    )
+    assert not property_matching.process_axis_matches_objective_scope(
+        "laser power",
+        "build orientation",
+    )
+
+
+def test_source_text_mentions_specific_process_axis_alias() -> None:
+    """A source's broad process label remains discoverable for a specific axis."""
+
+    assert property_matching.source_text_mentions_objective_variable(
+        "Yield strength was compared across scanning strategy A, B, and C.",
+        "scan strategy rotation angle",
+    )
+
+
 def test_axis_matching_preserves_explicit_synonyms_and_source_aliases() -> None:
     assert property_matching.axis_values_match(
         "scan strategy",
@@ -92,6 +145,10 @@ def test_axis_matching_preserves_explicit_synonyms_and_source_aliases() -> None:
         "crack formation",
     )
     assert property_matching.source_text_mentions_axis("E p", "pitting potential")
+
+
+def test_axis_values_match_accepts_dropped_e_gerund_variant() -> None:
+    assert property_matching.axis_values_match("trace distance", "tracing distance")
 
 
 def test_variable_theme_membership_does_not_create_axis_equivalence() -> None:
@@ -155,6 +212,37 @@ def test_source_text_matches_normalized_objective_outcome_alias() -> None:
         "Increasing laser power enhanced elongation from 15.4% to 20.1%.",
         "ductility",
     )
+
+
+def test_fatigue_strength_measurement_variant_matches_qualified_objective() -> None:
+    """A cycle-qualified Objective must recognize an explicit fatigue metric."""
+
+    assert property_matching.property_matches_target_axes(
+        "FAT at 10 4 cycles [MPa]",
+        target_axes=("high cycle fatigue strength",),
+    )
+    assert not property_matching.property_matches_target_axes(
+        "low cycle fatigue strength",
+        target_axes=("high cycle fatigue strength",),
+    )
+
+
+def test_source_defined_outcome_alias_requires_an_explicit_definition() -> None:
+    objective = type(
+        "Objective",
+        (),
+        {"outcomes": ("densification index",)},
+    )()
+    assert property_matching.normalize_source_defined_objective_property(
+        "DIDX",
+        source_text="Table 3. DIDX means densification index. DIDX = 99.1%.",
+        objective_context=objective,
+    ) == "densification index"
+    assert property_matching.normalize_source_defined_objective_property(
+        "DIDX",
+        source_text="Table 3. DIDX = 99.1%.",
+        objective_context=objective,
+    ) == "didx"
 
 
 @pytest.mark.parametrize(

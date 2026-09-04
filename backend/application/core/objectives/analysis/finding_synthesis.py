@@ -8,10 +8,18 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from typing import Any, Callable, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from openai import APIError, LengthFinishReasonError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from application.core.objectives import property_matching
-from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.objectives.analysis.diagnostics import record_analysis_diagnostic
+from application.core.objectives.analysis.source_extraction import (
+    _objective_missing_context_fields,
+)
+from application.core.objectives.llm.structured_response import (
+    StructuredOutputSaturatedError,
+    StructuredResponseClient,
+)
 from domain.core import (
     Finding,
     FindingPaperContribution,
@@ -67,7 +75,35 @@ _J_PER_CUBIC_MM_RE = re.compile(
     r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
     re.IGNORECASE,
 )
+
+
+def _material_attribute_is_primary(name: object) -> bool:
+    """Identify attributes that describe the specimen material identity."""
+
+    label = " ".join(str(name or "").casefold().split())
+    if not label or any(marker in label for marker in _SUPPORTING_MATERIAL_ATTRIBUTE_MARKERS):
+        return False
+    return any(marker in label for marker in _PRIMARY_MATERIAL_ATTRIBUTE_MARKERS)
+
+
 _FINDING_ASSERTION_STRENGTHS = {"causal", "associative", "descriptive"}
+_PRIMARY_MATERIAL_ATTRIBUTE_MARKERS = (
+    "material",
+    "alloy",
+    "powder",
+    "feedstock",
+    "composition",
+    "grade",
+)
+_SUPPORTING_MATERIAL_ATTRIBUTE_MARKERS = (
+    "substrate",
+    "build plate",
+    "base plate",
+    "support",
+    "fixture",
+    "holder",
+    "backing plate",
+)
 _FINDING_SYNTHESIS_SYSTEM_PROMPT = """
 TASK MODEL
 You are the scientific assertion judge for one atomic materials-literature
@@ -153,6 +189,10 @@ Return exactly `{"findings":[]}` or one object shaped as
 `"context_evidence_labels":[],"mechanisms":[]}]}`. Use empty arrays when
 annotations are absent and no extra keys.
 """.strip()
+
+
+class FindingAssertionTechnicalError(RuntimeError):
+    """The optional assertion judge failed before returning a valid judgment."""
 
 
 def _normalize_underscored_choice(
@@ -606,16 +646,28 @@ class FindingAssertionJudge:
                 allowed_context_labels=allowed_context_labels,
             )
 
-        response = self.response_client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=_StructuredModelFindingSynthesis,
-            max_completion_tokens=_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_response,
-            parsed_validator=validate_and_rebind,
-            task_type="finding_synthesis",
-            prompt_version=_FINDING_SYNTHESIS_PROMPT_VERSION,
-        )
+        try:
+            response = self.response_client.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=_StructuredModelFindingSynthesis,
+                max_completion_tokens=_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS,
+                json_text_parser=parse_json_response,
+                parsed_validator=validate_and_rebind,
+                task_type="finding_synthesis",
+                prompt_version=_FINDING_SYNTHESIS_PROMPT_VERSION,
+            )
+        except (
+            APIError,
+            LengthFinishReasonError,
+            StructuredOutputSaturatedError,
+            ValidationError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
+            raise FindingAssertionTechnicalError(
+                "Finding assertion judge returned no valid structured judgment"
+            ) from exc
         if not isinstance(response, StructuredFindingSynthesis):
             raise TypeError("unexpected Finding synthesis response type")
         return response
@@ -669,20 +721,140 @@ class FindingSynthesisService:
             contributions=contributions,
             evidence_records=evidence_records,
         )
-        result_sets = self._result_sets(objective, evidence_records)
-        if not result_sets:
-            eligible_evidence = tuple(
-                evidence
-                for evidence in evidence_records
-                if self._eligible_result_evidence(evidence)
+        evidence_by_id = {
+            evidence.evidence_id: evidence for evidence in evidence_records
+        }
+        eligible_evidence = tuple(
+            evidence
+            for evidence in evidence_records
+            if self._eligible_result_evidence(evidence)
+            and not _objective_missing_context_fields(evidence, objective)
+            and self.evidence_matches_objective_axes(objective, evidence)
+        )
+        paper_result_evidence = tuple(
+            evidence
+            for evidence in evidence_records
+            if self._eligible_paper_result_evidence(objective, evidence)
+        )
+        incomplete_coverage_documents = frozenset(
+            contribution.document_id
+            for contribution in contributions
+            if contribution.evidence_disposition == "coverage_incomplete"
+            or (contribution.uninspected_source_count or 0) > 0
+        )
+        result_sets = self._result_sets(
+            objective,
+            evidence_records,
+            excluded_document_ids=incomplete_coverage_documents,
+        )
+        directional_source_outcomes = {
+            (
+                evidence.document_id,
+                evidence.source_kind,
+                evidence.source_ref,
+                property_matching.axis_key(
+                    self._canonical_objective_axis(
+                        evidence.reported_result.outcome,
+                        objective.outcomes,
+                    )
+                ),
             )
+            for evidence in eligible_evidence
+            if evidence.reported_result is not None
+        }
+        qualified_result_sets = self._qualified_result_sets(
+            objective,
+            tuple(
+                evidence
+                for evidence in paper_result_evidence
+                if (
+                    evidence.document_id in incomplete_coverage_documents
+                    or not self.is_synthesizable_result_evidence(objective, evidence)
+                    or (
+                        evidence.attribution_scope == "association_only"
+                        and evidence.evidence_id
+                        not in self._cross_paper_association_ids(
+                            objective,
+                            paper_result_evidence,
+                            excluded_document_ids=incomplete_coverage_documents,
+                        )
+                    )
+                )
+                and not (
+                    evidence.attribution_scope == "descriptive_only"
+                    and evidence.comparison is None
+                    and evidence.reported_result is not None
+                    and evidence.reported_result.value is not None
+                    and evidence.reported_result.direction == "unknown"
+                    and (
+                        evidence.document_id,
+                        evidence.source_kind,
+                        evidence.source_ref,
+                        property_matching.axis_key(
+                            self._canonical_objective_axis(
+                                evidence.reported_result.outcome,
+                                objective.outcomes,
+                            )
+                        ),
+                    )
+                    in directional_source_outcomes
+                )
+                and not self._paper_result_is_covered_by_directional_evidence(
+                    objective,
+                    evidence,
+                    directional_evidence=tuple(eligible_evidence),
+                )
+            ),
+            coverage_incomplete_document_ids=incomplete_coverage_documents,
+        )
+        if incomplete_coverage_documents:
+            incomplete_evidence_count = sum(
+                evidence.document_id in incomplete_coverage_documents
+                for evidence in paper_result_evidence
+            )
+            uninspected_source_count = sum(
+                contribution.uninspected_source_count or 0
+                for contribution in contributions
+                if contribution.document_id in incomplete_coverage_documents
+            )
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_finding_coverage_gate",
+                    "collection_id": collection_id,
+                    "objective_id": objective.objective_id,
+                    "analysis_version": analysis.analysis_version,
+                    "excluded_document_ids": sorted(incomplete_coverage_documents),
+                    "uninspected_source_count": uninspected_source_count,
+                    "eligible_result_evidence_count": len(paper_result_evidence),
+                    "excluded_result_evidence_count": incomplete_evidence_count,
+                    "paper_scoped_result_set_count": len(qualified_result_sets),
+                    "disposition": "paper_scoped_until_coverage_complete",
+                }
+            )
+        if not result_sets:
+            if paper_result_evidence:
+                if qualified_result_sets:
+                    logger.info(
+                        "Finding synthesis retained qualified paper results "
+                        "without cross-paper comparison result_set_count=%s",
+                        len(qualified_result_sets),
+                    )
+                    return self._synthesize_qualified_result_sets(
+                        collection_id=collection_id,
+                        objective=objective,
+                        analysis=analysis,
+                        contributions=contributions,
+                        evidence_records=evidence_records,
+                        result_sets=qualified_result_sets,
+                    )
             logger.warning(
                 "Finding synthesis found no in-scope result sets "
                 "objective_variables=%s objective_outcomes=%s "
-                "eligible_result_count=%s eligible_axes=%s",
+                "eligible_result_count=%s paper_result_count=%s eligible_axes=%s",
                 objective.variables,
                 objective.outcomes,
                 len(eligible_evidence),
+                len(paper_result_evidence),
                 sorted(
                     {
                         (
@@ -698,9 +870,6 @@ class FindingSynthesisService:
                 )[:12],
             )
             return ()
-        evidence_by_id = {
-            evidence.evidence_id: evidence for evidence in evidence_records
-        }
         contribution_payloads = [
             self._contribution_payload(contribution)
             for contribution in contributions
@@ -742,6 +911,50 @@ class FindingSynthesisService:
                 try:
                     parsed = self.assertion_judge.judge_result_set(request_payload)
                 except Exception as exc:  # noqa: BLE001
+                    recoverable_empty_response = isinstance(
+                        exc,
+                        FindingAssertionTechnicalError,
+                    ) or (
+                        isinstance(exc, RuntimeError)
+                        and "structured extraction returned empty response content"
+                        in str(exc)
+                    )
+                    if recoverable_empty_response:
+                        logger.warning(
+                            "Finding synthesis conservative recovery result_set_id=%s "
+                            "error_type=%s",
+                            expected_result_set_id,
+                            type(exc).__name__,
+                        )
+                        record_analysis_diagnostic(
+                            {
+                                "trace_type": "finding_assertion_judge_recovery",
+                                "collection_id": collection_id,
+                                "objective_id": objective.objective_id,
+                                "analysis_version": analysis.analysis_version,
+                                "result_set_id": expected_result_set_id,
+                                "error_type": type(exc).__name__,
+                                "disposition": "conservative_recovered",
+                            }
+                        )
+                        candidate = {
+                            "assertion_strength": "descriptive",
+                            "context_evidence_ids": [],
+                            "mechanisms": [],
+                        }
+                        finding = self._finding_from_candidate(
+                            collection_id=collection_id,
+                            objective=objective,
+                            analysis=analysis,
+                            candidate=candidate,
+                            result_set=result_set,
+                            context_evidence=context_evidence,
+                            contributions=contributions,
+                            evidence_by_id=evidence_by_id,
+                            display_rank=len(findings),
+                        )
+                        findings.append(finding)
+                        break
                     logger.exception(
                         "Finding synthesis failed result_set_id=%s semantic_attempt=%s",
                         expected_result_set_id,
@@ -759,7 +972,8 @@ class FindingSynthesisService:
                 candidates = _mapping_list(parsed_record.get("findings"))
                 if not candidates:
                     logger.warning(
-                        "Finding synthesis returned no candidate result_set_id=%s "
+                        "Finding synthesis judge abstained for backend-owned result set "
+                        "result_set_id=%s; publishing conservative descriptive Finding "
                         "factors=%s outcome=%s result_evidence=%s",
                         expected_result_set_id,
                         _strings(result_set.get("factors")),
@@ -786,6 +1000,33 @@ class FindingSynthesisService:
                             )
                         ],
                     )
+                    record_analysis_diagnostic(
+                        {
+                            "trace_type": "finding_assertion_judge_abstention_recovery",
+                            "collection_id": collection_id,
+                            "objective_id": objective.objective_id,
+                            "analysis_version": analysis.analysis_version,
+                            "result_set_id": expected_result_set_id,
+                            "disposition": "conservative_recovered",
+                            "reason": "judge_returned_empty_candidate",
+                        }
+                    )
+                    finding = self._finding_from_candidate(
+                        collection_id=collection_id,
+                        objective=objective,
+                        analysis=analysis,
+                        candidate={
+                            "assertion_strength": "descriptive",
+                            "context_evidence_ids": [],
+                            "mechanisms": [],
+                        },
+                        result_set=result_set,
+                        context_evidence=context_evidence,
+                        contributions=contributions,
+                        evidence_by_id=evidence_by_id,
+                        display_rank=len(findings),
+                    )
+                    findings.append(finding)
                     break
                 candidate = candidates[0]
                 logger.debug(
@@ -831,7 +1072,383 @@ class FindingSynthesisService:
                     ) from exc
                 findings.append(finding)
                 break
+        if qualified_result_sets:
+            findings.extend(
+                self._synthesize_qualified_result_sets(
+                    collection_id=collection_id,
+                    objective=objective,
+                    analysis=analysis,
+                    contributions=contributions,
+                    evidence_records=evidence_records,
+                    result_sets=qualified_result_sets,
+                    display_rank_offset=len(findings),
+                )
+            )
         return tuple(findings)
+
+    def _synthesize_qualified_result_sets(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        contributions: tuple[PaperContribution, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        result_sets: tuple[dict[str, Any], ...],
+        display_rank_offset: int = 0,
+    ) -> tuple[Finding, ...]:
+        """Publish paper-scoped descriptive results when comparison is incomplete.
+
+        These result sets are deliberately built per document.  They preserve
+        a Source-backed result for researcher review without allowing unresolved
+        material or condition context to become a cross-paper claim.
+        """
+
+        evidence_by_id = {
+            evidence.evidence_id: evidence for evidence in evidence_records
+        }
+        findings: list[Finding] = []
+        for result_set in result_sets:
+            result_documents = {
+                str(item.get("document_id") or "")
+                for item in _mapping_list(result_set.get("result_evidence"))
+            }
+            context_evidence = self._context_evidence_for_documents(
+                evidence_records,
+                result_documents,
+            )
+            finding = self._finding_from_candidate(
+                collection_id=collection_id,
+                objective=objective,
+                analysis=analysis,
+                candidate={
+                    "assertion_strength": "descriptive",
+                    "context_evidence_ids": [],
+                    "mechanisms": [],
+                },
+                result_set=result_set,
+                context_evidence=context_evidence,
+                contributions=contributions,
+                evidence_by_id=evidence_by_id,
+                display_rank=display_rank_offset + len(findings),
+            )
+            findings.append(finding)
+        return tuple(findings)
+
+    @classmethod
+    def _qualified_result_sets(
+        cls,
+        objective: ResearchObjective,
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        *,
+        coverage_incomplete_document_ids: frozenset[str] = frozenset(),
+    ) -> tuple[dict[str, Any], ...]:
+        """Group source-backed results per paper when strict comparison is unsafe."""
+
+        grouped: dict[tuple[str, ...], list[ObjectiveEvidence]] = defaultdict(list)
+        for evidence in evidence_records:
+            if not cls._eligible_paper_result_evidence(objective, evidence):
+                continue
+            grouped[cls._paper_result_series_key(objective, evidence)].append(evidence)
+
+        result_sets: list[dict[str, Any]] = []
+        for _series_key, grouped_evidence in sorted(grouped.items()):
+            series_factors = tuple(
+                dict.fromkeys(
+                    factor
+                    for evidence in grouped_evidence
+                    for factor in cls._paper_result_factor_labels(objective, evidence)
+                )
+            )
+            for compatible_evidence in cls._comparability_groups(
+                tuple(grouped_evidence),
+                ignored_axes=series_factors,
+                allow_partial_context=True,
+            ):
+                for direction, evidence_items in cls._direction_result_groups(
+                    compatible_evidence
+                ):
+                    factors = tuple(
+                        sorted(
+                            dict.fromkeys(
+                                factor
+                                for evidence in evidence_items
+                                for factor in cls._paper_result_factor_labels(
+                                    objective,
+                                    evidence,
+                                )
+                            ),
+                            key=lambda value: _normalize_term(value),
+                        )
+                    )
+                    first_evidence = evidence_items[0]
+                    assert first_evidence.reported_result is not None
+                    document_id = first_evidence.document_id
+                    outcome = cls._canonical_objective_axis(
+                        first_evidence.reported_result.outcome,
+                        objective.outcomes,
+                    )
+                    reasons = sorted(
+                        {
+                            reason
+                            for evidence in evidence_items
+                            for reason in cls._qualified_result_reasons(
+                                objective,
+                                evidence,
+                            )
+                        }
+                    )
+                    if document_id in coverage_incomplete_document_ids:
+                        reasons.append(
+                            "The paper has relevant Sources that were not inspected; "
+                            "this result is retained for review but excluded from "
+                            "cross-paper confirmation."
+                        )
+                        reasons = sorted(set(reasons))
+                    result_sets.append(
+                        {
+                            "result_set_id": cls._result_set_id(
+                                factors,
+                                outcome,
+                                direction,
+                                evidence_ids=tuple(
+                                    item.evidence_id for item in evidence_items
+                                ),
+                            ),
+                            "document_id": document_id,
+                            "factors": list(factors),
+                            "outcome": outcome,
+                            "comparison_interval": cls._comparison_interval(
+                                first_evidence
+                            ),
+                            "primary_direction": direction,
+                            "quality_note": "; ".join(reasons),
+                            "result_evidence": [
+                                cls._evidence_payload(evidence)
+                                for evidence in evidence_items
+                            ],
+                        }
+                    )
+        return tuple(result_sets)
+
+    @classmethod
+    def _paper_result_is_covered_by_directional_evidence(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+        *,
+        directional_evidence: tuple[ObjectiveEvidence, ...],
+    ) -> bool:
+        """Keep a weaker statement as Evidence without publishing it twice.
+
+        A paper often states one experimental comparison in a result table and
+        repeats it qualitatively in Results or Conclusions. An independently
+        grounded directional record for the same paper, factor, outcome, and
+        fixed context already carries the Finding. The incomplete statement
+        remains Evidence; distinct complete treatment comparisons and test
+        contexts remain separate.
+        """
+
+        result = evidence.reported_result
+        if result is None:
+            return False
+        comparison_is_incomplete = (
+            evidence.comparison is None
+            or not evidence.comparison.comparable
+            or any(
+                variable.baseline_value in (None, "")
+                or variable.target_value in (None, "")
+                for variable in evidence.changed_variables
+            )
+        )
+        if result.direction not in {"unknown", "mixed"} and not (
+            comparison_is_incomplete and evidence.resolution_status == "partial"
+        ):
+            return False
+        evidence_variables = {
+            property_matching.axis_key(
+                cls._canonical_objective_axis(variable.name, objective.variables)
+            ): variable
+            for variable in evidence.changed_variables
+        }
+        if not evidence_variables:
+            return False
+        outcome_key = property_matching.axis_key(
+            cls._canonical_objective_axis(result.outcome, objective.outcomes)
+        )
+        ignored_axes = tuple(
+            cls._canonical_objective_axis(variable.name, objective.variables)
+            for variable in evidence.changed_variables
+        )
+        evidence_context = cls._fixed_context_values(
+            evidence,
+            ignored_axes=ignored_axes,
+        )
+        for candidate in directional_evidence:
+            candidate_result = candidate.reported_result
+            if (
+                candidate.evidence_id == evidence.evidence_id
+                or
+                candidate.document_id != evidence.document_id
+                or candidate_result is None
+                or candidate_result.direction in {"unknown", "mixed"}
+                or property_matching.axis_key(
+                    cls._canonical_objective_axis(
+                        candidate_result.outcome,
+                        objective.outcomes,
+                    )
+                )
+                != outcome_key
+            ):
+                continue
+            candidate_variables = {
+                property_matching.axis_key(
+                    cls._canonical_objective_axis(
+                        variable.name,
+                        objective.variables,
+                    )
+                ): variable
+                for variable in candidate.changed_variables
+            }
+            if (
+                comparison_is_incomplete
+                and evidence.resolution_status == "partial"
+                and cls.is_comparable_result_evidence(objective, candidate)
+            ):
+                candidate_covers_factor = all(
+                    any(
+                        property_matching.process_axis_matches_objective_scope(
+                            candidate_variable.name,
+                            evidence_variable.name,
+                        )
+                        or property_matching.variable_matches_objective_scope(
+                            candidate_variable.name,
+                            evidence_variable.name,
+                        )
+                        for candidate_variable in candidate.changed_variables
+                    )
+                    for evidence_variable in evidence.changed_variables
+                )
+                if candidate_covers_factor:
+                    return True
+            if set(candidate_variables) != set(evidence_variables):
+                continue
+            if not all(
+                _comparison_endpoint_values_are_compatible(
+                    evidence_variables[key].baseline_value,
+                    candidate_variables[key].baseline_value,
+                )
+                and _comparison_endpoint_values_are_compatible(
+                    evidence_variables[key].target_value,
+                    candidate_variables[key].target_value,
+                )
+                for key in evidence_variables
+            ):
+                continue
+            candidate_context = cls._fixed_context_values(
+                candidate,
+                ignored_axes=ignored_axes,
+            )
+            if (
+                evidence_context.items() <= candidate_context.items()
+                or candidate_context.items() <= evidence_context.items()
+            ):
+                return True
+        return False
+
+    @classmethod
+    def _paper_result_series_key(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> tuple[str, ...]:
+        """Identify one paper-owned experimental series before context partitioning.
+
+        Source references locate observations; they do not identify separate
+        experiments.  A single experiment is commonly described across a
+        Results paragraph, a figure caption, and one or more tables.  Keeping
+        those references in the series key fragments one scientific relation
+        into multiple Findings and makes paper coverage look larger than it is.
+        Fixed sample/process/test values are partitioned after this key is
+        built, so distinct experiments in the same paper remain separate.
+        """
+
+        result = evidence.reported_result
+        outcome = (
+            cls._canonical_objective_axis(result.outcome, objective.outcomes)
+            if result is not None
+            else ""
+        )
+        factors = tuple(
+            dict.fromkeys(
+                cls._canonical_objective_axis(variable.name, objective.variables)
+                for variable in evidence.changed_variables
+                if variable.name
+            )
+        )
+        # A table can report several independently varied axes. Each
+        # single-factor sequence answers a distinct research question, while
+        # multi-factor edges from a coupled design remain one experiment series.
+        isolated_factor_key = (
+            (property_matching.axis_key(factors[0]),) if len(factors) == 1 else ()
+        )
+        return (
+            evidence.document_id,
+            property_matching.axis_key(outcome),
+            cls._comparison_interval(evidence),
+            *isolated_factor_key,
+        )
+
+    @classmethod
+    def _qualified_result_reasons(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> tuple[str, ...]:
+        reasons: list[str] = []
+        if evidence.reported_result is not None and evidence.reported_result.direction in {
+            "unknown",
+            "mixed",
+        }:
+            reasons.append(
+                "The Source reports the outcome but does not establish one "
+                "directional change."
+            )
+        material_status = cls.material_scope_status(objective, evidence)
+        if material_status == "unresolved":
+            reasons.append(
+                "Material scope is not confirmed for cross-paper comparison."
+            )
+        elif material_status == "mismatched":
+            reasons.append(
+                "The reported material does not match the Objective comparison scope."
+            )
+        if evidence.comparison is None or not evidence.comparison.comparable:
+            reasons.append(
+                "The Source does not provide a complete comparable condition pair."
+            )
+        if evidence.attribution_scope == "association_only":
+            reasons.append(
+                "The Source supports an association, not an isolated causal effect."
+            )
+        elif evidence.attribution_scope == "not_attributable":
+            reasons.append(
+                "The Source reports an outcome, but the available context does not "
+                "support attributing it to the Objective factor."
+            )
+        context_gaps = _objective_missing_context_fields(evidence, objective)
+        if context_gaps:
+            reasons.append(
+                "Same-paper context is missing: "
+                + ", ".join(sorted(context_gaps))
+                + "."
+            )
+        if not evidence.changed_variables:
+            reasons.append(
+                "The Source mentions the Objective factor but does not provide a "
+                "structured comparison field."
+            )
+        return tuple(reasons)
 
     @staticmethod
     def _validate_scope(
@@ -868,26 +1485,79 @@ class FindingSynthesisService:
         self,
         objective: ResearchObjective,
         evidence_records: tuple[ObjectiveEvidence, ...],
+        *,
+        excluded_document_ids: frozenset[str] = frozenset(),
     ) -> tuple[dict[str, Any], ...]:
-        grouped: dict[tuple[tuple[str, ...], str], list[ObjectiveEvidence]] = (
-            defaultdict(list)
+        cross_paper_association_ids = self._cross_paper_association_ids(
+            objective,
+            evidence_records,
+            excluded_document_ids=excluded_document_ids,
         )
-        factor_labels: dict[tuple[str, ...], tuple[str, ...]] = {}
-        outcome_labels: dict[str, str] = {}
+        eligible_evidence: list[ObjectiveEvidence] = []
         for evidence in evidence_records:
-            if not self.is_comparable_result_evidence(objective, evidence):
+            if evidence.document_id in excluded_document_ids:
                 continue
-            factors = tuple(
+            if not self._eligible_result_evidence(evidence):
+                continue
+            if not self.evidence_matches_objective_axes(objective, evidence):
+                continue
+            if self.material_scope_status(objective, evidence) not in {
+                "matched",
+                "not_required",
+            }:
+                continue
+            if (
+                evidence.attribution_scope == "association_only"
+                and evidence.evidence_id not in cross_paper_association_ids
+            ):
+                continue
+            eligible_evidence.append(evidence)
+
+        series_groups: dict[tuple[str, ...], list[ObjectiveEvidence]] = defaultdict(list)
+        for evidence in eligible_evidence:
+            if evidence.attribution_scope != "association_only":
+                series_groups[self._paper_result_series_key(objective, evidence)].append(
+                    evidence
+                )
+        series_factors_by_evidence_id: dict[str, tuple[str, ...]] = {}
+        for series_evidence in series_groups.values():
+            series_factors = tuple(
                 sorted(
-                    (
+                    dict.fromkeys(
                         self._canonical_objective_axis(
-                            item.name,
+                            variable.name,
                             objective.variables,
                         )
-                        for item in evidence.changed_variables
+                        for evidence in series_evidence
+                        for variable in evidence.changed_variables
                     ),
                     key=lambda value: _normalize_term(value),
                 )
+            )
+            for evidence in series_evidence:
+                series_factors_by_evidence_id[evidence.evidence_id] = series_factors
+
+        grouped: dict[
+            tuple[tuple[str, ...], str, tuple[str, ...]],
+            list[ObjectiveEvidence],
+        ] = defaultdict(list)
+        factor_labels: dict[tuple[str, ...], tuple[str, ...]] = {}
+        outcome_labels: dict[str, str] = {}
+        for evidence in eligible_evidence:
+            factors = series_factors_by_evidence_id.get(
+                evidence.evidence_id,
+                tuple(
+                    sorted(
+                        (
+                            self._canonical_objective_axis(
+                                item.name,
+                                objective.variables,
+                            )
+                            for item in evidence.changed_variables
+                        ),
+                        key=lambda value: _normalize_term(value),
+                    )
+                ),
             )
             factor_key = tuple(property_matching.axis_key(value) for value in factors)
             outcome = self._canonical_objective_axis(
@@ -895,7 +1565,18 @@ class FindingSynthesisService:
                 objective.outcomes,
             )
             outcome_key = property_matching.axis_key(outcome)
-            grouped[(factor_key, outcome_key)].append(evidence)
+            # An association is only a safe cross-paper stratum when the
+            # papers name the same endpoint pair.  "Low -> high exposure" and
+            # "as-fabricated -> HIP" are both valid within-paper associations,
+            # but pooling them would erase the actual treatment distinction.
+            association_condition_key = (
+                self._association_condition_key(evidence)
+                if evidence.attribution_scope == "association_only"
+                else ()
+            )
+            result_key = (factor_key, outcome_key, association_condition_key)
+            if self.is_synthesizable_result_evidence(objective, evidence):
+                grouped[result_key].append(evidence)
             factor_labels.setdefault(
                 factor_key,
                 tuple(_normalize_scientific_typography(value) for value in factors),
@@ -903,11 +1584,12 @@ class FindingSynthesisService:
             outcome_labels.setdefault(outcome_key, outcome)
 
         result_sets: list[dict[str, Any]] = []
-        for factor_key, outcome_key in sorted(grouped):
+        for factor_key, outcome_key, _association_condition_key in sorted(grouped):
             factors = factor_labels[factor_key]
             outcome = outcome_labels[outcome_key]
             evidence_groups = self._comparability_groups(
-                tuple(grouped[(factor_key, outcome_key)])
+                tuple(grouped[(factor_key, outcome_key, _association_condition_key)]),
+                ignored_axes=factors,
             )
             for evidence_group in evidence_groups:
                 for comparison_interval, interval_items in (
@@ -916,6 +1598,15 @@ class FindingSynthesisService:
                     for primary_direction, evidence_items in (
                         self._direction_result_groups(interval_items)
                     ):
+                        published_items = tuple(
+                            sorted(
+                                evidence_items,
+                                key=lambda evidence: (
+                                    evidence.document_id,
+                                    evidence.evidence_id,
+                                ),
+                            )
+                        )
                         result_sets.append(
                             {
                                 "result_set_id": self._result_set_id(
@@ -923,7 +1614,7 @@ class FindingSynthesisService:
                                     outcome,
                                     primary_direction,
                                     evidence_ids=tuple(
-                                        item.evidence_id for item in evidence_items
+                                        item.evidence_id for item in published_items
                                     ),
                                 ),
                                 "factors": list(factors),
@@ -932,19 +1623,108 @@ class FindingSynthesisService:
                                 "primary_direction": primary_direction,
                                 "result_evidence": [
                                     self._evidence_payload(evidence)
-                                    for evidence in evidence_items
+                                    for evidence in published_items
                                 ],
                             }
                         )
         return tuple(result_sets)
 
     @classmethod
+    def _cross_paper_association_ids(
+        cls,
+        objective: ResearchObjective,
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        *,
+        excluded_document_ids: frozenset[str] = frozenset(),
+    ) -> frozenset[str]:
+        """Return complete association records repeated across one stratum.
+
+        A single paper's associative contrast remains paper-scoped.  Requiring
+        the same endpoint pair and fixed context in at least two independent
+        papers prevents broad labels such as "post-processing condition" from
+        hiding distinct treatments while still surfacing repeated observations.
+        """
+
+        grouped: dict[tuple[Any, ...], list[ObjectiveEvidence]] = defaultdict(list)
+        for evidence in evidence_records:
+            if evidence.document_id in excluded_document_ids:
+                continue
+            if (
+                evidence.attribution_scope != "association_only"
+                or not cls.is_synthesizable_result_evidence(objective, evidence)
+            ):
+                continue
+            factors = tuple(
+                sorted(
+                    cls._canonical_objective_axis(
+                        variable.name,
+                        objective.variables,
+                    )
+                    for variable in evidence.changed_variables
+                )
+            )
+            outcome = cls._canonical_objective_axis(
+                evidence.reported_result.outcome,
+                objective.outcomes,
+            )
+            context_signature = tuple(
+                f"{section}:{name}:{','.join(sorted(values))}"
+                for (section, name), values in sorted(
+                    cls._fixed_context_values(evidence).items()
+                )
+            )
+            grouped[
+                (
+                    tuple(property_matching.axis_key(value) for value in factors),
+                    property_matching.axis_key(outcome),
+                    cls._association_condition_key(evidence),
+                    context_signature,
+                )
+            ].append(evidence)
+
+        repeated_ids: set[str] = set()
+        for items in grouped.values():
+            if len({item.document_id for item in items}) >= 2:
+                repeated_ids.update(item.evidence_id for item in items)
+        return frozenset(repeated_ids)
+
+    @staticmethod
+    def _association_condition_key(
+        evidence: ObjectiveEvidence,
+    ) -> tuple[str, ...]:
+        comparison = evidence.comparison
+        if comparison is None:
+            return ()
+        return (
+            _normalize_term(comparison.baseline_label),
+            _normalize_term(comparison.target_label),
+            json.dumps(
+                sorted(
+                    (
+                        _normalize_term(variable.name),
+                        _scalar_key(variable.baseline_value),
+                        _scalar_key(variable.target_value),
+                        _normalize_term(variable.unit),
+                    )
+                    for variable in evidence.changed_variables
+                ),
+                ensure_ascii=True,
+            ),
+        )
+
+    @classmethod
     def _comparability_groups(
         cls,
         evidence_items: tuple[ObjectiveEvidence, ...],
+        *,
+        ignored_axes: tuple[str, ...] = (),
+        allow_partial_context: bool = False,
     ) -> tuple[tuple[ObjectiveEvidence, ...], ...]:
         context_values = {
-            evidence.evidence_id: cls._fixed_context_values(evidence)
+            evidence.evidence_id: cls._fixed_context_values(
+                evidence,
+                ignored_axes=ignored_axes,
+            )
             for evidence in evidence_items
         }
         ordered = sorted(
@@ -958,6 +1738,37 @@ class FindingSynthesisService:
                 evidence.evidence_id,
             ),
         )
+        if allow_partial_context:
+            groups: list[list[ObjectiveEvidence]] = []
+            group_contexts: list[dict[tuple[str, str], set[str]]] = []
+            for evidence in ordered:
+                evidence_context = context_values[evidence.evidence_id]
+                compatible_indexes = [
+                    index
+                    for index, group_context in enumerate(group_contexts)
+                    if cls._context_values_compatible(
+                        group_context,
+                        evidence_context,
+                    )
+                ]
+                # A context-free Source is safe to attach when there is one
+                # possible paper series.  If it could belong to multiple
+                # known condition groups, retain it separately rather than
+                # inventing a binding.
+                if len(compatible_indexes) != 1:
+                    groups.append([evidence])
+                    group_contexts.append(
+                        {key: set(values) for key, values in evidence_context.items()}
+                    )
+                    continue
+                index = compatible_indexes[0]
+                groups[index].append(evidence)
+                for key, values in evidence_context.items():
+                    group_contexts[index].setdefault(key, set()).update(values)
+            return tuple(
+                tuple(sorted(group, key=lambda item: item.evidence_id))
+                for group in groups
+            )
         groups_by_context: dict[
             tuple[tuple[str, str, tuple[str, ...]], ...],
             list[ObjectiveEvidence],
@@ -980,10 +1791,36 @@ class FindingSynthesisService:
         )
 
     @staticmethod
+    def _context_values_compatible(
+        left: Mapping[tuple[str, str], set[str]],
+        right: Mapping[tuple[str, str], set[str]],
+    ) -> bool:
+        """Return whether two Sources can describe one fixed condition.
+
+        Missing context is an open field, not a conflicting value.  When both
+        Sources identify the same field, at least one known value must agree;
+        disjoint values are a real experimental boundary.
+        """
+
+        for key in left.keys() & right.keys():
+            if left[key] and right[key] and left[key].isdisjoint(right[key]):
+                return False
+        return True
+
+    @staticmethod
     def _fixed_context_values(
         evidence: ObjectiveEvidence,
+        *,
+        ignored_axes: tuple[str, ...] = (),
     ) -> dict[tuple[str, str], set[str]]:
-        changed_axes = tuple(item.name for item in evidence.changed_variables)
+        changed_axes = tuple(
+            dict.fromkeys(
+                (
+                    *(item.name for item in evidence.changed_variables),
+                    *ignored_axes,
+                )
+            )
+        )
         values: dict[tuple[str, str], set[str]] = defaultdict(set)
         for section in ("material", "sample", "process", "test"):
             for attribute in getattr(evidence.scientific_context, section):
@@ -1266,9 +2103,118 @@ class FindingSynthesisService:
             evidence.supports_finding
             and evidence.evidence_role in {"direct_result", "contradictory_result"}
             and evidence.reported_result is not None
+            and evidence.reported_result.result_kind in {"measured", "observed"}
             and evidence.reported_result.direction != "unknown"
             and evidence.changed_variables
             and evidence.attribution_scope != "not_attributable"
+        )
+
+    @classmethod
+    def _eligible_paper_result_evidence(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> bool:
+        """Keep a source-backed result visible without weakening comparison gates.
+
+        A paper result may be useful to a researcher even when the extractor
+        failed to structure its factor endpoints.  This predicate therefore
+        accepts a source-explicit factor mention, but still requires a real
+        extracted result, a source lineage, and an Objective-matching outcome.
+        An unknown or mixed direction remains visible as a paper-scoped result;
+        strict cross-paper comparison continues to use
+        ``_eligible_result_evidence`` and ``is_comparable_result_evidence``.
+        """
+
+        result = evidence.reported_result
+        if not (
+            evidence.supports_finding
+            and evidence.evidence_role in {"direct_result", "contradictory_result"}
+            and result is not None
+            and result.result_kind in {"measured", "observed"}
+            and evidence.source_ref
+            and evidence.source_excerpt
+            and property_matching.outcome_matches_objective_scope(
+                result.outcome,
+                objective.outcomes,
+            )
+        ):
+            return False
+        return bool(cls._paper_result_factor_labels(objective, evidence))
+
+    @classmethod
+    def _paper_result_factor_labels(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> tuple[str, ...]:
+        """Return the complete Source-local factor set for an Objective result.
+
+        Objective membership is still required before a result enters the
+        paper-scoped path, but the published factor labels must not discard
+        co-varied factors reported by the Source.  Dropping those factors
+        would make a joint experiment look like an isolated Objective effect
+        and would also make the Finding contract disagree with its Evidence.
+        """
+
+        if evidence.changed_variables:
+            objective_match = any(
+                property_matching.variable_matches_objective_scope(
+                    item.name,
+                    objective_variable,
+                )
+                or property_matching.process_axis_matches_objective_scope(
+                    item.name,
+                    objective_variable,
+                )
+                for item in evidence.changed_variables
+                for objective_variable in objective.variables
+            )
+            if not objective_match:
+                return ()
+            factors = tuple(
+                cls._canonical_objective_axis(item.name, objective.variables)
+                for item in evidence.changed_variables
+            )
+            return tuple(
+                dict.fromkeys(
+                    sorted(
+                        (factor for factor in factors if factor),
+                        key=lambda value: _normalize_term(value),
+                    )
+                )
+            )
+
+        # A model may correctly report an outcome while leaving variable
+        # endpoints unstructured.  Preserve the paper-level observation only
+        # when the Source itself names an Objective variable.  This gives a
+        # researcher a reviewable descriptive result without copying an
+        # Objective axis into evidence that never grounded it.
+        source_text = " ".join(
+            value
+            for value in (
+                evidence.source_excerpt,
+                evidence.reported_result.result_text
+                if evidence.reported_result is not None
+                else "",
+            )
+            if value
+        )
+        source_factors = [
+            cls._canonical_objective_axis(objective_variable, objective.variables)
+            for objective_variable in objective.variables
+            if property_matching.source_text_mentions_objective_variable(
+                source_text,
+                objective_variable,
+            )
+        ]
+        return tuple(
+            dict.fromkeys(
+                sorted(
+                    (factor for factor in source_factors if factor),
+                    key=lambda value: _normalize_term(value),
+                )
+            )
         )
 
     @classmethod
@@ -1279,13 +2225,70 @@ class FindingSynthesisService:
     ) -> bool:
         if not cls._eligible_result_evidence(evidence):
             return False
+        # An explicitly associative or descriptive source observation is not a
+        # strict cross-paper comparison, even when it happens to contain two
+        # endpoint labels. Keep it in the paper-scoped qualified path so the
+        # Finding cannot imply stronger attribution than the source supports.
+        if evidence.attribution_scope not in {"isolated_effect", "joint_effect"}:
+            return False
+        # A reported direction and changed variable are not enough to form a
+        # comparison.  The Source must also bind the two condition endpoints;
+        # otherwise this remains a paper-scoped association or description.
+        if evidence.comparison is None or not evidence.comparison.comparable:
+            return False
+        if any(
+            variable.baseline_value in (None, "")
+            or variable.target_value in (None, "")
+            for variable in evidence.changed_variables
+        ):
+            return False
         return cls.evidence_matches_objective_axes(
             objective,
             evidence,
         ) and cls.material_scope_status(objective, evidence) in {
             "matched",
             "not_required",
-        }
+        } and not _objective_missing_context_fields(evidence, objective)
+
+    @classmethod
+    def is_synthesizable_result_evidence(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> bool:
+        """Return whether a grounded result can join a qualified Finding.
+
+        Comparability and attribution are separate research judgments.  An
+        ``association_only`` result with explicit endpoints and aligned fixed
+        context can support a cross-paper associative conclusion, even though
+        it must never be promoted to an isolated causal effect.  Results with
+        missing endpoints, unresolved context, or descriptive-only attribution
+        remain paper-scoped until a researcher supplies the missing evidence.
+        """
+
+        if not cls._eligible_result_evidence(evidence):
+            return False
+        if evidence.attribution_scope not in {
+            "isolated_effect",
+            "joint_effect",
+            "association_only",
+        }:
+            return False
+        if evidence.comparison is None or not evidence.comparison.comparable:
+            return False
+        if any(
+            variable.baseline_value in (None, "")
+            or variable.target_value in (None, "")
+            for variable in evidence.changed_variables
+        ):
+            return False
+        return cls.evidence_matches_objective_axes(
+            objective,
+            evidence,
+        ) and cls.material_scope_status(objective, evidence) in {
+            "matched",
+            "not_required",
+        } and not _objective_missing_context_fields(evidence, objective)
 
     @classmethod
     def evidence_matches_objective_axes(
@@ -1310,9 +2313,18 @@ class FindingSynthesisService:
 
         if not objective.material_scope:
             return "not_required"
+        # A paper can report a substrate, build plate, or fixture alongside
+        # the specimen alloy. Those are experimental context, not the material
+        # identity being compared. Only primary material attributes may decide
+        # whether an Evidence item belongs to this Objective's scope.
+        primary_material_attributes = tuple(
+            attribute
+            for attribute in evidence.scientific_context.material
+            if _material_attribute_is_primary(attribute.name)
+        )
         evidence_values = tuple(
             attribute.value
-            for attribute in evidence.scientific_context.material
+            for attribute in primary_material_attributes
             if attribute.value not in (None, "")
         )
         if not evidence_values:
@@ -1369,6 +2381,10 @@ class FindingSynthesisService:
             )
             and any(
                 _axis_matches(outcome, objective_outcome)
+                or property_matching.outcome_matches_objective_scope(
+                    outcome,
+                    (objective_outcome,),
+                )
                 for objective_outcome in objective.outcomes
             )
         )
@@ -1504,7 +2520,55 @@ class FindingSynthesisService:
                 "backend primary direction does not match one consistent supporting "
                 "Evidence direction"
             )
-        common_context = Finding.common_scientific_context_for(supporting_evidence)
+        context_gaps = frozenset(
+            field
+            for evidence in supporting_evidence
+            for field in _objective_missing_context_fields(evidence, objective)
+        )
+        source_attribution_scope = (
+            "descriptive_only"
+            if any(
+                evidence.attribution_scope == "not_attributable"
+                for evidence in supporting_evidence
+            )
+            else Finding.attribution_scope_for(
+                factors,
+                supporting_evidence,
+            )
+        )
+        if context_gaps:
+            # Keep a paper-level result visible, but never let an open
+            # same-paper context retain isolated/joint attribution. Missing
+            # fixed context is only associative.  An extractor may also have
+            # explicitly recorded an association from prose without being able
+            # to structure endpoints; that source-local judgment should remain
+            # an association rather than being erased as a mere description.
+            attribution_scope = (
+                source_attribution_scope
+                if source_attribution_scope in {
+                    "association_only",
+                    "descriptive_only",
+                }
+                else "descriptive_only"
+                if "variable" in context_gaps or "comparison" in context_gaps
+                else "association_only"
+            )
+        else:
+            # ``not_attributable`` is a valid Evidence state for a reported
+            # Source fact whose treatment/context is still unresolved, but it
+            # is not a valid Finding state.  Keep the fact visible as a
+            # conservative description; strict comparison continues to reject
+            # the underlying Evidence through ``_eligible_result_evidence``.
+            attribution_scope = (
+                source_attribution_scope
+                if source_attribution_scope
+                in {"isolated_effect", "joint_effect", "association_only", "descriptive_only"}
+                else "descriptive_only"
+            )
+        common_context = Finding.common_scientific_context_for(
+            supporting_evidence,
+            excluded_factors=factors,
+        )
         statement = self._finding_statement(
             factors=factors,
             outcome=outcome,
@@ -1513,7 +2577,9 @@ class FindingSynthesisService:
                 _text(result_set.get("comparison_interval")) or "unspecified"
             ),
             common_context=common_context,
+            supporting_evidence=supporting_evidence,
             contradicting_evidence=contradicting_evidence,
+            attribution_scope=attribution_scope,
         )
         boundary_ids = self._condition_boundary_evidence_ids(
             supporting_evidence,
@@ -1529,9 +2595,6 @@ class FindingSynthesisService:
             evidence_by_id=evidence_by_id,
         )
         synthesis_status = Finding.synthesis_status_for(paper_bindings)
-        attribution_scope = Finding.attribution_scope_for(
-            factors, supporting_evidence
-        )
         assertion_strength = self._bounded_assertion_strength(
             _text(candidate.get("assertion_strength")) or "descriptive",
             attribution_scope=attribution_scope,
@@ -1545,6 +2608,7 @@ class FindingSynthesisService:
             attribution_scope=attribution_scope,
             supporting_evidence=supporting_evidence,
             contradicting_evidence=contradicting_evidence,
+            quality_note=_text(result_set.get("quality_note")),
         )
         finding_id = self._finding_id(
             objective_id=objective.objective_id,
@@ -1591,7 +2655,9 @@ class FindingSynthesisService:
         direction: str,
         comparison_interval: str,
         common_context: ObjectiveEvidenceContext,
+        supporting_evidence: tuple[ObjectiveEvidence, ...],
         contradicting_evidence: tuple[ObjectiveEvidence, ...],
+        attribution_scope: str,
     ) -> str:
         factor_phrase = (
             factors[0]
@@ -1611,8 +2677,22 @@ class FindingSynthesisService:
             "changed": "a qualitative change",
             "no_change": "no reported change",
             "mixed": "a source-reported mixed change",
+            "unknown": "an outcome whose direction was not determined",
         }
         primary_phrase = direction_phrases[direction]
+        if attribution_scope == "descriptive_only":
+            return (
+                f"The Source reported {primary_phrase} in {outcome} while "
+                f"discussing {factor_phrase}."
+            )
+        qualitative_observation = FindingSynthesisService._qualitative_observation(
+            outcome=outcome,
+            factors=factors,
+            supporting_evidence=supporting_evidence,
+            contradicting_evidence=contradicting_evidence,
+        )
+        if qualitative_observation is not None:
+            return qualitative_observation
         if comparison_interval == "reference_to_treatment" and not (
             contradicting_evidence
         ):
@@ -1632,6 +2712,9 @@ class FindingSynthesisService:
                 "changed": f"a qualitative change in {outcome}",
                 "no_change": f"no reported difference in {outcome}",
                 "mixed": f"a source-reported mixed change in {outcome}",
+                "unknown": (
+                    f"an outcome whose direction was not determined for {outcome}"
+                ),
             }
             context_prefix = FindingSynthesisService._finding_context_prefix(
                 common_context
@@ -1659,6 +2742,72 @@ class FindingSynthesisService:
             f"Across the reported comparisons, {subject[:1].lower() + subject[1:]} "
             "showed opposing "
             f"directions in {outcome}: {primary_phrase} versus {opposing_phrases}."
+        )
+
+    @staticmethod
+    def _qualitative_observation(
+        *,
+        outcome: str,
+        factors: tuple[str, ...],
+        supporting_evidence: tuple[ObjectiveEvidence, ...],
+        contradicting_evidence: tuple[ObjectiveEvidence, ...],
+    ) -> str | None:
+        """Render a verified qualitative observation without changing its meaning.
+
+        Broad outcomes such as ``microstructure`` do not have a meaningful
+        numeric direction. If the Source supplied a concrete observation, the
+        Finding must retain that wording rather than turn it into the invalid
+        phrase ``a decrease in microstructure``. Contradictory sets continue to
+        use the explicit opposing-directions template below.
+        """
+
+        if contradicting_evidence or not supporting_evidence:
+            return None
+        results = tuple(
+            evidence.reported_result
+            for evidence in supporting_evidence
+            if evidence.reported_result is not None
+        )
+        if not results or any(result.value is not None for result in results):
+            return None
+        observations: list[str] = []
+        for result in results:
+            text = " ".join(str(result.result_text or "").split()).strip()
+            if not text:
+                continue
+            if re.fullmatch(
+                r".+ changed under the reported comparison\.?",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                continue
+            if text.casefold() not in {item.casefold() for item in observations}:
+                observations.append(text.rstrip("."))
+        if not observations:
+            return None
+        factor_phrase = (
+            factors[0]
+            if len(factors) == 1
+            else f"{', '.join(factors[:-1])} and {factors[-1]}"
+        )
+        endpoint_pairs = {
+            (
+                str(variable.baseline_value or "").strip(),
+                str(variable.target_value or "").strip(),
+            )
+            for evidence in supporting_evidence
+            for variable in evidence.changed_variables
+            if variable.baseline_value not in (None, "")
+            and variable.target_value not in (None, "")
+        }
+        endpoint_prefix = ""
+        if len(endpoint_pairs) == 1:
+            baseline, target = next(iter(endpoint_pairs))
+            endpoint_prefix = f" (baseline: {baseline}; target: {target})"
+        observation_text = "; ".join(observations[:3])
+        return (
+            f"For {factor_phrase}{endpoint_prefix}, the Source reported this "
+            f"{outcome} observation: {observation_text}."
         )
 
     @staticmethod
@@ -1843,36 +2992,49 @@ class FindingSynthesisService:
         attribution_scope: str,
         supporting_evidence: tuple[ObjectiveEvidence, ...],
         contradicting_evidence: tuple[ObjectiveEvidence, ...],
+        quality_note: str | None = None,
     ) -> tuple[str, ...]:
         deterministic: list[str] = []
+
+        def add_limitation(value: str) -> None:
+            value = value.strip()
+            if value and value not in deterministic:
+                deterministic.append(value)
+
         if len(factors) > 1:
-            deterministic.append(
+            add_limitation(
                 "The reported comparison changes the complete factor set; "
                 "individual-factor effects are not identifiable."
             )
         if synthesis_status == "insufficient_confirmation":
-            deterministic.append(
+            add_limitation(
                 "Cross-paper confirmation is absent for this atomic result."
             )
         if synthesis_status == "conflict":
-            deterministic.append(
+            add_limitation(
                 "Comparable direct results report opposing directions."
             )
         if synthesis_status == "condition_dependent":
-            deterministic.append(
+            add_limitation(
                 "The reported relationship changes across an explicit condition boundary."
             )
         if contradicting_evidence and (
             {item.document_id for item in supporting_evidence}
             & {item.document_id for item in contradicting_evidence}
         ):
-            deterministic.append(
+            add_limitation(
                 "Within-paper condition comparisons report opposing directions."
             )
         if attribution_scope == "association_only":
-            deterministic.append(
+            add_limitation(
                 "The available evidence supports association, not isolated causation."
             )
+        # Qualified paper-scoped result sets carry deterministic reasons for why
+        # they were intentionally excluded from cross-paper comparison. Keep
+        # those reasons on the published Finding so an incomplete conclusion is
+        # inspectable rather than looking like a normal comparable result.
+        for item in (quality_note or "").split("; "):
+            add_limitation(item)
         return _strings(deterministic)
 
     @staticmethod
@@ -2013,6 +3175,21 @@ def _is_untreated_reference_state(value: Any) -> bool:
 
 def _context_attribute_key(section: str, value: Any) -> str:
     key = _normalize_term(value)
+    # Free-form narrative fields are useful for audit but cannot identify an
+    # experimental stratum.  Model-generated summaries in particular often
+    # differ per paper even when the underlying method is identical.
+    if key in {
+        "comment",
+        "comments",
+        "detail",
+        "details",
+        "description",
+        "methods",
+        "note",
+        "notes",
+        "summary",
+    }:
+        return ""
     aliases = {
         "material": {
             "alloy": "material identity",
@@ -2057,6 +3234,28 @@ def _scalar_key(value: Any) -> str:
     except InvalidOperation:
         return _normalize_term(value)
     return str(number.normalize())
+
+
+def _comparison_endpoint_values_are_compatible(left: Any, right: Any) -> bool:
+    left_key = _scalar_key(left)
+    right_key = _scalar_key(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    if _is_untreated_reference_state(left) and _is_untreated_reference_state(right):
+        return True
+
+    left_numbers = tuple(re.findall(r"[-+]?\d+(?:\.\d+)?", left_key))
+    right_numbers = tuple(re.findall(r"[-+]?\d+(?:\.\d+)?", right_key))
+    if left_numbers and right_numbers and left_numbers != right_numbers:
+        return False
+    ignored_tokens = {"at", "condition", "conditions", "the", "to"}
+    left_tokens = set(left_key.split()) - ignored_tokens
+    right_tokens = set(right_key.split()) - ignored_tokens
+    return bool(left_tokens and right_tokens) and (
+        left_tokens <= right_tokens or right_tokens <= left_tokens
+    )
 
 
 def _axis_matches(left: Any, right: Any) -> bool:

@@ -20,6 +20,14 @@ EvidenceAttributionScope = Literal[
     "descriptive_only",
     "not_attributable",
 ]
+EvidenceStatus = Literal[
+    "comparable",
+    "association_only",
+    "descriptive",
+    "needs_context",
+    "non_comparable",
+    "extraction_failed",
+]
 EvidenceResultDirection = Literal[
     "increase",
     "decrease",
@@ -28,6 +36,20 @@ EvidenceResultDirection = Literal[
     "changed",
     "no_change",
     "mixed",
+    "unknown",
+]
+EvidenceResultKind = Literal[
+    "measured",
+    "observed",
+    "predicted",
+    "simulated",
+    "modeled",
+    "unknown",
+]
+EvidenceContextScope = Literal[
+    "experimental",
+    "simulation",
+    "background",
     "unknown",
 ]
 
@@ -173,6 +195,32 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     abstention_note: str | None = None
 
 
+class ObjectiveEvidenceGapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str
+    document_id: str
+    source_kind: str
+    source_ref: str
+    page_numbers: list[int] = Field(default_factory=list)
+    evidence_status: EvidenceStatus
+    reason: str
+    outcome: str | None = None
+    source_excerpt: str = ""
+
+
+class ObjectiveEvidenceReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_evidence_count: int = Field(..., ge=0)
+    result_count: int = Field(..., ge=0)
+    comparable_evidence_count: int = Field(..., ge=0)
+    gap_count: int = Field(..., ge=0)
+    omitted_gap_count: int = Field(..., ge=0)
+    status_counts: dict[EvidenceStatus, int] = Field(default_factory=dict)
+    gaps: list[ObjectiveEvidenceGapResponse] = Field(default_factory=list)
+
+
 class FindingMechanismResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -201,6 +249,7 @@ class ObjectiveEvidenceAttributeResponse(BaseModel):
     name: str
     value: str | int | float | bool
     unit: str | None = None
+    context_scope: EvidenceContextScope = "unknown"
 
 
 class ObjectiveEvidenceVariableResponse(BaseModel):
@@ -226,6 +275,7 @@ class ObjectiveEvidenceResultResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     outcome: str
+    result_kind: EvidenceResultKind = "observed"
     value: str | int | float | bool | None = None
     baseline_value: str | int | float | bool | None = None
     target_value: str | int | float | bool | None = None
@@ -303,6 +353,8 @@ class ObjectiveEvidenceResponse(BaseModel):
     evidence_role: str
     selection_status: str
     selection_reason: str | None = None
+    evidence_status: EvidenceStatus | None = None
+    evidence_status_reason: str | None = None
     changed_variables: list[ObjectiveEvidenceVariableResponse] = Field(
         default_factory=list
     )
@@ -372,6 +424,8 @@ class ObjectiveEvidenceMapEvidenceNodeResponse(BaseModel):
     document_id: str
     evidence_role: str
     attribution_scope: EvidenceAttributionScope
+    evidence_status: EvidenceStatus | None = None
+    evidence_status_reason: str | None = None
     confidence: float = Field(..., ge=0, le=1)
     direction: EvidenceResultDirection | None = None
     outcome: str | None = None
@@ -403,6 +457,7 @@ class ObjectiveEvidenceMapDocumentNodeResponse(BaseModel):
     evidence_disposition: Literal[
         "excluded",
         "no_routable_evidence",
+        "coverage_incomplete",
         "extraction_failed",
         "no_comparable_evidence",
         "comparable_evidence",
@@ -450,6 +505,7 @@ class ObjectiveEvidenceMapCoverageResponse(BaseModel):
     evidence_count: int = Field(..., ge=0)
     source_count: int = Field(..., ge=0)
     unlinked_evidence_count: int = Field(..., ge=0)
+    evidence_status_counts: dict[EvidenceStatus, int] = Field(default_factory=dict)
 
 
 class ObjectiveEvidenceMapResponse(BaseModel):
@@ -500,6 +556,7 @@ class PaperContributionResponse(BaseModel):
     evidence_disposition: Literal[
         "excluded",
         "no_routable_evidence",
+        "coverage_incomplete",
         "extraction_failed",
         "no_comparable_evidence",
         "comparable_evidence",
@@ -508,7 +565,9 @@ class PaperContributionResponse(BaseModel):
     extracted_source_count: int | None = Field(default=None, ge=0)
     comparable_evidence_count: int | None = Field(default=None, ge=0)
     failed_source_count: int | None = Field(default=None, ge=0)
+    uninspected_source_count: int | None = Field(default=None, ge=0)
     evidence_disposition_reason: str | None = None
+    evidence_status_counts: dict[EvidenceStatus, int] = Field(default_factory=dict)
 
 
 class ObjectiveAnalysisResponse(BaseModel):
@@ -518,6 +577,15 @@ class ObjectiveAnalysisResponse(BaseModel):
     published_analysis: ObjectiveAnalysisStateResponse | None = None
     paper_contributions: list[PaperContributionResponse] = Field(
         default_factory=list
+    )
+    evidence_review: ObjectiveEvidenceReviewResponse = Field(
+        default_factory=lambda: ObjectiveEvidenceReviewResponse(
+            total_evidence_count=0,
+            result_count=0,
+            comparable_evidence_count=0,
+            gap_count=0,
+            omitted_gap_count=0,
+        )
     )
     warnings: list[str] = Field(default_factory=list)
 

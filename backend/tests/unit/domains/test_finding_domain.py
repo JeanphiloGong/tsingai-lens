@@ -185,6 +185,74 @@ def test_finding_validates_direct_evidence_and_complete_paper_coverage() -> None
         )
 
 
+def test_finding_accepts_experiment_series_factor_subsets_with_exact_union() -> None:
+    """Row-pair Evidence may cover subsets of one source-grounded series scope."""
+
+    support = _evidence(
+        "evidence-1",
+        "paper-1",
+        factors=("energy input", "travel speed"),
+        attribution_scope="joint_effect",
+    )
+    contradiction = _evidence(
+        "evidence-2",
+        "paper-1",
+        factors=("travel speed", "path strategy"),
+        attribution_scope="joint_effect",
+        direction="decrease",
+    )
+    finding = _finding(
+        factors=["energy input", "path strategy", "travel speed"],
+        attribution_scope="joint_effect",
+        paper_contributions=[
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-1"],
+                "contradicting_evidence_ids": ["evidence-2"],
+            }
+        ],
+    )
+
+    finding.validate_sources(
+        (support, contradiction),
+        (_contribution("paper-1"),),
+    )
+
+
+def test_finding_accepts_semantically_equivalent_series_factor_labels() -> None:
+    """Source header units and ordinary word forms do not create a new axis."""
+
+    support = _evidence(
+        "evidence-1",
+        "paper-1",
+        factors=("Hatch space (mm)", "scanning speed"),
+        attribution_scope="joint_effect",
+    )
+    finding = _finding(
+        factors=["hatch spacing", "scanning speed"],
+        attribution_scope="joint_effect",
+    )
+
+    finding.validate_sources((support,), (_contribution("paper-1"),))
+
+
+def test_finding_rejects_factor_not_covered_by_direct_evidence_union() -> None:
+    support = _evidence(
+        "evidence-1",
+        "paper-1",
+        factors=("energy input", "travel speed"),
+        attribution_scope="joint_effect",
+    )
+    finding = _finding(
+        factors=["atmosphere", "energy input", "travel speed"],
+        attribution_scope="joint_effect",
+    )
+
+    with pytest.raises(ValueError, match="factors differ"):
+        finding.validate_sources((support,), (_contribution("paper-1"),))
+
+
 def test_finding_rejects_missing_and_cross_version_evidence() -> None:
     finding = _finding()
     contributions = (_contribution("paper-1"),)

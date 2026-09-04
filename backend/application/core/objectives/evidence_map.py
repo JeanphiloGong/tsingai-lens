@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from hashlib import sha1
 from typing import Any, Iterable
 
@@ -100,9 +101,38 @@ def build_objective_evidence_map(
         )
 
     evidence_by_id = {item.evidence_id: item for item in evidence_records}
-    linked_evidence_ids: list[str] = []
+    linked_evidence_ids: set[str] = set()
     source_nodes: dict[tuple[str, str, str], dict[str, Any]] = {}
     source_document_edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for evidence in evidence_records:
+        evidence_node_id = f"evidence:{evidence.evidence_id}"
+        nodes.append(_evidence_node(evidence))
+        source_key = (
+            evidence.document_id,
+            evidence.source_kind,
+            evidence.source_ref,
+        )
+        source_node = source_nodes.setdefault(source_key, _source_node(evidence))
+        source_node["evidence_ids"].append(evidence.evidence_id)
+        edges.append(
+            _edge(
+                source=evidence_node_id,
+                target=source_node["id"],
+                relation="extracted_from",
+            )
+        )
+        source_document_edges.setdefault(
+            source_key,
+            _edge(
+                source=source_node["id"],
+                target=f"document:{evidence.document_id}",
+                relation="reported_in",
+            ),
+        )
+
+    nodes.extend(source_nodes.values())
+    edges.extend(source_document_edges.values())
 
     for finding in findings:
         finding_node_id = f"finding:{finding.finding_id}"
@@ -142,34 +172,7 @@ def build_objective_evidence_map(
                         f"finding references missing evidence: {evidence_id}"
                     )
                 evidence_node_id = f"evidence:{evidence_id}"
-                if evidence_id not in linked_evidence_ids:
-                    linked_evidence_ids.append(evidence_id)
-                    nodes.append(_evidence_node(evidence))
-                    source_key = (
-                        evidence.document_id,
-                        evidence.source_kind,
-                        evidence.source_ref,
-                    )
-                    source_node = source_nodes.setdefault(
-                        source_key,
-                        _source_node(evidence),
-                    )
-                    source_node["evidence_ids"].append(evidence_id)
-                    edges.append(
-                        _edge(
-                            source=evidence_node_id,
-                            target=source_node["id"],
-                            relation="extracted_from",
-                        )
-                    )
-                    source_document_edges.setdefault(
-                        source_key,
-                        _edge(
-                            source=source_node["id"],
-                            target=f"document:{evidence.document_id}",
-                            relation="reported_in",
-                        ),
-                    )
+                linked_evidence_ids.add(evidence_id)
                 edges.append(
                     _edge(
                         source=finding_node_id,
@@ -181,10 +184,6 @@ def build_objective_evidence_map(
                     )
                 )
 
-    nodes.extend(source_nodes.values())
-    edges.extend(source_document_edges.values())
-
-    linked_evidence_set = set(linked_evidence_ids)
     direct_document_ids = {
         evidence_by_id[evidence_id].document_id
         for finding in findings
@@ -218,7 +217,10 @@ def build_objective_evidence_map(
             "evidence_count": len(evidence_records),
             "source_count": len(source_nodes),
             "unlinked_evidence_count": len(
-                set(evidence_by_id) - linked_evidence_set
+                set(evidence_by_id) - linked_evidence_ids
+            ),
+            "evidence_status_counts": dict(
+                sorted(Counter(item.evidence_status for item in evidence_records).items())
             ),
         },
     }
@@ -236,6 +238,8 @@ def _evidence_node(evidence: ObjectiveEvidence) -> dict[str, Any]:
         "document_id": evidence.document_id,
         "evidence_role": evidence.evidence_role,
         "attribution_scope": evidence.attribution_scope,
+        "evidence_status": evidence.evidence_status,
+        "evidence_status_reason": evidence.evidence_status_reason,
         "confidence": evidence.confidence,
         "direction": result.direction if result is not None else None,
         "outcome": result.outcome if result is not None else None,

@@ -589,6 +589,13 @@ def _objective_variable_is_observed_mediator(
             re.IGNORECASE | re.DOTALL,
         )
         for match in pattern.finditer(lowered):
+            if match.group("cause") == "by":
+                connector_prefix = lowered[max(0, match.start("cause") - 24) : match.start("cause")]
+                if re.search(
+                    r"\b(?:measured|tested|assessed|evaluated|characterized|determined)\s*$",
+                    connector_prefix,
+                ):
+                    continue
             if outcome:
                 cause_tail = lowered[match.end() :].split(",", 1)[0]
                 cause_tail = re.split(r"\bwhile\b", cause_tail, maxsplit=1)[0]

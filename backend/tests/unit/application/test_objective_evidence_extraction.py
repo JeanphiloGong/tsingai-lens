@@ -8234,6 +8234,78 @@ def test_source_validation_downgrades_model_supplied_mediator_endpoints() -> Non
     assert "observed mediator" in records[0]["selection_reason"]
 
 
+def test_source_validation_keeps_explicit_intervention_before_measurement_method() -> None:
+    """A trailing measurement method does not make the intervention a mediator."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-laser-porosity-measurement-clause",
+            "question": "How does laser exposure condition affect porosity?",
+            "variables": ["laser exposure condition"],
+            "outcomes": ["porosity"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-laser-measurement-clause",
+            "source_kind": "text_window",
+            "source_ref": "results-laser-measurement-clause",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = (
+        "Changing laser exposure condition from low exposure to high exposure "
+        "decreased porosity from 2.4% to 0.8% measured by X-ray computed tomography."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "laser exposure condition",
+                    "baseline_value": "low exposure",
+                    "target_value": "high exposure",
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "low exposure",
+                "target_label": "high exposure",
+                "axis_names": ["laser exposure condition"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "porosity",
+                "value": 0.8,
+                "baseline_value": 2.4,
+                "target_value": 0.8,
+                "unit": "%",
+                "direction": "decrease",
+                "result_text": result_text,
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records[0]["changed_variables"][0]["name"] == "laser exposure condition"
+    assert records[0]["comparison"]["comparable"] is True
+    assert records[0]["attribution_scope"] == "isolated_effect"
+
+
 def test_source_validation_keeps_explicit_mediator_outcome_association() -> None:
     """An explicit porosity-elongation clause remains reviewable as an association."""
 

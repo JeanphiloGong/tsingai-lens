@@ -14,9 +14,11 @@ from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredDirectEvidenceExtractions,
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+	StructuredDirectEvidenceExtractions,
+	StructuredEvidenceExtraction,
+	StructuredEvidenceExtractions,
+	StructuredRequestedContextFacts,
+	StructuredRequestedContextFact,
 )
 from application.core.objectives.analysis.source_screening import (
     StructuredPaperFrameBatch,
@@ -178,6 +180,36 @@ class FakeDomainModelExtractor:
             response = self.route_source(payload)
         elif response_model is StructuredEvidenceExtractions:
             response = self.extract_source(_source_extraction_payload(user_prompt))
+        elif response_model is StructuredRequestedContextFacts:
+            source_payload = _source_extraction_payload(user_prompt)
+            extracted = self.extract_source(source_payload)
+            route = source_payload.get("evidence_route")
+            role = str(route.get("role") or "") if isinstance(route, dict) else ""
+            context_field = {
+                "process_or_treatment": "process",
+                "test_condition": "test",
+                "composition_or_background": "material",
+            }.get(role, "process")
+            facts = [
+                StructuredRequestedContextFact(
+                    name=str(attribute.get("name") or "source_statement"),
+                    value=attribute.get("value")
+                    if attribute.get("value") is not None
+                    else "",
+                    unit=attribute.get("unit"),
+                    context_scope=attribute.get("context_scope", "unknown"),
+                    group_label=None,
+                )
+                for extraction in extracted.extractions
+                for attribute in (
+                    extraction.scientific_context.model_dump().get(context_field, [])
+                    if extraction.scientific_context is not None
+                    else []
+                )
+                if isinstance(attribute, dict)
+                and str(attribute.get("name") or "").strip()
+            ]
+            response = StructuredRequestedContextFacts(facts=facts)
         elif response_model is StructuredDirectEvidenceExtractions:
             extracted = self.extract_source(_source_extraction_payload(user_prompt))
             response = StructuredDirectEvidenceExtractions.model_validate(

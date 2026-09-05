@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Protocol
 
 from application.core.objectives import property_matching
+from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
 from domain.core import PaperResearchMap
 
 
@@ -249,18 +250,8 @@ def _material_scope_conflicts(
             for item in getattr(paper_map.review_synthesis, field_name)
             if item.material_scope
         )
-    material_values = tuple(value for scope in observed_scopes for value in scope)
-    specific_material_values = tuple(
-        value
-        for value in material_values
-        if property_matching.material_scope_value_is_specific(value)
-        or property_matching.material_scope_value_is_broad(value)
-    )
-    return bool(specific_material_values) and not any(
-        property_matching.material_scope_value_is_broad(value)
-        for value in specific_material_values
-    ) and not any(
-        _material_matches(requested_values, observed)
+    return bool(observed_scopes) and all(
+        _material_collections_conflict(requested_values, observed)
         for observed in observed_scopes
     )
 
@@ -300,7 +291,11 @@ def _scope_partially_matches(
 ) -> bool:
     observed_variables = tuple(variables)
     observed_outcomes = tuple(outcomes)
-    if not _material_matches(question.material_scope, tuple(materials)):
+    observed_materials = tuple(materials)
+    if _material_collections_conflict(
+        tuple(question.material_scope),
+        observed_materials,
+    ):
         return False
     variable_match = any(
         property_matching.variable_matches_objective_scope(observed, requested)
@@ -325,6 +320,24 @@ def _material_matches(requested: Iterable[str], observed: Iterable[str]) -> bool
             for left in requested_values
             for right in observed_values
         )
+    )
+
+
+def _material_collections_conflict(
+    requested: tuple[str, ...],
+    observed: tuple[str, ...],
+) -> bool:
+    """Return true only for an explicit all-pairs identity conflict.
+
+    A missing, broad, or unregistered label is an inspection gap. It must not
+    become a deterministic scientific exclusion.
+    """
+
+    return bool(requested and observed) and all(
+        property_matching.material_match_quality(left, right)
+        is MaterialMatchQuality.CONFLICT
+        for left in requested
+        for right in observed
     )
 
 

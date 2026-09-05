@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
-from hashlib import sha1
+from hashlib import sha1, sha256
 from typing import Any
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from domain.core import ResearchObjective
 
-# Source validation now retains explicit associations and uses same-paper
-# material recovery; invalidate checkpoints produced by the previous contract.
-OBJECTIVE_SOURCE_GROUNDING_VERSION = "objective-source-grounding.v3"
+# Source validation now distinguishes cited background from an unresolved
+# current-paper result; invalidate checkpoints from the prior contract.
+OBJECTIVE_SOURCE_GROUNDING_VERSION = "objective-source-grounding.v11"
 
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _NO_CHANGE_RESULT_KEYS = (
@@ -36,7 +37,7 @@ _TABLE_CONTINUATION_MARKER = re.compile(
 _OBJECTIVE_ASSOCIATION_RELATION_MARKERS = re.compile(
     r"\b(?:associated|association|correlat(?:e|ed|es|ion)|relationship|"
     r"influence|influenced|effect|effects|impact|sensitivity|dependent|"
-    r"dependence|compared|comparison|different|varied|varying|as|while|"
+    r"sensitive|dependence|compared|comparison|different|varied|varying|as|while|"
     r"with|between|from|higher|lower|improve|improved|improves|improving|"
     r"enhance|enhanced|enhances|enhancing)\b",
     re.IGNORECASE,
@@ -49,12 +50,65 @@ _OBJECTIVE_INTERVENTION_RELATION_MARKERS = re.compile(
 _OBJECTIVE_OBSERVED_CHANGE_MARKERS = re.compile(
     r"\b(?:increase|increased|increases|increasing|decrease|decreased|"
     r"decreases|decreasing|reduce|reduced|reduces|reducing|change|changed|"
-    r"changes|vary|varied|varies|varying)\b",
+    r"changes|vary|varied|varies|varying|remove|removed|removal|"
+    r"eliminate|eliminated|elimination|deplete|depleted|depletion)\b",
     re.IGNORECASE,
 )
 _OBJECTIVE_MEDIATOR_CAUSE_MARKERS = re.compile(
     r"\b(?:by|due to|because of|after|following|result(?:ed|s)? from|"
     r"as a result of|as|while)\b",
+    re.IGNORECASE,
+)
+_SECONDARY_STUDY_NAMED_ATTRIBUTION = re.compile(
+    r"\b(?:[A-Z][\w'’-]*\s+et\s+al\.?|previous|prior|earlier)\b.*?"
+    r"\b(?:reported|compared|showed|found|observed|revealed|demonstrated|"
+    r"identified|measured|indicated|investigated|studied|concluded)\b|"
+    r"\bour\s+(?:prior|previous|earlier)\s+"
+    r"(?:study|work|research|investigation|analysis)\b",
+    re.IGNORECASE,
+)
+_SECONDARY_STUDY_PASSIVE_ATTRIBUTION = re.compile(
+    r"\b(?:it|this|these)\s+(?:(?:has|have)\s+been\s+|(?:was|were)\s+)?"
+    r"(?:previously\s+)?(?:reported|shown|found|observed|demonstrated)\s+that\b",
+    re.IGNORECASE,
+)
+_SECONDARY_STUDY_PRONOUN_REPORT = re.compile(
+    r"^\s*they\s+(?:reported|compared|showed|found|observed|revealed|"
+    r"demonstrated|identified|measured|indicated|attributed|concluded)\b",
+    re.IGNORECASE,
+)
+_SECONDARY_STUDY_CITED_REPORT = re.compile(
+    r"\b(?:it|this|these|which)\s+(?:(?:has|have)\s+been\s+|"
+    r"(?:was|were)\s+)?(?:previously\s+)?"
+    r"(?:reported|shown|found|observed|demonstrated)\s+"
+    r"(?:as|to|that)\b",
+    re.IGNORECASE,
+)
+_SCIENTIFIC_CITATION_MARKER = re.compile(
+    r"\[(?:\d+[a-z]?\s*(?:[-,;]\s*\d+[a-z]?\s*)*)\]|"
+    r"\((?:[A-Z][\w'’-]+(?:\s+et\s+al\.?)?[^)]*\b(?:19|20)\d{2}[a-z]?)\)",
+    re.IGNORECASE,
+)
+_CURRENT_STUDY_ATTRIBUTION = re.compile(
+    r"\b(?:we|this\s+(?:study|work)|the\s+present\s+(?:study|work)|"
+    r"current\s+(?:study|work)|our\s+(?:results?|findings?|experiments?|"
+    r"measurements?|analysis))\b",
+    re.IGNORECASE,
+)
+_STUDY_INTENT_MARKERS = re.compile(
+    r"\b(?:aim|aimed|objective|purpose)\b|"
+    r"\b(?:was|were|is|are|has\s+been|have\s+been)\s+"
+    r"(?:investigated|examined|evaluated|assessed|analy[sz]ed|studied|"
+    r"characteri[sz]ed|measured)\b",
+    re.IGNORECASE,
+)
+_RESULT_OBSERVATION_MARKERS = re.compile(
+    r"\b(?:increase|increased|increases|decrease|decreased|decreases|"
+    r"reduce|reduced|reduces|improve|improved|improves|enhance|enhanced|"
+    r"higher|lower|greater|smaller|more|less|different|difference|"
+    r"observed|found|showed|revealed|exhibited|formed|formation|developed|"
+    r"seen|resulted|remained|unchanged|similar|correlated|associated)\b|"
+    r"[-+]?\d+(?:\.\d+)?\s*(?:%|mpa|gpa|kpa|pa|hv|°?c)\b",
     re.IGNORECASE,
 )
 
@@ -131,13 +185,18 @@ def _objective_table_matrix_rows(
     # header row.  Honor the source's declared header depth first, then fall
     # back to the legacy first-row check for artifacts produced before that
     # field was persisted.
+    header_depth_is_declared = "header_row_count" in source
     try:
         header_row_count = int(source.get("header_row_count", 1) or 0)
     except (TypeError, ValueError):
         header_row_count = 1
     header_row_count = max(0, min(header_row_count, len(matrix)))
-    if header_row_count == 1 and not _objective_row_matches_headers(
-        matrix[0], headers
+    if (
+        not header_depth_is_declared
+        and header_row_count == 1
+        and not _objective_row_matches_headers(
+            matrix[0], headers
+        )
     ):
         # Some legacy rows have no explicit header row despite the default
         # metadata value.  Preserve the old behavior for those artifacts.
@@ -224,19 +283,25 @@ def validate_source_fact(
         source=grounding_source,
     )
     record = _objective_remove_observed_mediator_variables(record)
-    record = _objective_retain_source_grounded_context(
-        record,
-        source=grounding_source,
-    )
-    record = _objective_recover_source_bound_objective_material(
+    record = _objective_remove_unattributed_objective_variables(
         record,
         source=grounding_source,
         objective_context=objective_context,
+    )
+    record = _objective_retain_source_grounded_context(
+        record,
+        source=grounding_source,
     )
     record = _objective_normalize_explicit_no_change_direction(record)
     reported_result = record.get("reported_result")
     if isinstance(reported_result, Mapping):
         normalized_result = dict(reported_result)
+        normalized_result = _objective_reanchor_result_text(
+            normalized_result,
+            source=source,
+            source_text=_objective_source_grounding_text(source),
+            objective_context=objective_context,
+        )
         result_value = normalized_result.get("value")
         direction = str(normalized_result.get("direction") or "unknown")
         result_text = (
@@ -252,7 +317,6 @@ def validate_source_fact(
                 "higher",
                 "greater",
                 "larger",
-                "more",
             ),
             "decrease": (
                 "decrease",
@@ -260,7 +324,6 @@ def validate_source_fact(
                 "decreases",
                 "decreasing",
                 "lower",
-                "less",
                 "reduce",
                 "reduced",
                 "reduces",
@@ -302,11 +365,18 @@ def validate_source_fact(
             if any(f"_{term}_" in result_text for term in terms)
         ]
         if direction == "unknown":
-            result_direction = _objective_result_direction_near_outcome(
-                result_text=str(normalized_result.get("result_text") or ""),
-                outcome=str(normalized_result.get("outcome") or ""),
-                direction_terms=direction_terms,
-            )
+            result_text_value = str(normalized_result.get("result_text") or "")
+            outcome_value = str(normalized_result.get("outcome") or "")
+            result_direction = None
+            if not _objective_result_is_non_directional_relation(
+                result_text=result_text_value,
+                outcome=outcome_value,
+            ):
+                result_direction = _objective_result_direction_near_outcome(
+                    result_text=result_text_value,
+                    outcome=outcome_value,
+                    direction_terms=direction_terms,
+                )
             if result_direction is not None:
                 direction = result_direction
             elif len(explicit_directions) == 1:
@@ -322,11 +392,27 @@ def validate_source_fact(
             normalized_result["direction"] = "unknown"
         record["reported_result"] = normalized_result
         reported_result = normalized_result
+        record = _objective_retain_outcome_applicable_test_context(record)
     if not isinstance(reported_result, Mapping):
         record["changed_variables"] = []
         record["comparison"] = None
     if isinstance(reported_result, Mapping):
         source_text = _objective_source_grounding_text(source)
+        if (
+            source.get("source_kind") == "text_window"
+            and _objective_result_is_attributed_to_secondary_study(
+                result_text=str(reported_result.get("result_text") or ""),
+                source_text=source_text,
+            )
+        ):
+            # The Source was inspected successfully, but the model transcribed
+            # another study's result. It is neither a technical failure nor
+            # Evidence from the current paper.
+            return ()
+        if _objective_result_text_is_study_intent_only(
+            str(reported_result.get("result_text") or "")
+        ):
+            return ()
         result_grounding_errors = _objective_evidence_result_grounding_errors(
             record,
             source=source,
@@ -347,6 +433,12 @@ def validate_source_fact(
             objective_context=objective_context,
             candidate_variables=candidate_variables,
         )
+        explicit_association_variables = _objective_explicit_association_variables(
+            record,
+            source=source,
+            source_text=source_text,
+            objective_context=objective_context,
+        )
         if inferred_association_variable is not None:
             record["changed_variables"] = [
                 {
@@ -365,6 +457,14 @@ def validate_source_fact(
                 "Source explicitly names one Objective variable theme but does not "
                 "provide complete comparison endpoints; retained as an association."
             )
+        elif explicit_association_variables:
+            record["attribution_scope"] = "association_only"
+            record["resolution_status"] = "partial"
+            record["selection_reason"] = (
+                "Source explicitly links the reported outcome to the Objective "
+                "variable, but does not provide complete comparison endpoints; "
+                "retained as an association."
+            )
         # An association variable is a canonical Objective theme inferred from
         # an explicitly named Source intervention (for example, "scanning
         # strategies" -> "laser exposure condition").  Its canonical name is
@@ -377,6 +477,7 @@ def validate_source_fact(
                 record,
                 source=grounding_source,
                 source_text=_objective_source_grounding_text(grounding_source),
+                allow_missing_endpoints=bool(explicit_association_variables),
             )
         )
         comparison_grounding_errors = _objective_evidence_comparison_grounding_errors(
@@ -469,6 +570,22 @@ def validate_source_fact(
             for group in ("material", "sample", "process", "test")
         ):
             return ()
+        if (
+            source.get("source_kind") == "text_window"
+            and _objective_source_is_secondary_only_target_context(
+                source_text=_objective_source_grounding_text(source),
+                objective_context=objective_context,
+            )
+        ):
+            record["evidence_role"] = "background_context"
+            background_context: dict[str, list[dict[str, Any]]] = {}
+            for group in ("material", "sample", "process", "test"):
+                background_context[group] = [
+                    {**dict(attribute), "context_scope": "background"}
+                    for attribute in scientific_context.get(group, ())
+                    if isinstance(attribute, Mapping)
+                ]
+            record["scientific_context"] = background_context
     supported_fields = list(
         _objective_primary_source_supported_fields(record, source=source)
     )
@@ -555,6 +672,189 @@ def _objective_source_sentences(text: str) -> tuple[str, ...]:
     )
 
 
+def _objective_reanchor_result_text(
+    result: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+    source_text: str,
+    objective_context: ResearchObjective | None,
+) -> dict[str, Any]:
+    """Keep a reported result excerpt tied to its own outcome clause.
+
+    Model output may copy a direction from one sentence and an outcome label
+    from another sentence in the same paragraph.  Whole-Source substring
+    grounding accepts that combination even though a researcher would not call
+    it one result.  For prose, recover the smallest adjacent sentence span that
+    contains the reported outcome and a source-named Objective variable.  The
+    span remains verbatim Source text; no scientific wording is generated.
+    """
+
+    normalized = dict(result)
+    if (
+        not objective_context
+        or not objective_context.outcomes
+        or str(source.get("source_kind") or "") != "text_window"
+    ):
+        return normalized
+    result_text = str(normalized.get("result_text") or "").strip()
+    outcome = str(normalized.get("outcome") or "").strip()
+    if not result_text or not outcome:
+        return normalized
+    if property_matching.source_text_mentions_axis(result_text, outcome):
+        return normalized
+
+    variables = tuple(str(item).strip() for item in objective_context.variables if str(item).strip())
+    sentences = _objective_source_sentences(source_text)
+    candidates: list[tuple[int, int, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        if not property_matching.source_text_mentions_axis(sentence, outcome):
+            continue
+        spans = ((index, index),)
+        if index > 0:
+            spans += ((index - 1, index),)
+        if index + 1 < len(sentences):
+            spans += ((index, index + 1),)
+        for start, end in spans:
+            span = " ".join(sentences[start : end + 1]).strip()
+            variable_match = any(
+                property_matching.source_text_mentions_objective_variable(span, variable)
+                for variable in variables
+            )
+            relationship_match = bool(
+                _OBJECTIVE_ASSOCIATION_RELATION_MARKERS.search(span)
+            )
+            if not variable_match or not relationship_match:
+                continue
+            # Prefer the shortest source-local span, then one with both target
+            # axes in the same sentence, then the earliest occurrence.
+            same_sentence_match = any(
+                property_matching.source_text_mentions_objective_variable(
+                    sentence,
+                    variable,
+                )
+                for variable in variables
+            )
+            same_sentence_bonus = 0 if same_sentence_match else 1
+            candidates.append((end - start, same_sentence_bonus, start, span))
+    if not candidates:
+        return normalized
+    _span_size, _same_sentence_bonus, _start, selected = min(candidates)
+    normalized["result_text"] = selected
+    # A direction inferred from the discarded clause is no longer trustworthy.
+    # Recompute it later from the reanchored text; if no direction is stated,
+    # the existing validation path will preserve ``unknown``.
+    normalized["direction"] = "unknown"
+    return normalized
+
+
+def _objective_result_is_attributed_to_secondary_study(
+    *,
+    result_text: str,
+    source_text: str,
+) -> bool:
+    """Identify a cited study as the owner of one extracted result statement.
+
+    A Source block can mix cited literature and current-work prose, so the
+    decision is made around the sentence containing the extracted result, not
+    from the whole paragraph. Pronoun-led reports inherit attribution only
+    from the immediately preceding named-study sentence.
+    """
+
+    result_key = _objective_column_key(result_text)
+    if not result_key:
+        return False
+    sentences = _objective_source_sentences(source_text)
+    for index, sentence in enumerate(sentences):
+        sentence_key = _objective_column_key(sentence)
+        if not sentence_key or result_key not in sentence_key:
+            continue
+        if _CURRENT_STUDY_ATTRIBUTION.search(sentence):
+            return False
+        if (
+            _SECONDARY_STUDY_PASSIVE_ATTRIBUTION.search(sentence)
+            or _SECONDARY_STUDY_NAMED_ATTRIBUTION.search(sentence)
+        ):
+            return True
+        if _SECONDARY_STUDY_PRONOUN_REPORT.search(sentence) and index > 0:
+            # Sentence tokenizers commonly split the abbreviation in
+            # ``et al. [12] investigated ...``. Rejoin a bounded attribution
+            # prefix without widening the scientific claim boundary.
+            attribution_prefix = " ".join(sentences[max(0, index - 2) : index])
+            if _SECONDARY_STUDY_NAMED_ATTRIBUTION.search(attribution_prefix):
+                return True
+    return False
+
+
+def _objective_result_text_is_study_intent_only(result_text: str) -> bool:
+    """Distinguish a study action from an observed scientific result."""
+
+    text = str(result_text or "").strip()
+    return bool(
+        text
+        and _STUDY_INTENT_MARKERS.search(text)
+        and not _RESULT_OBSERVATION_MARKERS.search(text)
+    )
+
+
+def _objective_source_is_secondary_only_target_context(
+    *,
+    source_text: str,
+    objective_context: ResearchObjective | None,
+) -> bool:
+    """Return true only when every target-outcome claim is explicitly secondary.
+
+    This gate prevents cited background from becoming current-experiment
+    context while preserving mixed paragraphs and ordinary Results prose for
+    further reading. PDF sentence splitting may separate ``et al.``, a citation,
+    and its report; attribution therefore carries across that bounded sequence.
+    """
+
+    text = str(source_text or "").strip()
+    if not text or objective_context is None or not objective_context.outcomes:
+        return False
+    if _CURRENT_STUDY_ATTRIBUTION.search(text):
+        return False
+    sentences = _objective_source_sentences(text)
+    target_seen = False
+    secondary_attribution_active = False
+    for index, sentence in enumerate(sentences):
+        attribution_window = " ".join(sentences[max(0, index - 1) : index + 1])
+        named_secondary = bool(
+            _SECONDARY_STUDY_NAMED_ATTRIBUTION.search(attribution_window)
+        )
+        passive_secondary = bool(
+            _SECONDARY_STUDY_PASSIVE_ATTRIBUTION.search(sentence)
+        )
+        if named_secondary or passive_secondary:
+            secondary_attribution_active = True
+
+        is_target_sentence = any(
+            property_matching.source_text_mentions_axis(sentence, outcome)
+            for outcome in objective_context.outcomes
+        )
+        if not is_target_sentence:
+            continue
+        target_seen = True
+        nearby_text = " ".join(
+            sentences[max(0, index - 1) : min(len(sentences), index + 2)]
+        )
+        is_secondary = (
+            named_secondary
+            or passive_secondary
+            or (
+                bool(_SECONDARY_STUDY_PRONOUN_REPORT.search(sentence))
+                and secondary_attribution_active
+            )
+            or (
+                bool(_SECONDARY_STUDY_CITED_REPORT.search(sentence))
+                and bool(_SCIENTIFIC_CITATION_MARKER.search(nearby_text))
+            )
+        )
+        if not is_secondary:
+            return False
+    return target_seen
+
+
 def _objective_variable_is_observed_mediator(
     text: str,
     variable: str,
@@ -602,6 +902,25 @@ def _objective_variable_is_observed_mediator(
                 if property_matching.source_text_mentions_axis(cause_tail, outcome):
                     continue
             return True
+        # Papers often phrase a mediated change as "the removal of X" or
+        # "the reduction of X", placing the observed variable after the
+        # change marker. Require a nearby causal verb so a plain noun phrase
+        # such as "porosity removal" is not treated as an intervention.
+        phrase_pattern = re.compile(
+            rf"\b(?:removal|elimination|reduction|depletion)\s+of\s+"
+            rf"{term_pattern}\b",
+            re.IGNORECASE,
+        )
+        for sentence in _objective_source_sentences(text):
+            if not phrase_pattern.search(sentence):
+                continue
+            if re.search(
+                r"\b(?:induced|caused|promoted|led\s+to|due\s+to|after|"
+                r"following|through|by)\b",
+                sentence,
+                re.IGNORECASE,
+            ):
+                return True
     return False
 
 
@@ -767,6 +1086,119 @@ def _objective_remove_observed_mediator_variables(
     return normalized
 
 
+def _objective_remove_unattributed_objective_variables(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> dict[str, Any]:
+    """Keep Objective factors only when SOURCE establishes their role.
+
+    A result Source may mention an Objective property as an intermediate state
+    while reporting an intervention's effect (for example, treatment reduced
+    porosity and improved elongation). A model can copy that property into
+    ``changed_variables`` even though the paper never compares porosity as the
+    intervention. Preserve the reported result for audit, but remove the
+    unsupported factor so it cannot become a misleading Finding.
+    """
+
+    normalized = dict(record)
+    variables = normalized.get("changed_variables")
+    result = normalized.get("reported_result")
+    if (
+        not isinstance(variables, list)
+        or not variables
+        or not isinstance(result, Mapping)
+        or objective_context is None
+    ):
+        return normalized
+
+    result_text = str(result.get("result_text") or "").strip()
+    outcome = str(result.get("outcome") or "").strip()
+    source_text = _objective_source_grounding_text(source)
+    if not result_text or not outcome or not source_text:
+        return normalized
+
+    objective_variables = tuple(objective_context.variables)
+    retained: list[Any] = []
+    removed_names: list[str] = []
+    for variable in variables:
+        if not isinstance(variable, Mapping):
+            retained.append(variable)
+            continue
+        name = str(variable.get("name") or "").strip()
+        is_objective_variable = any(
+            property_matching.variable_matches_objective_scope(name, candidate)
+            or property_matching.process_axis_matches_objective_scope(name, candidate)
+            for candidate in objective_variables
+        )
+        if (
+            name
+            and is_objective_variable
+            and (
+                _objective_variable_is_observed_mediator(
+                    result_text,
+                    name,
+                    outcome=outcome,
+                )
+                or _objective_variable_is_observed_mediator(
+                    source_text,
+                    name,
+                    outcome=outcome,
+                )
+            )
+            and not _objective_source_explicitly_links_variable_to_result(
+                variable=name,
+                outcome=outcome,
+                result_text=result_text,
+                source_text=source_text,
+                source=source,
+            )
+        ):
+            removed_names.append(name)
+            continue
+        retained.append(variable)
+
+    if not removed_names:
+        return normalized
+
+    normalized["changed_variables"] = retained
+    comparison = normalized.get("comparison")
+    if isinstance(comparison, Mapping):
+        remaining_names = {
+            str(variable.get("name") or "").strip().casefold()
+            for variable in retained
+            if isinstance(variable, Mapping) and str(variable.get("name") or "").strip()
+        }
+        normalized_comparison = dict(comparison)
+        axes = comparison.get("axis_names")
+        if isinstance(axes, list):
+            normalized_comparison["axis_names"] = [
+                axis
+                for axis in axes
+                if str(axis).strip().casefold() in remaining_names
+            ]
+        normalized["comparison"] = (
+            normalized_comparison
+            if normalized_comparison.get("axis_names")
+            else None
+        )
+
+    if not retained or normalized.get("comparison") is None:
+        normalized["attribution_scope"] = "descriptive_only"
+    elif normalized["comparison"].get("comparable") is True:
+        normalized["attribution_scope"] = "association_only"
+    else:
+        normalized["attribution_scope"] = "not_attributable"
+    normalized["resolution_status"] = "partial"
+    normalized["selection_reason"] = (
+        "SOURCE mentions the Objective variable as an intermediate or context "
+        "fact but does not establish it as the compared intervention; the "
+        "reported result is retained without attributing it to that variable."
+    )
+    return normalized
+
+
 def _objective_source_association_variable(
     record: Mapping[str, Any],
     *,
@@ -788,6 +1220,27 @@ def _objective_source_association_variable(
     result_outcome = str(
         record["reported_result"].get("outcome") or ""
     ).strip()
+    # If the result sentence omits the Objective variable and the same-paper
+    # bundle only describes that variable as a treatment-mediated observation,
+    # do not recover it from a broad document-level mention.  Otherwise a
+    # sentence such as "heat treatment improved elongation" can be paired with
+    # "heat treatment removed porosity" and misreported as a porosity effect.
+    # When the result sentence names the variable itself, its local relation
+    # check below is authoritative; an upstream mediator mention must not mask
+    # that explicit observation.
+    if result_text and objective_context.variables:
+        for variable in objective_context.variables:
+            if property_matching.source_text_mentions_objective_variable(
+                result_text,
+                variable,
+            ):
+                continue
+            if _objective_variable_is_observed_mediator(
+                source_text,
+                variable,
+                outcome=result_outcome,
+            ):
+                return None
     if isinstance(comparison, Mapping) and comparison.get("comparable") is False:
         # An unresolved pair still carries a real scientific observation when
         # the result sentence explicitly names the Objective variable. Keep
@@ -880,6 +1333,64 @@ def _objective_source_association_variable(
     return matches[0] if len(matches) == 1 else None
 
 
+def _objective_explicit_association_variables(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+    source_text: str,
+    objective_context: ResearchObjective | None,
+) -> tuple[Mapping[str, Any], ...]:
+    """Keep source-named relation variables when only endpoints are missing.
+
+    A model may return a variable with null endpoints after reading an explicit
+    qualitative relation such as ``ductility was sensitive to porosity``. The
+    missing endpoints limit the claim to an association, but they do not erase
+    the source-backed variable. Preserve the full candidate only when every
+    variable is named and linked to the reported outcome by this Source.
+    """
+
+    if objective_context is None or not isinstance(record.get("reported_result"), Mapping):
+        return ()
+    variables = tuple(
+        variable
+        for variable in record.get("changed_variables") or ()
+        if isinstance(variable, Mapping)
+    )
+    if not variables or any(
+        variable.get("baseline_value") not in (None, "")
+        or variable.get("target_value") not in (None, "")
+        for variable in variables
+    ):
+        return ()
+    reported_result = record["reported_result"]
+    outcome = str(reported_result.get("outcome") or "").strip()
+    result_text = str(reported_result.get("result_text") or "").strip()
+    if not outcome or not result_text:
+        return ()
+    if not all(
+        _objective_axis_is_source_grounded(
+            variable.get("name"),
+            source=source,
+            source_text=source_text,
+        )
+        and _objective_source_explicitly_links_variable_to_result(
+            variable=str(variable.get("name") or ""),
+            outcome=outcome,
+            result_text=result_text,
+            source_text=source_text,
+            source=source,
+        )
+        and (
+            not str(variable.get("unit") or "").strip()
+            or _objective_column_key(str(variable.get("unit")))
+            in _objective_column_key(source_text)
+        )
+        for variable in variables
+    ):
+        return ()
+    return variables
+
+
 def _objective_result_direction_near_outcome(
     *,
     result_text: str,
@@ -931,6 +1442,46 @@ def _objective_result_direction_near_outcome(
     if len(nearest_directions) != 1:
         return None
     return next(iter(nearest_directions))
+
+
+def _objective_result_is_non_directional_relation(
+    *,
+    result_text: str,
+    outcome: str,
+) -> bool:
+    """Return whether wording describes a relationship rather than outcome change.
+
+    Phrases such as ``ductility was more sensitive to porosity`` compare
+    sensitivity or association. They do not say that elongation increased or
+    decreased. Treating ``more`` as an increase would manufacture a directional
+    Finding from a qualitative relationship, which is not a conclusion a
+    researcher could support from the Source.
+    """
+
+    text = str(result_text or "").strip().casefold()
+    target = str(outcome or "").strip().casefold()
+    if not text or not target:
+        return False
+    if not re.search(r"\bsensitiv(?:e|ity)\b", text):
+        return False
+    # A sensitivity phrase attached to the reported outcome is non-directional.
+    # Keep an explicit change clause (``elongation increased and was sensitive``)
+    # eligible for ordinary direction inference.
+    target_positions = [match.start() for match in re.finditer(re.escape(target), text)]
+    if not target_positions:
+        return True
+    for match in re.finditer(r"\bsensitiv(?:e|ity)\b", text):
+        if min(abs(match.start() - position) for position in target_positions) <= 80:
+            return not bool(
+                re.search(
+                    r"\b(?:increase|increased|increases|increasing|decrease|"
+                    r"decreased|decreases|decreasing|reduced|reduces|improved|"
+                    r"improves|worsened|worsens|higher|lower)\b",
+                    text,
+                    re.IGNORECASE,
+                )
+            )
+    return False
 
 
 def _objective_normalize_explicit_no_change_direction(
@@ -1092,6 +1643,7 @@ def _objective_evidence_variable_grounding_errors(
     *,
     source: Mapping[str, Any],
     source_text: str,
+    allow_missing_endpoints: bool = False,
 ) -> tuple[str, ...]:
     errors: list[str] = []
     for position, variable in enumerate(record.get("changed_variables") or ()):
@@ -1109,6 +1661,8 @@ def _objective_evidence_variable_grounding_errors(
             )
         for field in ("baseline_value", "target_value"):
             value = variable.get(field)
+            if allow_missing_endpoints and value in (None, ""):
+                continue
             if not _objective_value_is_source_grounded(value, source_text):
                 errors.append(f"{path}.{field}={value!r} is not grounded in SOURCE")
         variable_unit = str(variable.get("unit") or "").strip()
@@ -1390,7 +1944,7 @@ def _objective_retain_source_grounded_context(
             )
             if group == "material" and value not in (None, ""):
                 value_is_grounded = value_is_grounded or (
-                    property_matching.material_value_matches_objective_comparison_scope(
+                    property_matching.source_text_mentions_material(
                         source_text,
                         str(value),
                     )
@@ -1433,65 +1987,61 @@ def _objective_retain_source_grounded_context(
                 source_text
             ):
                 continue
-            grounded_attributes.append(dict(attribute))
+            grounded_attribute = dict(attribute)
+            applies_to_outcomes = attribute.get("applies_to_outcomes")
+            if isinstance(applies_to_outcomes, (list, tuple)):
+                grounded_outcomes = [
+                    str(outcome).strip()
+                    for outcome in applies_to_outcomes
+                    if str(outcome).strip()
+                    and _objective_axis_is_source_grounded(
+                        outcome,
+                        source=source,
+                        source_text=source_text,
+                    )
+                ]
+                if grounded_outcomes:
+                    grounded_attribute["applies_to_outcomes"] = list(
+                        dict.fromkeys(grounded_outcomes)
+                    )
+                else:
+                    grounded_attribute.pop("applies_to_outcomes", None)
+            grounded_attributes.append(grounded_attribute)
         grounded_context[group] = grounded_attributes
     grounded_record["scientific_context"] = grounded_context
     return grounded_record
 
 
-def _objective_recover_source_bound_objective_material(
+def _objective_retain_outcome_applicable_test_context(
     record: Mapping[str, Any],
-    *,
-    source: Mapping[str, Any],
-    objective_context: ResearchObjective | None,
 ) -> dict[str, Any]:
-    recovered = dict(record)
-    scientific_context = recovered.get("scientific_context")
-    if (
-        objective_context is None
-        or not objective_context.material_scope
-        or not isinstance(record.get("reported_result"), Mapping)
-        or not isinstance(scientific_context, Mapping)
-        or scientific_context.get("material")
-    ):
-        return recovered
+    """Keep result-bound test facts only when their measured outcome matches."""
 
-    reported_result = record["reported_result"]
-    binding_text = "\n".join(
-        value
-        for value in (
-            str(source.get("heading_path") or "").strip(),
-            str(source.get("caption_text") or "").strip(),
-            str(reported_result.get("result_text") or "").strip(),
-            _objective_source_grounding_text(source),
+    retained = dict(record)
+    result = retained.get("reported_result")
+    context = retained.get("scientific_context")
+    if not isinstance(result, Mapping) or not isinstance(context, Mapping):
+        return retained
+    outcome = str(result.get("outcome") or "").strip()
+    if not outcome:
+        return retained
+    test_attributes = context.get("test")
+    if not isinstance(test_attributes, (list, tuple)):
+        return retained
+    applicable = [
+        dict(attribute)
+        for attribute in test_attributes
+        if isinstance(attribute, Mapping)
+        and isinstance(attribute.get("applies_to_outcomes"), (list, tuple))
+        and property_matching.outcome_matches_objective_scope(
+            outcome,
+            tuple(attribute["applies_to_outcomes"]),
         )
-        if value
-    )
-    matching_materials = tuple(
-        material
-        for material in objective_context.material_scope
-        if property_matching.axis_label_is_mentioned(binding_text, material)
-        or property_matching.material_value_matches_objective_comparison_scope(
-            binding_text,
-            material,
-        )
-    )
-    if len(matching_materials) != 1:
-        return recovered
-
-    context = {
-        group: [dict(item) for item in scientific_context.get(group) or ()]
-        for group in ("material", "sample", "process", "test")
-    }
-    context["material"] = [
-        {
-            "name": "material",
-            "value": matching_materials[0],
-            "unit": None,
-        }
     ]
-    recovered["scientific_context"] = context
-    return recovered
+    scientific_context = dict(context)
+    scientific_context["test"] = applicable
+    retained["scientific_context"] = scientific_context
+    return retained
 
 
 def _objective_table_cell_matches_value(cell: Any, value: Any) -> bool:
@@ -1654,6 +2204,45 @@ def _objective_route_source_refs(
         "source_excerpt": source_excerpt,
         "supports": list(supports),
     }
+    repair_attestation = source.get("table_matrix_repair_attestation")
+    if route.source_kind == "table" and isinstance(repair_attestation, Mapping):
+        attestation = dict(repair_attestation)
+        matrix = source.get("table_matrix")
+        if (
+            row_index is not None
+            and isinstance(matrix, (list, tuple))
+            and 0 <= row_index < len(matrix)
+            and isinstance(matrix[row_index], (list, tuple))
+        ):
+            repaired_row = [str(cell).strip() for cell in matrix[row_index]]
+            attestation.update(
+                {
+                    "repaired_row_index": row_index,
+                    "repaired_row_sha256": _objective_source_matrix_sha256(
+                        repaired_row
+                    ),
+                }
+            )
+        if source_excerpt:
+            attestation["source_excerpt_sha256"] = (
+                _objective_source_excerpt_sha256(source_excerpt)
+            )
+        ref["table_matrix_repair_attestation"] = attestation
     return (
         {key: value for key, value in ref.items() if value not in (None, "", [], {})},
     )
+
+
+def _objective_source_matrix_sha256(value: Any) -> str:
+    return sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _objective_source_excerpt_sha256(value: Any) -> str:
+    normalized = " ".join(str(value or "").split()).casefold()
+    return sha256(normalized.encode("utf-8")).hexdigest()

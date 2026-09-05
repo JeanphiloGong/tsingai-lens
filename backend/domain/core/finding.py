@@ -887,7 +887,7 @@ def _source_contains_factors(
     evidence: ObjectiveEvidence,
     finding_factors: tuple[str, ...],
 ) -> bool:
-    """Validate descriptive factor labels against the retained Source text."""
+    """Validate descriptive factor labels against grounded Source content."""
 
     source_text = " ".join(
         value
@@ -900,6 +900,25 @@ def _source_contains_factors(
         if value
     )
     source_tokens = set(_normalize_term(source_text).split())
+    context_attribute_names = tuple(
+        _normalize_term(attribute.name)
+        for attributes in (
+            evidence.scientific_context.material,
+            evidence.scientific_context.sample,
+            evidence.scientific_context.process,
+            evidence.scientific_context.test,
+        )
+        for attribute in attributes
+        if _normalize_term(attribute.name)
+    )
+
+    def factor_is_grounded(factor: str) -> bool:
+        factor_tokens = set(factor.split())
+        return factor_tokens <= source_tokens or any(
+            factor_tokens <= set(attribute_name.split())
+            for attribute_name in context_attribute_names
+        )
+
     return bool(finding_factors) and all(
-        set(factor.split()) <= source_tokens for factor in finding_factors
+        factor_is_grounded(factor) for factor in finding_factors
     )

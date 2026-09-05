@@ -74,7 +74,21 @@ def anyio_backend() -> str:
 def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version():
     assert (
         "paper_experiment",
-        "paper-experiment-reconstruction.v13",
+        "paper-experiment-reconstruction.v17",
+    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+
+
+def test_document_evidence_checkpoint_uses_current_source_extraction_version():
+    assert (
+        "source_extraction",
+        "objective_evidence_extraction.v27",
+    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+
+
+def test_document_evidence_checkpoint_uses_current_materialization_version():
+    assert (
+        "evidence_materialization",
+        "objective-evidence-materialization.v11",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -363,51 +377,13 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                 )
 
             baseline, target = result_values[source_ref]
-            if self.calls.count(source_ref) == 1:
-                return StructuredEvidenceExtractions.model_validate(
-                    {
-                        "extractions": [
-                            {
-                                "evidence_role": "direct_result",
-                                "changed_variables": [],
-                                "comparison": None,
-                                "reported_result": {
-                                    "outcome": "relative density",
-                                    "value": target,
-                                    "baseline_value": baseline,
-                                    "target_value": target,
-                                    "unit": "%",
-                                    "direction": "increase",
-                                    "result_text": source_text_by_ref[source_ref],
-                                },
-                                "attribution_scope": "descriptive_only",
-                                "scientific_context": {},
-                                "resolution_status": "partial",
-                                "confidence": 0.8,
-                            }
-                        ]
-                    }
-                )
             return StructuredEvidenceExtractions.model_validate(
                 {
                     "extractions": [
                         {
                             "evidence_role": "direct_result",
-                            "changed_variables": [
-                                {
-                                    "name": "laser power",
-                                    "baseline_value": 100,
-                                    "target_value": 140,
-                                    "unit": "W",
-                                }
-                            ],
-                                "comparison": {
-                                    "baseline_label": "S1",
-                                    "target_label": "S2",
-                                    "axis_names": ["laser power"],
-                                    "comparable": True,
-                                "incomparability_reasons": [],
-                            },
+                            "changed_variables": [],
+                            "comparison": None,
                             "reported_result": {
                                 "outcome": "relative density",
                                 "value": target,
@@ -417,26 +393,10 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                                 "direction": "increase",
                                 "result_text": source_text_by_ref[source_ref],
                             },
-                            "attribution_scope": "isolated_effect",
-                            "scientific_context": {
-                                "material": [
-                                    {"name": "alloy", "value": "Ti-6Al-4V"}
-                                ],
-                                "sample": [
-                                    {"name": "state", "value": "as-built"}
-                                ],
-                                "process": [
-                                    {"name": "process", "value": "LPBF"}
-                                ],
-                                "test": [
-                                    {
-                                        "name": "method",
-                                        "value": "Archimedes density",
-                                    }
-                                ],
-                            },
-                            "resolution_status": "resolved",
-                            "confidence": 0.9,
+                            "attribution_scope": "descriptive_only",
+                            "scientific_context": {},
+                            "resolution_status": "partial",
+                            "confidence": 0.8,
                         }
                     ]
                 }
@@ -556,8 +516,6 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         "paper-b-result",
         "paper-a-methods",
         "paper-b-methods",
-        "paper-a-result",
-        "paper-b-result",
     ]
     finding = findings[0]
     assert finding.direction == "increase"

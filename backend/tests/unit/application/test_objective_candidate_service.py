@@ -128,6 +128,31 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
     ]
 
 
+def test_material_context_conflicts_are_strict_but_unknown_labels_remain_reviewable():
+    service = ObjectiveCandidateService()
+
+    assert service._context_collection_compatibility(
+        ("nickel foam",),
+        ("nickel alloy",),
+    ).value == "possible"
+    assert service._context_collection_compatibility(
+        ("titanium alloy",),
+        ("Ti-6Al-4V",),
+    ).value == "possible"
+    assert service._context_collection_compatibility(
+        ("titanium alloy",),
+        ("stainless steel",),
+    ).value == "possible"
+    assert service._context_collection_compatibility(
+        ("316L stainless steel",),
+        ("17-4PH stainless steel",),
+    ).value == "incompatible"
+    assert service._context_collection_compatibility(
+        ("316L stainless steel", "17-4PH stainless steel"),
+        ("316L stainless steel",),
+    ).value == "possible"
+
+
 def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     skims = (
         _paper_map(
@@ -147,6 +172,27 @@ def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     )
 
     assert groups == [("relationship-known", "relationship-missing")]
+
+
+def test_broad_material_is_not_treated_as_missing_or_rewritten_to_one_grade():
+    paper_maps = (
+        _paper_map(
+            document_id="paper-broad",
+            relationship_id="relationship-broad",
+            material_scope=("titanium alloy",),
+        ),
+        _paper_map(
+            document_id="paper-specific",
+            relationship_id="relationship-specific",
+            material_scope=("Ti-6Al-4V",),
+        ),
+    )
+
+    groups = _group_relationship_ids(
+        ObjectiveCandidateService()._build_relationship_groups(paper_maps)
+    )
+
+    assert groups == [("relationship-broad",), ("relationship-specific",)]
 
 
 def test_missing_material_and_one_known_anchor_build_cross_paper_objective():

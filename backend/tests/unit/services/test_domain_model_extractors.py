@@ -1325,7 +1325,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v14",
+        "finding_synthesis": "finding_synthesis.v15",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -1770,7 +1770,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v14"
+    assert trace["prompt_version"] == "finding_synthesis.v15"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -4169,6 +4169,7 @@ def test_structured_objective_evidence_normalizes_compact_context_attributes():
         "value": "316L stainless steel",
         "unit": None,
         "context_scope": "unknown",
+        "applies_to_outcomes": [],
     }
     assert json.loads(str(context.sample[0].value)) == {
         "shape": "cylindrical",

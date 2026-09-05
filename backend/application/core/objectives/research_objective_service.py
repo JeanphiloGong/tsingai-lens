@@ -28,6 +28,8 @@ from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_materialization import (
     OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION,
     materialize_evidence,
+    rebind_persisted_contribution,
+    rebind_persisted_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import (
     OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
@@ -679,7 +681,12 @@ class ResearchObjectiveService:
                 input_fingerprint,
             )
             if checkpoint is not None and checkpoint.status == "succeeded":
-                return self._rebind_document_evidence(checkpoint, analysis)
+                return self._rebind_document_evidence(
+                    checkpoint,
+                    analysis,
+                    objective=active_objective,
+                    objective_inputs=objective_inputs,
+                )
 
             running = ObjectiveDocumentEvidence.start(
                 collection_id=collection_id,
@@ -746,7 +753,12 @@ class ResearchObjectiveService:
                     completed_at=datetime.now(timezone.utc),
                 )
             await self.objective_repository.write_document_evidence(checkpoint)
-            return self._rebind_document_evidence(checkpoint, analysis)
+            return self._rebind_document_evidence(
+                checkpoint,
+                analysis,
+                objective=active_objective,
+                objective_inputs=document_objective_inputs,
+            )
 
         document_artifacts = await gather(
             *(
@@ -1145,18 +1157,30 @@ class ResearchObjectiveService:
     def _rebind_document_evidence(
         checkpoint: ObjectiveDocumentEvidence,
         analysis: ObjectiveAnalysis,
+        *,
+        objective: ResearchObjective,
+        objective_inputs: dict[str, Any],
     ) -> ObjectiveDocumentEvidenceArtifacts:
         if checkpoint.contribution is None:
             raise ValueError("terminal document Evidence lacks a contribution")
+        evidence_records = rebind_persisted_evidence(
+            collection_id=checkpoint.collection_id,
+            analysis=analysis,
+            objective=objective,
+            evidence_records=checkpoint.evidence_records,
+            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
+            tables_by_document_id=objective_inputs["tables_by_document_id"],
+            figures_by_document_id=objective_inputs["figures_by_document_id"],
+        )
+        contribution = rebind_persisted_contribution(
+            contribution=checkpoint.contribution,
+            analysis=analysis,
+            objective=objective,
+            evidence_records=evidence_records,
+        )
         return ObjectiveDocumentEvidenceArtifacts(
-            contribution=replace(
-                checkpoint.contribution,
-                analysis_version=analysis.analysis_version,
-            ),
-            evidence_records=tuple(
-                replace(record, analysis_version=analysis.analysis_version)
-                for record in checkpoint.evidence_records
-            ),
+            contribution=contribution,
+            evidence_records=evidence_records,
         )
 
     @staticmethod

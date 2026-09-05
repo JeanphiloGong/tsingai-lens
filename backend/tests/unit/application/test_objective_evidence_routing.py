@@ -546,6 +546,42 @@ def test_current_work_result_is_not_filtered_as_a_citation() -> None:
     )
 
 
+def test_percent_elongation_result_is_recalled_for_percentage_objective() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-elongation-percentage",
+            "question": "How does build platform preheating affect elongation percentage?",
+            "variables": ["build platform preheating"],
+            "outcomes": ["elongation percentage"],
+        }
+    )
+    candidate = {
+        "source_kind": "text_window",
+        "text": (
+            "Preheating the build plate increased the El% and yield strength "
+            "by approximately 14% and 4%, respectively."
+        ),
+        "section_label": "Tensile properties",
+    }
+
+    assert evidence_routing._route_candidate_is_direct_result_candidate(
+        candidate=candidate,
+        objective_context=objective,
+    )
+
+
+def test_authors_prior_investigation_is_not_current_work_evidence() -> None:
+    candidate = {
+        "text": (
+            "In our prior investigation [24], a marginal impact of defects "
+            "was observed on tensile strength and elongation."
+        ),
+        "section_label": "Results and discussion",
+    }
+
+    assert evidence_routing._route_text_candidate_is_secondary_citation(candidate)
+
+
 def test_direct_result_source_is_recalled_when_router_returns_empty_selection() -> None:
     """A routing false negative must not hide a source a researcher would read."""
 
@@ -2709,6 +2745,129 @@ def test_research_objective_tree_routing_does_not_cap_direct_result_recall():
     assert {item[2]["source_ref"] for item in selected} == {
         f"result-{index}" for index in range(12)
     }
+
+
+def test_research_objective_routing_reads_late_result_in_complete_source_block():
+    """Candidate ranking must not truncate what a researcher can read."""
+
+    class EmptyRouter:
+        def route_source(self, payload):  # noqa: ANN001, ARG002
+            return SimpleNamespace(selections=[])
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    source_ref = "late-result"
+    source_text = (
+        "General experimental discussion without the requested axes. " * 30
+        + "At 200 W laser power, relative density increased compared with "
+        "the 150 W condition."
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("result-node",),
+                node_type="document",
+                order=0,
+            ),
+            "result-node": SourceDocumentNode(
+                node_id="result-node",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=(),
+                node_type="paragraph",
+                order=1,
+                text=source_text,
+                heading_path=("Results",),
+                source_ref_kind="block",
+                source_ref_id=source_ref,
+            ),
+        },
+    )
+
+    routes = evidence_routing.route_sources(
+        collection_id="col-test",
+        evidence_router=EmptyRouter(),
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert [(route.source_ref, route.role) for route in routes] == [
+        (source_ref, "current_experimental_evidence")
+    ]
+
+
+def test_research_objective_routing_reads_target_result_in_late_table_row():
+    """The full logical table, not a three-row preview, owns recall."""
+
+    class EmptyRouter:
+        def route_source(self, payload):  # noqa: ANN001, ARG002
+            return SimpleNamespace(selections=[])
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    table = SimpleNamespace(
+        document_id="paper-1",
+        table_id="late-result-table",
+        caption_text="Experimental observations by condition.",
+        heading_path="Results",
+        column_headers=("Condition", "Observation"),
+        row_count=9,
+        col_count=2,
+        table_matrix=(
+            ("Condition", "Observation"),
+            *((f"run-{index}", "not reported") for index in range(1, 8)),
+            ("200 W laser power", "relative density increased to 99.2%"),
+        ),
+    )
+
+    routes = evidence_routing.route_sources(
+        collection_id="col-test",
+        evidence_router=EmptyRouter(),
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={},
+    )
+
+    assert [(route.source_ref, route.role) for route in routes] == [
+        (table.table_id, "current_experimental_evidence")
+    ]
 
 
 def test_research_objective_primary_frame_keeps_unlisted_tables_for_recall():

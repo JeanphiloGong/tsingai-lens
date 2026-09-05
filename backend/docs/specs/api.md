@@ -587,6 +587,11 @@ paper presents the setting without changing its Source grounding. Simulation
 and background attributes remain visible for audit, but cannot by themselves
 close the experimental process-context requirements for a comparable result.
 Historical Evidence without this field is read as `unknown`.
+Test and characterization attributes may also include
+`applies_to_outcomes`, listing only outcomes that the same Source explicitly
+says the method measures or characterizes. An empty list means that the method
+remains auditable paper context but cannot be assumed to apply to a particular
+result.
 
 Failed extraction attempts remain Evidence with their exact Source locator,
 `selection_status=failed`, and a non-empty `failure_reason`. They do not

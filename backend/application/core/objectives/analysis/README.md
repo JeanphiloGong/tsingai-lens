@@ -26,15 +26,24 @@ Read the analysis responsibilities in real research order:
    containing only carried label and uncertainty fragments may merge into the
    preceding logical row. Mean-plus-uncertainty result columns are rebound from
    their complete top-to-bottom Source number sequence; missing, duplicated,
-   reordered, or changed result numbers invalidate the repair. If neither
-   view can support a safe repair, the Source remains unresolved or technically
-   failed and cannot be presented as a scientific absence.
+   reordered, or changed result numbers invalidate the repair. The repaired
+   first-column specimen labels must also preserve their original semantic
+   order, so structurally merged rows cannot silently bind a result to another
+   specimen. If neither view can support a safe repair, the Source remains
+   unresolved or technically failed and cannot be presented as a scientific
+   absence. A successful repair records an
+   `objective_table_repair_attestation.v1` on the transient Source. It binds the
+   exact raw matrix, repaired matrix, and optional visual text by SHA-256. Each
+   durable row Source reference then records its repaired row index, row hash,
+   and excerpt hash. The expert audit recomputes those values from the
+   persisted Source artifact; unattested or stale repaired rows cannot satisfy
+   Source-grounding checks.
 4. `source_validation.py` immediately checks each model-authored draft against
    the exact Source being inspected. Extraction and validation therefore
-   alternate per Source; they are not two collection-wide passes. When that
-   same Source uniquely names the Objective material, validation may restore
-   the omitted material identity with that Source as its lineage. Unsupported
-   results abstain, while supported results with incomplete variable or
+   alternate per Source; they are not two collection-wide passes. Validation
+   may retain a material only when extraction explicitly bound its source label
+   to the current specimen or experiment; an Objective value or an unrelated
+   material mention cannot fill it. Unsupported results abstain, while supported results with incomplete variable or
    comparison support become `association_only` or descriptive drafts before
    they can enter the next Source prompt's document state. Association drafts
    may name the confirmed Objective variable while leaving baseline and target
@@ -44,16 +53,36 @@ Read the analysis responsibilities in real research order:
    fills only missing scope from validated facts in those same-paper Sources,
    binds Methods and Results through exact sample identities, and derives
    bounded pairwise comparisons. When all inspected context Sources establish
-   one compatible paper material, a result missing material identity inherits
-   that value and its supporting Source reference. Conflicting materials remain
-   unresolved. It never reads preliminary map scope as experiment context.
+   one compatible material fact extracted from an inspected Source, a result
+   missing material identity inherits that fact and its supporting Source
+   reference. Raw document text and Objective hints never create this context;
+   conflicting materials remain unresolved. It never reads preliminary map
+   scope as experiment context.
 6. `evidence_materialization.py` turns reconstructed drafts into durable
    `ObjectiveEvidence`, deduplicates replayed scientific claims by stable
    Evidence identity, and derives each paper's `PaperContribution` from that
-   final Evidence set.
+   final Evidence set. Table row and column locators are part of a result's
+   Source-local identity, so equal scalar values in different specimen rows do
+   not collapse while true retries of the same row still coalesce. Imported
+   filenames and other page-less document labels
+   remain useful screening and lineage metadata, but they are not primary
+   scientific Sources when the same fact is grounded by an inspectable paged
+   Abstract, Methods, Results, table, or figure Source. Materialization keeps
+   the filename in related lineage and selects the paged Source as the durable
+   primary locator.
 7. `finding_synthesis.py` groups durable Evidence into backend-owned result
    sets, asks the bounded assertion judge only for claim strength and supported
-   context, and publishes traceable cross-paper `Finding` records.
+   context, and publishes traceable cross-paper `Finding` records. Within one
+   paper, result sets that share the same outcome, Objective factor set, and
+   comparison interval are treated as one experimental series only when the
+   result Evidence has an overlapping primary or related Source lineage and
+   only process-context values vary. No process vocabulary or numeric-shape
+   heuristic decides this. The published Finding keeps every Evidence id and
+   states the observed condition values; material identity, sample state, test
+   context, and any Objective axis that is not established as varying in the
+   same Source remain boundaries. This mirrors how a researcher reports one
+   experiment series without erasing the conditions under which its direction
+   may change.
 
 `source_screening.py` owns complete Source-unit accounting, bounded framing
 batches, the screening prompt and response schema, prompt preflight, bounded
@@ -111,7 +140,11 @@ schema-valid model draft directly to `source_validation.py` before updating the
 accepted state supplied to the next Source prompt. Provider or irrecoverable
 structured-output failures remain technical failed drafts. Shared provider
 invocation, JSON parsing, usage accounting, and trace capture stay outside this
-scientific responsibility. When a grounded result is partial or lacks material,
+scientific responsibility. A model-authored context role carrying a non-null
+`reported_result` is normalized to `direct_result` without changing any
+scientific field; the candidate still passes the same primary-Source grounding
+and can be rejected or demoted there. When a grounded result is partial or lacks
+material,
 condition, or comparison context, it performs an adaptive same-paper context
 expansion over Methods, specimen, processing, characterization, and test
 Sources. It ranks explicit condition values, group identities, and Objective
@@ -123,6 +156,12 @@ stable tie-breaker. It never imports context from another paper or invents the
 missing value. If no remaining Source can close the gap, or a technical
 execution budget ends inspection, the omission remains an explicit scope gap
 and the original result remains descriptive, associative, or `needs_context`.
+Deterministic method-family context records only a method name explicitly
+present in the Source; an outcome word such as `microstructure` cannot imply
+`SEM`, `ImageJ`, or another unreported method. A test or characterization fact
+also records the outcome that the same Source explicitly says it measures. A
+method with no source-grounded outcome applicability remains standalone paper
+context and cannot close the test context of an unrelated result.
 Rows that report the same outcome from the same result Source share one context
 decision: the service selects one Evidence Bundle for that result series rather
 than rereading Methods independently for every table row. A different result
@@ -154,21 +193,31 @@ The same retention rule applies to a Source explicitly routed as
 `current_experimental_evidence`: a valid empty extraction becomes an unresolved
 `direct_result` candidate and can trigger same-paper context expansion. This
 avoids losing a result because a synonym, abbreviation, or OCR form escaped a
-second keyword detector. When a first read found the measured result but left
-its comparison or study context partial, the service may reread that exact
-result Source once after grounded Methods or condition Sources are available.
-The reread is bounded by route identity and never replaces the result Source as
-the authority for measured values. If explicit sample/group labels already let
-deterministic reconstruction bind the result, no reread is made. When lexical
-matching cannot identify a context Source, the expansion may read a small
-structural-neighbour window around the result Source. Those routes are marked
-as structural candidates with no claimed field coverage; only source extraction
-and validation can close the missing context.
+second keyword detector. The result Source is interpreted once and then remains
+immutable. Newly grounded Methods or condition facts are joined by deterministic
+paper reconstruction; they never trigger a second model interpretation of the
+result. When lexical matching cannot identify a context Source, the expansion
+may read a small structural-neighbour window around the result Source. Those
+routes are marked as structural candidates with no claimed field coverage; only
+source extraction and validation can close the missing context.
+
+That unresolved fallback is reserved for a genuinely uncertain empty read. If
+the model returns a statement that deterministic validation identifies as study
+intent rather than an observation, or as a result owned by a cited study, the
+Source is recorded as inspected with no current-paper fact. It does not become
+`needs_context`, enter durable Evidence, or trigger another scientific read.
 
 Adaptive same-paper closure is limited to two progress rounds per extraction
 run. This is a research-scope budget, not a scientific conclusion: if the
 inspected Sources still cannot establish the missing fields, the result keeps
 its source-backed observation and records an explicit scope gap for review.
+
+When every Objective-outcome statement in a text Source is attributed to prior
+or cited studies, its extracted context remains `background` Evidence. Sentence
+splits around author names, citations, and pronoun-led reports do not convert
+that prior-study context into the current experiment, and reconstruction never
+uses background attributes to close current-paper material, process, sample, or
+test fields.
 
 Context Sources may contain several independent condition facts for one paper
 (for example one row for S1 and one for S2). Their transient evidence IDs
@@ -182,13 +231,17 @@ model and deterministic repair counts, number-sequence verification, and a
 final `verified`, `rejected`, or `provider_failed` disposition. These traces are
 persisted with the internal analysis record for debugging but are deliberately
 absent from Objective API responses, Evidence, and user-visible warnings.
+The final researcher-information-parity trace also records the ordered Source
+locators and a SHA-256 digest of the exact materialized Evidence packet supplied
+to Finding synthesis. It does not log paper text, but it makes a conclusion run
+reproducible against the same persisted Evidence.
 
 `source_validation.py` owns deterministic Source acceptance, demotion, or
 abstention. It checks the reported result, comparison labels, changed
 variables, and scientific context independently and records which field
 families each Source supports. For a grounded text result whose comparison is
 still absent, it keeps the exact Source excerpt as transient reconstruction
-input. During a bounded same-document context revisit, it may validate
+input. During bounded same-document context expansion, it may validate
 condition and context fields against the explicit Evidence Bundle assembled
 from that paper's Methods, Results, tables, and figures; measured result values
 and result wording remain grounded in the primary result Source. It never
@@ -225,14 +278,19 @@ caption-defined symbols, units, and row values jointly define it. The paper
 reconstruction then builds a registry keyed by exact condition label, merges
 complementary same-label context, and rejects conflicting definitions. A result
 may join registered conditions only when its own Source mentions those exact
-labels. The result retains its own context and fills only missing material,
-sample, process, or test fields that are identical across both bound conditions;
-an explicit result-local value is never overwritten. An unchanged series becomes
-an isolated effect only when its first and last registered conditions have
-complete process context and differ by exactly one factor; incomplete,
-multi-factor, missing, or conflicting conditions remain associative or
-descriptive. No label spelling convention and no cross-document binding supplies
-scientific meaning. For same-table row comparisons, numeric results retain
+labels. A paper-wide material or manufacturing-process fact is carried into
+each named condition as shared fixed context; it does not become a changed
+factor because one condition repeats that identity under another field name.
+The result retains its own context and fills only missing material, sample,
+process, or outcome-applicable test fields that are identical across both bound
+conditions; an explicit result-local value is never overwritten. An unchanged
+series becomes an isolated effect only when its first and last registered
+conditions have complete process context and differ by exactly one factor with
+two complete, distinct endpoints. A field with one missing endpoint is retained
+as an incomparability reason and never emitted as a changed variable.
+Incomplete, multi-factor, missing, or conflicting conditions remain associative
+or descriptive. No label spelling convention and no cross-document binding
+supplies scientific meaning. For same-table row comparisons, numeric results retain
 ordered increase/decrease semantics, while categorical results retain both raw
 endpoints and report only `changed` or `no_change`. A numeric/category mismatch
 or any incompatible material, sample, or test context remains explicitly
@@ -277,9 +335,16 @@ fill, overwrite, or validate an `ExtractedEvidenceDraft`.
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,
 canonicalizes uniquely matching axes, resolves exact Source excerpts and
-related locators, and deduplicates only replayed drafts with the same stable
-`evidence_id`. Distinct claims from one Source remain separate because a table,
-figure, or paragraph can support several measurements or comparisons.
+related locators. The primary excerpt is always the exact primary paragraph,
+figure caption, or cited rows from the primary table; a table with no row-level
+excerpt falls back to its complete Source. Methods, other condition tables,
+figures, and row bindings used to reconstruct the experiment remain separate
+`related_source_refs` and are never concatenated into text that no single
+Source actually contains. Replayed model drafts that canonicalize to the same complete
+source-grounded scientific record are deduplicated even when a provider attempt
+assigned a different `evidence_id`. Distinct claims from one Source remain
+separate because a table, figure, or paragraph can support several measurements
+or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
 from that complete claim set, and its contribution summary is assembled only
 from grounded result text in the final Evidence records. Contribution warnings
@@ -350,15 +415,30 @@ endpoints (for example, as-fabricated -> HIP versus as-built -> stress-relieved)
 remain separate paper-scoped results even when their directions agree.
 Within one paper Source, compatible row-pair comparisons belong to one
 experimental condition series rather than one Finding per endpoint pair. The
-series factors are the exact union of the source-grounded changed factors, and
-opposing directions remain visible inside that Finding with every comparison
-Evidence id retained. Objective-axis values are condition coordinates within
-the series, so they neither split the result set nor appear again as fixed
-scientific context. When that Source already yields a comparable relationship,
-its scalar, directionless row measurements remain available in the Evidence
-Map but do not become duplicate descriptive Findings. A separate aggregate
-observation or explicitly reported association remains eligible because it is a
-different scientific claim, not merely a table coordinate.
+series may be divided into direction-specific result sets when its comparisons
+do not agree. Every direct Evidence record in a final result set must have the
+same complete canonical changed-factor set. A three-factor comparison and a
+four-factor comparison therefore remain separate even when their paper,
+outcome, context, interval, and direction agree. A result set also cannot
+inherit a factor that appeared only in another direction group from the same
+experiment series. Opposing directions remain visible without overstating what
+any one comparison varied, and every comparison Evidence id is retained.
+An Objective-axis value is treated as a condition coordinate only when the
+source-backed result explicitly varies that axis in the same comparison. A
+different Objective axis found only in context remains a boundary; the system
+does not assume that two interventions were jointly varied. When that Source
+already yields a comparable relationship, its scalar,
+directionless row measurements remain available in the Evidence Map but do not
+become duplicate descriptive Findings. A separate aggregate observation or
+explicitly reported association remains eligible because it is a different
+scientific claim, not merely a table coordinate.
+An outcome-only prose paragraph does not become a paper-scoped Objective result
+merely because it mentions an Objective variable somewhere in the same
+excerpt. For prose, the variable must be explicitly related to that outcome by
+Source-local relationship language. A complete structured table is the
+deliberate exception: its variable and outcome columns provide the binding when
+both labels are present, even if the model omitted a structured variable
+endpoint.
 When a source-backed result is relevant to the Objective but cannot safely enter
 a cross-paper result set, synthesis keeps it as a paper-scoped descriptive
 Finding and carries the deterministic material or condition gap in
@@ -380,6 +460,13 @@ review, but cannot contribute to a cross-paper Finding until those selected
 Sources are inspected. Complete papers may still be compared with one another,
 and the analysis diagnostic records the excluded papers, uninspected Source
 count, and paper-scoped result count.
+Each real analysis also records one `researcher_information_parity` diagnostic
+after materialization. It summarizes the Objective question, visible and
+inspected Source references, unresolved field families, technical failures,
+same-paper closure, and the final disposition (`decision_ready`,
+`needs_context`, `no_grounded_evidence`, or `extraction_failed`). This is an
+internal audit trail: it does not turn navigation candidates into Evidence and
+is not a substitute for the published Source lineage.
 `FindingAssertionJudge` decides only assertion strength and
 optional context or mechanism annotations for one backend-owned result set. It
 cannot change result-set membership, scientific direction, Evidence bindings,
@@ -388,10 +475,12 @@ source-backed direct results, an empty judge response is treated as an
 annotation abstention: the backend publishes that result set as a conservative
 descriptive Finding and records a private recovery diagnostic. If the optional
 judge fails at the provider or structured-response boundary, the same
-conservative recovery applies. Only the absence of a backend-owned result set
+conservative recovery applies. Repeated semantic rejection also discards the
+judge-authored assertion and publishes a backend-grounded descriptive Finding
+with no optional context or mechanisms; it cannot erase a valid result set or
+change its Evidence membership. Only the absence of a backend-owned result set
 produces an empty Finding set, and that scientific abstention remains visible
-through Evidence statuses, paper dispositions, and coverage counts. Repeated
-semantic rejection of a non-empty candidate still aborts the analysis version.
+through Evidence statuses, paper dispositions, and coverage counts.
 When an analysis completes without a Finding, `ObjectiveAnalysis` persists the
 derived scientific reason (`no_grounded_evidence`, `no_comparable_evidence`, or
 `insufficient_evidence`) and a deterministic note. This is a successful,

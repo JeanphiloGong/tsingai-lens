@@ -48,6 +48,13 @@ def _material_scope_evidence(
             "source_kind": "text_window",
             "source_ref": f"source-{evidence_id}",
             "source_excerpt": "Scan X produced smaller porosity than Scan O.",
+            "related_source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": f"source-{evidence_id}",
+                    "supports": ["scientific_context.material"],
+                }
+            ],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
             "changed_variables": [
@@ -480,6 +487,13 @@ def test_theme_objective_keeps_exact_interventions_in_separate_result_sets():
                     f"{factor} changed from {baseline} C to {target} C and "
                     "elongation increased."
                 ),
+                "related_source_refs": [
+                    {
+                        "source_kind": "table_row",
+                        "source_ref": f"{document_id}-result-row",
+                        "supports": ["scientific_context.material"],
+                    }
+                ],
                 "evidence_role": "direct_result",
                 "selection_status": "extracted",
                 "changed_variables": [
@@ -572,6 +586,13 @@ def test_comparable_result_requires_resolved_objective_material_scope() -> None:
                 "source_excerpt": (
                     "Scan X produced smaller porosity than Scan O."
                 ),
+                "related_source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": f"source-{evidence_id}",
+                        "supports": ["scientific_context.material"],
+                    }
+                ],
                 "evidence_role": "direct_result",
                 "selection_status": "extracted",
                 "changed_variables": [
@@ -634,6 +655,19 @@ def test_comparable_result_requires_resolved_objective_material_scope() -> None:
         objective,
         evidence("other-grade", "316L"),
     ) == "mismatched"
+    assert service.material_scope_status(
+        objective,
+        evidence("unregistered-material", "nickel foam"),
+    ) == "unresolved"
+    assert service.material_scope_status(
+        objective,
+        ObjectiveEvidence.from_mapping(
+            {
+                **evidence("lexical-alias-without-binding", "TiAl6V4").to_record(),
+                "related_source_refs": [],
+            }
+        ),
+    ) == "unresolved"
 
 
 def test_material_scope_ignores_supporting_substrate_identity() -> None:
@@ -5270,7 +5304,63 @@ def test_source_local_factor_comparison_survives_unrelated_condition_registry():
     assert bound.attribution_scope == "association_only"
 
 
-def test_paper_reconstruction_binds_material_from_source_grounded_document_context():
+def test_paper_reconstruction_does_not_invent_material_role_from_a_document_mention():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-substrate-porosity",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["heat treatment condition"],
+            "outcomes": ["porosity"],
+        }
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-nickel-specimen",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-nickel-specimen",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "reported_result": {
+                "outcome": "porosity",
+                "direction": "decrease",
+                "result_text": "Nickel specimen porosity decreased.",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id=objective.collection_id,
+        source_facts=(result,),
+        objectives=(objective,),
+        document_contexts={
+            "paper-nickel-specimen": (
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "methods-substrate",
+                    "text": (
+                        "A TC4 substrate supported the nickel specimen. "
+                        "Nickel specimen porosity decreased after heat treatment."
+                    ),
+                },
+            )
+        },
+    )
+
+    retained = next(
+        item
+        for item in reconstructed
+        if item.evidence_id == "result-nickel-specimen"
+    )
+    assert retained.scientific_context.material == ()
+
+
+def test_paper_reconstruction_binds_source_extracted_material_context():
     objective = _research_objective(
         {
             "objective_id": "obj-strength",
@@ -5327,34 +5417,49 @@ def test_paper_reconstruction_binds_material_from_source_grounded_document_conte
             "confidence": 0.9,
         }
     )
+    material_context = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "methods-material",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-ti64",
+            "source_kind": "text_window",
+            "source_ref": "methods-material",
+            "evidence_role": "condition_context",
+            "selection_status": "extracted",
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti6Al4V"}]
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "methods-material",
+                    "source_excerpt": "The specimens were machined from Ti6Al4V.",
+                    "supports": ["scientific_context.material"],
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
 
     reconstructed = paper_experiment.reconstruct_paper_experiments(
         collection_id=objective.collection_id,
-        source_facts=(result,),
+        source_facts=(result, material_context),
         objectives=(objective,),
-        document_contexts={
-            "paper-ti64": (
-                {
-                    "source_kind": "text_window",
-                    "source_ref": "title-block",
-                    "text": "Effect of heat treatment on Ti-6Al-4V tensile strength",
-                },
-            )
-        },
     )
 
     bound = next(item for item in reconstructed if item.evidence_id == result.evidence_id)
     assert [item.to_record() for item in bound.scientific_context.material] == [
-        {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+        {"name": "material", "value": "Ti6Al4V", "unit": None}
     ]
     assert any(
-        ref.get("source_ref") == "title-block"
+        ref.get("source_ref") == "methods-material"
         and "scientific_context.material" in ref.get("supports", ())
         for ref in bound.source_refs
     )
 
 
-def test_paper_reconstruction_binds_context_when_one_result_already_has_material():
+def test_paper_reconstruction_does_not_spread_result_local_material_context():
     objective = _research_objective(
         {
             "objective_id": "obj-strength-mixed-material",
@@ -5440,9 +5545,7 @@ def test_paper_reconstruction_binds_context_when_one_result_already_has_material
     without_material = next(
         item for item in reconstructed if item.evidence_id == "without-material"
     )
-    assert [item.to_record() for item in without_material.scientific_context.material] == [
-        {"name": "material", "value": "Ti-6Al-4V", "unit": None}
-    ]
+    assert without_material.scientific_context.material == ()
 
 
 def test_paper_reconstruction_binds_unambiguous_same_paper_context_fields():
@@ -5469,13 +5572,22 @@ def test_paper_reconstruction_binds_unambiguous_same_paper_context_fields():
                 "material": [{"name": "alloy", "value": "316L stainless steel"}],
                 "sample": [{"name": "orientation", "value": "vertical"}],
                 "process": [{"name": "layer thickness", "value": 0.03, "unit": "mm"}],
-                "test": [{"name": "standard", "value": "ASTM E8"}],
+                "test": [
+                    {
+                        "name": "standard",
+                        "value": "ASTM E8",
+                        "applies_to_outcomes": ["tensile strength"],
+                    }
+                ],
             },
             "source_refs": [
                 {
                     "source_kind": "text_window",
                     "source_ref": "methods-context",
-                    "source_excerpt": "316L vertical samples, 0.03 mm layers, ASTM E8.",
+                    "source_excerpt": (
+                        "316L vertical samples, 0.03 mm layers; ASTM E8 tensile "
+                        "testing measured tensile strength."
+                    ),
                 }
             ],
             "resolution_status": "resolved",
@@ -5540,7 +5652,14 @@ def test_paper_reconstruction_binds_unambiguous_same_paper_context_fields():
         "material": [{"name": "alloy", "value": "316L stainless steel", "unit": None}],
         "sample": [{"name": "orientation", "value": "vertical", "unit": None}],
         "process": [{"name": "layer thickness", "value": 0.03, "unit": "mm"}],
-        "test": [{"name": "standard", "value": "ASTM E8", "unit": None}],
+        "test": [
+            {
+                "name": "standard",
+                "value": "ASTM E8",
+                "unit": None,
+                "applies_to_outcomes": ["tensile strength"],
+            }
+        ],
     }
     context_ref = next(
         ref for ref in bound.source_refs if ref["source_ref"] == "methods-context"
@@ -5674,6 +5793,166 @@ def test_paper_reconstruction_joins_explicit_group_aliases_to_fixed_context():
     assert [item.to_record() for item in bound.scientific_context.process] == [
         {"name": "process", "value": "LB-PBF", "unit": None}
     ]
+
+
+def test_group_alias_binding_coalesces_duplicate_objective_axis_wording():
+    """One group's local axis wording must not invent a second intervention."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-duplicate-axis",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    alias_text = (
+        "Specimens fabricated without preheating the build platform, and the "
+        "ones fabricated with preheating the build platform to 150 C are "
+        "designated by NP and P150, respectively."
+    )
+
+    def condition(
+        evidence_id: str,
+        *,
+        group: str,
+        process_name: str,
+        process_value: str | int,
+        process_unit: str | None = None,
+        source_excerpt: str = alias_text,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": objective.objective_id,
+                "document_id": "paper-preheating",
+                "source_kind": "text_window",
+                "source_ref": evidence_id,
+                "evidence_role": "condition_context",
+                "selection_status": "extracted",
+                "scientific_context": {
+                    "sample": [{"name": "group", "value": group}],
+                    "process": [
+                        {
+                            "name": process_name,
+                            "value": process_value,
+                            "unit": process_unit,
+                        }
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": evidence_id,
+                        "source_excerpt": source_excerpt,
+                    },
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": "group-aliases",
+                        "source_excerpt": alias_text,
+                        "supports": ["condition_join"],
+                    },
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "preheating-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "results",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "build platform preheating",
+                    "baseline_value": "NP",
+                    "target_value": "P150",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["build platform preheating"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "direction": "mixed",
+                "result_text": "The cellular structure was observed for P150 rather than NP.",
+            },
+            "attribution_scope": "association_only",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results",
+                    "source_excerpt": (
+                        "The cellular structure was observed for P150 rather than NP."
+                    ),
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id=objective.collection_id,
+        source_facts=(
+            condition(
+                "condition-np",
+                group="NP",
+                process_name="build platform preheating",
+                process_value="non-preheated",
+            ),
+            condition(
+                "condition-p150",
+                group="P150",
+                process_name="build platform preheating",
+                process_value=150,
+                process_unit="C",
+            ),
+            condition(
+                "condition-p150-detail",
+                group="P150",
+                process_name="P150 condition preheating temperature",
+                process_value=150,
+                source_excerpt=(
+                    "Preheating the build platform to 150 C produced the P150 condition."
+                ),
+            ),
+            result,
+        ),
+        objectives=(objective,),
+        document_contexts={
+            "paper-preheating": (
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "group-aliases",
+                    "text": alias_text,
+                },
+            )
+        },
+    )
+
+    bound = next(item for item in reconstructed if item.evidence_id == result.evidence_id)
+    assert [variable.to_record() for variable in bound.changed_variables] == [
+        {
+            "name": "build platform preheating",
+            "baseline_value": "non-preheated",
+            "target_value": 150,
+            "unit": "C",
+        }
+    ]
+    assert bound.comparison is not None and bound.comparison.comparable
+    assert "condition-p150-detail" in {
+        ref["source_ref"] for ref in bound.source_refs
+    }
 
 
 def test_paper_reconstruction_binds_qualitative_result_with_missing_endpoints():

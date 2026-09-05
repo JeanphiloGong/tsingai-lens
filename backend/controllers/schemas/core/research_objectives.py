@@ -250,6 +250,7 @@ class ObjectiveEvidenceAttributeResponse(BaseModel):
     value: str | int | float | bool
     unit: str | None = None
     context_scope: EvidenceContextScope = "unknown"
+    applies_to_outcomes: list[str] = Field(default_factory=list, max_length=4)
 
 
 class ObjectiveEvidenceVariableResponse(BaseModel):

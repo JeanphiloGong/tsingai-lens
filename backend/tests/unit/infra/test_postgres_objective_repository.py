@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from domain.core import ResearchObjective
+from domain.core import ObjectiveAnalysis, PreparedDocumentInput, ResearchObjective
 from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
 from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
 
@@ -74,3 +74,44 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
 
     assert restored["created_at"] == column_created_at.isoformat()
     assert restored["updated_at"] == column_updated_at.isoformat()
+
+
+def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> None:
+    analysis = ObjectiveAnalysis(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_inputs=(PreparedDocumentInput("paper-1", "preparation-1"),),
+        pipeline_version="objective-analysis.v2",
+        model_name="model-a",
+        prompt_versions={},
+        total_document_count=1,
+        diagnostics=(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-1",
+                "status": "verified",
+            },
+        ),
+    )
+
+    row = PostgresObjectiveRepository._new_analysis_row(
+        analysis,
+        now=datetime(2026, 9, 5, tzinfo=UTC),
+    )
+
+    assert "diagnostics" not in analysis.to_record()
+    assert row.payload["diagnostics"] == [
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-1",
+            "status": "verified",
+        }
+    ]
+    assert PostgresObjectiveRepository._analysis_from_row(row).diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-1",
+            "status": "verified",
+        },
+    )

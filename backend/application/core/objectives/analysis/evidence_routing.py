@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 _FRAME_TABLE_ROW_LIMIT = 3
-_ROUTE_TEXT_CHARS = 900
 _ROUTE_PROMPT_TEXT_CHARS = 320
 _ROUTE_PROMPT_HEADER_LIMIT = 8
 _ROUTE_CANDIDATE_LIMIT = 40
@@ -1376,6 +1375,7 @@ def _route_candidate_text(candidate: Mapping[str, Any]) -> str:
             candidate.get("caption_text"),
             candidate.get("heading_path"),
             candidate.get("text"),
+            candidate.get("decision_text"),
             " ".join(str(item) for item in column_headers or []),
         )
         if str(value or "").strip()
@@ -1551,6 +1551,10 @@ def _build_route_source_candidates(
             "heading_path": getattr(table, "heading_path", None),
             "table_schema": table_schema,
             "sample_rows": table_schema["sample_rows"],
+            # Candidate recall uses the complete logical table a researcher
+            # can inspect. The routing prompt still receives only its bounded
+            # caption/header preview; extraction receives the complete table.
+            "decision_text": _objective_table_search_text(table),
         }
         candidate["lineage_match"] = _route_candidate_matches_lineage(
             candidate,
@@ -1610,7 +1614,7 @@ def _build_route_source_candidates(
                 "frame_status": "relevant",
                 "section_label": _block_section_label(block),
                 "block_type": block_type,
-                "text": text[:_ROUTE_TEXT_CHARS],
+                "text": text,
                 "lineage_match": True,
             }
         )
@@ -1999,7 +2003,7 @@ def _build_ranked_route_text_candidates(
                     "frame_status": "relevant",
                     "section_label": section_label,
                     "block_type": block_type,
-                    "text": text[:_ROUTE_TEXT_CHARS],
+                    "text": text,
                 },
             )
         )
@@ -2153,7 +2157,7 @@ def _build_tree_route_text_candidates(
                     "frame_status": "relevant",
                     "section_label": section_label,
                     "block_type": block_type,
-                    "text": text[:_ROUTE_TEXT_CHARS],
+                    "text": text,
                 },
             )
         )
@@ -2466,17 +2470,28 @@ def _route_text_candidate_is_secondary_citation(
         )
         if str(value or "").strip()
     ).casefold()
+    prior_self_reference = re.compile(
+        r"\bour\s+(?:prior|previous|earlier)\s+"
+        r"(?:study|work|research|investigation|analysis)\b"
+    )
+    current_work_text = prior_self_reference.sub("", text)
+    has_current_work_claim = bool(
+        re.search(
+            r"\b(?:we|this\s+(?:study|work)|the\s+present\s+(?:study|work)|"
+            r"current\s+(?:work|study)|our\s+(?:results?|findings?|"
+            r"experiments?|measurements?|analysis|study|work))\b",
+            current_work_text,
+        )
+    )
     secondary_context = re.search(
         r"\b(?:cited|previous|prior)\s+(?:study|work|research)|"
         r"\b(?:literature|reported)\s+(?:value|result|study)|"
-        r"\breported\s+by\s+[^\W\d_][\w'’-]*",
+        r"\breported\s+by\s+[^\W\d_][\w'’-]*|"
+        r"\bour\s+(?:prior|previous|earlier)\s+"
+        r"(?:study|work|research|investigation|analysis)\b",
         text,
     )
-    if secondary_context and not re.search(
-        r"\b(?:we|our|this\s+(?:study|work)|the\s+present\s+study|"
-        r"current\s+(?:work|study))\b",
-        text,
-    ):
+    if secondary_context and not has_current_work_claim:
         return True
 
     # Papers commonly attribute a result with an author and citation marker
@@ -2501,11 +2516,7 @@ def _route_text_candidate_is_secondary_citation(
     )
     return bool(
         citation_context
-        and not re.search(
-            r"\b(?:we|our|this\s+(?:study|work)|the\s+present\s+study|"
-            r"current\s+(?:work|study))\b",
-            text,
-        )
+        and not has_current_work_claim
     )
 
 
@@ -2783,7 +2794,7 @@ def _build_objective_table_routing_hints(
         property_search_pieces = [
             " ".join(str(value) for value in getattr(table, "column_headers", ()) or ())
         ]
-        for row in tuple(getattr(table, "table_matrix", ()) or ())[:6]:
+        for row in tuple(getattr(table, "table_matrix", ()) or ()):
             if isinstance(row, (list, tuple)):
                 property_search_pieces.append(" ".join(str(cell) for cell in row))
         property_table_text = " ".join(
@@ -2842,7 +2853,7 @@ def _objective_table_search_text(table: Any) -> str:
         str(getattr(table, "caption_text", "") or ""),
         " ".join(str(value) for value in getattr(table, "column_headers", ()) or ()),
     ]
-    for row in tuple(getattr(table, "table_matrix", ()) or ())[:6]:
+    for row in tuple(getattr(table, "table_matrix", ()) or ()):
         if isinstance(row, (list, tuple)):
             pieces.append(" ".join(str(cell) for cell in row))
     return " ".join(piece for piece in pieces if piece.strip())

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 import io
 import json
 import os
@@ -22,7 +23,8 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _SPACE_RE = re.compile(r"\s+")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _NUMBER_RE = re.compile(
-    r"(?<![\w.])[-+]?(?:\d+(?:[.,]\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])"
+    r"(?<![\w.])[-+]?(?:\d+(?:[.,]\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    r"(?!\w|\.\d)"
 )
 _MULTIPLICATION_SCIENTIFIC_RE = re.compile(
     r"(?<![\w.])([-+]?(?:\d+(?:[.,]\d*)?|\.\d+))\s*[x×]\s*"
@@ -89,6 +91,33 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
         for item in objectives
     ):
         raise ValueError("acceptance objectives require question and result terms")
+    for objective in objectives:
+        for field in (
+            "required_source_evidence",
+            "forbidden_direct_sources",
+            "required_finding_claims",
+        ):
+            for requirement in _mapping_list(objective.get(field)):
+                if (
+                    _text(requirement.get("paper_id")) not in paper_ids
+                    or not _text(requirement.get("label"))
+                ):
+                    raise ValueError(
+                        "acceptance requirements need an approved paper and label"
+                    )
+                if field == "required_finding_claims":
+                    if not requirement.get("statement_term_groups"):
+                        raise ValueError(
+                            "acceptance Finding requirements need statement term groups"
+                        )
+                elif (
+                    not _text(requirement.get("source_kind"))
+                    or not requirement.get("source_term_groups")
+                ):
+                    raise ValueError(
+                        "acceptance Source requirements need a source kind and "
+                        "Source term groups"
+                    )
     statuses = set(_text_list(payload.get("required_review_statuses")))
     if statuses != {"correct", "partial", "incorrect"}:
         raise ValueError("acceptance manifest requires correct, partial, and incorrect")
@@ -162,10 +191,11 @@ async def check_objective_findings_projection(
     expected_document_ids: set[str] | None = None
     required_review_statuses: set[str] = set()
     manifest_objectives = _mapping_list(acceptance_manifest["objectives"])
-    expected_document_ids = await _resolve_manifest_document_ids(
+    document_ids_by_paper = await _resolve_manifest_document_ids(
         collection_id,
         _mapping_list(acceptance_manifest["documents"]),
     )
+    expected_document_ids = set(document_ids_by_paper.values())
     required_review_statuses = set(acceptance_manifest["required_review_statuses"])
     source_index = await _load_source_index(collection_id)
     cookie = _api_login_cookie(api_base_url.rstrip("/")) if api_base_url else ""
@@ -202,6 +232,39 @@ async def check_objective_findings_projection(
             source_index=source_index,
             expected_document_ids=expected_document_ids,
             expected_term_groups=expectation.get("expected_term_groups"),
+            expected_source_requirements=[
+                {
+                    **requirement,
+                    "document_id": document_ids_by_paper[
+                        _text(requirement.get("paper_id"))
+                    ],
+                }
+                for requirement in _mapping_list(
+                    expectation.get("required_source_evidence")
+                )
+            ],
+            expected_finding_requirements=[
+                {
+                    **requirement,
+                    "document_id": document_ids_by_paper[
+                        _text(requirement.get("paper_id"))
+                    ],
+                }
+                for requirement in _mapping_list(
+                    expectation.get("required_finding_claims")
+                )
+            ],
+            forbidden_direct_source_requirements=[
+                {
+                    **requirement,
+                    "document_id": document_ids_by_paper[
+                        _text(requirement.get("paper_id"))
+                    ],
+                }
+                for requirement in _mapping_list(
+                    expectation.get("forbidden_direct_sources")
+                )
+            ],
         )
         objectives.append(result)
         checks.extend(result["checks"])
@@ -231,6 +294,9 @@ def evaluate_objective_bundle(
     source_index: dict[tuple[str, str, str], dict[str, Any]],
     expected_document_ids: set[str] | None = None,
     expected_term_groups: list[list[str]] | None = None,
+    expected_source_requirements: list[dict[str, Any]] | None = None,
+    expected_finding_requirements: list[dict[str, Any]] | None = None,
+    forbidden_direct_source_requirements: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     objective = _mapping(payload.get("objective"))
     analysis = _mapping(payload.get("published_analysis"))
@@ -406,7 +472,10 @@ def evaluate_objective_bundle(
             supporting_ids=supporting_ids,
             contradicting_ids=contradicting_ids,
         )
-        experiment_binding_issues = _experiment_binding_issues(direct_records)
+        experiment_binding_issues = _experiment_binding_issues(
+            direct_records,
+            source_index=source_index,
+        )
         sample_state_issues = _sample_state_confounding_issues(direct_records)
         direct_documents = {_text(item.get("document_id")) for item in direct_records}
         bound_direct_documents = {
@@ -443,6 +512,7 @@ def evaluate_objective_bundle(
                 for item in direct_records
                 if _text(item.get("evidence_id")) in supporting_ids
             ],
+            source_index=source_index,
         )
         checks.extend(
             [
@@ -605,7 +675,18 @@ def evaluate_objective_bundle(
             )
         )
 
-    source_results = [_audit_source_record(item, source_index) for item in all_evidence]
+    published_evidence = _mapping_list(payload.get("evidence"))
+    if not published_evidence:
+        published_evidence = list(
+            {
+                _text(item.get("evidence_id")): item
+                for item in all_evidence
+                if _text(item.get("evidence_id"))
+            }.values()
+        )
+    source_results = [
+        _audit_source_record(item, source_index) for item in published_evidence
+    ]
     checks.extend(
         [
             _check(
@@ -641,6 +722,127 @@ def evaluate_objective_bundle(
             ),
         ]
     )
+    checks.append(
+        _check(
+            objective_id,
+            "Evidence contains no duplicate source-grounded facts",
+            not (
+                duplicate_facts := _duplicate_source_grounded_facts(
+                    published_evidence
+                )
+            ),
+            f"duplicate_evidence_ids={duplicate_facts}",
+            blocker=True,
+        )
+    )
+    for requirement in expected_source_requirements or []:
+        label = _text(requirement.get("label")) or "required decision Source"
+        source_keys = _matching_source_keys(requirement, source_index)
+        allowed_roles = set(_text_list(requirement.get("allowed_evidence_roles")))
+        lineage_matches = [
+            _text(evidence.get("evidence_id"))
+            for evidence in published_evidence
+            if (not allowed_roles or _text(evidence.get("evidence_role")) in allowed_roles)
+            and any(
+                source_key in _evidence_lineage_keys(evidence)
+                for source_key in source_keys
+            )
+        ]
+        checks.append(
+            _check(
+                objective_id,
+                f"Evidence lineage includes {label}",
+                len(source_keys) == 1 and bool(lineage_matches),
+                (
+                    f"matched_source_keys={source_keys}; "
+                    f"lineage_evidence_ids={lineage_matches}; "
+                    f"allowed_roles={sorted(allowed_roles)}"
+                ),
+                blocker=True,
+            )
+        )
+    for requirement in expected_finding_requirements or []:
+        label = _text(requirement.get("label")) or "required decision Finding"
+        document_id = _text(requirement.get("document_id"))
+        term_groups = [
+            _text_list(group)
+            for group in requirement.get("statement_term_groups") or []
+        ]
+        allowed_strengths = set(
+            _text_list(requirement.get("allowed_assertion_strengths"))
+        )
+        allowed_scopes = set(
+            _text_list(requirement.get("allowed_attribution_scopes"))
+        )
+        allowed_statuses = set(
+            _text_list(requirement.get("allowed_synthesis_statuses"))
+        )
+        matching_finding_ids = []
+        for finding in findings:
+            statement = _normalized_text(finding.get("statement"))
+            if term_groups and not all(
+                any(_normalized_text(term) in statement for term in group)
+                for group in term_groups
+            ):
+                continue
+            if allowed_strengths and _text(
+                finding.get("assertion_strength")
+            ) not in allowed_strengths:
+                continue
+            if allowed_scopes and _text(
+                finding.get("attribution_scope")
+            ) not in allowed_scopes:
+                continue
+            if allowed_statuses and _text(
+                finding.get("synthesis_status")
+            ) not in allowed_statuses:
+                continue
+            if not any(
+                _text(contribution.get("document_id")) == document_id
+                and bool(_text_list(contribution.get("supporting_evidence_ids")))
+                for contribution in _mapping_list(
+                    finding.get("paper_contributions")
+                )
+            ):
+                continue
+            matching_finding_ids.append(_text(finding.get("finding_id")))
+        checks.append(
+            _check(
+                objective_id,
+                f"Finding includes {label}",
+                bool(document_id) and bool(matching_finding_ids),
+                (
+                    f"matching_finding_ids={matching_finding_ids}; "
+                    f"document_id={document_id}; "
+                    f"allowed_strengths={sorted(allowed_strengths)}; "
+                    f"allowed_scopes={sorted(allowed_scopes)}; "
+                    f"allowed_statuses={sorted(allowed_statuses)}"
+                ),
+                blocker=True,
+            )
+        )
+    for requirement in forbidden_direct_source_requirements or []:
+        label = _text(requirement.get("label")) or "forbidden background Source"
+        source_keys = set(_matching_source_keys(requirement, source_index))
+        violations = [
+            _text(evidence.get("evidence_id"))
+            for evidence in published_evidence
+            if _text(evidence.get("evidence_role"))
+            in {"direct_result", "contradictory_result"}
+            and _primary_evidence_source_key(evidence) in source_keys
+        ]
+        checks.append(
+            _check(
+                objective_id,
+                f"Direct Evidence excludes {label}",
+                len(source_keys) == 1 and not violations,
+                (
+                    f"matched_source_keys={sorted(source_keys)}; "
+                    f"violating_evidence_ids={violations}"
+                ),
+                blocker=True,
+            )
+        )
     if expected_term_groups:
         finding_text = _normalized_text(
             " ".join(
@@ -681,7 +883,7 @@ def evaluate_objective_bundle(
         "question": _text(objective.get("question")),
         "analysis_version": analysis_version,
         "finding_count": len(findings),
-        "evidence_count": len(all_evidence),
+        "evidence_count": len(published_evidence),
         "review_statuses": review_statuses,
         "source_audit": source_results,
         "checks": checks,
@@ -730,11 +932,18 @@ async def _local_objective_bundle(
             findings, _ = await repository.list_findings(
                 collection_id, objective_id, version, offset=0, limit=500
             )
+            published_evidence, _ = await repository.list_evidence(
+                collection_id,
+                objective_id,
+                version,
+                offset=0,
+                limit=500,
+            )
             evidence_by_finding = {}
             feedback_by_finding = {}
             curations_by_finding = {}
             for finding in findings:
-                evidence, _ = await repository.list_evidence(
+                finding_evidence, _ = await repository.list_evidence(
                     collection_id,
                     objective_id,
                     version,
@@ -743,7 +952,7 @@ async def _local_objective_bundle(
                     limit=1000,
                 )
                 evidence_by_finding[finding.finding_id] = [
-                    item.to_record() for item in evidence
+                    item.to_record() for item in finding_evidence
                 ]
                 feedback_by_finding[finding.finding_id] = [
                     item.to_record()
@@ -768,6 +977,7 @@ async def _local_objective_bundle(
         "published_analysis": analysis.to_record() if analysis else None,
         "paper_contributions": [item.to_record() for item in paper_contributions],
         "findings": [item.to_record() for item in findings],
+        "evidence": [item.to_record() for item in published_evidence],
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,
         "curations_by_finding": curations_by_finding,
@@ -808,6 +1018,17 @@ def _api_objective_bundle(
         cookie=cookie,
     )
     findings = _mapping_list(finding_page.get("items"))
+    evidence_query = urlencode(
+        {"analysis_version": version, "offset": 0, "limit": 500}
+    )
+    evidence_page = _api_json_request(
+        base,
+        (
+            f"/api/v1/collections/{collection_id}/objectives/{objective_id}/"
+            f"evidence?{evidence_query}"
+        ),
+        cookie=cookie,
+    )
     paper_contributions = (
         _mapping_list(findings[0].get("paper_contributions")) if findings else []
     )
@@ -867,6 +1088,7 @@ def _api_objective_bundle(
         "published_analysis": analysis,
         "paper_contributions": paper_contributions,
         "findings": findings,
+        "evidence": _mapping_list(evidence_page.get("items")),
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,
         "curations_by_finding": curations_by_finding,
@@ -903,6 +1125,7 @@ async def _load_source_index(
         }
     for table in (item for document in documents for item in document.tables):
         record = table.to_record()
+        metadata = _mapping(record.get("metadata"))
         index[(table.document_id, "table", table.table_id)] = {
             "text": _text(
                 record.get("table_markdown")
@@ -910,7 +1133,10 @@ async def _load_source_index(
                 or record.get("caption_text")
             )[:12_000],
             "page": getattr(table, "page", None),
+            "column_headers": record.get("column_headers") or [],
+            "header_row_count": record.get("header_row_count"),
             "rows": record.get("table_matrix") or [],
+            "visual_text": _text(metadata.get("visual_text")),
         }
     for figure in (item for document in documents for item in document.figures):
         index[(figure.document_id, "figure", figure.figure_id)] = {
@@ -923,7 +1149,7 @@ async def _load_source_index(
 async def _resolve_manifest_document_ids(
     collection_id: str,
     documents: list[dict[str, Any]],
-) -> set[str]:
+) -> dict[str, str]:
     expected_hashes = {_text(item.get("sha256")) for item in documents}
     with contextlib.redirect_stdout(io.StringIO()):
         from sqlalchemy import select  # noqa: PLC0415
@@ -971,8 +1197,95 @@ async def _resolve_manifest_document_ids(
             f"{unresolved}"
         )
     return {
-        next(iter(document_ids_by_hash[digest])) for digest in expected_hashes
+        _text(document.get("paper_id")): next(
+            iter(document_ids_by_hash[_text(document.get("sha256"))])
+        )
+        for document in documents
     }
+
+
+def _matching_source_keys(
+    requirement: dict[str, Any],
+    source_index: dict[tuple[str, str, str], dict[str, Any]],
+) -> list[tuple[str, str, str]]:
+    document_id = _text(requirement.get("document_id"))
+    source_kind = _text(requirement.get("source_kind"))
+    term_groups = [
+        _text_list(group) for group in requirement.get("source_term_groups") or []
+    ]
+    matches: list[tuple[str, str, str]] = []
+    for key, source in source_index.items():
+        if key[0] != document_id or key[1] != source_kind:
+            continue
+        source_text = _normalized_text(source.get("text"))
+        if term_groups and not all(
+            any(_normalized_text(term) in source_text for term in group)
+            for group in term_groups
+        ):
+            continue
+        matches.append(key)
+    return sorted(matches)
+
+
+def _primary_evidence_source_key(
+    evidence: dict[str, Any],
+) -> tuple[str, str, str]:
+    return (
+        _text(evidence.get("document_id")),
+        _text(evidence.get("source_kind")),
+        _text(evidence.get("source_ref")),
+    )
+
+
+def _evidence_lineage_keys(
+    evidence: dict[str, Any],
+) -> set[tuple[str, str, str]]:
+    document_id = _text(evidence.get("document_id"))
+    keys = {_primary_evidence_source_key(evidence)}
+    keys.update(
+        (
+            document_id,
+            _text(reference.get("source_kind")),
+            _text(reference.get("source_ref")),
+        )
+        for reference in _mapping_list(evidence.get("related_source_refs"))
+    )
+    return keys
+
+
+def _evidence_lineage_source_text(
+    evidence: dict[str, Any],
+    source_index: dict[tuple[str, str, str], dict[str, Any]],
+) -> str:
+    """Return Source-authoritative text for one Evidence's exact lineage."""
+
+    return "\n".join(
+        _text(source_index[key].get("text"))
+        for key in sorted(_evidence_lineage_keys(evidence))
+        if key in source_index and _text(source_index[key].get("text"))
+    )
+
+
+def _duplicate_source_grounded_facts(
+    evidence_records: list[dict[str, Any]],
+) -> list[list[str]]:
+    ids_by_identity: dict[str, set[str]] = {}
+    for evidence in evidence_records:
+        record = dict(evidence)
+        evidence_id = _text(record.pop("evidence_id", None))
+        identity = json.dumps(
+            record,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        ids_by_identity.setdefault(identity, set()).add(evidence_id)
+    return sorted(
+        sorted(evidence_ids)
+        for evidence_ids in ids_by_identity.values()
+        if len(evidence_ids) > 1
+    )
 
 
 def _audit_source_record(
@@ -1005,20 +1318,56 @@ def _audit_source_record(
             _int(ref.get("page")) > 0
             and _int(ref.get("page")) == _int(related_source.get("page"))
         )
-    table_sources = {key[2]: source, **related_sources} if source else {}
+    table_sources = {key[2]: source} if source else {}
+    table_sources.update(
+        {
+            _text(ref.get("source_ref")): related_sources[
+                _text(ref.get("source_ref"))
+            ]
+            for ref in _mapping_list(evidence.get("related_source_refs"))
+            if _text(ref.get("source_kind")) == "table"
+            and _text(ref.get("source_ref")) in related_sources
+        }
+    )
     raw_excerpt = _text(evidence.get("source_excerpt"))
     excerpt = _normalized_text(raw_excerpt)
     source_text = _normalized_text(source.get("text")) if source else ""
     excerpt_matches = bool(source_text) and excerpt == source_text
     if key[1] == "table" and source is not None:
-        excerpt_matches = (
-            _composite_table_excerpt_matches_refs(
-                raw_excerpt,
-                evidence=evidence,
-                sources=table_sources,
+        primary_table_refs = [
+            ref
+            for ref in _mapping_list(evidence.get("related_source_refs"))
+            if _text(ref.get("source_kind")) == "table"
+            and _text(ref.get("source_ref")) == key[2]
+        ]
+        primary_fact_refs = [
+            ref
+            for ref in primary_table_refs
+            if ref.get("col_index") is not None
+            or {
+                _text(value)
+                for value in ref.get("supports") or ()
+            }
+            & {"reported_result", "changed_variables", "comparison"}
+        ]
+        if primary_fact_refs:
+            primary_table_refs = primary_fact_refs
+        primary_row_indexes = tuple(
+            dict.fromkeys(
+                _int(ref.get("row_index"))
+                for ref in primary_table_refs
+                if _int(ref.get("row_index")) > 0
             )
-            if len(table_sources) > 1
-            else _table_excerpt_matches_source(raw_excerpt, source)
+        )
+        excerpt_matches = _table_excerpt_matches_source(
+            raw_excerpt,
+            source,
+            row_indexes=primary_row_indexes,
+            repair_attestations=[
+                _mapping(ref.get("table_matrix_repair_attestation"))
+                for ref in primary_table_refs
+                if isinstance(ref.get("table_matrix_repair_attestation"), dict)
+            ],
         )
     pages = {
         _int(page) for page in evidence.get("page_numbers") or [] if _int(page) > 0
@@ -1029,6 +1378,7 @@ def _audit_source_record(
         evidence.get("source_kind") == "table"
         and evidence.get("evidence_role")
         in {"direct_result", "contradictory_result"}
+        and bool(_mapping(evidence.get("reported_result")))
     ):
         table_binding_matches = (
             _composite_table_evidence_binding_matches(evidence, table_sources)
@@ -1054,63 +1404,138 @@ def _audit_source_record(
 def _table_excerpt_matches_source(
     excerpt: str,
     source: dict[str, Any],
+    *,
+    row_indexes: tuple[int, ...] = (),
+    repair_attestations: list[dict[str, Any]] | None = None,
 ) -> bool:
     excerpt_lines = _normalized_lines(excerpt)
     source_lines = _normalized_lines(source.get("text"))
     if source_lines and excerpt_lines == source_lines:
         return True
-    rows = [
-        [_text(cell) for cell in row]
-        for row in source.get("rows") or []
-        if isinstance(row, list)
-    ]
+    rows = _table_audit_rows(source)
     if len(rows) < 2:
         return False
     headers = rows[0]
     canonical_rows = {
-        _normalized_text(
+        row_index: _normalized_text(
             " | ".join(
                 f"{header}: {row[index]}"
                 for index, header in enumerate(headers)
                 if index < len(row)
             )
         )
-        for row in rows[1:]
+        for row_index, row in enumerate(rows[1:], start=1)
     }
     excerpt_rows = set(excerpt_lines)
-    return bool(excerpt_rows) and excerpt_rows <= canonical_rows
-
-
-def _composite_table_excerpt_matches_refs(
-    excerpt: str,
-    *,
-    evidence: dict[str, Any],
-    sources: dict[str, dict[str, Any]],
-) -> bool:
-    expected_rows: set[str] = set()
-    for ref in _mapping_list(evidence.get("related_source_refs")):
-        source_ref = _text(ref.get("source_ref"))
-        row_index = _int(ref.get("row_index"))
-        source = sources.get(source_ref)
-        rows = [
-            [_text(cell) for cell in row]
-            for row in (source or {}).get("rows") or []
-            if isinstance(row, list)
-        ]
-        if row_index <= 0 or row_index >= len(rows):
-            return False
-        headers = rows[0]
-        row = rows[row_index]
-        expected_rows.add(
-            _normalized_text(
-                " | ".join(
-                    f"{header}: {row[index]}"
-                    for index, header in enumerate(headers)
-                    if index < len(row)
-                )
+    if row_indexes:
+        if any(row_index not in canonical_rows for row_index in row_indexes):
+            return _repaired_table_excerpt_matches_attestation(
+                excerpt_lines,
+                source,
+                row_indexes=row_indexes,
+                attestations=repair_attestations or [],
             )
+        expected_rows = {canonical_rows[row_index] for row_index in row_indexes}
+        if bool(excerpt_rows) and excerpt_rows == expected_rows:
+            return True
+    elif bool(excerpt_rows) and excerpt_rows <= set(canonical_rows.values()):
+        return True
+    return _repaired_table_excerpt_matches_attestation(
+        excerpt_lines,
+        source,
+        row_indexes=row_indexes,
+        attestations=repair_attestations or [],
+    )
+
+
+def _repaired_table_excerpt_matches_attestation(
+    excerpt_lines: tuple[str, ...],
+    source: dict[str, Any],
+    *,
+    row_indexes: tuple[int, ...],
+    attestations: list[dict[str, Any]],
+) -> bool:
+    if not excerpt_lines or not attestations:
+        return False
+    raw_matrix_sha256 = _table_matrix_sha256(_table_audit_rows(source))
+    visual_text = _text(source.get("visual_text"))
+    visual_text_sha256 = _exact_text_sha256(visual_text) if visual_text else None
+    expected_excerpt_hashes = sorted(
+        _normalized_text_sha256(line) for line in excerpt_lines
+    )
+    attested_excerpt_hashes: list[str] = []
+    attested_row_indexes: list[int] = []
+    repaired_matrix_hashes: set[str] = set()
+    for attestation in attestations:
+        if (
+            attestation.get("schema_version")
+            != "objective_table_repair_attestation.v1"
+            or attestation.get("raw_matrix_sha256") != raw_matrix_sha256
+            or _SHA256_RE.fullmatch(
+                _text(attestation.get("repaired_matrix_sha256"))
+            )
+            is None
+            or _SHA256_RE.fullmatch(_text(attestation.get("repaired_row_sha256")))
+            is None
+            or _SHA256_RE.fullmatch(_text(attestation.get("source_excerpt_sha256")))
+            is None
+        ):
+            return False
+        attested_visual_hash = _text(attestation.get("visual_text_sha256"))
+        if attested_visual_hash and attested_visual_hash != visual_text_sha256:
+            return False
+        repaired_matrix_hashes.add(_text(attestation.get("repaired_matrix_sha256")))
+        attested_excerpt_hashes.append(
+            _text(attestation.get("source_excerpt_sha256"))
         )
-    return bool(expected_rows) and set(_normalized_lines(excerpt)) == expected_rows
+        attested_row_indexes.append(_int(attestation.get("repaired_row_index")))
+    return (
+        len(repaired_matrix_hashes) == 1
+        and sorted(attested_excerpt_hashes) == expected_excerpt_hashes
+        and all(row_index > 0 for row_index in attested_row_indexes)
+        and (
+            not row_indexes
+            or sorted(attested_row_indexes) == sorted(row_indexes)
+        )
+    )
+
+
+def _table_matrix_sha256(matrix: Any) -> str:
+    return sha256(
+        json.dumps(
+            matrix,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _exact_text_sha256(value: Any) -> str:
+    return sha256(_text(value).encode("utf-8")).hexdigest()
+
+
+def _normalized_text_sha256(value: Any) -> str:
+    return sha256(_normalized_text(value).encode("utf-8")).hexdigest()
+
+
+def _table_audit_rows(source: dict[str, Any]) -> list[list[str]]:
+    raw_rows = [
+        [_text(cell) for cell in row]
+        for row in source.get("rows") or []
+        if isinstance(row, list)
+    ]
+    flattened_headers = _text_list(source.get("column_headers"))
+    if not flattened_headers:
+        return raw_rows
+    try:
+        header_row_count = int(source.get("header_row_count", 1) or 0)
+    except (TypeError, ValueError):
+        header_row_count = 1
+    body_rows = raw_rows[max(0, min(header_row_count, len(raw_rows))) :]
+    return [
+        flattened_headers,
+        *[row for row in body_rows if any(_text(cell) for cell in row)],
+    ]
 
 
 def _composite_table_evidence_binding_matches(
@@ -1129,11 +1554,7 @@ def _composite_table_evidence_binding_matches(
 
     endpoint_rows: list[tuple[list[str], list[str], list[str]]] = []
     for source_ref, row_indexes in row_indexes_by_source.items():
-        rows = [
-            [_text(cell) for cell in row]
-            for row in sources[source_ref].get("rows") or []
-            if isinstance(row, list)
-        ]
+        rows = _table_audit_rows(sources[source_ref])
         if len(row_indexes) != 2 or any(index >= len(rows) for index in row_indexes):
             continue
         endpoint_rows.append(
@@ -1204,14 +1625,12 @@ def _table_evidence_binding_matches(
 ) -> bool:
     if source is None:
         return False
-    rows = [
-        [_text(cell) for cell in row]
-        for row in source.get("rows") or []
-        if isinstance(row, list)
-    ]
+    rows = _table_audit_rows(source)
     comparison = _mapping(evidence.get("comparison"))
-    if not rows or not comparison:
+    if not rows:
         return False
+    if not comparison:
+        return _table_scalar_result_binding_matches(evidence, source, rows)
     exact_rows = _table_comparison_rows(evidence, rows)
     if exact_rows is not None:
         baseline_row, target_row, result_columns = exact_rows
@@ -1228,6 +1647,55 @@ def _table_evidence_binding_matches(
             result_columns=result_columns,
         )
     return _table_named_comparison_rows_bind(evidence, rows)
+
+
+def _table_scalar_result_binding_matches(
+    evidence: dict[str, Any],
+    source: dict[str, Any],
+    rows: list[list[str]],
+) -> bool:
+    if _mapping_list(evidence.get("changed_variables")):
+        return False
+    result = _mapping(evidence.get("reported_result"))
+    outcome = result.get("outcome")
+    value = result.get("value")
+    if not _text(outcome) or value is None:
+        return False
+    table_refs = [
+        ref
+        for ref in _mapping_list(evidence.get("related_source_refs"))
+        if _text(ref.get("source_kind")) == "table"
+        and _text(ref.get("source_ref")) == _text(evidence.get("source_ref"))
+    ]
+    for ref in table_refs:
+        row_index = _int(ref.get("row_index"))
+        col_index = _int(ref.get("col_index"))
+        if (
+            0 < row_index < len(rows)
+            and 0 <= col_index < len(rows[0])
+            and col_index < len(rows[row_index])
+            and _table_header_is_result(
+                _table_header_key(rows[0][col_index]), outcome
+            )
+            and _value_matches_cell(value, rows[row_index][col_index])
+        ):
+            return True
+        attestation = _mapping(ref.get("table_matrix_repair_attestation"))
+        if (
+            attestation
+            and _table_header_is_result(
+                _table_header_key(ref.get("header_path")), outcome
+            )
+            and _value_matches_cell(value, evidence.get("source_excerpt"))
+            and _table_excerpt_matches_source(
+                _text(evidence.get("source_excerpt")),
+                source,
+                row_indexes=(row_index,) if row_index > 0 else (),
+                repair_attestations=[attestation],
+            )
+        ):
+            return True
+    return False
 
 
 def _table_comparison_rows(
@@ -1383,8 +1851,17 @@ def _table_factor_matches_header(factor: Any, header_key: str) -> bool:
 
 
 def _table_header_is_result(header_key: str, outcome: Any) -> bool:
-    header_tokens = set(header_key.split()) - _RESULT_QUALIFIERS
-    outcome_tokens = set(_normalized_term(outcome).split()) - _RESULT_QUALIFIERS
+    from application.core.objectives import property_matching
+
+    normalized_header = (
+        property_matching.normalize_property_label(header_key) or header_key
+    )
+    normalized_outcome = (
+        property_matching.normalize_property_label(outcome)
+        or _normalized_term(outcome)
+    )
+    header_tokens = set(normalized_header.split()) - _RESULT_QUALIFIERS
+    outcome_tokens = set(normalized_outcome.split()) - _RESULT_QUALIFIERS
     return bool(
         header_tokens
         and outcome_tokens
@@ -1692,12 +2169,16 @@ def _direct_results_have_disjoint_context_boundary(
 def _finding_statement_issues(
     finding: dict[str, Any],
     supporting_evidence: list[dict[str, Any]],
+    *,
+    source_index: dict[tuple[str, str, str], dict[str, Any]],
 ) -> list[str]:
     statement_numbers = set(_numbers(finding.get("statement")))
     if not statement_numbers:
         return []
     for evidence in supporting_evidence:
-        evidence_numbers = set(_numbers(evidence.get("source_excerpt")))
+        evidence_numbers = set(
+            _numbers(_evidence_lineage_source_text(evidence, source_index))
+        )
         if statement_numbers <= evidence_numbers:
             return []
     return [
@@ -1789,13 +2270,21 @@ def _direct_result_issues(
     issues: list[str] = []
     outcome = _normalized_term(finding.get("outcome"))
     direction = _text(finding.get("direction"))
+    unattributable_is_bounded = (
+        finding.get("assertion_strength") == "descriptive"
+        and finding.get("attribution_scope") == "descriptive_only"
+        and finding.get("synthesis_status") == "insufficient_confirmation"
+    )
     for evidence in evidence_records:
         evidence_id = _text(evidence.get("evidence_id"))
         result = _mapping(evidence.get("reported_result"))
         result_direction = _text(result.get("direction"))
         if _normalized_term(result.get("outcome")) != outcome:
             issues.append(f"{evidence_id}: outcome differs from Finding")
-        if evidence.get("attribution_scope") == "not_attributable":
+        if (
+            evidence.get("attribution_scope") == "not_attributable"
+            and not unattributable_is_bounded
+        ):
             issues.append(f"{evidence_id}: non-attributable Evidence supports Finding")
         if evidence_id in supporting_ids and result_direction != direction:
             issues.append(f"{evidence_id}: support direction differs from Finding")
@@ -1812,23 +2301,26 @@ def _direct_result_issues(
 
 def _experiment_binding_issues(
     evidence_records: list[dict[str, Any]],
+    *,
+    source_index: dict[tuple[str, str, str], dict[str, Any]],
 ) -> list[str]:
     issues: list[str] = []
     for evidence in evidence_records:
         evidence_id = _text(evidence.get("evidence_id"))
-        excerpt = _text(evidence.get("source_excerpt"))
+        source_text = _evidence_lineage_source_text(evidence, source_index)
         for variable in _mapping_list(evidence.get("changed_variables")):
             for field in ("baseline_value", "target_value"):
                 value = variable.get(field)
-                if _numbers(value) and not _numbers_grounded(value, excerpt):
+                if _numbers(value) and not _numbers_grounded(value, source_text):
                     issues.append(
                         f"{evidence_id}: {variable.get('name')} {field}={value!r} "
-                        "is absent from source"
+                        "is absent from Evidence lineage Sources"
                     )
         result_value = _mapping(evidence.get("reported_result")).get("value")
-        if _numbers(result_value) and not _numbers_grounded(result_value, excerpt):
+        if _numbers(result_value) and not _numbers_grounded(result_value, source_text):
             issues.append(
-                f"{evidence_id}: result value={result_value!r} is absent from source"
+                f"{evidence_id}: result value={result_value!r} is absent from "
+                "Evidence lineage Sources"
             )
     return issues
 
@@ -1916,6 +2408,8 @@ def _failed_source_ids(results: list[dict[str, Any]], field: str) -> str:
 def _finding_attribution_scope(
     *, factor_count: int, evidence_scopes: set[str]
 ) -> str:
+    if "not_attributable" in evidence_scopes:
+        return "descriptive_only"
     if "descriptive_only" in evidence_scopes:
         return "descriptive_only"
     if "association_only" in evidence_scopes:

@@ -139,6 +139,7 @@ def _evidence(
             if is_result and len(factors) > 1 and comparison is not None
             else "not_attributable"
         )
+    extra_source_refs = list(overrides.pop("related_source_refs", ()))
     payload = {
         "collection_id": "col-1",
         "objective_id": "obj-density",
@@ -151,7 +152,14 @@ def _evidence(
             "Laser power and scan speed changed while relative density increased."
         ),
         "page_numbers": [4],
-        "related_source_refs": [],
+        "related_source_refs": [
+            {
+                "source_kind": "text_window",
+                "source_ref": f"block-{evidence_id}",
+                "supports": ["scientific_context.material"],
+            },
+            *extra_source_refs,
+        ],
         "evidence_role": role,
         "selection_status": "extracted",
         "selection_reason": "Direct objective result.",
@@ -364,6 +372,30 @@ def test_synthesis_keeps_source_result_when_material_scope_is_unresolved() -> No
     )
 
 
+def test_synthesis_excludes_result_with_explicitly_mismatched_material_scope() -> None:
+    """A result for another material cannot answer the confirmed material question."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-other-material",
+                "paper-1",
+                material="17-4PH stainless steel",
+                attribution_scope="descriptive_only",
+                comparison=None,
+            ),
+        ),
+    )
+
+    assert findings == ()
+
+
 def test_synthesis_downgrades_result_with_open_process_context_to_association() -> None:
     """Missing fixed process context must not support an isolated Finding."""
 
@@ -449,7 +481,10 @@ def test_synthesis_keeps_qualitative_source_result_when_factor_is_in_source_text
     assert findings[0].supporting_evidence_ids == ("ev-lcf-qualitative",)
     assert "low cycle fatigue strength" in findings[0].statement
     assert "associated" not in findings[0].statement
-    assert findings[0].statement.startswith("The Source reported")
+    assert "the Source reported this low cycle fatigue strength observation" in (
+        findings[0].statement
+    )
+    assert "medium and high VED structures enhanced" in findings[0].statement
 
 
 def test_synthesis_keeps_source_result_when_variable_endpoints_are_unstructured() -> None:
@@ -493,6 +528,118 @@ def test_synthesis_keeps_source_result_when_variable_endpoints_are_unstructured(
     assert findings[0].attribution_scope == "descriptive_only"
     assert findings[0].assertion_strength == "descriptive"
     assert findings[0].supporting_evidence_ids == ("ev-unstructured-variable",)
+
+
+def test_synthesis_keeps_symbol_table_observation_grounded_by_process_context() -> None:
+    """A normalized table axis can label a description without implying an effect."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    evidence = _evidence(
+        "ev-symbol-table-row",
+        "paper-1",
+        outcome="yield strength",
+        factors=(),
+        changed_variables=[],
+        comparison=None,
+        direction="unknown",
+        attribution_scope="descriptive_only",
+        source_kind="table",
+        source_ref="table-yield-strength",
+        source_excerpt=(
+            "alpha (deg): 0 | beta (deg): 0 | theta (deg): 30 | "
+            "Yield Strength Experiment (MPa): 342.5"
+        ),
+        reported_result={
+            "outcome": "yield strength",
+            "value": 342.5,
+            "unit": "MPa",
+            "direction": "unknown",
+            "result_text": "yield strength = 342.5 MPa",
+        },
+        scientific_context={
+            "material": [{"name": "alloy", "value": "316L"}],
+            "sample": [],
+            "process": [
+                {
+                    "name": "build orientation alpha angle",
+                    "value": 0,
+                    "unit": "deg",
+                },
+                {
+                    "name": "build orientation beta angle",
+                    "value": 0,
+                    "unit": "deg",
+                },
+                {
+                    "name": "scan strategy rotation angle",
+                    "value": 30,
+                    "unit": "deg",
+                },
+            ],
+            "test": [],
+        },
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question=(
+                "How do scan strategy rotation angle and build orientation "
+                "affect yield strength?"
+            ),
+            variables=["scan strategy rotation angle", "build orientation"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(evidence,),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].factors == ("scan strategy rotation angle",)
+    assert findings[0].direction == "unknown"
+    assert findings[0].attribution_scope == "descriptive_only"
+    assert findings[0].assertion_strength == "descriptive"
+
+
+def test_synthesis_does_not_qualify_result_when_objective_variable_is_only_context() -> None:
+    """A variable mentioned as background must not become a paper Finding factor."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    evidence = _evidence(
+        "ev-heat-treatment-context",
+        "paper-1",
+        outcome="elongation",
+        factors=(),
+        changed_variables=[],
+        comparison=None,
+        attribution_scope="descriptive_only",
+        source_excerpt=(
+            "Heat treatment removed porosity. The heat treatments improved "
+            "elongation."
+        ),
+        reported_result={
+            "outcome": "elongation",
+            "value": None,
+            "unit": None,
+            "direction": "improve",
+            "result_text": "The heat treatments improved elongation.",
+        },
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question="How does porosity affect elongation?",
+            variables=["porosity"],
+            outcomes=["elongation"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(evidence,),
+    )
+
+    assert findings == ()
 
 
 def test_synthesis_does_not_qualify_out_of_scope_result_as_finding() -> None:
@@ -1385,6 +1532,60 @@ def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
     ]
 
 
+def test_synthesis_separates_results_with_different_joint_factor_sets() -> None:
+    """A Finding cannot attribute one factor set to a different experiment."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        variables=[
+            "laser power",
+            "scan speed",
+            "volumetric energy density",
+            "hatch spacing",
+        ]
+    )
+    evidence_records = (
+        _evidence(
+            "three-factor-result",
+            "paper-1",
+            factors=(
+                "laser power",
+                "scan speed",
+                "volumetric energy density",
+            ),
+        ),
+        _evidence(
+            "four-factor-result",
+            "paper-1",
+            factors=(
+                "laser power",
+                "scan speed",
+                "volumetric energy density",
+                "hatch spacing",
+            ),
+        ),
+    )
+
+    result_sets = service._result_sets(objective, evidence_records)
+
+    assert len(result_sets) == 2
+    assert {
+        tuple(result_set["factors"]) for result_set in result_sets
+    } == {
+        ("laser power", "scan speed", "volumetric energy density"),
+        (
+            "hatch spacing",
+            "laser power",
+            "scan speed",
+            "volumetric energy density",
+        ),
+    }
+    assert {
+        tuple(item["evidence_id"] for item in result_set["result_evidence"])
+        for result_set in result_sets
+    } == {("three-factor-result",), ("four-factor-result",)}
+
+
 def test_synthesis_splits_cross_paper_results_at_process_context_boundary() -> None:
     service = FindingSynthesisService(assertion_judge=_Extractor([]))
     common = {
@@ -2009,6 +2210,68 @@ def test_synthesis_keeps_same_source_scalar_rows_as_evidence_not_findings() -> N
     assert len(extractor.payloads) == 1
 
 
+def test_incomplete_same_source_comparison_still_suppresses_scalar_findings() -> None:
+    """A qualified table comparison remains the Finding; its rows remain Evidence."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        question="How does energy density affect relative density?",
+        variables=["energy density"],
+    )
+    scientific_context = {
+        "material": [{"name": "alloy", "value": "316L"}],
+        "sample": [{"name": "state", "value": "as-built"}],
+        "process": [{"name": "process", "value": "LPBF"}],
+        "test": [],
+    }
+    shared = {
+        "source_kind": "table",
+        "source_ref": "condition-table",
+        "source_excerpt": (
+            "Energy density (J/mm3): 70, 100 | Relative density (%): 95.4, 98.0"
+        ),
+        "scientific_context": scientific_context,
+    }
+    comparison = _evidence(
+        "comparison-70-100",
+        "paper-1",
+        outcome="relative density",
+        factors=("energy density",),
+        direction="increase",
+        **shared,
+    )
+    scalar_row = _evidence(
+        "measurement-70",
+        "paper-1",
+        outcome="relative density",
+        factors=(),
+        changed_variables=[],
+        comparison=None,
+        direction="unknown",
+        attribution_scope="descriptive_only",
+        reported_result={
+            "outcome": "relative density",
+            "value": 95.4,
+            "unit": "%",
+            "direction": "unknown",
+            "result_text": "relative density = 95.4 %",
+        },
+        **shared,
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=objective,
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(comparison, scalar_row),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].supporting_evidence_ids == ("comparison-70-100",)
+    assert findings[0].attribution_scope in {"association_only", "descriptive_only"}
+
+
 def test_incomplete_coverage_keeps_series_finding_without_scalar_noise() -> None:
     """An unread supplemental Source must not replace a valid series with unknowns."""
 
@@ -2208,8 +2471,8 @@ def test_qualified_results_group_one_paper_relation_across_source_fragments() ->
     } == {"porosity-prose", "porosity-table"}
 
 
-def test_synthesis_groups_pairwise_rows_as_one_experiment_series() -> None:
-    """A condition table yields one series conclusion, not one Finding per row pair."""
+def test_synthesis_separates_pairwise_rows_with_different_factor_sets() -> None:
+    """One condition table does not make different interventions one effect."""
 
     extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(assertion_judge=extractor)
@@ -2328,23 +2591,91 @@ def test_synthesis_groups_pairwise_rows_as_one_experiment_series() -> None:
         evidence_records=evidence_records,
     )
 
-    assert len(findings) == 1
-    finding = findings[0]
-    assert finding.factors == ("energy input", "path strategy", "travel speed")
-    assert set(finding.supporting_evidence_ids) | set(
-        finding.contradicting_evidence_ids
-    ) == {"series-low-middle", "series-middle-high", "series-low-high"}
-    assert finding.attribution_scope == "joint_effect"
-    assert "opposing directions" in finding.statement
+    assert len(findings) == 3
+    assert {finding.direction: finding.factors for finding in findings} == {
+        "increase": ("energy input", "travel speed"),
+        "decrease": ("energy input", "path strategy"),
+        "no_change": ("path strategy", "travel speed"),
+    }
     assert {
-        item.name for item in finding.scientific_context.process
-    }.isdisjoint({"energy input", "path strategy", "travel speed"})
-    assert any(
-        "individual-factor effects are not identifiable" in limitation
-        for limitation in finding.limitations
+        evidence_id
+        for finding in findings
+        for evidence_id in (
+            *finding.supporting_evidence_ids,
+            *finding.contradicting_evidence_ids,
+        )
+    } == {"series-low-middle", "series-middle-high", "series-low-high"}
+    assert all(finding.attribution_scope == "joint_effect" for finding in findings)
+    assert all(
+        {
+            item.name for item in finding.scientific_context.process
+        }.isdisjoint(finding.factors)
+        for finding in findings
     )
-    assert len(extractor.payloads) == 1
-    assert extractor.payloads[0]["result_set"]["total_evidence_count"] == 3
+    assert all(
+        any(
+            "individual-factor effects are not identifiable" in limitation
+            for limitation in finding.limitations
+        )
+        for finding in findings
+    )
+    assert len(extractor.payloads) == 3
+    assert all(
+        payload["result_set"]["total_evidence_count"] == 1
+        for payload in extractor.payloads
+    )
+
+
+def test_synthesis_recomputes_factors_after_splitting_one_series_by_direction() -> None:
+    """Each Finding names only factors supported by its own direct Evidence."""
+
+    extractor = _Extractor([_candidate(), _candidate()])
+    service = FindingSynthesisService(assertion_judge=extractor)
+    objective = _objective(
+        question=(
+            "How do laser power, scan speed, and hatch spacing affect relative "
+            "density?"
+        ),
+        variables=["laser power", "scan speed", "hatch spacing"],
+    )
+    evidence_records = (
+        _evidence(
+            "power-speed-increase",
+            "paper-1",
+            factors=("laser power", "scan speed"),
+            direction="increase",
+            source_kind="table",
+            source_ref="result-table",
+        ),
+        _evidence(
+            "power-hatch-mixed",
+            "paper-1",
+            factors=("laser power", "hatch spacing"),
+            direction="mixed",
+            source_kind="table",
+            source_ref="result-table",
+        ),
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=objective,
+        analysis=_analysis(),
+        contributions=(
+            _contribution(
+                "paper-1",
+                changed_variables=["laser power", "scan speed", "hatch spacing"],
+            ),
+        ),
+        evidence_records=evidence_records,
+    )
+
+    assert len(findings) == 2
+    factors_by_direction = {finding.direction: finding.factors for finding in findings}
+    assert factors_by_direction == {
+        "increase": ("laser power", "scan speed"),
+        "mixed": ("hatch spacing", "laser power"),
+    }
 
 
 def test_result_table_keeps_independently_varied_axes_as_separate_series() -> None:
@@ -2455,6 +2786,299 @@ def test_result_table_keeps_independently_varied_axes_as_separate_series() -> No
     assert {
         item["evidence_id"] for item in theta_set["result_evidence"]
     } == {"theta-0-30", "theta-30-45"}
+
+
+def test_same_paper_objective_conditions_publish_one_series_finding() -> None:
+    """Rows across an Objective condition axis are one researcher-level result."""
+
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(assertion_judge=extractor)
+    objective = _objective(
+        question="How do energy density and scanning strategy affect yield strength?",
+        variables=["energy density", "scanning strategy"],
+        outcomes=["yield strength"],
+    )
+    shared = {
+        "source_kind": "table",
+        "source_ref": "strategy-table",
+        "outcome": "yield strength",
+        "factors": ("scanning strategy",),
+        "changed_variables": [
+            {
+                "name": "scanning strategy",
+                "baseline_value": "A",
+                "target_value": "B",
+            }
+        ],
+        "scientific_context": {
+            "material": [{"name": "alloy", "value": "316L"}],
+            "sample": [{"name": "state", "value": "as-built"}],
+            "test": [{"name": "method", "value": "tensile testing"}],
+        },
+    }
+    low_energy = _evidence(
+        "strategy-low-energy",
+        "paper-1",
+        direction="increase",
+        **{
+            **shared,
+            "scientific_context": {
+                **shared["scientific_context"],
+                "process": [{"name": "energy density", "value": 70, "unit": "J/mm3"}],
+            },
+        },
+    )
+    high_energy = _evidence(
+        "strategy-high-energy",
+        "paper-1",
+        direction="decrease",
+        **{
+            **shared,
+            "scientific_context": {
+                **shared["scientific_context"],
+                "process": [{"name": "energy density", "value": 110, "unit": "J/mm3"}],
+            },
+        },
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=objective,
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(low_energy, high_energy),
+    )
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert "an increase versus a decrease." in finding.statement
+    assert "energy density: 70 J/mm3, 110 J/mm3" in finding.statement
+    assert set(finding.supporting_evidence_ids) | set(
+        finding.contradicting_evidence_ids
+    ) == {"strategy-low-energy", "strategy-high-energy"}
+    assert len(extractor.payloads) == 1
+    assert extractor.payloads[0]["result_set"]["total_evidence_count"] == 2
+    assert extractor.payloads[0]["result_set"]["condition_context"] == [
+        {"name": "energy density", "values": ["70", "110"], "unit": "J/mm3"}
+    ]
+
+
+def test_same_paper_implicit_process_parameters_form_one_condition_series() -> None:
+    """Unlisted process settings remain conditions, not duplicate Findings."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        question="How does scanning strategy affect yield strength?",
+        variables=["scanning strategy"],
+        outcomes=["yield strength"],
+    )
+    common_context = {
+        "material": [{"name": "alloy", "value": "316L"}],
+        "sample": [{"name": "state", "value": "as-built"}],
+        "test": [{"name": "method", "value": "tensile testing"}],
+    }
+
+    evidence_records = tuple(
+        _evidence(
+            f"strategy-{energy}",
+            "paper-1",
+                factors=("scanning strategy",),
+                outcome="yield strength",
+                direction="increase" if energy == 70 else "decrease",
+                source_ref="strategy-table",
+                scientific_context={
+                **common_context,
+                "process": [
+                    {"name": "energy density", "value": energy, "unit": "J/mm3"},
+                    {"name": "manufacturing process", "value": "LPBF"},
+                ],
+            },
+        )
+        for energy in (70, 110)
+    )
+
+    result_sets = service._result_sets(objective, evidence_records)
+
+    assert len(result_sets) == 1
+    assert len(result_sets[0]["result_evidence"]) == 2
+    assert result_sets[0]["condition_context"] == [
+        {"name": "energy density", "values": ["70", "110"], "unit": "J/mm3"}
+    ]
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=objective,
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=evidence_records,
+    )
+
+    assert len(findings) == 1
+    assert "energy density: 70 J/mm3, 110 J/mm3" in findings[0].statement
+
+
+def test_same_paper_directional_findings_do_not_share_other_direction_context() -> None:
+    """A paper result may cite only conditions carried by its own Evidence."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        question="How does scanning strategy affect yield strength?",
+        variables=["scanning strategy"],
+        outcomes=["yield strength"],
+    )
+    common = {
+        "source_kind": "text_window",
+        "factors": ("scanning strategy",),
+        "outcome": "yield strength",
+        "attribution_scope": "descriptive_only",
+        "comparison": None,
+        "related_source_refs": [
+            {
+                "source_kind": "text_window",
+                "source_ref": "shared-methods",
+                "page": 3,
+            }
+        ],
+    }
+    directional = _evidence(
+        "strategy-directional",
+        "paper-1",
+        direction="improve",
+        source_ref="directional-results",
+        scientific_context={
+            "material": [{"name": "alloy", "value": "316L"}],
+            "sample": [],
+            "process": [{"name": "energy density", "value": 100, "unit": "J/mm3"}],
+            "test": [],
+        },
+        **common,
+    )
+    unresolved = _evidence(
+        "strategy-unresolved",
+        "paper-1",
+        direction="unknown",
+        source_ref="unresolved-results",
+        scientific_context={
+            "material": [{"name": "alloy", "value": "316L"}],
+            "sample": [],
+            "process": [{"name": "energy density", "value": 150, "unit": "J/mm3"}],
+            "test": [],
+        },
+        **common,
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=objective,
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(directional, unresolved),
+    )
+
+    directional_finding = next(
+        finding
+        for finding in findings
+        if "strategy-directional" in finding.supporting_evidence_ids
+    )
+    assert "150" not in directional_finding.statement
+    assert "Reported process-condition values" not in directional_finding.statement
+
+
+def test_same_source_unknown_process_label_forms_condition_series() -> None:
+    """A shared source establishes a condition axis without a domain vocabulary."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        question="How does route selection affect yield strength?",
+        variables=["route selection"],
+        outcomes=["yield strength"],
+    )
+    evidence_records = tuple(
+        _evidence(
+            f"route-{value}",
+            "paper-1",
+            factors=("route selection",),
+            outcome="yield strength",
+            direction="increase" if value == "A" else "decrease",
+            source_ref="shared-result-table",
+            scientific_context={
+                "material": [{"name": "alloy", "value": "316L"}],
+                "sample": [{"name": "state", "value": "as-built"}],
+                "process": [{"name": "parameter q", "value": value}],
+                "test": [{"name": "method", "value": "tensile testing"}],
+            },
+        )
+        for value in ("A", "B")
+    )
+
+    result_sets = service._result_sets(objective, evidence_records)
+
+    assert len(result_sets) == 1
+    assert result_sets[0]["condition_context"] == [
+        {"name": "parameter q", "values": ["A", "B"], "unit": None}
+    ]
+
+
+def test_unrelated_sources_do_not_merge_numeric_process_context() -> None:
+    """Numeric context alone cannot prove that two sources are one experiment."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        question="How does route selection affect yield strength?",
+        variables=["route selection"],
+        outcomes=["yield strength"],
+    )
+    evidence_records = tuple(
+        _evidence(
+            f"route-{value}",
+            "paper-1",
+            factors=("route selection",),
+            outcome="yield strength",
+            source_ref=f"result-source-{value}",
+            scientific_context={
+                "material": [{"name": "alloy", "value": "316L"}],
+                "sample": [{"name": "state", "value": "as-built"}],
+                "process": [{"name": "parameter q", "value": value}],
+                "test": [{"name": "method", "value": "tensile testing"}],
+            },
+        )
+        for value in (10, 20)
+    )
+
+    result_sets = service._result_sets(objective, evidence_records)
+
+    assert len(result_sets) == 2
+
+
+def test_same_paper_process_identity_still_splits_condition_series() -> None:
+    """Different manufacturing processes are distinct experiments."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        question="How does scanning strategy affect yield strength?",
+        variables=["scanning strategy"],
+        outcomes=["yield strength"],
+    )
+    evidence_records = tuple(
+        _evidence(
+            f"process-{process}",
+            "paper-1",
+            factors=("scanning strategy",),
+            outcome="yield strength",
+            scientific_context={
+                "material": [{"name": "alloy", "value": "316L"}],
+                "sample": [{"name": "state", "value": "as-built"}],
+                "process": [{"name": "manufacturing process", "value": process}],
+                "test": [{"name": "method", "value": "tensile testing"}],
+            },
+        )
+        for process in ("LPBF", "DED")
+    )
+
+    result_sets = service._result_sets(objective, evidence_records)
+
+    assert len(result_sets) == 2
+    assert all(len(item["result_evidence"]) == 1 for item in result_sets)
 
 
 def test_complete_specific_comparison_supersedes_broad_qualitative_finding() -> None:
@@ -4244,6 +4868,115 @@ def test_synthesis_keeps_causal_strength_for_deterministic_controlled_table_pair
     assert finding.assertion_strength == "causal"
 
 
+def test_synthesis_statement_matches_causal_assertion_strength() -> None:
+    """A causal Finding must not publish associative wording."""
+
+    service = FindingSynthesisService(
+        assertion_judge=_Extractor(
+            [
+                _candidate(
+                    assertion_strength="causal",
+                )
+            ]
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=["laser power"]),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-causal",
+                "paper-1",
+                factors=("laser power",),
+                source_kind="table",
+                selection_reason=(
+                    "Deterministic comparison of rows from the same result table."
+                ),
+                related_source_refs=[
+                    {"row_index": 1, "col_index": 2},
+                    {"row_index": 2, "col_index": 2},
+                ],
+            ),
+        ),
+    )[0]
+
+    assert finding.assertion_strength == "causal"
+    assert "associated with" not in finding.statement
+    assert "resulted in an increase" in finding.statement
+
+
+def test_synthesis_downgrades_causal_candidate_when_evidence_conflicts() -> None:
+    """Conflicting papers cannot be described as one causal direction."""
+
+    service = FindingSynthesisService(
+        assertion_judge=_Extractor(
+            [
+                _candidate(
+                    assertion_strength="causal",
+                    statement="Laser power increased relative density.",
+                )
+            ]
+        )
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=["laser power"]),
+        analysis=_analysis(
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1",
+                    preparation_fingerprint="fingerprint-paper-1",
+                ),
+                PreparedDocumentInput(
+                    document_id="paper-2",
+                    preparation_fingerprint="fingerprint-paper-2",
+                ),
+            ),
+            total_document_count=2,
+        ),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            _evidence(
+                "ev-support",
+                "paper-1",
+                factors=("laser power",),
+                source_kind="table",
+                selection_reason=(
+                    "Deterministic comparison of rows from the same result table."
+                ),
+                related_source_refs=[
+                    {"row_index": 1, "col_index": 2},
+                    {"row_index": 2, "col_index": 2},
+                ],
+            ),
+            _evidence(
+                "ev-conflict",
+                "paper-2",
+                factors=("laser power",),
+                direction="decrease",
+                role="contradictory_result",
+                source_kind="table",
+                selection_reason=(
+                    "Deterministic comparison of rows from the same result table."
+                ),
+                related_source_refs=[
+                    {"row_index": 1, "col_index": 2},
+                    {"row_index": 2, "col_index": 2},
+                ],
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.assertion_strength == "associative"
+    assert "resulted in" not in finding.statement
+
+
 def test_synthesis_retains_unattributable_result_as_descriptive_finding() -> None:
     extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(assertion_judge=extractor)
@@ -4251,10 +4984,24 @@ def test_synthesis_retains_unattributable_result_as_descriptive_finding() -> Non
         "incomparable-1",
         "paper-1",
         attribution_scope="not_attributable",
+        factors=("build platform preheating",),
+        outcome="microstructure",
+        direction="mixed",
+        source_excerpt=(
+            "Comparing P150 with NP, the cellular structure is seen in the "
+            "former condition."
+        ),
+        reported_result={
+            "outcome": "microstructure",
+            "value": None,
+            "unit": None,
+            "direction": "mixed",
+            "result_text": "the cellular structure is seen in the P150 condition",
+        },
         comparison={
-            "baseline_label": "as-built",
-            "target_label": "HIP",
-            "axis_names": ["laser power", "scan speed"],
+            "baseline_label": "NP",
+            "target_label": "P150",
+            "axis_names": ["build platform preheating"],
             "comparable": False,
             "incomparability_reasons": ["sample state differs"],
         },
@@ -4262,9 +5009,19 @@ def test_synthesis_retains_unattributable_result_as_descriptive_finding() -> Non
 
     findings = service.synthesize(
         collection_id="col-1",
-        objective=_objective(),
+        objective=_objective(
+            question="How does build platform preheating affect microstructure?",
+            variables=["build platform preheating"],
+            outcomes=["microstructure"],
+        ),
         analysis=_analysis(),
-        contributions=(_contribution("paper-1"),),
+        contributions=(
+            _contribution(
+                "paper-1",
+                changed_variables=["build platform preheating"],
+                measured_property_scope=["microstructure"],
+            ),
+        ),
         evidence_records=(incomparable,),
     )
 
@@ -4272,6 +5029,8 @@ def test_synthesis_retains_unattributable_result_as_descriptive_finding() -> Non
     assert findings[0].attribution_scope == "descriptive_only"
     assert findings[0].assertion_strength == "descriptive"
     assert findings[0].supporting_evidence_ids == ("incomparable-1",)
+    assert "cellular structure is seen in the P150 condition" in findings[0].statement
+    assert "associated" not in findings[0].statement
     assert any(
         "complete comparable condition pair" in item.casefold()
         for item in findings[0].limitations
@@ -4427,18 +5186,17 @@ def test_synthesis_repairs_unavailable_context_reference_once() -> None:
     }
 
 
-def test_synthesis_fails_after_one_unsuccessful_semantic_repair(caplog) -> None:
+def test_synthesis_recovers_conservatively_after_unsuccessful_semantic_repair(
+    caplog,
+) -> None:
     rejected = _candidate(
         context_evidence_ids=["missing-context"],
     )
     extractor = _Extractor([rejected, rejected])
     service = FindingSynthesisService(assertion_judge=extractor)
 
-    with pytest.raises(
-        RuntimeError,
-        match="Finding synthesis remained invalid after repair",
-    ):
-        service.synthesize(
+    with capture_analysis_diagnostics() as diagnostics:
+        findings = service.synthesize(
             collection_id="col-1",
             objective=_objective(),
             analysis=_analysis(),
@@ -4446,8 +5204,21 @@ def test_synthesis_fails_after_one_unsuccessful_semantic_repair(caplog) -> None:
             evidence_records=(_evidence("ev-1", "paper-1"),),
         )
 
+    assert len(findings) == 1
+    assert findings[0].assertion_strength == "descriptive"
+    assert findings[0].context_evidence_ids == ()
     assert len(extractor.payloads) == 2
     assert "semantic_repair_attempted=True" in caplog.text
+    recovery_trace = dict(diagnostics.records[-1])
+    assert recovery_trace.pop("result_set_id").startswith("result_set_")
+    assert recovery_trace == {
+        "trace_type": "finding_assertion_judge_invalid_recovery",
+        "collection_id": "col-1",
+        "objective_id": "obj-density",
+        "analysis_version": 1,
+        "disposition": "conservative_recovered",
+        "reason": "candidate references unavailable context Evidence",
+    }
 
 
 def test_synthesis_rejects_cross_version_children_and_orphan_evidence() -> None:

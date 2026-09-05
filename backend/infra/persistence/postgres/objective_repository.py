@@ -934,12 +934,14 @@ class PostgresObjectiveRepository:
         *,
         now: datetime,
     ) -> ObjectiveAnalysisRecord:
+        payload = analysis.to_record()
+        payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
         return ObjectiveAnalysisRecord(
             collection_id=analysis.collection_id,
             objective_id=analysis.objective_id,
             analysis_version=analysis.analysis_version,
             status=analysis.status,
-            payload=analysis.to_record(),
+            payload=payload,
             created_at=analysis.created_at or now,
             updated_at=now,
         )
@@ -950,7 +952,9 @@ class PostgresObjectiveRepository:
         analysis: ObjectiveAnalysis,
     ) -> None:
         row.status = analysis.status
-        row.payload = analysis.to_record()
+        payload = analysis.to_record()
+        payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
+        row.payload = payload
         row.updated_at = datetime.now(timezone.utc)
 
     @staticmethod

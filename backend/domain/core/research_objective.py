@@ -1669,6 +1669,7 @@ class ObjectiveEvidenceAttribute:
     value: EvidenceScalar
     unit: str | None = None
     context_scope: str = "unknown"
+    applies_to_outcomes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _text(self.name) or _scientific_scalar(self.value) is None:
@@ -1690,6 +1691,9 @@ class ObjectiveEvidenceAttribute:
                 EVIDENCE_CONTEXT_SCOPES,
                 "unknown",
             ),
+            applies_to_outcomes=normalize_objective_terms(
+                payload.get("applies_to_outcomes")
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -1699,6 +1703,8 @@ class ObjectiveEvidenceAttribute:
         # it changes how a researcher may use the context for comparison.
         if self.context_scope != "unknown":
             record["context_scope"] = self.context_scope
+        if self.applies_to_outcomes:
+            record["applies_to_outcomes"] = list(self.applies_to_outcomes)
         return record
 
 

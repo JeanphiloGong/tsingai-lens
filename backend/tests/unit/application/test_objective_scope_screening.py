@@ -123,6 +123,22 @@ def test_specific_material_conflict_is_confidently_out_of_scope() -> None:
     assert preview.decisions[0].reason == "material_scope_conflict"
 
 
+def test_unregistered_material_identity_requires_inspection_instead_of_exclusion() -> None:
+    preview = screen_objective_scope(
+        (
+            _experimental_map(
+                "paper-unknown-material",
+                material="nickel foam",
+            ),
+        ),
+        objective=_objective(seed_document_ids=()),
+    )
+
+    assert preview.review_document_ids == ("paper-unknown-material",)
+    assert preview.excluded_document_ids == ()
+    assert preview.decisions[0].reason == "partial_scope_match"
+
+
 def test_scope_preview_does_not_truncate_a_131_paper_collection() -> None:
     maps = tuple(_experimental_map(f"paper-{position:03d}") for position in range(131))
 

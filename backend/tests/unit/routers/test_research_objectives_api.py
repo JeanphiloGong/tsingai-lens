@@ -202,13 +202,14 @@ def _paper_contribution() -> PaperContribution:
     )
 
 
-def test_evidence_attribute_response_preserves_context_scope_and_legacy_default() -> None:
+def test_evidence_attribute_response_preserves_scope_and_outcome_applicability() -> None:
     simulation = ObjectiveEvidenceAttributeResponse.model_validate(
         {
             "name": "solver",
             "value": "ANSYS",
             "unit": None,
             "context_scope": "simulation",
+            "applies_to_outcomes": ["residual stress"],
         }
     )
     legacy = ObjectiveEvidenceAttributeResponse.model_validate(
@@ -216,7 +217,9 @@ def test_evidence_attribute_response_preserves_context_scope_and_legacy_default(
     )
 
     assert simulation.context_scope == "simulation"
+    assert simulation.applies_to_outcomes == ["residual stress"]
     assert legacy.context_scope == "unknown"
+    assert legacy.applies_to_outcomes == []
 
 
 class _Repository:

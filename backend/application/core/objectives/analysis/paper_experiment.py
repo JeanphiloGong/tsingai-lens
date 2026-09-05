@@ -16,6 +16,7 @@ from application.core.objectives.analysis.diagnostics import (
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     _objective_missing_context_fields,
+    _objective_test_context_applies_to_outcome,
 )
 from domain.core import ResearchObjective
 
@@ -24,10 +25,9 @@ logger = logging.getLogger(__name__)
 # Group labels are experiment identities, not condition endpoints. Rebuild
 # persisted document checkpoints so exact same-paper condition mappings replace
 # labels such as R0/R1 with their source-grounded process values.
-PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v13"
+PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v17"
 
 _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
-_OBJECTIVE_MATERIAL_CONTEXT_REF_LIMIT = 8
 _OBJECTIVE_GROUP_ALIAS_CONTEXT_REF_LIMIT = 8
 _OBJECTIVE_DERIVED_COMPARISON_ID_PREFIX = "oeu_cmp_"
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
@@ -36,7 +36,10 @@ _RESULT_SERIES_MEASUREMENT_PATTERN = re.compile(
     r"(?P<unit>%|[A-Za-z\u00b5\u03bc\u00b0][A-Za-z0-9\u00b5\u03bc\u00b0/^.\-]*)?\s*"
     rf"(?:(?:\u00b1|\+/-)\s*{_NUMBER_PATTERN.pattern}\s*"
     r"(?:%|[A-Za-z\u00b5\u03bc\u00b0][A-Za-z0-9\u00b5\u03bc\u00b0/^.\-]*)?)?\s*"
-    r"[([]?\s*$"
+    r"[([]?\s*"
+    r"(?:(?:for|in|at|of|the|corresponding\s+to)\s+)*"
+    r"(?:(?:sample|specimen|group|condition|case|state)\s+)?$",
+    flags=re.IGNORECASE,
 )
 _ENCODED_CONDITION_SCHEMA_PATTERN = re.compile(
     r"(?P<prefix>[A-Za-z][A-Za-z0-9\s,\-]{1,80}?)\s*"
@@ -76,11 +79,6 @@ def reconstruct_paper_experiments(
     objectives: tuple[ResearchObjective, ...],
     document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]] | None = None,
 ) -> tuple[ExtractedEvidenceDraft, ...]:
-    source_facts = _append_source_grounded_document_context(
-        source_facts,
-        objectives=objectives,
-        document_contexts=document_contexts or {},
-    )
     source_facts = _append_source_grounded_group_alias_context(
         source_facts,
         objectives=objectives,
@@ -88,7 +86,10 @@ def reconstruct_paper_experiments(
     )
     bound = _bind_unambiguous_document_context(source_facts)
     bound = _bind_encoded_sample_condition_values(bound)
-    bound = _bind_objective_result_process_context(bound)
+    bound = _bind_objective_result_process_context(
+        bound,
+        objectives=objectives,
+    )
     bound = _bind_objective_result_material_context(bound)
     paper_facts = _merge_duplicate_paper_facts(bound)
     paper_facts = _merge_duplicate_paper_observations(paper_facts)
@@ -298,8 +299,11 @@ def _bind_unambiguous_document_context(
     A researcher carries a paper-wide fact such as the test standard into a
     result table, but does not choose between two conflicting specimens or
     process states.  Build a conservative registry from context Sources and
-    attach only fields with exactly one value for the document.  Group-specific
-    process values remain the responsibility of the sample-label registry below.
+    attach only fields with exactly one value for the document. Shared material
+    and process facts also belong to every explicitly named condition, while a
+    test fact belongs only to results for the outcome it explicitly measures.
+    Group-specific process values remain the responsibility of the sample-label
+    registry below.
     """
 
     values_by_scope: dict[
@@ -330,6 +334,10 @@ def _bind_unambiguous_document_context(
         )
         for section in _OBJECTIVE_CONTEXT_SECTIONS:
             for attribute in getattr(unit.scientific_context, section):
+                if attribute.context_scope == "background":
+                    # Prior-study facts stay auditable but cannot describe the
+                    # current paper's material, process, sample, or test.
+                    continue
                 name = (
                     property_matching.normalize_property_label(attribute.name)
                     or _objective_column_key(attribute.name)
@@ -376,7 +384,12 @@ def _bind_unambiguous_document_context(
 
     bound: list[ExtractedEvidenceDraft] = []
     for unit in units:
-        if unit.selection_status == "failed" or unit.reported_result is None:
+        is_named_condition = bool(
+            unit.reported_result is None and _objective_context_has_group_identity(unit)
+        )
+        if unit.selection_status == "failed" or (
+            unit.reported_result is None and not is_named_condition
+        ):
             bound.append(unit)
             continue
         fields = unique_values_by_scope.get((unit.objective_id, unit.document_id), {})
@@ -388,7 +401,18 @@ def _bind_unambiguous_document_context(
         source_ref_groups: list[tuple[dict[str, Any], ...]] = [unit.source_refs]
         added = False
         for (section, field_name), entry in fields.items():
+            if is_named_condition and section not in {"material", "process"}:
+                continue
             attribute = dict(entry["attribute"])
+            if (
+                section == "test"
+                and unit.reported_result is not None
+                and not _objective_test_context_applies_to_outcome(
+                    attribute,
+                    unit.reported_result.outcome,
+                )
+            ):
+                continue
             existing_names = {
                 property_matching.normalize_property_label(item.get("name"))
                 or _objective_column_key(item.get("name"))
@@ -429,122 +453,11 @@ def _bind_unambiguous_document_context(
     return tuple(bound)
 
 
-def _append_source_grounded_document_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
-    *,
-    objectives: tuple[ResearchObjective, ...],
-    document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]],
-) -> tuple[ExtractedEvidenceDraft, ...]:
-    """Add only explicit same-paper material context to the fact stream.
-
-    A researcher uses a paper title, abstract, or methods paragraph to identify
-    the material before reading a result table.  The result Source often does
-    not repeat that identity.  This deterministic bridge keeps that legitimate
-    context in the evidence lineage without asking the model to infer a
-    material or trusting a paper-level screening hint.
-    """
-
-    if not document_contexts:
-        return units
-    objective_by_id = {objective.objective_id: objective for objective in objectives}
-    existing_material_scopes = {
-        (unit.objective_id, unit.document_id)
-        for unit in units
-        if unit.reported_result is None
-        and unit.scientific_context.material
-    }
-    augmented: list[ExtractedEvidenceDraft] = list(units)
-    for objective_id, objective in objective_by_id.items():
-        if not objective.material_scope:
-            continue
-        document_ids = {
-            unit.document_id
-            for unit in units
-            if unit.objective_id == objective_id
-        }
-        for document_id in sorted(document_ids):
-            if (objective_id, document_id) in existing_material_scopes:
-                continue
-            matched_contexts: list[tuple[Mapping[str, Any], str]] = []
-            for context in document_contexts.get(document_id, ()):
-                if not isinstance(context, Mapping):
-                    continue
-                source_text = _document_context_text(context)
-                if not source_text:
-                    continue
-                matched_scopes = tuple(
-                    scope
-                    for scope in objective.material_scope
-                    if _document_context_matches_material(source_text, scope)
-                )
-                if len(matched_scopes) == 1:
-                    matched_contexts.append((context, matched_scopes[0]))
-            if not matched_contexts:
-                continue
-            material_values = {scope for _context, scope in matched_contexts}
-            if len(material_values) != 1:
-                # A paper that names multiple possible materials needs explicit
-                # source-local binding; choosing one would create false evidence.
-                continue
-            material_value = next(iter(material_values))
-            source_refs = tuple(
-                {
-                    **_document_context_source_ref(context),
-                    "supports": ["scientific_context.material"],
-                }
-                for context, _scope in matched_contexts[:_OBJECTIVE_MATERIAL_CONTEXT_REF_LIMIT]
-                if _document_context_source_ref(context).get("source_ref")
-            )
-            if not source_refs:
-                continue
-            identity = json.dumps(
-                [objective_id, document_id, material_value, source_refs],
-                ensure_ascii=False,
-                sort_keys=True,
-                default=str,
-            )
-            augmented.append(
-                ExtractedEvidenceDraft.from_mapping(
-                    {
-                        "evidence_id": (
-                            f"ctx_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-                        ),
-                        "objective_id": objective_id,
-                        "document_id": document_id,
-                        "source_kind": source_refs[0]["source_kind"],
-                        "source_ref": source_refs[0]["source_ref"],
-                        "evidence_role": "condition_context",
-                        "selection_reason": (
-                            "Material identity was explicitly named in a same-paper "
-                            "context Source and retained for result binding."
-                        ),
-                        "selection_status": "extracted",
-                        "scientific_context": {
-                            "material": [
-                                {"name": "material", "value": material_value}
-                            ]
-                        },
-                        "source_refs": list(source_refs),
-                        "resolution_status": "resolved",
-                        "confidence": 1.0,
-                    }
-                )
-            )
-    return tuple(augmented)
-
-
 def _document_context_text(context: Mapping[str, Any]) -> str:
     return "\n".join(
         str(context.get(field) or "").strip()
         for field in ("text", "source_excerpt", "caption_text", "heading_path")
         if str(context.get(field) or "").strip()
-    )
-
-
-def _document_context_matches_material(text: str, objective_scope: str) -> bool:
-    return property_matching.material_value_matches_objective_comparison_scope(
-        text,
-        objective_scope,
     )
 
 
@@ -1217,13 +1130,15 @@ def _objective_source_local_association(
 
 def _bind_objective_result_process_context(
     units: tuple[ExtractedEvidenceDraft, ...],
+    *,
+    objectives: tuple[ResearchObjective, ...] = (),
 ) -> tuple[ExtractedEvidenceDraft, ...]:
     units = _bind_results_by_shared_condition_values(units)
     (
         process_context_by_sample,
         process_context_scopes,
         conflicting_samples,
-    ) = _objective_condition_registry(units)
+    ) = _objective_condition_registry(units, objectives=objectives)
 
     expanded_units = tuple(
         expanded
@@ -1368,21 +1283,46 @@ def _bind_objective_result_process_context(
                 or _objective_column_key(item.name): item
                 for item in target_context.scientific_context.process
             }
+            common_process_signatures = {
+                (
+                    _objective_fact_scalar_key(baseline_process[key].value),
+                    _objective_fact_text_key(baseline_process[key].unit),
+                )
+                for key in set(baseline_process) & set(target_process)
+                if (
+                    baseline_process[key].value == target_process[key].value
+                    and baseline_process[key].unit == target_process[key].unit
+                )
+            }
             changed_variables: list[dict[str, Any]] = []
             incomparability_reasons: list[str] = []
             for key in sorted(set(baseline_process) | set(target_process)):
                 baseline_attribute = baseline_process.get(key)
                 target_attribute = target_process.get(key)
                 if baseline_attribute is None or target_attribute is None:
-                    name = (
-                        target_attribute.name
+                    present_attribute = (
+                        target_attribute
                         if target_attribute is not None
-                        else baseline_attribute.name
+                        else baseline_attribute
                     )
+                    if present_attribute is None:
+                        continue
+                    signature = (
+                        _objective_fact_scalar_key(present_attribute.value),
+                        _objective_fact_text_key(present_attribute.unit),
+                    )
+                    if signature in common_process_signatures:
+                        # One group repeated the shared fabrication identity
+                        # under a second field name. The shared value proves it
+                        # is fixed context, not a changed factor.
+                        continue
                     incomparability_reasons.append(
                         "process comparison is missing one group value for "
-                        f"{name}"
+                        f"{present_attribute.name}"
                     )
+                    # A factor with one missing endpoint cannot be a changed
+                    # variable. Preserve the gap as an incomparability reason.
+                    continue
                 else:
                     name = target_attribute.name
                     if (
@@ -1872,6 +1812,8 @@ def _objective_material_values_are_compatible(values: tuple[Any, ...]) -> bool:
 
 def _objective_condition_registry(
     units: tuple[ExtractedEvidenceDraft, ...],
+    *,
+    objectives: tuple[ResearchObjective, ...] = (),
 ) -> tuple[
     dict[tuple[str, str, str], ExtractedEvidenceDraft],
     set[tuple[str, str]],
@@ -1880,6 +1822,9 @@ def _objective_condition_registry(
     registry: dict[tuple[str, str, str], ExtractedEvidenceDraft] = {}
     scopes: set[tuple[str, str]] = set()
     conflicts: set[tuple[str, str, str]] = set()
+    objectives_by_id = {
+        objective.objective_id: objective for objective in objectives
+    }
     for unit in units:
         if (
             unit.evidence_role != "condition_context"
@@ -1901,7 +1846,11 @@ def _objective_condition_registry(
         if existing is None:
             registry[key] = unit
             continue
-        merged = _objective_merge_condition_context(existing, unit)
+        merged = _objective_merge_condition_context(
+            existing,
+            unit,
+            objective=objectives_by_id.get(unit.objective_id),
+        )
         if merged is None:
             conflicts.add(key)
             registry.pop(key, None)
@@ -2243,9 +2192,12 @@ def _objective_encoded_condition_schema_source_refs(
 def _objective_merge_condition_context(
     existing: ExtractedEvidenceDraft,
     incoming: ExtractedEvidenceDraft,
+    *,
+    objective: ResearchObjective | None = None,
 ) -> ExtractedEvidenceDraft | None:
     context: dict[str, list[dict[str, Any]]] = {}
     added_context = False
+    coalesced_objective_axis = False
     aliases_match = _objective_condition_aliases_match(existing, incoming)
     for context_name in ("material", "sample", "process", "test"):
         attributes = [
@@ -2268,6 +2220,17 @@ def _objective_merge_condition_context(
                         prior.get("name"),
                         attribute.name,
                     )
+                    or (
+                        context_name == "process"
+                        and aliases_match
+                        and _objective_group_process_attributes_share_axis(
+                            existing=existing,
+                            incoming=incoming,
+                            left=prior,
+                            right=record,
+                            objective=objective,
+                        )
+                    )
                 ),
                 None,
             )
@@ -2277,6 +2240,22 @@ def _objective_merge_condition_context(
                 by_name[key] = record
                 added_context = True
                 continue
+            if (
+                context_name == "process"
+                and aliases_match
+                and not _objective_context_attribute_names_match(
+                    prior.get("name"),
+                    attribute.name,
+                )
+                and _objective_group_process_attributes_share_axis(
+                    existing=existing,
+                    incoming=incoming,
+                    left=prior,
+                    right=record,
+                    objective=objective,
+                )
+            ):
+                coalesced_objective_axis = True
             if (
                 str(prior.get("value")).casefold()
                 != str(record.get("value")).casefold()
@@ -2292,16 +2271,99 @@ def _objective_merge_condition_context(
                 return None
         context[context_name] = attributes
 
-    if not added_context:
+    source_refs = (
+        _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
+        if added_context or coalesced_objective_axis
+        else existing.source_refs
+    )
+    if not added_context and source_refs == existing.source_refs:
         return existing
 
     payload = existing.to_record()
     payload["scientific_context"] = context
-    payload["source_refs"] = list(
-        _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
-    )
+    payload["source_refs"] = list(source_refs)
     payload["confidence"] = min(existing.confidence, incoming.confidence)
     return ExtractedEvidenceDraft.from_mapping(payload)
+
+
+def _objective_group_process_attributes_share_axis(
+    *,
+    existing: ExtractedEvidenceDraft,
+    incoming: ExtractedEvidenceDraft,
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+    objective: ResearchObjective | None,
+) -> bool:
+    """Recognize duplicate wording for one Objective axis inside one group.
+
+    A paper may name the same condition once with the research axis and later
+    with a group-qualified label.  This is not a second changed factor.  The
+    merge remains conservative: both values must agree, experimental scopes
+    cannot conflict, and each field must resolve uniquely to the same confirmed
+    Objective axis using its own same-paper Source text.
+    """
+
+    if objective is None:
+        return False
+    left_value = left.get("value")
+    right_value = right.get("value")
+    left_number = _coerce_number(left_value)
+    right_number = _coerce_number(right_value)
+    if left_number is not None and right_number is not None:
+        values_match = abs(left_number - right_number) <= 1e-9
+    else:
+        values_match = _objective_fact_scalar_key(left_value) == (
+            _objective_fact_scalar_key(right_value)
+        )
+    if not values_match:
+        return False
+
+    left_unit = _objective_fact_text_key(left.get("unit"))
+    right_unit = _objective_fact_text_key(right.get("unit"))
+    if left_unit and right_unit and left_unit != right_unit:
+        return False
+    left_scope = _objective_fact_text_key(left.get("context_scope"))
+    right_scope = _objective_fact_text_key(right.get("context_scope"))
+    if left_scope and right_scope and left_scope != right_scope:
+        return False
+
+    def matching_axes(
+        unit: ExtractedEvidenceDraft,
+        attribute: Mapping[str, Any],
+    ) -> tuple[str, ...]:
+        name = str(attribute.get("name") or "").strip()
+        name_tokens = property_matching.axis_tokens(
+            property_matching.axis_key(name)
+        )
+        source_text = "\n".join(
+            str(ref.get("source_excerpt") or "").strip()
+            for ref in unit.source_refs
+            if str(ref.get("source_excerpt") or "").strip()
+        )
+        return tuple(
+            axis
+            for axis in objective.variables
+            if (
+                property_matching.variable_matches_objective_scope(name, axis)
+                or property_matching.process_axis_matches_objective_scope(name, axis)
+                or (
+                    bool(
+                        name_tokens
+                        & property_matching.axis_tokens(
+                            property_matching.axis_key(axis)
+                        )
+                    )
+                    and property_matching.source_text_mentions_objective_variable(
+                        source_text,
+                        axis,
+                    )
+                )
+            )
+        )
+
+    left_axes = matching_axes(existing, left)
+    right_axes = matching_axes(incoming, right)
+    return len(left_axes) == 1 and left_axes == right_axes
 
 
 def _objective_context_attribute_names_match(left: Any, right: Any) -> bool:
@@ -2439,6 +2501,21 @@ def _objective_results_with_registered_condition_comparisons(
             fallback_unit=unit.reported_result.unit,
         )
         if measurements is None:
+            return (unit,)
+        reported_baseline = unit.reported_result.baseline_value
+        reported_target = unit.reported_result.target_value
+        if (
+            reported_baseline not in (None, "")
+            and _objective_fact_scalar_key(measurements[0][0])
+            != _objective_fact_scalar_key(reported_baseline)
+        ) or (
+            reported_target not in (None, "")
+            and _objective_fact_scalar_key(measurements[-1][0])
+            != _objective_fact_scalar_key(reported_target)
+        ):
+            # Labels may occur elsewhere in the same sentence. Only bind the
+            # series when its measured endpoints agree with the result that was
+            # already validated against the immutable result Source.
             return (unit,)
         pairs = tuple(zip(mentioned, mentioned[1:]))
     else:
@@ -3706,7 +3783,6 @@ def _objective_sample_identity_key(
         "case",
         "id",
         "no",
-        "printed_316l",
         "condition_number",
         "condition_no",
         "condition",
@@ -3719,6 +3795,9 @@ def _objective_sample_identity_key(
         for key, value in sample_attributes.items()
         if str(value).strip()
     }
+    for column_key, value_text in normalized_items.items():
+        if column_key.startswith("printed_") and value_text:
+            return value_text.casefold()
     for column_key in preferred_keys:
         value_text = normalized_items.get(column_key)
         if value_text:
@@ -3791,6 +3870,8 @@ def _objective_condition_label_key(value: Any) -> str:
 
 
 def _objective_table_column_is_sample_key(column_key: str) -> bool:
+    if column_key.startswith("printed_"):
+        return True
     return column_key in {
         "case",
         "condition",
@@ -3799,7 +3880,6 @@ def _objective_table_column_is_sample_key(column_key: str) -> bool:
         "group",
         "id",
         "no",
-        "printed_316l",
         "sample",
         "sample_id",
         "sample_no",

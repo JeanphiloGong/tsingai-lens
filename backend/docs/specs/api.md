@@ -93,9 +93,10 @@ The endpoint does not infer which papers failed. Parsing, Paper Map, and
 Objective analysis retain ownership of their failure states. Clients select
 IDs from `Collection.documents` or from stage-specific failure lineage.
 
-The preparation request accepts `mode: standard | fast` and defaults to
-`standard`. It starts a process-local asyncio task and returns immediately;
-clients read persisted state through `GET /api/v1/tasks/{task_id}`. A
+The preparation command has no request body and runs the canonical Source and
+DocumentProfile preparation pipeline. It starts a process-local asyncio task
+and returns immediately; clients read persisted state through
+`GET /api/v1/tasks/{task_id}`. A
 process-local semaphore defaults to 10 concurrent document preparations. This
 handoff and admission limit are not an external durable queue.
 

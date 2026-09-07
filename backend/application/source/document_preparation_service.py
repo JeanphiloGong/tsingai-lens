@@ -22,7 +22,6 @@ from application.source.reference_extraction_service import (
 from application.source.task_service import TaskService
 from domain.ports import SourceArtifactRepository
 from domain.source import Document, SourceDocument
-from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.config.source_runtime_config import (
     CacheConfig,
     InputConfig,
@@ -149,14 +148,15 @@ class DocumentPreparationService:
             )
         return interrupted_count
 
-    async def queue_document(
+    async def queue_document_preparation(
         self,
         collection_id: str,
         document_id: str,
         *,
-        mode: IndexingMethod | str = IndexingMethod.Standard,
         request_id: str | None = None,
     ) -> dict[str, Any]:
+        """Queue or reuse preparation of one collection document."""
+
         document = await self.collection_service.get_document(
             collection_id,
             document_id,
@@ -167,15 +167,13 @@ class DocumentPreparationService:
             document_id=document_id,
             task_type="document_preparation",
             input_fingerprint=fingerprint,
-            mode=str(mode),
         )
         if created:
             background = create_task(
-                self.run_task(
+                self.run_document_preparation_task(
                     task["task_id"],
                     collection_id,
                     document_id,
-                    mode=mode,
                     request_id=request_id,
                 )
             )
@@ -184,13 +182,12 @@ class DocumentPreparationService:
             background.add_done_callback(self._log_unexpected_failure)
         return task
 
-    async def run_task(
+    async def run_document_preparation_task(
         self,
         task_id: str,
         collection_id: str,
         document_id: str,
         *,
-        mode: IndexingMethod | str = IndexingMethod.Standard,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         del request_id
@@ -229,7 +226,6 @@ class DocumentPreparationService:
                     source_document = await self._parse_document(
                         collection_id,
                         document,
-                        mode=mode,
                     )
                     await self.source_artifact_repository.replace_document(
                         collection_id,
@@ -340,12 +336,9 @@ class DocumentPreparationService:
         self,
         collection_id: str,
         document: Document,
-        *,
-        mode: IndexingMethod | str,
     ) -> SourceDocument:
         outputs = await self._get_source_artifact_builder()(
             config=self._source_config(collection_id, document.document_id),
-            method=mode,
             input_documents=pd.DataFrame(
                 [
                     {

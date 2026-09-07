@@ -2,19 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 TaskStatus = Literal["queued", "running", "completed", "partial_success", "failed"]
-PipelineMode = Literal["standard", "fast"]
-class DocumentPreparationRequest(BaseModel):
-    """Request payload to prepare one collection document."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    mode: PipelineMode = Field(
-        default="standard",
-        description="Document preparation mode.",
-    )
 
 
 class TaskResponse(BaseModel):

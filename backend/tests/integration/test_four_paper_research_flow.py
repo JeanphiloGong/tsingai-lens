@@ -391,7 +391,6 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             queued = client.post(
                 f"{API_PREFIX}/collections/{collection_id}/documents/"
                 f"{document_id}/preparation",
-                json={"mode": "standard"},
             )
             assert queued.status_code == 200
 

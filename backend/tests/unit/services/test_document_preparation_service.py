@@ -277,7 +277,7 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
         max_concurrency=1,
     )
 
-    result = await service.run_task(
+    result = await service.run_document_preparation_task(
         "task_test",
         collection_id,
         document_id,
@@ -370,7 +370,11 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
         max_concurrency=1,
     )
 
-    result = await service.run_task("task_lazy_map", collection_id, document_id)
+    result = await service.run_document_preparation_task(
+        "task_lazy_map",
+        collection_id,
+        document_id,
+    )
 
     assert result["status"] == "completed"
     assert collection_service.document.status == "ready"

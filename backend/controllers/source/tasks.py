@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from controllers.schemas.source.task import (
-    DocumentPreparationRequest,
-    TaskListResponse,
-    TaskResponse,
-)
+from controllers.schemas.source.task import TaskListResponse, TaskResponse
 
 router = APIRouter(tags=["tasks"])
 
@@ -19,14 +15,13 @@ router = APIRouter(tags=["tasks"])
 async def prepare_collection_document(
     collection_id: str,
     document_id: str,
-    payload: DocumentPreparationRequest,
     request: Request,
 ) -> TaskResponse:
     try:
-        task = await request.app.state.document_preparation_service.queue_document(
+        preparation_service = request.app.state.document_preparation_service
+        task = await preparation_service.queue_document_preparation(
             collection_id,
             document_id,
-            mode=payload.mode,
             request_id=getattr(request.state, "request_id", None),
         )
     except FileNotFoundError as exc:

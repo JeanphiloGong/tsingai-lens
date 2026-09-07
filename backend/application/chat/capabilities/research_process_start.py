@@ -94,10 +94,9 @@ class StartResearchProcessCapability:
         queued_tasks = []
         for document_id in selected_ids:
             queued_tasks.append(
-                await self.document_preparation_service.queue_document(
+                await self.document_preparation_service.queue_document_preparation(
                     context.collection_id,
                     document_id,
-                    mode="standard",
                 )
             )
         tasks = tuple(queued_tasks)
@@ -108,7 +107,6 @@ class StartResearchProcessCapability:
                 "collection_id": context.collection_id,
                 "document_ids": list(selected_ids),
                 "tasks": tasks,
-                "mode": "standard",
                 "research_scope": "document_preparation",
                 "objective_discovery_started": False,
                 "objective_analysis_started": False,

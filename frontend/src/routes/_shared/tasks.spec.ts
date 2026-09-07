@@ -15,7 +15,7 @@ describe('document preparation API', () => {
 			collection_id: 'col_1',
 			document_id: 'doc_1',
 			task_type: 'document_preparation',
-			mode: 'fast',
+			mode: 'standard',
 			input_fingerprint: 'input-doc-1',
 			status: 'queued',
 			current_stage: 'queued',
@@ -26,16 +26,15 @@ describe('document preparation API', () => {
 			updated_at: '2026-08-27T00:00:00Z'
 		});
 
-		const result = await prepareCollectionDocument('col_1', 'doc_1', 'fast');
+		const result = await prepareCollectionDocument('col_1', 'doc_1');
 
 		expect(request).toHaveBeenCalledWith('/collections/col_1/documents/doc_1/preparation', {
-			method: 'POST',
-			body: JSON.stringify({ mode: 'fast' })
+			method: 'POST'
 		});
 		expect(result).toMatchObject({
 			task_id: 'task_1',
 			document_id: 'doc_1',
-			mode: 'fast',
+			mode: 'standard',
 			input_fingerprint: 'input-doc-1'
 		});
 	});

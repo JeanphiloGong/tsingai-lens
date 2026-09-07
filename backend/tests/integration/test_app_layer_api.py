@@ -32,12 +32,11 @@ class _ImmediateDocumentPreparationService:
         self.collection_service = collection_service
         self.task_service = task_service
 
-    async def queue_document(
+    async def queue_document_preparation(
         self,
         collection_id: str,
         document_id: str,
         *,
-        mode: str,
         request_id: str | None,
     ) -> dict:
         del request_id
@@ -53,7 +52,6 @@ class _ImmediateDocumentPreparationService:
             document_id=document_id,
             task_type="document_preparation",
             input_fingerprint=fingerprint,
-            mode=mode,
         )
         if not created:
             return task
@@ -148,7 +146,6 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     prepared = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
         f"{first['document_id']}/preparation",
-        json={"mode": "standard"},
     )
     assert prepared.status_code == 200
     assert prepared.json()["status"] == "completed"
@@ -178,7 +175,6 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     repeated = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
         f"{first['document_id']}/preparation",
-        json={"mode": "standard"},
     )
     assert repeated.status_code == 200
     assert repeated.json()["task_id"] == prepared.json()["task_id"]
@@ -191,17 +187,12 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     assert task_list.json()["items"][0]["task_type"] == "document_preparation"
 
 
-def test_document_preparation_rejects_unknown_mode(app_client) -> None:
-    collection_id = _create_collection(app_client, "Invalid preparation mode")
-    document = _upload(app_client, collection_id, "paper.txt", b"Paper")
+def test_document_preparation_contract_has_no_request_body(app_client) -> None:
+    operation = app_client.get("/api/openapi.json").json()["paths"][
+        "/api/v1/collections/{collection_id}/documents/{document_id}/preparation"
+    ]["post"]
 
-    response = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
-        f"{document['document_id']}/preparation",
-        json={"mode": "unknown"},
-    )
-
-    assert response.status_code == 422
+    assert "requestBody" not in operation
 
 
 @pytest.mark.parametrize(

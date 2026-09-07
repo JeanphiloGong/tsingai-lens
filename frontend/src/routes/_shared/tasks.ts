@@ -115,14 +115,12 @@ export function isTaskFinished(task: Task | null | undefined) {
 
 export async function prepareCollectionDocument(
 	collectionId: string,
-	documentId: string,
-	mode: 'standard' | 'fast' = 'standard'
+	documentId: string
 ) {
 	const data = await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/preparation`,
 		{
-			method: 'POST',
-			body: JSON.stringify({ mode })
+			method: 'POST'
 		}
 	);
 

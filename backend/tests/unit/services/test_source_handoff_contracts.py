@@ -58,12 +58,13 @@ def test_pipeline_factory_defaults_to_minimal_source_handoff():
     source = factory_path.read_text(encoding="utf-8")
     assignments = _assignments_by_name(factory_path)
 
-    workflows = ast.literal_eval(assignments["_source_handoff_workflows"])
+    workflows = ast.literal_eval(assignments["_DEFAULT_SOURCE_WORKFLOWS"])
     assert workflows == [
+        "load_input_documents",
         "create_source_artifacts",
     ]
-    assert 'IndexingMethod.Standard, ["load_input_documents", *_source_handoff_workflows]' in source
-    assert 'IndexingMethod.Fast, ["load_input_documents", *_source_handoff_workflows]' in source
+    assert "IndexingMethod" not in source
+    assert "register_pipeline" not in source
 
 
 def test_create_final_text_units_no_longer_loads_legacy_graph_artifacts():

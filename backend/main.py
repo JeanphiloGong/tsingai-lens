@@ -16,20 +16,33 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import (
+    AssessObjectiveQualityCapability,
+    BrowseCollectionPapersCapability,
+    ConfirmObjectiveCapability,
+    CreateEvidenceDraftCapability,
+    CreateFindingDraftCapability,
     CreateFindingVersionCapability,
     CreateEvidenceVersionCapability,
     CreateObjectiveCandidateCapability,
+    CreateResearchPlanCapability,
     CurateFindingCapability,
+    DeriveObjectiveCapability,
     GetCollectionContextCapability,
     InspectDocumentSourcesCapability,
+    InspectTableCapability,
+    ReadSourceCapability,
     InspectObjectiveAnalysisCapability,
     InspectPublishedFindingCapability,
     InspectResearchProcessCapability,
+    InspectResearchPlansCapability,
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
+    ProposeResearchPlanCapability,
     PublishAgentObjectiveAnalysisCapability,
     QueryPublishedFindingsCapability,
+    ReviseResearchPlanCapability,
     RecordFindingFeedbackCapability,
+    SearchSourcesCapability,
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
@@ -311,6 +324,10 @@ async def build_application_runtime(
             review_repository=finding_review_repository,
             objective_repository=objective_repository,
         )
+        experiment_plan_service = ExperimentPlanService(
+            repository=experiment_plan_repository,
+            finding_feedback_service=finding_feedback_service,
+        )
         finding_authoring_service = FindingAuthoringService(
             collection_service=collection_service,
             objective_repository=objective_repository,
@@ -353,6 +370,7 @@ async def build_application_runtime(
             chat_model = OpenAIChatModel()
             chat_session_service = ChatSessionService(
                 collection_service=collection_service,
+                source_artifact_repository=source_artifact_repository,
                 repository=chat_repository,
                 runner=ResearchAgentRunner(
                     model=chat_model,
@@ -363,7 +381,25 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                             ),
+                            BrowseCollectionPapersCapability(
+                                collection_service=collection_service,
+                                document_profile_repository=document_profile_repository,
+                                paper_map_repository=paper_map_repository,
+                                source_artifact_repository=source_artifact_repository,
+                            ),
                             InspectDocumentSourcesCapability(
+                                collection_service=collection_service,
+                                source_artifact_repository=source_artifact_repository,
+                            ),
+                            SearchSourcesCapability(
+                                collection_service=collection_service,
+                                source_artifact_repository=source_artifact_repository,
+                            ),
+                            InspectTableCapability(
+                                collection_service=collection_service,
+                                source_artifact_repository=source_artifact_repository,
+                            ),
+                            ReadSourceCapability(
                                 collection_service=collection_service,
                                 source_artifact_repository=source_artifact_repository,
                             ),
@@ -394,8 +430,13 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 finding_feedback_service=finding_feedback_service,
                             ),
+                            CreateFindingDraftCapability(),
                             CreateFindingVersionCapability(
                                 finding_authoring_service=finding_authoring_service,
+                            ),
+                            CreateEvidenceDraftCapability(
+                                collection_service=collection_service,
+                                source_artifact_repository=source_artifact_repository,
                             ),
                             CreateEvidenceVersionCapability(
                                 evidence_authoring_service=evidence_authoring_service,
@@ -417,13 +458,43 @@ async def build_application_runtime(
                             CreateObjectiveCandidateCapability(
                                 research_objective_service=research_objective_service,
                             ),
+                            ConfirmObjectiveCapability(
+                                research_objective_service=research_objective_service,
+                            ),
                             StartObjectiveAnalysisCapability(
                                 collection_service=collection_service,
+                                objective_repository=objective_repository,
                                 objective_analysis_service=objective_analysis_service,
                             ),
                             InspectObjectiveAnalysisCapability(
                                 collection_service=collection_service,
                                 objective_analysis_service=objective_analysis_service,
+                            ),
+                            AssessObjectiveQualityCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            DeriveObjectiveCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            ProposeResearchPlanCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
+                            ),
+                            CreateResearchPlanCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
+                                experiment_plan_service=experiment_plan_service,
+                            ),
+                            InspectResearchPlansCapability(
+                                collection_service=collection_service,
+                                experiment_plan_service=experiment_plan_service,
+                            ),
+                            ReviseResearchPlanCapability(
+                                collection_service=collection_service,
+                                finding_feedback_service=finding_feedback_service,
+                                experiment_plan_service=experiment_plan_service,
                             ),
                         )
                     ),
@@ -451,10 +522,7 @@ async def build_application_runtime(
             research_objective_service=research_objective_service,
             goal_service=goal_service,
             chat_session_service=chat_session_service,
-            experiment_plan_service=ExperimentPlanService(
-                repository=experiment_plan_repository,
-                finding_feedback_service=finding_feedback_service,
-            ),
+            experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
         )
     except BaseException:

@@ -70,18 +70,16 @@ def _message() -> ChatMessage:
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v13"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v13.7"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "supporting source" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Never expose registered tool names" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "我是 TsingAI-Lens 科研研究智能体" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "形成研究目标" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "分析已有论文和证据" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "设计研究方案" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "验证研究判断" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "研究方案生成和验证闭环仍在开发中" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "never restart the greeting or capability introduction" in prompt
+    assert "Use onboarding only for an actual greeting" in prompt
+    assert "A paper survey and a Source search are navigation steps" in prompt
+    assert "the actual transient plan draft before answering" in prompt
     assert "insufficient map" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "inspect that paper's Sources" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "it is not verified Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -90,15 +88,24 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "Never reconstruct a complete Finding from a summary" in prompt
     assert "record or correct Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "exact complete Source" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "`read_source`" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "create_evidence_version" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Evidence draft" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Finding draft" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Source-to-Evidence write" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "analysis authored by you" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "publish_agent_objective_analysis" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "publishes no Finding" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "derive_objective" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "propose_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "create_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "technical extraction failure" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Never expose hidden chain-of-thought" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "candidate creation" in RESEARCH_AGENT_SYSTEM_PROMPT.lower()
+    assert "confirm_objective" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert (
-        "Creating a research question and starting its analysis"
-        in RESEARCH_AGENT_SYSTEM_PROMPT
+        "candidate creation, objective confirmation, and analysis start"
+        in RESEARCH_AGENT_SYSTEM_PROMPT.lower()
     )
 
 
@@ -120,6 +127,9 @@ def test_prompt_separates_product_questions_from_collection_reads() -> None:
     assert "application's purpose" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "without calling a tool" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "current collection's contents" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "browse the visible paper" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "screening only" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "researcher may add" in RESEARCH_AGENT_SYSTEM_PROMPT
 
 
 def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:
@@ -146,7 +156,7 @@ def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
     assert "tools" not in request
 
 
-def test_openai_chat_model_marks_selected_source_as_unverified_context() -> None:
+def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence() -> None:
     client, completions = _client(_completion(content="This passage reports one measured result."))
     model = OpenAIChatModel(client=client, model="test-model")
     message = ChatMessage.user(
@@ -167,7 +177,7 @@ def test_openai_chat_model_marks_selected_source_as_unverified_context() -> None
                 collection_id="col-1",
                 document_id="doc-1",
                 document_title="Paper A",
-                source_kind="paragraph",
+                source_kind="text_window",
                 source_ref="results",
                 page=3,
                 quote="Conductivity improved to 12 mS/cm under EIS.",

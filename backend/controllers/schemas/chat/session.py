@@ -40,6 +40,7 @@ class ChatSourceContextPayload(BaseModel):
     quote: str = Field(min_length=1, max_length=6000)
     heading_path: str | None = Field(default=None, max_length=1000)
     quote_truncated: bool = False
+    source_digest: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class ChatToolResultResponse(BaseModel):

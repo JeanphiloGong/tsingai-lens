@@ -71,12 +71,13 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
                 collection_id="col-chat",
                 document_id="doc-source",
                 document_title="Paper A",
-                source_kind="paragraph",
+                source_kind="text_window",
                 source_ref="results",
                 page=3,
                 quote="Conductivity improved to 12 mS/cm under EIS.",
                 heading_path="Results",
                 quote_truncated=True,
+                source_digest="a" * 64,
             ),
         ),
     )
@@ -197,4 +198,23 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
             decided_at="2026-08-19T00:01:01+00:00",
         )
         == approved
+    )
+
+    claimed = await repository.claim_approved_tool_call(
+        session_id=chat.session_id,
+        tool_call_id=pending.tool_call_id,
+        user_id=user["user_id"],
+        started_at="2026-08-19T00:01:02+00:00",
+    )
+
+    assert claimed is not None
+    assert claimed.status is ToolCallStatus.RUNNING
+    assert (
+        await repository.claim_approved_tool_call(
+            session_id=chat.session_id,
+            tool_call_id=pending.tool_call_id,
+            user_id=user["user_id"],
+            started_at="2026-08-19T00:01:03+00:00",
+        )
+        is None
     )

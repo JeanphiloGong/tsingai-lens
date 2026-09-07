@@ -20,10 +20,26 @@ class ChatContextBuilder:
         self,
         messages: tuple[ChatMessage, ...],
     ) -> tuple[ChatMessage, ...]:
+        units = self._protocol_units(messages)
+        active_user_index = next(
+            (
+                index
+                for index in range(len(units) - 1, -1, -1)
+                if len(units[index]) == 1
+                and units[index][0].role is ChatMessageRole.USER
+            ),
+            None,
+        )
+        if active_user_index is not None and self._can_reserve_active_user(
+            units,
+            active_user_index,
+        ):
+            return self._select_around_active_user(units, active_user_index)
+
         selected: list[tuple[ChatMessage, ...]] = []
         message_count = 0
         char_count = 0
-        for unit in reversed(self._protocol_units(messages)):
+        for unit in reversed(units):
             unit_chars = sum(self._size(item) for item in unit)
             if (
                 message_count + len(unit) > self.max_messages
@@ -34,6 +50,66 @@ class ChatContextBuilder:
             message_count += len(unit)
             char_count += unit_chars
         return tuple(message for unit in reversed(selected) for message in unit)
+
+    def _can_reserve_active_user(
+        self,
+        units: tuple[tuple[ChatMessage, ...], ...],
+        active_user_index: int,
+    ) -> bool:
+        user_unit = units[active_user_index]
+        user_chars = sum(self._size(item) for item in user_unit)
+        if len(user_unit) > self.max_messages or user_chars > self.max_chars:
+            return False
+        if active_user_index == len(units) - 1:
+            return True
+        newest_unit = units[-1]
+        newest_chars = sum(self._size(item) for item in newest_unit)
+        return (
+            len(user_unit) + len(newest_unit) <= self.max_messages
+            and user_chars + newest_chars <= self.max_chars
+        )
+
+    def _select_around_active_user(
+        self,
+        units: tuple[tuple[ChatMessage, ...], ...],
+        active_user_index: int,
+    ) -> tuple[ChatMessage, ...]:
+        user_unit = units[active_user_index]
+        selected: list[tuple[int, tuple[ChatMessage, ...]]] = [
+            (active_user_index, user_unit)
+        ]
+        message_count = len(user_unit)
+        char_count = sum(self._size(item) for item in user_unit)
+
+        for index in range(len(units) - 1, active_user_index, -1):
+            unit = units[index]
+            unit_chars = sum(self._size(item) for item in unit)
+            if (
+                message_count + len(unit) > self.max_messages
+                or char_count + unit_chars > self.max_chars
+            ):
+                break
+            selected.append((index, unit))
+            message_count += len(unit)
+            char_count += unit_chars
+
+        for index in range(active_user_index - 1, -1, -1):
+            unit = units[index]
+            unit_chars = sum(self._size(item) for item in unit)
+            if (
+                message_count + len(unit) > self.max_messages
+                or char_count + unit_chars > self.max_chars
+            ):
+                break
+            selected.append((index, unit))
+            message_count += len(unit)
+            char_count += unit_chars
+
+        return tuple(
+            message
+            for _, unit in sorted(selected, key=lambda item: item[0])
+            for message in unit
+        )
 
     @staticmethod
     def _protocol_units(

@@ -20,6 +20,7 @@ from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
+    MemorySourceArtifactRepository,
     MemoryTaskRepository,
 )
 from main import create_app
@@ -35,10 +36,32 @@ class _Model:
 
     def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
         assert messages
-        assert {item.name for item in tool_specs} == {
-            "get_collection_context",
-            "create_objective_candidate",
-        }
+        latest_user = next(
+            message
+            for message in reversed(messages)
+            if message.role == "user"
+        )
+        if latest_user.content == "Hello":
+            assert tool_specs == ()
+        elif "collection contain" in latest_user.content:
+            assert {item.name for item in tool_specs} == {"get_collection_context"}
+        elif any(
+            message.tool_name == "create_objective_candidate"
+            and message.tool_call_id
+            for message in messages
+            if message.role == "assistant"
+        ) and any(
+            message.tool_result is not None
+            and message.tool_result.status in {"succeeded", "queued"}
+            for message in messages
+            if message.role == "tool"
+        ):
+            assert {item.name for item in tool_specs} == {"get_collection_context"}
+        else:
+            assert {item.name for item in tool_specs} == {
+                "get_collection_context",
+                "create_objective_candidate",
+            }
         return self.turns.popleft()
 
 
@@ -114,6 +137,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
     chat_repository = MemoryChatRepository()
+    source_artifact_repository = MemorySourceArtifactRepository()
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
@@ -136,6 +160,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     )
     chat_service = ChatSessionService(
         collection_service=collection_service,
+        source_artifact_repository=source_artifact_repository,
         repository=chat_repository,
         runner=ResearchAgentRunner(
             model=model,
@@ -154,7 +179,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         auth_session_service=auth_session_service,
         collection_service=collection_service,
         task_service=TaskService(MemoryTaskRepository()),
-        source_artifact_repository=object(),
+        source_artifact_repository=source_artifact_repository,
         document_profile_repository=MemoryDocumentProfileRepository(),
         paper_map_repository=MemoryPaperMapRepository(),
         objective_repository=objective_repository,

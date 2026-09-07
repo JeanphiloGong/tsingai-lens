@@ -244,6 +244,38 @@ class PostgresChatRepository:
             _update_call_row(row, decided)
             return decided
 
+    async def claim_approved_tool_call(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        user_id: str,
+        started_at: str,
+    ) -> ChatToolCall | None:
+        async with self.session_factory.begin() as database:
+            session_row = await database.get(ChatSessionRow, session_id)
+            if session_row is None or session_row.user_id != user_id:
+                raise FileNotFoundError(f"chat session not found: {session_id}")
+            row = await database.get(
+                ChatToolCallRow, tool_call_id, with_for_update=True
+            )
+            if row is None or row.session_id != session_id:
+                raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
+            call = _call_record(row)
+            if call.status is ToolCallStatus.APPROVED:
+                claimed = call.start(started_at)
+                _update_call_row(row, claimed)
+                return claimed
+            if call.status in {
+                ToolCallStatus.RUNNING,
+                ToolCallStatus.SUCCEEDED,
+                ToolCallStatus.FAILED,
+            }:
+                return None
+            raise ValueError(
+                f"cannot claim tool call in status {call.status.value}"
+            )
+
 
 def _update_call_row(row: ChatToolCallRow, call: ChatToolCall) -> None:
     row.status = call.status.value

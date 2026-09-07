@@ -284,6 +284,20 @@ def test_build_research_objective_id_covers_complete_scientific_intent() -> None
     assert objective_id != build_research_objective_id(
         **{**scientific_intent, "outcomes": ("pitting potential",)}
     )
+    assert objective_id != build_research_objective_id(
+        **scientific_intent,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=2,
+    )
+    assert build_research_objective_id(
+        **scientific_intent,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=2,
+    ) != build_research_objective_id(
+        **scientific_intent,
+        parent_objective_id="objective-other",
+        parent_analysis_version=2,
+    )
 
 
 def test_research_objective_normalizes_scope_and_round_trips() -> None:
@@ -638,6 +652,46 @@ def test_paper_contribution_records_auditable_evidence_disposition() -> None:
     assert PaperContribution.from_mapping(contribution.to_record()) == contribution
 
 
+def test_paper_contribution_preserves_inspected_source_lineage_without_evidence() -> None:
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "evidence_disposition": "no_grounded_evidence",
+            "routed_source_count": 1,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+            "evidence_disposition_reason": (
+                "The inspected Results Source contains no target outcome."
+            ),
+            "inspected_source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-results",
+                    "source_digest": "a" * 64,
+                }
+            ],
+            "confidence": 0.9,
+        }
+    )
+
+    assert contribution.inspected_source_refs[0].source_ref == "block-results"
+    assert contribution.to_record()["inspected_source_refs"] == [
+        {
+            "source_kind": "text_window",
+            "source_ref": "block-results",
+            "source_digest": "a" * 64,
+        }
+    ]
+    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
+
+
 def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
     base = {
         "collection_id": "collection-1",
@@ -729,6 +783,22 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert extracted.supports_finding is True
     assert "route_id" not in extracted.to_record()
     assert "evidence_unit_id" not in extracted.to_record()
+
+
+def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
+    legacy = _candidate_evidence()
+    explicit_empty = _candidate_evidence(related_source_refs=[])
+
+    assert legacy.related_source_refs == ()
+    assert "related_source_refs" not in legacy.to_record()
+    assert ObjectiveEvidence.from_mapping(
+        legacy.to_record()
+    ).related_source_refs_explicit is False
+    assert explicit_empty.related_source_refs == ()
+    assert explicit_empty.to_record()["related_source_refs"] == []
+    assert ObjectiveEvidence.from_mapping(
+        explicit_empty.to_record()
+    ).related_source_refs_explicit is True
 
 
 def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:

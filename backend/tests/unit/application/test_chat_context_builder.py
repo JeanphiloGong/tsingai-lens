@@ -23,23 +23,27 @@ def _assistant(message_id: str, content: str) -> ChatMessage:
     )
 
 
-def _tool_pair() -> tuple[ChatMessage, ChatMessage]:
+def _tool_pair(
+    *,
+    call_id: str = "call-1",
+    payload: dict | None = None,
+) -> tuple[ChatMessage, ChatMessage]:
     call = ChatMessage.assistant_tool_call(
-        message_id="msg-call",
+        message_id=f"msg-{call_id}",
         session_id="chat-1",
         content="",
-        tool_call_id="call-1",
+        tool_call_id=call_id,
         tool_name="get_collection_context",
         tool_arguments={},
         created_at="2026-08-19T00:00:00+00:00",
     )
     result = ChatMessage.from_tool_result(
-        message_id="msg-result",
+        message_id=f"msg-result-{call_id}",
         session_id="chat-1",
         result=ChatToolResult(
-            tool_call_id="call-1",
+            tool_call_id=call_id,
             status="succeeded",
-            data={"collection_id": "col-1"},
+            data=payload or {"collection_id": "col-1"},
         ),
         created_at="2026-08-19T00:00:00+00:00",
     )
@@ -111,3 +115,28 @@ def test_context_builder_budgets_tool_result_once_for_model_wire_content() -> No
     )
 
     assert selected == (user, call, result)
+
+
+def test_context_builder_preserves_active_user_request_when_observations_fill_budget() -> None:
+    user = _user(
+        "msg-active-user",
+        "Compare the selected papers and clearly report what remains unread.",
+    )
+    older_call, older_result = _tool_pair(
+        call_id="call-older",
+        payload={"papers": ["a" * 700]},
+    )
+    latest_call, latest_result = _tool_pair(
+        call_id="call-latest",
+        payload={"findings": ["b" * 700]},
+    )
+    latest_unit_size = sum(
+        ChatContextBuilder._size(item) for item in (latest_call, latest_result)
+    )
+    budget = ChatContextBuilder._size(user) + latest_unit_size + 10
+
+    selected = ChatContextBuilder(max_messages=5, max_chars=budget).for_model(
+        (user, older_call, older_result, latest_call, latest_result)
+    )
+
+    assert selected == (user, latest_call, latest_result)

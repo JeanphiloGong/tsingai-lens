@@ -124,11 +124,19 @@ Analysis records.
 A user message may carry at most one `source_contexts` item selected from the
 same Collection's document reader. The item contains a stable Source resource
 reference, document identity, Source kind and reference, optional page and
-heading, a bounded verbatim quote, and whether that quote was shortened. It is stored with that user message and
-returned when the trajectory is reloaded. This context is material for the
-Agent to inspect, not verified Evidence and not authorization to create or
-modify an Objective, Evidence, Finding, or Analysis. The quoted content is never
-treated as model instructions. Existing messages have an empty context list.
+heading, a bounded verbatim quote, and whether that quote was shortened. Before
+the model sees the message, the server resolves the exact canonical Source,
+checks that the quote is contained in it, and replaces client-supplied title,
+page, heading, link, and digest metadata with canonical values. The persisted
+context includes the SHA-256 `source_digest` of the complete Source and is
+returned when the trajectory is reloaded. A missing Source, unsupported Source
+kind, forged locator or quote, or stale submitted digest returns
+`422 chat_source_context_invalid` without running the model or storing a partial
+turn. This context is material for the Agent to inspect, not verified Evidence
+and not authorization to create or modify an Objective, Evidence, Finding, or
+Analysis. The quoted content is never treated as model instructions. Existing
+messages have an empty context list and historical contexts may have a null
+digest.
 
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
@@ -151,7 +159,13 @@ the capability. While a write remains `approval_required`, posting another
 message to that session returns `409 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
-The production Research Agent currently exposes these automatic capabilities:
+The production Research Agent registers the capabilities below, but the Runner
+selects a bounded subset for each model decision based on the current user
+intent. Ordinary conversation receives no capability schemas; collection
+screening, Source inspection, Finding review, Objective work, and research-plan
+work each receive only their relevant read or draft actions. Write capabilities
+are exposed only for an explicit matching action and still stop for exact user
+approval. The production Research Agent currently exposes these capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
@@ -161,6 +175,22 @@ The production Research Agent currently exposes these automatic capabilities:
   truncated quote as the complete Source. It returns canonical Document and
   Source links; matched content remains inspection material rather than
   verified Evidence;
+- `read_source` reads one exact canonical Source by its Document ID, Source
+  kind, and Source reference. It returns the complete content when it fits the
+  bounded response, a stable complete-Source digest, and a continuation offset
+  for an oversized Source. A paginated excerpt is still inspection material;
+  the Agent must read all required pages before proposing Evidence. Oversized
+  tables should use `inspect_table` for row-aware windows. An offset at or past
+  the end of a non-empty Source returns `source_offset_out_of_range` rather than
+  a successful empty excerpt; offset zero remains valid for an empty parsed
+  Source;
+- `search_sources` searches canonical Source units only inside an explicit
+  Document scope. It returns bounded candidate locations, complete-Source
+  digests, and pagination state. A search hit is an inspection lead, not
+  Evidence or a scientific absence;
+- `inspect_table` returns a small canonical table as complete Markdown. Only a
+  table above the bounded response limit is split into row windows, and every
+  window repeats the canonical headers and complete-table digest;
 - `inspect_research_process` reads each current Document and its latest
   preparation task. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,
@@ -180,6 +210,11 @@ The production Research Agent currently exposes these automatic capabilities:
   and a bounded page of its linked Evidence. This exact read, followed by any
   necessary Source inspection, is required before the Agent proposes a review
   or a new conclusion;
+- `create_finding_draft` records a structured, transient conclusion or
+  abstention proposal in the Chat trajectory. It reuses the canonical Finding
+  authoring input shape but does not validate Evidence bindings, publish a
+  Finding, or modify an Objective analysis. The later formal write remains a
+  distinct approval event;
 - `create_finding_version` is a `write` capability. It accepts the same
   statement, assertion strength, version-local Evidence roles, limitations,
   optional parent Finding, or explicit abstention as the human Finding
@@ -196,6 +231,14 @@ The production Research Agent currently exposes these automatic capabilities:
   `FindingFeedbackService.record_curation()` path as the Finding workbench.
   Service validation preserves Finding identity, paper coverage, Evidence IDs,
   and Source lineage; curation cannot create a new Finding;
+- `create_evidence_draft` records one transient Source-bound Evidence proposal
+  in the Chat trajectory. Before returning it, Lens verifies Collection
+  ownership, exact Source identity, complete-content digest, and verbatim
+  excerpt. It does not publish Evidence, advance an analysis version, or make
+  the proposed scientific fields verified Evidence;
+- `create_evidence_version` is the separate `write` capability for a reviewed
+  Evidence draft. Exact-argument approval invokes the same immutable
+  Source-to-Evidence versioning service used by the human authoring route;
 - `propose_objective_drafts` records at most three focused, single-outcome
   drafts in the Chat trajectory. PaperResearchMap relationships may be reported
   as proposal context, but they are never presented as Evidence and this call
@@ -205,35 +248,85 @@ The production Research Agent currently exposes these automatic capabilities:
   seed-document IDs record where the question came from, not the complete
   analysis scope, support, or Evidence; an empty seed set is valid. The candidate has zero confidence until
   Objective analysis tests it. It never confirms the Objective or starts
-  analysis. Repeating the same approved tool call is idempotent;
+  analysis. Follow-up candidates also preserve the exact parent Objective,
+  published analysis version, and validated Finding/Evidence-gap basis; a stale
+  parent version is rejected before persistence. Repeating the same approved
+  tool call is idempotent;
+- `confirm_objective` is a separate `write` capability. Exact-argument approval
+  changes one reviewed candidate to `confirmed` without allocating an analysis
+  version or starting work. Repeated confirmation is idempotent. This separate
+  confirmation step belongs to the Chat/Agent trajectory; the legacy Objective
+  workspace HTTP Fast Path below intentionally keeps its atomic confirm-and-
+  queue behavior;
 - `preview_research_scope` is a `read` capability. For one proposed material,
   variable, and outcome scope, it projects mapped papers as
   `likely_relevant`, `needs_inspection`, or `confidently_out_of_scope`.
   `insufficient_map` papers always need inspection, and review citation leads
-  can request inspection but cannot establish relevance or Evidence. Results
-  and full counts are bounded independently;
-- `start_objective_analysis` is a `write` capability. A separate exact-argument
-  approval confirms the chosen candidate and calls the same canonical
+  can request inspection but cannot establish relevance or Evidence. Detailed
+  records are bounded per category, while `scope_counts` and every classified
+  Document ID remain complete. `suggested_scope.recommended_document_ids`
+  identifies the complete default analysis selection; it is deliberately not
+  called `seed_document_ids`, because seed papers record question provenance.
+  `scope_complete: true` confirms that detail truncation did not truncate those
+  ID lists, and `returned_record_count` plus `omitted_record_count` describe
+  only the bounded detail projection;
+- `start_objective_analysis` is a `write` capability for an already confirmed
+  Objective. A separate exact-argument approval calls the same canonical
   `ObjectiveAnalysisService.start_analysis()` used by the HTTP route with the
-  exact approved ready `document_ids`. It
+  exact approved ready `document_ids`. An unconfirmed candidate is rejected
+  without allocating an analysis version. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
 - `publish_agent_objective_analysis` is a separate `write` capability for the
   case where the researcher explicitly asks the Agent itself to analyze a
   bounded paper scope. Before proposing the write, the Agent reads exact
-  Sources through `inspect_document_sources` over one or more turns. The
-  approved payload contains one summary and at least one structured Evidence
-  draft for every selected ready Document. The backend revalidates each Source
-  locator, complete-content SHA-256 digest, normalized verbatim excerpt, and
-  Evidence contract before allocating a version. It then publishes one
+  Sources through `read_source`, or complete untruncated
+  `inspect_document_sources` results, over one or more turns. The
+  approved payload contains one summary for every selected ready Document.
+  Papers with supported facts carry structured Evidence drafts. A paper that
+  was inspected but supplied no grounded fact instead carries an explicit
+  `no_grounded_evidence` or `excluded_after_review` disposition, reason, and at
+  least one exact inspected Source locator and digest. A technical read or
+  extraction failure carries `extraction_failed` and its technical reason; it
+  is never treated as a scientific absence. The backend revalidates
+  each Source locator, complete-content SHA-256 digest, normalized verbatim
+  excerpt, Evidence contract, and no-Evidence inspection record before
+  allocating a version. It then publishes one
   `agent_authored` analysis through the existing repository queue, claim, and
-  atomic publication lifecycle. The version contains PaperContributions and
-  Evidence but no Finding; any conclusion requires a later approved
+  atomic publication lifecycle. If every non-excluded paper reports
+  `extraction_failed`, the active version is marked failed and remains retryable;
+  it does not publish `no_grounded_evidence` or advance the published pointer.
+  Mixed scopes may publish surviving Evidence while retaining failed paper
+  contributions. A successful version contains PaperContributions and Evidence
+  but no Finding; any conclusion requires a later approved
   `create_finding_version` call. This capability has no separate HTTP endpoint,
   draft store, background extraction, or Finding-synthesis call;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
-  published-version identity without starting or retrying work.
+  published-version identity without starting or retrying work;
+- `assess_objective_quality` reads the current published Evidence ledger and
+  separates technical extraction failures from scientific incompleteness or
+  non-comparability. It returns bounded exact Source locations for further
+  inspection without creating a new judgment. If a newer active analysis failed
+  before publication, the response exposes that runtime failure separately and
+  retains the last published result without presenting the failed run as a
+  scientific conclusion;
+- `derive_objective` records at most three transient follow-up Objective drafts
+  from exact current Findings, scientific Evidence gaps, or non-failed paper
+  contributions. An `extraction_failed` record is a recovery task and is
+  rejected as scientific basis. Persisting any accepted draft still requires
+  the separate approved `create_objective_candidate` write;
+- `propose_research_plan` records one transient structured plan with hypothesis,
+  variable roles and proposed values, controls, fixed conditions, measurements,
+  replication, analysis, acceptance criteria, feasibility, safety, and
+  limitations. Every literature-derived choice references current Finding and
+  Evidence IDs. The result is not persisted and does not authorize an
+  experiment;
+- `create_research_plan` is the separate `write` capability for that reviewed
+  plan. Its exact approval payload includes the current Finding and Evidence
+  fingerprints. The capability rechecks those snapshots before using the
+  canonical Objective-scoped ExperimentPlan service; changed or unreviewed
+  sources produce no plan record.
 
 Model context is a bounded recent suffix of the durable trajectory. An
 assistant tool call and its following tool result are retained or omitted as one
@@ -375,6 +468,10 @@ creates the next analysis version with `queued` status. For an already confirmed
 Objective, it creates or reuses the active analysis normally. The command returns
 immediately, and the frontend polls `GET .../analysis`. Retry allocates a new
 version. A failed active version leaves the prior published version readable.
+This REST command is intentionally the legacy Fast Path exception to the
+Chat/Agent three-step approval lifecycle. For a candidate Objective it
+atomically confirms the Objective and queues automatic analysis; this contract
+does not introduce a separate REST confirmation request.
 Independent Objective analyses,
 including analyses from different collections, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
@@ -529,12 +626,13 @@ An Evidence correction never overwrites the old record. Supplying
 locator; publication clones the complete source snapshot into the next
 immutable analysis version, marks the old record as superseded, and leaves old
 Findings pointing at their original Evidence. A successful command returns
-`201` with the new analysis and Evidence. Stale versions, running analyses,
+  `201` with the new analysis and Evidence. Stale versions, running analyses,
 unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
 already superseded record return `409`; malformed scientific shapes return
-`422`. The Research Agent exposes the same operation as the approved
-`create_evidence_version` write capability and must supply the digest returned
-by `inspect_document_sources`; it does not create a second Evidence identity.
+  `422`. The Research Agent exposes the same operation as the approved
+  `create_evidence_version` write capability and must supply the digest returned
+  by `read_source` or a complete untruncated `inspect_document_sources` result;
+  it does not create a second Evidence identity.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns
@@ -687,10 +785,14 @@ formatter (the default column names are already correct):
 - `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 
 Plans are human-editable downstream drafts, not scientific source records.
-New plans are manual and cannot claim Chat-message provenance. Historical plans
-that already reference a migrated Chat message retain their stored
-Finding/Evidence lineage. Reads report whether that snapshot is still current;
-stale historical plans cannot be promoted to `ready_for_review`.
+The HTTP POST creates a manual draft without Chat provenance. The Research
+Agent can propose the same Objective-scoped plan structure and, after exact
+approval, save it through the same `ExperimentPlanService`. Agent-created plans
+store the approved tool-call identity, visible Evidence links, and complete
+Finding/Evidence fingerprints. Reads recheck those snapshots; stale grounded
+plans cannot be promoted to `ready_for_review`. Historical plans that reference
+a migrated Chat message retain their existing lineage and validation rules.
+Saving a plan never schedules or claims that an experiment was executed.
 
 ### Documents And Source Verification
 

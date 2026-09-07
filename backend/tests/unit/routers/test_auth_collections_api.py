@@ -177,10 +177,37 @@ def test_app_lifespan_composes_one_shared_collection_service(
             service.collection_service is collection_service
             for service in collection_consumers
         )
-        assert "start_research_process" in {
+        capability_names = {
             spec.name
             for spec in state.chat_session_service.runner.capabilities.specs
         }
+        assert {
+            "get_collection_context",
+            "inspect_document_sources",
+            "search_sources",
+            "read_source",
+            "inspect_table",
+            "inspect_research_process",
+            "start_research_process",
+            "query_published_findings",
+            "inspect_published_finding",
+            "record_finding_feedback",
+            "curate_finding",
+            "create_finding_draft",
+            "create_finding_version",
+            "create_evidence_draft",
+            "create_evidence_version",
+            "publish_agent_objective_analysis",
+            "propose_objective_drafts",
+            "preview_research_scope",
+            "create_objective_candidate",
+            "start_objective_analysis",
+            "inspect_objective_analysis",
+            "assess_objective_quality",
+            "derive_objective",
+            "propose_research_plan",
+            "create_research_plan",
+        }.issubset(capability_names)
 
 
 def test_app_lifespan_recovers_orphaned_work_before_serving_requests(

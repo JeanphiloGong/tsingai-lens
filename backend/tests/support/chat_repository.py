@@ -70,5 +70,27 @@ class MemoryChatRepository:
         self.calls[tool_call_id] = decided
         return decided
 
+    async def claim_approved_tool_call(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        user_id: str,
+        started_at: str,
+    ) -> ChatToolCall | None:
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError(f"chat session not found: {session_id}")
+        call = self.calls.get(tool_call_id)
+        if call is None or call.session_id != session_id:
+            raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
+        if call.status.value == "approved":
+            claimed = call.start(started_at)
+            self.calls[tool_call_id] = claimed
+            return claimed
+        if call.status.value in {"running", "succeeded", "failed"}:
+            return None
+        raise ValueError(f"cannot claim tool call in status {call.status.value}")
+
 
 __all__ = ["MemoryChatRepository"]

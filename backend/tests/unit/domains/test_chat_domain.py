@@ -194,11 +194,12 @@ def test_user_message_round_trips_traceable_source_context() -> None:
         collection_id="col-1",
         document_id="doc-1",
         document_title="Paper A",
-        source_kind="paragraph",
+        source_kind="text_window",
         source_ref="results",
         page=3,
         quote="Conductivity improved to 12 mS/cm under EIS.",
         heading_path="Results",
+        source_digest="a" * 64,
     )
     message = ChatMessage.user(
         message_id="msg-source",
@@ -212,6 +213,24 @@ def test_user_message_round_trips_traceable_source_context() -> None:
     assert message.source_contexts == (source_context,)
 
 
+def test_source_context_rejects_an_invalid_source_digest() -> None:
+    with pytest.raises(ValueError, match="SHA-256"):
+        ChatSourceContext(
+            resource_ref=ChatResourceRef(
+                resource_type="source",
+                resource_id="doc-1:results",
+            ),
+            collection_id="col-1",
+            document_id="doc-1",
+            document_title="Paper A",
+            source_kind="text_window",
+            source_ref="results",
+            page=3,
+            quote="Conductivity improved to 12 mS/cm under EIS.",
+            source_digest="not-a-digest",
+        )
+
+
 def test_source_context_requires_a_matching_stable_source_reference() -> None:
     with pytest.raises(ValueError, match="resource identity"):
         ChatSourceContext(
@@ -222,7 +241,7 @@ def test_source_context_requires_a_matching_stable_source_reference() -> None:
             collection_id="col-1",
             document_id="doc-1",
             document_title="Paper A",
-            source_kind="paragraph",
+            source_kind="text_window",
             source_ref="results",
             page=3,
             quote="Conductivity improved to 12 mS/cm under EIS.",

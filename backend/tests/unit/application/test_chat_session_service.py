@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from hashlib import sha256
 from typing import Any
 
 import pytest
@@ -30,6 +31,7 @@ from domain.chat import (
     ToolCallStatus,
     ToolRisk,
 )
+from domain.source import SourceBlock, SourceDocument
 
 pytestmark = pytest.mark.anyio
 
@@ -102,6 +104,36 @@ class _CollectionService:
         if collection_id != "col-1" or document_id != "doc-1":
             raise FileNotFoundError("document not found")
         return {"collection_id": collection_id, "document_id": document_id}
+
+
+class _SourceArtifactRepository:
+    def __init__(self) -> None:
+        self.document = SourceDocument(
+            document_id="doc-1",
+            document_order=0,
+            title="Canonical Paper A",
+            text="Conductivity improved to 12 mS/cm under EIS.",
+            blocks=(
+                SourceBlock(
+                    block_id="results",
+                    document_id="doc-1",
+                    block_type="paragraph",
+                    text="Conductivity improved to 12 mS/cm under EIS.",
+                    block_order=0,
+                    page=3,
+                    heading_path="Results > Conductivity",
+                ),
+            ),
+        )
+
+    async def read_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> SourceDocument | None:
+        if collection_id == "col-1" and document_id == self.document.document_id:
+            return self.document
+        return None
 
 
 class _Repository:
@@ -177,6 +209,30 @@ class _Repository:
         self.calls[tool_call_id] = decided
         return decided
 
+    async def claim_approved_tool_call(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        user_id: str,
+        started_at: str,
+    ) -> ChatToolCall | None:
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError("chat session not found")
+        call = self.calls[tool_call_id]
+        if call.status is ToolCallStatus.APPROVED:
+            call = call.start(started_at)
+            self.calls[tool_call_id] = call
+            return call
+        if call.status in {
+            ToolCallStatus.RUNNING,
+            ToolCallStatus.SUCCEEDED,
+            ToolCallStatus.FAILED,
+        }:
+            return None
+        raise ValueError(f"cannot claim tool call in status {call.status.value}")
+
 
 def _service(
     model: _Model,
@@ -185,6 +241,7 @@ def _service(
 ) -> ChatSessionService:
     return ChatSessionService(
         collection_service=_CollectionService(),
+        source_artifact_repository=_SourceArtifactRepository(),
         repository=repository,
         runner=ResearchAgentRunner(
             model=model,
@@ -226,12 +283,12 @@ async def test_chat_session_service_persists_selected_source_with_user_message()
         ),
         collection_id="col-1",
         document_id="doc-1",
-        document_title="Paper A",
-        source_kind="paragraph",
+        document_title="Client supplied title",
+        source_kind="text_window",
         source_ref="results",
-        page=3,
+        page=1,
         quote="Conductivity improved to 12 mS/cm under EIS.",
-        heading_path="Results",
+        heading_path="Client supplied heading",
     )
 
     await service.post_message_for_user(
@@ -242,7 +299,18 @@ async def test_chat_session_service_persists_selected_source_with_user_message()
     )
 
     stored = await repository.read_messages(session.session_id)
-    assert stored[0].source_contexts == (source_context,)
+    canonical_context = stored[0].source_contexts[0]
+    assert canonical_context.document_title == "Canonical Paper A"
+    assert canonical_context.source_kind == "text_window"
+    assert canonical_context.page == 3
+    assert canonical_context.heading_path == "Results > Conductivity"
+    assert canonical_context.source_digest == sha256(
+        b"Conductivity improved to 12 mS/cm under EIS."
+    ).hexdigest()
+    assert canonical_context.resource_ref.href == (
+        "/collections/col-1/documents/doc-1"
+        "?view=parsed-paper&source_ref=results&page=3"
+    )
     assert stored[1].source_contexts == ()
 
 
@@ -259,7 +327,7 @@ async def test_chat_session_service_rejects_source_from_another_collection() -> 
         collection_id="col-2",
         document_id="doc-2",
         document_title="Foreign Paper",
-        source_kind="paragraph",
+        source_kind="text_window",
         source_ref="results",
         page=1,
         quote="A result from another collection.",
@@ -293,7 +361,7 @@ async def test_chat_session_service_rejects_unknown_document_source() -> None:
         collection_id="col-1",
         document_id="doc-missing",
         document_title="Unknown Paper",
-        source_kind="paragraph",
+        source_kind="text_window",
         source_ref="results",
         page=1,
         quote="A client-supplied passage without a Collection document.",
@@ -306,6 +374,133 @@ async def test_chat_session_service_rejects_unknown_document_source() -> None:
             "user-1",
             message="Explain this.",
             source_contexts=(unknown_source,),
+        )
+
+    assert await repository.read_messages(session.session_id) == ()
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "source_ref", "quote", "error"),
+    (
+        (
+            "text_window",
+            "invented-results",
+            "Conductivity improved to 12 mS/cm under EIS.",
+            "Source reference",
+        ),
+        (
+            "table",
+            "results",
+            "Conductivity improved to 12 mS/cm under EIS.",
+            "Source reference",
+        ),
+        (
+            "text_window",
+            "results",
+            "The paper proved room-temperature superconductivity.",
+            "quote is not contained",
+        ),
+    ),
+)
+async def test_chat_session_service_rejects_forged_source_context(
+    source_kind: str,
+    source_ref: str,
+    quote: str,
+    error: str,
+) -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="must not run")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    source_context = ChatSourceContext(
+        resource_ref=ChatResourceRef(
+            resource_type="source",
+            resource_id=f"doc-1:{source_ref}",
+            href=(
+                "/collections/col-1/documents/doc-1"
+                f"?view=parsed-paper&source_ref={source_ref}"
+            ),
+        ),
+        collection_id="col-1",
+        document_id="doc-1",
+        document_title="Paper A",
+        source_kind=source_kind,
+        source_ref=source_ref,
+        page=3,
+        quote=quote,
+        heading_path="Results",
+    )
+
+    with pytest.raises(ChatSourceContextError, match=error):
+        await service.post_message_for_user(
+            session.session_id,
+            "user-1",
+            message="Explain this.",
+            source_contexts=(source_context,),
+        )
+
+    assert await repository.read_messages(session.session_id) == ()
+
+
+async def test_chat_session_service_accepts_a_bounded_canonical_quote() -> None:
+    repository = _Repository()
+    service = _service(
+        _Model(ModelTurn(content="This is a partial Source quote.")), repository
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    source_context = ChatSourceContext(
+        resource_ref=ChatResourceRef(
+            resource_type="source",
+            resource_id="doc-1:results",
+        ),
+        collection_id="col-1",
+        document_id="doc-1",
+        document_title="Paper A",
+        source_kind="text_window",
+        source_ref="results",
+        page=3,
+        quote="Conductivity improved to 12 mS/cm",
+    )
+
+    await service.post_message_for_user(
+        session.session_id,
+        "user-1",
+        message="Explain this excerpt.",
+        source_contexts=(source_context,),
+    )
+
+    stored = (await repository.read_messages(session.session_id))[0].source_contexts[
+        0
+    ]
+    assert stored.quote == "Conductivity improved to 12 mS/cm"
+    assert stored.quote_truncated is True
+    assert stored.source_digest is not None
+
+
+async def test_chat_session_service_rejects_a_stale_source_digest() -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="must not run")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    source_context = ChatSourceContext(
+        resource_ref=ChatResourceRef(
+            resource_type="source",
+            resource_id="doc-1:results",
+        ),
+        collection_id="col-1",
+        document_id="doc-1",
+        document_title="Paper A",
+        source_kind="text_window",
+        source_ref="results",
+        page=3,
+        quote="Conductivity improved to 12 mS/cm under EIS.",
+        source_digest="0" * 64,
+    )
+
+    with pytest.raises(ChatSourceContextError, match="digest does not match"):
+        await service.post_message_for_user(
+            session.session_id,
+            "user-1",
+            message="Explain this.",
+            source_contexts=(source_context,),
         )
 
     assert await repository.read_messages(session.session_id) == ()
@@ -436,6 +631,19 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
         await service.get_pending_approval_for_user(session.session_id, "user-1")
         is None
     )
+
+    duplicate_turn = await service.decide_tool_call_for_user(
+        session.session_id,
+        pending.tool_call_id,
+        "user-1",
+        arguments_digest=pending.arguments_digest,
+        decision="approved",
+    )
+
+    assert duplicate_turn["status"] == "completed"
+    assert capability.executed == [
+        {"question": "How does energy input affect ductility?"}
+    ]
 
 
 async def test_chat_session_service_rejection_never_executes_write() -> None:

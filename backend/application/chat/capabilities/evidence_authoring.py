@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -12,6 +14,8 @@ from application.chat.capabilities.contracts import (
 )
 from application.core.objectives.evidence_authoring_service import (
     EvidenceAuthoringService,
+    normalize_source_text,
+    resolve_canonical_objective_source,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
@@ -61,7 +65,14 @@ class EvidenceComparisonArguments(BaseModel):
 
     baseline_label: str = Field(min_length=1, max_length=500)
     target_label: str = Field(min_length=1, max_length=500)
-    axis_names: list[str] = Field(default_factory=list, max_length=20)
+    axis_names: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description=(
+            "Exact distinct names from changed_variables[].name. These are the "
+            "varied comparison axes, not the measured outcome or result column."
+        ),
+    )
     comparable: bool
     incomparability_reasons: list[str] = Field(default_factory=list, max_length=20)
 
@@ -132,15 +143,137 @@ class CreateEvidenceVersionArguments(BaseModel):
         return self
 
 
+class CreateEvidenceDraftArguments(CreateEvidenceVersionArguments):
+    draft_id: str = Field(min_length=1, max_length=128)
+
+
+class CreateEvidenceDraftCapability:
+    spec = ToolSpec(
+        name="create_evidence_draft",
+        description=(
+            "Record one transient Evidence draft after inspecting an exact complete "
+            "paper Source. Lens verifies collection ownership, the canonical Source "
+            "digest, and the verbatim excerpt, but does not publish Evidence or change "
+            "an Objective analysis. Use the separate approved Evidence write only "
+            "after the researcher reviews this draft."
+        ),
+        risk=ToolRisk.DRAFT,
+        input_model=CreateEvidenceDraftArguments,
+    )
+
+    def __init__(
+        self,
+        *,
+        collection_service: Any,
+        source_artifact_repository: Any,
+    ) -> None:
+        self.collection_service = collection_service
+        self.source_artifact_repository = source_artifact_repository
+
+    async def execute(
+        self,
+        context: CapabilityExecutionContext,
+        arguments: CreateEvidenceDraftArguments,
+    ) -> ChatToolResult:
+        await self.collection_service.get_collection_for_user(
+            context.collection_id,
+            context.user_id,
+        )
+        document = await self.source_artifact_repository.read_document(
+            context.collection_id,
+            arguments.document_id,
+        )
+        if document is None:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status="failed",
+                error_code="document_sources_not_ready",
+                error_message=(
+                    "The requested paper has no prepared Source content in this "
+                    "collection."
+                ),
+            )
+        try:
+            canonical = resolve_canonical_objective_source(
+                document,
+                source_kind=arguments.source_kind,
+                source_ref=arguments.source_ref,
+            )
+        except FileNotFoundError:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status="failed",
+                error_code="source_not_found",
+                error_message="The requested Source was not found in this paper.",
+            )
+
+        canonical_digest = sha256(canonical.content.encode("utf-8")).hexdigest()
+        if arguments.source_digest.lower() != canonical_digest:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status="failed",
+                error_code="source_digest_mismatch",
+                error_message=(
+                    "The Source changed or the draft was based on shortened content. "
+                    "Inspect the complete Source again before drafting Evidence."
+                ),
+            )
+        if normalize_source_text(arguments.source_excerpt) not in normalize_source_text(
+            canonical.content
+        ):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status="failed",
+                error_code="source_excerpt_not_grounded",
+                error_message=(
+                    "The proposed excerpt is not present in the canonical Source."
+                ),
+            )
+
+        draft = arguments.model_dump()
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id,
+            status="succeeded",
+            data={
+                "draft": draft,
+                "source_page": canonical.page,
+                "persistence": "transient_chat_result",
+                "published": False,
+                "requires_user_approval": True,
+                "support_is_evidence": False,
+            },
+            resource_refs=(
+                ChatResourceRef(
+                    resource_type="source",
+                    resource_id=(
+                        f"{arguments.document_id}:{arguments.source_kind}:"
+                        f"{arguments.source_ref}"
+                    ),
+                    href=(
+                        f"/collections/{context.collection_id}/documents/"
+                        f"{arguments.document_id}?"
+                        + urlencode(
+                            {
+                                "view": "parsed-paper",
+                                "source_ref": arguments.source_ref,
+                            }
+                        )
+                    ),
+                ),
+            ),
+        )
+
+
 class CreateEvidenceVersionCapability:
     spec = ToolSpec(
         name="create_evidence_version",
         description=(
             "Propose one structured Objective Evidence record from an exact Source "
-            "returned by inspect_document_sources. The Source digest must match the "
-            "complete canonical Source; never infer facts or use a truncated quote. "
-            "This write requires explicit user approval and publishes a new immutable "
-            "analysis version without changing old Evidence or Findings."
+            "returned by read_source or a complete untruncated Source returned by "
+            "inspect_document_sources. The Source digest must match the complete "
+            "canonical Source; never infer facts or use a truncated quote. This write "
+            "requires explicit user approval and publishes a new immutable analysis "
+            "version without changing old Evidence or Findings."
         ),
         risk=ToolRisk.WRITE,
         input_model=CreateEvidenceVersionArguments,
@@ -216,10 +349,13 @@ class CreateEvidenceVersionCapability:
                 "supports_finding": evidence.supports_finding,
             },
             resource_refs=refs,
+            warnings=tuple(evidence.warnings),
         )
 
 
 __all__ = [
+    "CreateEvidenceDraftArguments",
+    "CreateEvidenceDraftCapability",
     "CreateEvidenceVersionArguments",
     "CreateEvidenceVersionCapability",
 ]

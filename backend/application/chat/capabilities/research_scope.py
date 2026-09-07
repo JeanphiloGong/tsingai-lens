@@ -78,6 +78,11 @@ class PreviewResearchScopeCapability:
             if item.classification == "confidently_out_of_scope"
         ]
         scope_counts = preview.counts
+        suggested_scope = {
+            "recommended_document_ids": list(preview.recommended_document_ids),
+            "review_document_ids": list(preview.review_document_ids),
+            "excluded_document_ids": list(preview.excluded_document_ids),
+        }
         likely_relevant = likely_relevant[:_PREVIEW_CATEGORY_LIMIT]
         needs_inspection = needs_inspection[:_PREVIEW_CATEGORY_LIMIT]
         confidently_out_of_scope = confidently_out_of_scope[
@@ -109,8 +114,9 @@ class PreviewResearchScopeCapability:
             )
         if omitted_count:
             warning_items.append(
-                f"{omitted_count} classified paper record(s) were omitted from this "
-                "bounded preview; omitted papers were not added to the suggested scope."
+                f"{omitted_count} classified paper detail record(s) were omitted from "
+                "this bounded preview; the suggested scope remains complete because "
+                "all classified document IDs are included."
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
@@ -121,18 +127,10 @@ class PreviewResearchScopeCapability:
                 "needs_inspection": needs_inspection,
                 "confidently_out_of_scope": confidently_out_of_scope,
                 "scope_counts": scope_counts,
+                "returned_record_count": len(returned_records),
                 "omitted_record_count": omitted_count,
-                "suggested_scope": {
-                    "seed_document_ids": [
-                        item["document_id"] for item in likely_relevant
-                    ],
-                    "review_document_ids": [
-                        item["document_id"] for item in needs_inspection
-                    ],
-                    "excluded_document_ids": [
-                        item["document_id"] for item in confidently_out_of_scope
-                    ],
-                },
+                "scope_complete": True,
+                "suggested_scope": suggested_scope,
                 "support_is_evidence": preview.support_is_evidence,
             },
             resource_refs=refs,

@@ -5,14 +5,21 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
+from hashlib import sha256
 import logging
 from typing import Any
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from application.chat.agent_runner import AgentRunResult, ResearchAgentRunner
 from application.chat.capabilities import AgentContext
+from application.core.objectives.evidence_authoring_service import (
+    normalize_source_text,
+    resolve_canonical_objective_source,
+)
 from domain.chat import (
     ChatMessage,
+    ChatResourceRef,
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
@@ -20,7 +27,7 @@ from domain.chat import (
     ToolCallStatus,
     ToolResultStatus,
 )
-from domain.ports import ChatRepository
+from domain.ports import ChatRepository, SourceArtifactRepository
 
 
 logger = logging.getLogger(__name__)
@@ -53,10 +60,12 @@ class ChatSessionService:
         self,
         *,
         collection_service: Any,
+        source_artifact_repository: SourceArtifactRepository,
         repository: ChatRepository,
         runner: ResearchAgentRunner,
     ) -> None:
         self.collection_service = collection_service
+        self.source_artifact_repository = source_artifact_repository
         self.repository = repository
         self.runner = runner
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
@@ -120,7 +129,9 @@ class ChatSessionService:
         source_contexts: tuple[ChatSourceContext, ...] = (),
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
-        await self._validate_source_contexts(session, source_contexts)
+        source_contexts = await self._canonical_source_contexts(
+            session, source_contexts
+        )
         previous_messages = await self.repository.read_messages(session_id)
         pending = await self.get_pending_approval_for_user(session_id, user_id)
         if pending is not None:
@@ -143,7 +154,9 @@ class ChatSessionService:
         source_contexts: tuple[ChatSourceContext, ...] = (),
     ) -> AsyncIterator[dict[str, Any]]:
         session = await self.get_session_for_user(session_id, user_id)
-        await self._validate_source_contexts(session, source_contexts)
+        source_contexts = await self._canonical_source_contexts(
+            session, source_contexts
+        )
         previous_messages = await self.repository.read_messages(session_id)
         pending = await self.get_pending_approval_for_user(session_id, user_id)
         if pending is not None:
@@ -203,25 +216,105 @@ class ChatSessionService:
 
         return events()
 
-    async def _validate_source_contexts(
+    async def _canonical_source_contexts(
         self,
         session: ChatSession,
         source_contexts: tuple[ChatSourceContext, ...],
-    ) -> None:
+    ) -> tuple[ChatSourceContext, ...]:
         if any(item.collection_id != session.collection_id for item in source_contexts):
             raise ChatSourceContextError(
                 "source context does not belong to the Chat collection"
             )
-        try:
-            for item in source_contexts:
+        canonical_contexts: list[ChatSourceContext] = []
+        for item in source_contexts:
+            try:
                 await self.collection_service.get_document(
                     session.collection_id,
                     item.document_id,
                 )
-        except FileNotFoundError as exc:
-            raise ChatSourceContextError(
-                "source context document does not belong to the Chat collection"
-            ) from exc
+            except FileNotFoundError as exc:
+                raise ChatSourceContextError(
+                    "source context document does not belong to the Chat collection"
+                ) from exc
+            document = await self.source_artifact_repository.read_document(
+                session.collection_id,
+                item.document_id,
+            )
+            if document is None:
+                raise ChatSourceContextError(
+                    "selected Source content is not prepared for this document"
+                )
+            if document.document_id != item.document_id:
+                raise ChatSourceContextError(
+                    "selected Source document identity does not match its "
+                    "canonical Source"
+                )
+            document_title = str(document.title or document.document_id).strip()[:500]
+            try:
+                canonical = resolve_canonical_objective_source(
+                    document,
+                    source_kind=item.source_kind,
+                    source_ref=item.source_ref,
+                )
+            except ValueError as exc:
+                raise ChatSourceContextError(
+                    "selected Source kind is not supported"
+                ) from exc
+            except FileNotFoundError as exc:
+                raise ChatSourceContextError(
+                    "selected Source reference does not identify a canonical Source "
+                    "in this document"
+                ) from exc
+
+            heading_path = (
+                str(canonical.heading_path).strip()[:1000]
+                if canonical.heading_path is not None
+                else None
+            )
+            canonical_content = str(canonical.content or "")
+            normalized_content = normalize_source_text(canonical_content)
+            normalized_quote = normalize_source_text(item.quote)
+            if not normalized_quote or normalized_quote not in normalized_content:
+                raise ChatSourceContextError(
+                    "selected Source quote is not contained in the canonical Source"
+                )
+            digest = sha256(canonical_content.encode("utf-8")).hexdigest()
+            if item.source_digest is not None and item.source_digest != digest:
+                raise ChatSourceContextError(
+                    "selected Source digest does not match the canonical Source"
+                )
+            query = {
+                "view": "parsed-paper",
+                "source_ref": item.source_ref,
+            }
+            if canonical.page is not None:
+                query["page"] = str(canonical.page)
+            canonical_contexts.append(
+                ChatSourceContext(
+                    resource_ref=ChatResourceRef(
+                        resource_type="source",
+                        resource_id=f"{item.document_id}:{item.source_ref}",
+                        href=(
+                            f"/collections/{session.collection_id}/documents/"
+                            f"{item.document_id}?{urlencode(query)}"
+                        ),
+                    ),
+                    collection_id=session.collection_id,
+                    document_id=item.document_id,
+                    document_title=document_title,
+                    source_kind=item.source_kind,
+                    source_ref=item.source_ref,
+                    page=canonical.page,
+                    quote=normalized_quote,
+                    heading_path=heading_path,
+                    quote_truncated=(
+                        item.quote_truncated
+                        or normalized_quote != normalized_content
+                    ),
+                    source_digest=digest,
+                )
+            )
+        return tuple(canonical_contexts)
 
     async def decide_tool_call_for_user(
         self,
@@ -280,10 +373,33 @@ class ChatSessionService:
                 "pending_approval": None,
             }
 
-        run_result = await self.runner.resume_approved_call(
+        claimed = await self.repository.claim_approved_tool_call(
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            user_id=user_id,
+            started_at=_now_iso(),
+        )
+        if claimed is None:
+            current = await self.repository.read_tool_call(tool_call_id)
+            if current is not None and current.status is ToolCallStatus.SUCCEEDED:
+                return {
+                    "status": "completed",
+                    "messages": (),
+                    "pending_approval": None,
+                }
+            if current is not None and current.status is ToolCallStatus.FAILED:
+                return {
+                    "status": "failed",
+                    "messages": (),
+                    "pending_approval": None,
+                    "error_code": current.error_code,
+                }
+            raise ValueError("approved research action is already running")
+
+        run_result = await self.runner.resume_claimed_call(
             context=self._context(session),
             previous_messages=previous_messages,
-            approved_call=decided,
+            claimed_call=claimed,
             checkpoint=self._trajectory_checkpoint(session),
         )
         return self._turn_record(

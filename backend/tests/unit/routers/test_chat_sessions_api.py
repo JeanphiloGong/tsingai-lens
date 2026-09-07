@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatSessionNotFoundError,
+    ChatSourceContextError,
 )
 from application.source.task_service import TaskService
 from controllers.chat import sessions as sessions_controller
@@ -103,6 +104,10 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         if message == "blocked":
             raise ChatApprovalPendingError(self.pending.tool_call_id)
+        if message == "forged source":
+            raise ChatSourceContextError(
+                "selected Source quote is not contained in the canonical Source"
+            )
         assert message == "你好"
         if source_contexts:
             self.messages = (
@@ -217,7 +222,7 @@ def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
         "collection_id": "col-1",
         "document_id": "doc-1",
         "document_title": "Paper A",
-        "source_kind": "paragraph",
+        "source_kind": "text_window",
         "source_ref": "results",
         "page": 3,
         "quote": "Conductivity improved to 12 mS/cm under EIS.",
@@ -243,6 +248,25 @@ def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
             ),
         ).to_record()
     )
+
+
+def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
+    with pytest.raises(HTTPException) as invalid:
+        asyncio.run(
+            sessions_controller.post_chat_message(
+                "chat-1",
+                ChatTurnRequest(message="forged source"),
+                _request(_Service()),
+            )
+        )
+
+    assert invalid.value.status_code == 422
+    assert invalid.value.detail == {
+        "code": "chat_source_context_invalid",
+        "message": (
+            "selected Source quote is not contained in the canonical Source"
+        ),
+    }
 
 
 def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:

@@ -34,6 +34,11 @@ async def create_experiment_plan(
             objective_id=objective_id,
             title=payload.title,
             content=payload.content,
+            structured_plan=(
+                payload.structured_plan.model_dump()
+                if payload.structured_plan is not None
+                else None
+            ),
             created_by=await current_user_id(request),
         )
     except ValueError as exc:
@@ -62,6 +67,28 @@ async def list_experiment_plans(
     )
 
 
+@router.get(
+    "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
+    response_model=ExperimentPlanResponse,
+    summary="Read one experiment plan revision",
+)
+async def read_experiment_plan(
+    collection_id: str,
+    objective_id: str,
+    plan_id: str,
+    request: Request,
+) -> ExperimentPlanResponse:
+    try:
+        plan = await request.app.state.experiment_plan_service.read_plan(
+            collection_id,
+            objective_id,
+            plan_id,
+        )
+    except ExperimentPlanNotFoundError as exc:
+        raise _not_found(exc) from exc
+    return _plan_response(plan)
+
+
 @router.patch(
     "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
     response_model=ExperimentPlanResponse,
@@ -82,18 +109,15 @@ async def update_experiment_plan(
             title=payload.title,
             content=payload.content,
             status=payload.status,
+            structured_plan=(
+                payload.structured_plan.model_dump()
+                if payload.structured_plan is not None
+                else None
+            ),
+            updated_by=await current_user_id(request),
         )
     except ExperimentPlanNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "experiment_plan_not_found",
-                "message": str(exc),
-                "collection_id": exc.collection_id,
-                "objective_id": exc.objective_id,
-                "plan_id": exc.plan_id,
-            },
-        ) from exc
+        raise _not_found(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _plan_response(plan)
@@ -101,3 +125,16 @@ async def update_experiment_plan(
 
 def _plan_response(plan: ExperimentPlanRecord) -> ExperimentPlanResponse:
     return ExperimentPlanResponse(**plan.to_record())
+
+
+def _not_found(exc: ExperimentPlanNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "code": "experiment_plan_not_found",
+            "message": str(exc),
+            "collection_id": exc.collection_id,
+            "objective_id": exc.objective_id,
+            "plan_id": exc.plan_id,
+        },
+    )

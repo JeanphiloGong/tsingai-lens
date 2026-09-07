@@ -153,9 +153,22 @@ class ChatRepository(Protocol):
         decided_at: str,
     ) -> ChatToolCall: ...
 
+    async def claim_approved_tool_call(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        user_id: str,
+        started_at: str,
+    ) -> ChatToolCall | None: ...
+
 
 class ExperimentPlanRepository(Protocol):
     async def upsert_plan(
+        self, plan: ExperimentPlanRecord
+    ) -> ExperimentPlanRecord: ...
+
+    async def append_plan_revision(
         self, plan: ExperimentPlanRecord
     ) -> ExperimentPlanRecord: ...
 
@@ -336,6 +349,12 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
     ) -> dict[str, Any] | None: ...
 
+    async def confirm_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective: ...
+
     async def queue_analysis(
         self,
         collection_id: str,
@@ -391,6 +410,7 @@ class ObjectiveRepository(Protocol):
         error_code: str,
         error_message: str,
         expected_status: str | None = None,
+        contributions: tuple[PaperContribution, ...] = (),
     ) -> ObjectiveAnalysis: ...
 
     async def interrupt_active_analyses(self) -> int: ...

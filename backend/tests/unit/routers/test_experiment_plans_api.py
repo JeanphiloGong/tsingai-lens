@@ -45,6 +45,27 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan() -> None:
             ExperimentPlanCreateRequest(
                 title="Preheating validation matrix",
                 content="Expert-authored validation design.",
+                structured_plan={
+                    "hypothesis": "Preheating changes elongation.",
+                    "variables": [
+                        {
+                            "name": "preheating temperature",
+                            "role": "independent",
+                            "planned_values": ["expert-selected levels"],
+                            "basis": "expert_selection_required",
+                            "basis_evidence_ids": [],
+                        }
+                    ],
+                    "controls": ["Include an unheated reference."],
+                    "fixed_conditions": ["Hold alloy state fixed."],
+                    "measurements": ["Measure elongation."],
+                    "replication": "Use independent builds.",
+                    "analysis_method": "Estimate the response with uncertainty.",
+                    "acceptance_criteria": ["Direction repeats across builds."],
+                    "feasibility_checks": ["Verify thermal stability."],
+                    "safety_considerations": ["Review hot-surface controls."],
+                    "limitations": ["Levels require expert selection."],
+                },
             ),
             request,
         )
@@ -63,6 +84,10 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan() -> None:
                 title="Edited validation matrix",
                 content="Edited design with explicit controls.",
                 status="ready_for_review",
+                structured_plan={
+                    **created.structured_plan,
+                    "hypothesis": "Reviewed preheating hypothesis.",
+                },
             ),
             request,
         )
@@ -72,9 +97,22 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan() -> None:
     assert created.created_by == "expert-a"
     assert created.source_message_id is None
     assert created.metadata == {"source": "manual"}
+    assert created.plan_version == 1
+    assert created.structured_plan is not None
     assert listed.items[0].plan_id == created.plan_id
+    historical = asyncio.run(
+        experiment_plans_controller.read_experiment_plan(
+            "col_1", "objective_1", created.plan_id, request
+        )
+    )
     assert updated.title == "Edited validation matrix"
     assert updated.status == "ready_for_review"
+    assert updated.plan_id != created.plan_id
+    assert updated.plan_version == 2
+    assert updated.parent_plan_id == created.plan_id
+    assert updated.updated_by == "expert-a"
+    assert historical.plan_id == created.plan_id
+    assert historical.plan_version == 1
 
 
 def test_experiment_plan_create_contract_rejects_chat_message_provenance() -> None:

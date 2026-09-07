@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from alembic import command
@@ -7,7 +8,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import MetaData, Table, create_engine, inspect, select
 from sqlalchemy.engine import URL
 
 from infra.persistence.postgres.base import Base
@@ -15,7 +16,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260901_0041"
+HEAD_REVISION = "20260907_0042"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -72,6 +73,19 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             column["name"]
             for column in inspect(connection).get_columns("chat_messages")
         }
+        assert {
+            "plan_version",
+            "parent_plan_id",
+            "structured_plan",
+            "updated_by",
+        }.issubset(
+            {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "objective_experiment_plans"
+                )
+            }
+        )
 
         with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
             command.downgrade(config, "20260827_0037")
@@ -109,6 +123,109 @@ def test_existing_0040_database_removes_retired_task_output_path(tmp_path) -> No
         assert "output_path" not in {
             column["name"] for column in inspect(connection).get_columns("tasks")
         }
+
+    engine.dispose()
+
+
+def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "migration-plan-from-0041.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
+        command.downgrade(config, "20260901_0041")
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            "20260901_0041"
+        )
+        assert {
+            "plan_version",
+            "parent_plan_id",
+            "structured_plan",
+            "updated_by",
+        }.isdisjoint(
+            {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "objective_experiment_plans"
+                )
+            }
+        )
+        metadata = MetaData()
+        auth_users = Table("auth_users", metadata, autoload_with=connection)
+        collections = Table("collections", metadata, autoload_with=connection)
+        objectives = Table("research_objectives", metadata, autoload_with=connection)
+        plans = Table(
+            "objective_experiment_plans", metadata, autoload_with=connection
+        )
+        connection.execute(
+            auth_users.insert().values(
+                user_id="legacy-user",
+                email="legacy@example.com",
+                display_name=None,
+                password_hash="synthetic-password-hash",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            collections.insert().values(
+                collection_id="legacy-collection",
+                owner_user_id="legacy-user",
+                name="Legacy collection",
+                description=None,
+                status="idle",
+                paper_count=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        connection.execute(
+            objectives.insert().values(
+                collection_id="legacy-collection",
+                objective_id="legacy-objective",
+                rank=1,
+                origin="system_discovered",
+                created_by_tool_call_id=None,
+                payload={"question": "Legacy question"},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        connection.execute(
+            plans.insert().values(
+                plan_id="legacy-plan",
+                collection_id="legacy-collection",
+                objective_id="legacy-objective",
+                title="Legacy plan",
+                content="Previously approved prose.",
+                status="draft",
+                source_message_id=None,
+                source_links=[],
+                metadata_json={"source": "manual"},
+                created_by="legacy-user",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+        command.upgrade(config, "head")
+
+        upgraded_plans = Table(
+            "objective_experiment_plans", MetaData(), autoload_with=connection
+        )
+        row = connection.execute(
+            select(upgraded_plans).where(upgraded_plans.c.plan_id == "legacy-plan")
+        ).mappings().one()
+        assert row["plan_version"] == 1
+        assert row["parent_plan_id"] is None
+        assert row["structured_plan"] is None
+        assert row["updated_by"] is None
 
     engine.dispose()
 

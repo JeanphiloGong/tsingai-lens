@@ -116,6 +116,86 @@ async def test_derives_hybrid_finding_without_mutating_parent() -> None:
     assert {item.origin for item in version_two} == {"system_generated", "hybrid"}
 
 
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "Higher temperature increased tensile strength to 999 MPa.",
+        "Higher temperature increased tensile strength to 620 GPa.",
+        "Higher temperature was associated with lower tensile strength.",
+        "Higher temperature was associated with greater hardness.",
+        "Higher temperature caused greater tensile strength.",
+        (
+            "For Ti-6Al-4V, increasing laser power from 180 W to 220 W "
+            "was associated with lower porosity."
+        ),
+        "The IN718 sample showed 10^-3 A/cm² behavior.",
+    ),
+)
+async def test_persists_finding_statement_warnings_without_blocking_authoring(
+    statement: str,
+) -> None:
+    repository = await _published_objective_repository()
+    service = _service(repository)
+
+    result = await service.create_version(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        source_analysis_version=1,
+        statement=statement,
+        assertion_strength="associative",
+        supporting_evidence_ids=("evidence-1",),
+        contradicting_evidence_ids=(),
+        context_evidence_ids=(),
+        condition_boundary_evidence_ids=(),
+        limitations=(),
+        parent_finding_id=None,
+        abstention_reason=None,
+        created_by_user_id="user-researcher",
+    )
+
+    assert result.finding is not None
+    assert result.finding.warnings
+    persisted = await repository.read_finding(
+        "col-gold", "obj-1", 2, result.finding.finding_id
+    )
+    assert persisted is not None
+    assert persisted.warnings == result.finding.warnings
+
+    objective = await repository.read_objective("col-gold", "obj-1")
+    assert objective is not None
+    assert objective.published_analysis_version == 2
+
+
+async def test_page_citations_are_not_scientific_measurement_warnings() -> None:
+    repository = await _published_objective_repository()
+    service = _service(repository)
+
+    result = await service.create_version(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        source_analysis_version=1,
+        statement=(
+            "Higher temperature was associated with greater tensile strength "
+            "in the results table on page 8. This is an observed association."
+        ),
+        assertion_strength="associative",
+        supporting_evidence_ids=("evidence-1",),
+        contradicting_evidence_ids=(),
+        context_evidence_ids=(),
+        condition_boundary_evidence_ids=(),
+        limitations=(),
+        parent_finding_id=None,
+        abstention_reason=None,
+        created_by_user_id="user-researcher",
+    )
+
+    assert not any(
+        "numeric values not present" in warning
+        or "value/unit pairs not present" in warning
+        for warning in result.finding.warnings
+    )
+
+
 async def test_rejects_stale_or_unknown_evidence_without_writing_a_version() -> None:
     repository = await _published_objective_repository()
     service = _service(repository)
@@ -145,7 +225,7 @@ async def test_rejects_stale_or_unknown_evidence_without_writing_a_version() -> 
         collection_id="col-gold",
         objective_id="obj-1",
         source_analysis_version=1,
-        statement="Supported draft.",
+        statement="Higher temperature was associated with greater strength.",
         assertion_strength="associative",
         supporting_evidence_ids=("evidence-1",),
         contradicting_evidence_ids=(),

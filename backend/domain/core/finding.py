@@ -208,6 +208,9 @@ class Finding:
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
     created_at: datetime | None = None
+    # Authored Deep Path claims may need scientific review even when their
+    # provenance and structural bindings are valid.
+    warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not all(
@@ -439,6 +442,7 @@ class Finding:
                 payload.get("created_by_tool_call_id")
             ),
             created_at=_datetime_or_none(payload.get("created_at")),
+            warnings=_strings(payload.get("warnings")),
         )
 
     @staticmethod
@@ -690,7 +694,7 @@ class Finding:
             raise ValueError("finding outcome differs from direct evidence")
 
     def to_record(self) -> dict[str, Any]:
-        return {
+        record = {
             "collection_id": self.collection_id,
             "objective_id": self.objective_id,
             "analysis_version": self.analysis_version,
@@ -717,6 +721,9 @@ class Finding:
             "created_by_tool_call_id": self.created_by_tool_call_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if self.warnings:
+            record["warnings"] = list(self.warnings)
+        return record
 
 
 def _common_attributes(

@@ -215,7 +215,7 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByLabel('Research activity')).toHaveCount(0);
 
 		await sendAgentMessage(page, 'What published findings are available?');
-		await expect(page.getByText('Published findings completed')).toBeVisible();
+		await expect(page.getByText('Published findings completed', { exact: true })).toBeVisible();
 		await expect(page.getByText('1 findings · 3 evidence records')).toBeVisible();
 		await expect(page.getByText('One paper used a different heat treatment.')).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Open finding' })).toHaveAttribute(
@@ -760,6 +760,7 @@ function agentMessage(
 		tool_name: null,
 		tool_arguments: null,
 		tool_result: null,
+		source_contexts: [],
 		...overrides
 	};
 }

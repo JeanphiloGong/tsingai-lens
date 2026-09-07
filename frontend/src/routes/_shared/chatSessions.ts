@@ -17,6 +17,7 @@ export type ChatSourceContext = {
 	quote: string;
 	heading_path: string | null;
 	quote_truncated: boolean;
+	source_digest?: string | null;
 };
 
 export type ChatToolResult = {

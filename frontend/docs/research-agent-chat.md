@@ -16,9 +16,12 @@ User message
   -> final answer or exact write approval
 ```
 
-Ordinary conversation does not require a capability. Collection reads and
-Objective drafts run automatically. A Core write remains paused until the user
-approves the exact persisted arguments.
+Ordinary conversation does not require a capability. The Agent receives a
+small, intent-matched set of collection, Source, Finding, Objective, or plan
+actions for each decision; it does not receive the whole capability catalogue.
+Collection screening stays separate from Source reading, and deriving a new
+Objective requires an explicit request. A Core write remains paused until the
+user approves the exact persisted arguments.
 
 ## Product Boundary
 
@@ -40,8 +43,12 @@ scientific fact store.
 - Preparing papers and starting Objective analysis are separate approved writes.
   Preparation targets exact Documents; analysis targets an exact non-empty set
   of ready Documents.
-- A created Objective remains an unconfirmed candidate. Confirmation and
-  analysis stay in the Objective workspace.
+- A created Objective remains an unconfirmed candidate. The Agent may propose
+  `confirm_objective`, but the researcher must approve that exact action.
+  Starting automatic or Agent-authored analysis is a later, separate approval;
+  confirmation alone never queues work. The existing Objective workspace may
+  still combine the researcher's confirmation and automatic-analysis start in
+  its established browser action.
 - A Finding review begins from the complete published Finding, linked Evidence,
   and exact Sources. Feedback and curation reuse `FindingFeedbackService` after
   exact user approval.
@@ -58,9 +65,16 @@ scientific fact store.
   Exact user approval publishes a new immutable analysis version. A revision
   records supersession lineage and never changes the previous Evidence or any
   Finding that cites it.
-- General Agent prose cannot be saved as an Experiment Plan. New plans are
-  authored manually until a dedicated scientifically validated capability
-  exists.
+- `read_source` is the exact Source-reading capability used before Evidence
+  drafting. It returns complete text, table Markdown, or a figure caption when
+  the bounded response fits, plus the canonical digest and continuation state
+  for oversized content. A returned Source remains inspection context until a
+  separate Evidence draft and approved write are completed.
+- Research-plan prose becomes a transient structured draft first. The separate
+  approved save rechecks the current Finding and Evidence fingerprints, then
+  uses the same Objective-scoped ExperimentPlan service as the human workflow.
+  Saving creates an editable draft; it does not authorize or execute an
+  experiment.
 
 ## Browser Contract
 
@@ -105,7 +119,13 @@ The server trajectory is authoritative. Browser storage remembers which
 session to load, how to label it in the local history list, and one pending
 Source handoff from the document reader. The pending Source is shown above the
 composer and can be removed. It is cleared after the complete persisted turn
-returns; the durable user message then owns the Source context.
+returns; the durable user message then owns the Source context. The browser
+sends the canonical locator kind (`text_window`, `table`, or `figure`) and a
+bounded quote. The backend resolves that locator against the immutable prepared
+Source, rejects forged or stale context with `422`, and persists canonical
+title, location, link, quote, and full-Source digest metadata. The browser does
+not establish Source authenticity itself, and a verified context is still not
+Evidence until the Evidence authoring contract is completed.
 
 ## Visible States
 
@@ -163,7 +183,11 @@ Their result panels show:
 - links to canonical collection, Objective, Finding, or Evidence records;
 - a distinct Agent paper-analysis activity whose completed summary reports the
   number of published Source-grounded Evidence records and links to the
-  canonical Objective analysis.
+  canonical Objective analysis. An inspected paper with no grounded Evidence
+  remains visible through its explicit paper disposition instead of receiving
+  an invented Evidence record;
+- transient Evidence/Finding drafts, derived-question drafts, quality results,
+  and research-plan drafts with their source links and review status.
 
 A tool request paused for approval is represented by the approval panel only;
 the browser does not duplicate it as a second activity row. Images or embedded
@@ -182,9 +206,9 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 ### Write approval
 
 For `start_research_process`, `create_objective_candidate`,
-`start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
-`create_finding_version`, `create_evidence_version`, and
-`publish_agent_objective_analysis`, the page renders the exact persisted
+`confirm_objective`, `start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
+`create_finding_version`, `create_evidence_version`,
+`publish_agent_objective_analysis`, and `create_research_plan`, the page renders the exact persisted
 arguments and exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
 separate Evidence-to-conclusion decision that publishes a new immutable

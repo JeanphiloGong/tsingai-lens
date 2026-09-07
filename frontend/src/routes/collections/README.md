@@ -80,6 +80,12 @@ This node owns the Collection route family.
   Source-grounded Evidence record. That write requires the same exact
   approval, Source digest, and immutable-version publication as the human
   authoring command.
+  Source searches, complete table reads, Evidence/Finding drafts, quality
+  assessments, and follow-up Objective drafts remain visible as reviewable
+  research artifacts in the conversation. From a published analysis, the Agent
+  may also propose a ResearchPlan and, after a separate approval, save it with
+  the Finding/Evidence snapshots it used; a stale snapshot is shown as a
+  technical failure rather than silently saving a plan against newer results.
   The Agent composer can also add PDF papers directly to the current
   Collection. This user action reuses the canonical Collection document upload
   endpoint and queues independent per-paper preparation tasks; it does not send

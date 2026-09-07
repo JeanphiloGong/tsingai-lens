@@ -1,15 +1,25 @@
 import type { ChatMessage } from '../../../_shared/chatSessions';
 
 const reviewableResultTools = new Set([
+	'create_evidence_draft',
 	'create_evidence_version',
+	'create_finding_draft',
 	'create_finding_version',
 	'create_objective_candidate',
+	'confirm_objective',
+	'create_research_plan',
+	'derive_objective',
+	'assess_objective_quality',
+	'inspect_table',
 	'inspect_objective_analysis',
 	'inspect_published_finding',
 	'inspect_research_process',
 	'preview_research_scope',
 	'propose_objective_drafts',
+	'propose_research_plan',
 	'publish_agent_objective_analysis',
+	'read_source',
+	'search_sources',
 	'start_objective_analysis',
 	'start_research_process'
 ]);

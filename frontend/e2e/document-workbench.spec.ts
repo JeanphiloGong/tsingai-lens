@@ -283,7 +283,7 @@ test('a selected document Source reaches the same Collection Agent without a Cor
 			{
 				collection_id: collectionId,
 				document_id: documentId,
-				source_kind: 'paragraph',
+				source_kind: 'text_window',
 				source_ref: 'results',
 				page: 3,
 				quote: 'Conductivity improved to 12 mS/cm under EIS.'

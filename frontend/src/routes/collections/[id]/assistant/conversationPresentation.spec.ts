@@ -80,6 +80,46 @@ describe('buildChatPresentation', () => {
 		expect(activity.artifacts[0].toolName).toBe('propose_objective_drafts');
 	});
 
+	it('keeps Source, draft, quality, derivation, and plan results reviewable', () => {
+		const toolNames = [
+			'search_sources',
+			'read_source',
+			'inspect_table',
+			'confirm_objective',
+			'create_evidence_draft',
+			'create_finding_draft',
+			'assess_objective_quality',
+			'derive_objective',
+			'propose_research_plan',
+			'create_research_plan'
+		];
+		const items = buildChatPresentation([
+			message('call_context', 'assistant', {
+				toolCallId: 'tool_context',
+				toolName: 'get_collection_context'
+			}),
+			message('result_context', 'tool', {
+				toolCallId: 'tool_context',
+				toolResult: result('tool_context')
+			}),
+			...toolNames.flatMap((toolName, index) => [
+				message(`call_${index}`, 'assistant', {
+					toolCallId: `tool_${index}`,
+					toolName
+				}),
+				message(`result_${index}`, 'tool', {
+					toolCallId: `tool_${index}`,
+					toolResult: result(`tool_${index}`)
+				})
+			])
+		]);
+
+		const activity = items[0];
+		expect(activity.kind).toBe('activity');
+		if (activity.kind !== 'activity') return;
+		expect(activity.artifacts.map((item) => item.toolName)).toEqual(toolNames);
+	});
+
 	it('marks a failed operation so its details can open automatically', () => {
 		const items = buildChatPresentation([
 			message('call_1', 'assistant', {

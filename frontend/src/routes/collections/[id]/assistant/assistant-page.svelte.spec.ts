@@ -5,6 +5,7 @@ import { render } from 'vitest-browser-svelte';
 import type {
 	ChatMessage,
 	ChatToolCall,
+	ChatToolResult,
 	ChatTrajectory,
 	ChatTurn
 } from '../../../_shared/chatSessions';
@@ -119,6 +120,18 @@ function message(
 		tool_result: null,
 		source_contexts: [],
 		...overrides
+	};
+}
+
+function baseToolResult(toolCallId: string): ChatToolResult {
+	return {
+		tool_call_id: toolCallId,
+		status: 'succeeded',
+		data: {},
+		resource_refs: [],
+		warnings: [],
+		error_code: null,
+		error_message: null
 	};
 }
 
@@ -423,7 +436,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			collection_id: 'col_123',
 			document_id: 'doc_1',
 			document_title: 'Paper A',
-			source_kind: 'paragraph',
+			source_kind: 'text_window',
 			source_ref: 'results',
 			page: 3,
 			quote: 'Conductivity improved to 12 mS/cm under EIS.',
@@ -498,7 +511,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				collection_id: 'col_123',
 				document_id: 'doc_1',
 				document_title: 'Paper A',
-				source_kind: 'paragraph',
+				source_kind: 'text_window',
 				source_ref: 'results',
 				page: 3,
 				quote: 'Conductivity improved to 12 mS/cm under EIS.',
@@ -1009,6 +1022,134 @@ describe('collections/[id]/assistant Research Agent', () => {
 		).toBe(false);
 	});
 
+	it('shows Source-grounded drafts and complete table results for review', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Inspect this table and draft evidence'),
+					message('msg_call_table', 'assistant', '', {
+						tool_call_id: 'call_table',
+						tool_name: 'inspect_table'
+					}),
+					message('msg_result_table', 'tool', '', {
+						tool_call_id: 'call_table',
+						tool_result: {
+							...baseToolResult('call_table'),
+							data: {
+								data_row_count: 2,
+								column_count: 3,
+								table_markdown:
+									'| Condition | Result | Unit |\n| --- | --- | --- |\n| P150 | 82 | % |'
+							}
+						}
+					}),
+					message('msg_call_source', 'assistant', '', {
+						tool_call_id: 'call_source',
+						tool_name: 'read_source'
+					}),
+					message('msg_result_source', 'tool', '', {
+						tool_call_id: 'call_source',
+						tool_result: {
+							...baseToolResult('call_source'),
+							data: {
+								source_ref: 'results_4',
+								content: 'The P150 condition reached 82% elongation.',
+								content_truncated: true,
+								next_offset: 8
+							}
+						}
+					}),
+					message('msg_call_draft', 'assistant', '', {
+						tool_call_id: 'call_draft',
+						tool_name: 'create_evidence_draft'
+					}),
+					message('msg_result_draft', 'tool', '', {
+						tool_call_id: 'call_draft',
+						tool_result: {
+							...baseToolResult('call_draft'),
+							data: {
+								draft: {
+									source_ref: 'table_2',
+									source_kind: 'table',
+									evidence_role: 'direct_result',
+									source_excerpt: 'P150 elongation was 82%.',
+									changed_variables: [{ name: 'preheat', target_value: 150 }]
+								}
+							}
+						}
+					})
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Inspect this table and draft evidence');
+
+		await expect.element(browserPage.getByText('Complete Source table')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('P150 | 82 | %')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Complete Source content')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The P150 condition reached 82% elongation.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This Source is bounded; ask the Agent to continue from the returned offset before treating it as complete.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence draft completed' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('table_2')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('P150 elongation was 82%.')).toBeInTheDocument();
+	});
+
+	it('uses the research-plan approval boundary and wording', async () => {
+		const call = pendingCall({
+			tool_call_id: 'call_plan',
+			name: 'create_research_plan',
+			arguments: {
+				objective_id: 'obj_1',
+				title: 'Validate the preheat effect',
+				source_snapshots: [{ finding_id: 'finding_1', analysis_version: 2 }]
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Save the research plan'),
+					message('msg_call_plan', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Save the research plan');
+
+		await expect
+			.element(browserPage.getByText('Save research plan', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Persist this research-plan draft only after checking its Finding and Evidence snapshots. The saved plan remains a researcher-reviewable draft.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and save research plan' }))
+			.toBeInTheDocument();
+	});
+
 	it('shows exact write arguments and blocks new messages while approval is pending', async () => {
 		const call = pendingCall();
 		installApi({
@@ -1496,6 +1637,44 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and analyze' }))
+				.toBeInTheDocument();
+	});
+
+	it('requires a separate approval to confirm a research question without starting analysis', async () => {
+		const call = pendingCall({
+			name: 'confirm_objective',
+			arguments: { objective_id: 'obj_energy_1' }
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Confirm this research question'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Confirm this research question');
+
+		await expect
+			.element(browserPage.getByText('Research question confirmation', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Confirm this reviewed research question without starting its analysis.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve confirmation' }))
 			.toBeInTheDocument();
 	});
 

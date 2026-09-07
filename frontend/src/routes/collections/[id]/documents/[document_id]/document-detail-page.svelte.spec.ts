@@ -372,12 +372,13 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			collection_id: 'col_123',
 			document_id: 'doc_1',
 			document_title: 'Paper A',
-			source_kind: 'paragraph',
+			source_kind: 'text_window',
 			source_ref: 'results',
 			page: 3,
 			quote: 'Conductivity improved to 12 mS/cm under EIS.',
 			heading_path: 'Results',
-			quote_truncated: false
+			quote_truncated: false,
+			source_digest: null
 		});
 		expect(
 			fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')

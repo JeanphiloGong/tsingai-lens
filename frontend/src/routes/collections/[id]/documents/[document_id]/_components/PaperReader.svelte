@@ -517,8 +517,8 @@
 		paragraph: WorkbenchPdfParagraph
 	): DocumentSourceSelection {
 		return {
-			source_kind: 'paragraph',
-			source_ref: paragraph.source_span_id || paragraph.id,
+			source_kind: 'text_window',
+			source_ref: paragraph.id,
 			page: pageNumber,
 			quote: paragraph.text,
 			heading_path: paragraph.section

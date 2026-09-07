@@ -541,6 +541,12 @@
 		switch (toolName) {
 			case 'get_collection_context':
 				return $t('researchAgent.capability.collection');
+			case 'search_sources':
+				return $t('researchAgent.capability.searchSources');
+			case 'read_source':
+				return $t('researchAgent.capability.readSource');
+			case 'inspect_table':
+				return $t('researchAgent.capability.inspectTable');
 			case 'inspect_document_sources':
 				return $t('researchAgent.capability.documentSources');
 			case 'inspect_research_process':
@@ -555,8 +561,12 @@
 				return $t('researchAgent.capability.findingFeedback');
 			case 'curate_finding':
 				return $t('researchAgent.capability.findingCuration');
+			case 'create_finding_draft':
+				return $t('researchAgent.capability.findingDraft');
 			case 'create_finding_version':
 				return $t('researchAgent.capability.findingAuthoring');
+			case 'create_evidence_draft':
+				return $t('researchAgent.capability.evidenceDraft');
 			case 'create_evidence_version':
 				return $t('researchAgent.capability.evidenceAuthoring');
 			case 'publish_agent_objective_analysis':
@@ -565,12 +575,22 @@
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
 				return $t('researchAgent.capability.createObjective');
+			case 'confirm_objective':
+				return $t('researchAgent.capability.confirmObjective');
+			case 'derive_objective':
+				return $t('researchAgent.capability.deriveObjective');
 			case 'preview_research_scope':
 				return $t('researchAgent.capability.previewResearchScope');
+			case 'propose_research_plan':
+				return $t('researchAgent.capability.researchPlanDraft');
+			case 'create_research_plan':
+				return $t('researchAgent.capability.researchPlanAuthoring');
 			case 'start_objective_analysis':
 				return $t('researchAgent.capability.startObjectiveAnalysis');
 			case 'inspect_objective_analysis':
 				return $t('researchAgent.capability.inspectObjectiveAnalysis');
+			case 'assess_objective_quality':
+				return $t('researchAgent.capability.objectiveQuality');
 			default:
 				return $t('researchAgent.capability.unknown');
 		}
@@ -629,6 +649,23 @@
 				count: numberValue(result.data, 'match_total')
 			});
 		}
+		if (name === 'search_sources') {
+			return $t('researchAgent.capability.documentSourceCount', {
+				count: numberValue(result.data, 'match_total')
+			});
+		}
+		if (name === 'read_source') {
+			const sourceRef = result.data.source_ref;
+			return $t('researchAgent.capability.sourceReadSummary', {
+				source: typeof sourceRef === 'string' && sourceRef.trim() ? sourceRef : '--'
+			});
+		}
+		if (name === 'inspect_table') {
+			return $t('researchAgent.capability.tableSummary', {
+				rows: numberValue(result.data, 'data_row_count'),
+				columns: numberValue(result.data, 'column_count')
+			});
+		}
 		if (name === 'inspect_research_process') {
 			const process = result.data.process;
 			if (!process || typeof process !== 'object' || !('status' in process)) {
@@ -674,6 +711,12 @@
 				? $t('researchAgent.capability.findingPublished')
 				: $t('researchAgent.capability.findingAbstentionPublished');
 		}
+		if (name === 'create_finding_draft') {
+			return $t('researchAgent.capability.findingDraftReady');
+		}
+		if (name === 'create_evidence_draft') {
+			return $t('researchAgent.capability.evidenceDraftReady');
+		}
 		if (name === 'create_evidence_version') {
 			return $t('researchAgent.capability.evidencePublished');
 		}
@@ -689,6 +732,28 @@
 		}
 		if (name === 'create_objective_candidate') {
 			return $t('researchAgent.capability.objectiveCreated');
+		}
+		if (name === 'confirm_objective') {
+			return $t('researchAgent.capability.objectiveConfirmed');
+		}
+		if (name === 'derive_objective') {
+			return $t('researchAgent.capability.derivedDraftCount', {
+				count: numberValue(result.data, 'draft_count')
+			});
+		}
+		if (name === 'propose_research_plan') {
+			return $t('researchAgent.capability.researchPlanDraftReady');
+		}
+		if (name === 'create_research_plan') {
+			return $t('researchAgent.capability.researchPlanSaved');
+		}
+		if (name === 'assess_objective_quality') {
+			return $t('researchAgent.capability.qualitySummary', {
+				findings: numberValue(result.data, 'finding_count'),
+				evidence: numberValue(result.data, 'total_evidence_count'),
+				gaps: numberValue(result.data, 'scientific_gap_count'),
+				failures: numberValue(result.data, 'technical_failure_count')
+			});
 		}
 		if (name === 'preview_research_scope') {
 			const counts = result.data.scope_counts;
@@ -883,6 +948,151 @@
 			: [];
 	}
 
+	function resultDraft(message: ChatMessage): Record<string, unknown> | null {
+		const draft = message.tool_result?.data.draft;
+		return draft && typeof draft === 'object' && !Array.isArray(draft)
+			? (draft as Record<string, unknown>)
+			: null;
+	}
+
+	function resultDraftDetails(message: ChatMessage) {
+		const draft = resultDraft(message);
+		if (!draft) return [];
+		const details: Array<{ label: string; value: string }> = [];
+		const add = (label: string, value: unknown) => {
+			const formatted = formatValue(value);
+			if (formatted !== '--') details.push({ label, value: formatted });
+		};
+		if (draft.source_ref) add($t('researchAgent.capability.sourceReference'), draft.source_ref);
+		if (draft.source_kind) add($t('researchAgent.capability.sourceKind'), draft.source_kind);
+		if (draft.evidence_role) add($t('researchAgent.capability.evidenceRole'), draft.evidence_role);
+		if (draft.statement) add($t('researchAgent.capability.findingStatement'), draft.statement);
+		if (draft.assertion_strength)
+			add($t('researchAgent.capability.assertionStrength'), draft.assertion_strength);
+		if (draft.supporting_evidence_ids)
+			add($t('researchAgent.capability.supportingEvidence'), draft.supporting_evidence_ids);
+		if (draft.source_excerpt)
+			add($t('researchAgent.capability.sourceExcerpt'), draft.source_excerpt);
+		if (draft.authoring_note)
+			add($t('researchAgent.capability.authoringNote'), draft.authoring_note);
+		return details;
+	}
+
+	function draftReviewNote(message: ChatMessage) {
+		switch (resultToolName(message)) {
+			case 'create_evidence_draft':
+				return $t('researchAgent.capability.evidenceDraftTransient');
+			case 'create_finding_draft':
+				return $t('researchAgent.capability.findingDraftTransient');
+			default:
+				return '';
+		}
+	}
+
+	function resultPlanData(message: ChatMessage): Record<string, unknown> | null {
+		const data = message.tool_result?.data ?? {};
+		const plan = data.plan;
+		if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
+			return plan as Record<string, unknown>;
+		}
+		return data;
+	}
+
+	function resultPlanContent(message: ChatMessage) {
+		const toolName = resultToolName(message);
+		if (toolName !== 'propose_research_plan' && toolName !== 'create_research_plan') return '';
+		const data = resultPlanData(message);
+		return data && typeof data.content === 'string' ? data.content.trim() : '';
+	}
+
+	function resultPlanTitle(message: ChatMessage) {
+		const toolName = resultToolName(message);
+		if (toolName !== 'propose_research_plan' && toolName !== 'create_research_plan') return '';
+		const data = resultPlanData(message);
+		return data && typeof data.title === 'string' ? data.title.trim() : '';
+	}
+
+	function resultTableMarkdown(message: ChatMessage) {
+		if (resultToolName(message) !== 'inspect_table') return '';
+		const markdown = message.tool_result?.data.table_markdown;
+		return typeof markdown === 'string' ? markdown.trim() : '';
+	}
+
+	function resultSourceContent(message: ChatMessage) {
+		if (resultToolName(message) !== 'read_source') return '';
+		const data = message.tool_result?.data ?? {};
+		for (const key of ['content', 'source_content', 'source_excerpt', 'text']) {
+			const value = data[key];
+			if (typeof value === 'string' && value.trim()) return value.trim();
+		}
+		return '';
+	}
+
+	function resultContinuationNote(message: ChatMessage) {
+		const name = resultToolName(message);
+		const data = message.tool_result?.data ?? {};
+		if (
+			name === 'read_source' &&
+			(data.content_truncated === true ||
+				(data.next_offset !== null && data.next_offset !== undefined))
+		) {
+			return $t('researchAgent.capability.sourceContinuation');
+		}
+		if (
+			name === 'inspect_table' &&
+			(data.content_truncated === true ||
+				(data.next_row_offset !== null && data.next_row_offset !== undefined))
+		) {
+			return $t('researchAgent.capability.tableContinuation');
+		}
+		return '';
+	}
+
+	function resultSourceMatches(message: ChatMessage) {
+		if (resultToolName(message) !== 'search_sources') return [];
+		const matches = message.tool_result?.data.matches;
+		return Array.isArray(matches)
+			? matches.filter((item): item is Record<string, unknown> =>
+					Boolean(item && typeof item === 'object' && !Array.isArray(item))
+				)
+			: [];
+	}
+
+	function resultQuality(message: ChatMessage) {
+		if (resultToolName(message) !== 'assess_objective_quality') return null;
+		return message.tool_result?.data ?? null;
+	}
+
+	function qualityStatusLabel(value: unknown) {
+		switch (String(value ?? '')) {
+			case 'finding_available':
+				return $t('researchAgent.capability.qualityFindingAvailable');
+			case 'finding_available_with_gaps':
+				return $t('researchAgent.capability.qualityFindingWithGaps');
+			case 'scientific_abstention':
+				return $t('researchAgent.capability.qualityScientificAbstention');
+			case 'no_grounded_evidence':
+				return $t('researchAgent.capability.qualityNoGroundedEvidence');
+			default:
+				return $t('researchAgent.capability.qualityNotAnalyzed');
+		}
+	}
+
+	function draftBasisCount(draft: Record<string, unknown>) {
+		return Array.isArray(draft.derivation_basis) ? draft.derivation_basis.length : 0;
+	}
+
+	function draftBasisRationales(draft: Record<string, unknown>) {
+		const basis = draft.derivation_basis;
+		if (!Array.isArray(basis)) return [];
+		return basis
+			.filter((item): item is Record<string, unknown> =>
+				Boolean(item && typeof item === 'object' && !Array.isArray(item))
+			)
+			.map((item) => (typeof item.rationale === 'string' ? item.rationale.trim() : ''))
+			.filter(Boolean);
+	}
+
 	function draftList(draft: Record<string, unknown>, key: string) {
 		const value = draft[key];
 		return Array.isArray(value) ? value.map(String).filter(Boolean).join(', ') : '';
@@ -913,6 +1123,12 @@
 				return $t('researchAgent.resource.finding');
 			case 'evidence':
 				return $t('researchAgent.resource.evidence');
+			case 'source':
+				return $t('researchAgent.resource.source');
+			case 'document':
+				return $t('researchAgent.resource.document');
+			case 'research_plan':
+				return $t('researchAgent.resource.researchPlan');
 			case 'objective_analysis':
 				return $t('researchAgent.resource.analysis');
 			case 'document_preparation_task':
@@ -933,6 +1149,9 @@
 		if (call.name === 'start_objective_analysis') {
 			return $t('researchAgent.approval.objectiveAnalysisBody');
 		}
+		if (call.name === 'confirm_objective') {
+			return $t('researchAgent.approval.objectiveConfirmationBody');
+		}
 		if (call.name === 'record_finding_feedback') {
 			return $t('researchAgent.approval.findingFeedbackBody');
 		}
@@ -947,6 +1166,9 @@
 		if (call.name === 'create_evidence_version') {
 			return $t('researchAgent.approval.evidenceAuthoringBody');
 		}
+		if (call.name === 'create_research_plan') {
+			return $t('researchAgent.approval.researchPlanBody');
+		}
 		if (call.name === 'publish_agent_objective_analysis') {
 			return $t('researchAgent.approval.agentObjectiveAnalysisBody');
 		}
@@ -959,6 +1181,9 @@
 		}
 		if (call.name === 'start_objective_analysis') {
 			return $t('researchAgent.approval.analyzeObjective');
+		}
+		if (call.name === 'confirm_objective') {
+			return $t('researchAgent.approval.confirmObjective');
 		}
 		if (call.name === 'record_finding_feedback') {
 			return $t('researchAgent.approval.recordFeedback');
@@ -974,6 +1199,9 @@
 		if (call.name === 'create_evidence_version') {
 			return $t('researchAgent.approval.publishEvidence');
 		}
+		if (call.name === 'create_research_plan') {
+			return $t('researchAgent.approval.publishResearchPlan');
+		}
 		if (call.name === 'publish_agent_objective_analysis') {
 			return $t('researchAgent.approval.publishAgentAnalysis');
 		}
@@ -982,11 +1210,13 @@
 
 	function rejectionNoticeKey(toolName: string | null) {
 		if (toolName === 'start_research_process') return 'researchAgent.researchProcessRejected';
+		if (toolName === 'confirm_objective') return 'researchAgent.objectiveConfirmationRejected';
 		if (toolName === 'start_objective_analysis') return 'researchAgent.objectiveAnalysisRejected';
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
 		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
+		if (toolName === 'create_research_plan') return 'researchAgent.researchPlanRejected';
 		if (toolName === 'publish_agent_objective_analysis') {
 			return 'researchAgent.agentObjectiveAnalysisRejected';
 		}
@@ -1310,9 +1540,97 @@
 																status: String(draft.support_status ?? 'unknown')
 															})}
 														</small>
+														{#each draftBasisRationales(draft) as rationale (rationale)}
+															<small class="draft-basis">{rationale}</small>
+														{/each}
 													</li>
 												{/each}
 											</ol>
+										{/if}
+
+										{#if resultDraftDetails(artifact.resultMessage).length}
+											<dl class="artifact-details">
+												{#each resultDraftDetails(artifact.resultMessage) as detail (detail.label)}
+													<div>
+														<dt>{detail.label}</dt>
+														<dd
+															class:artifact-detail-quote={detail.label ===
+																$t('researchAgent.capability.sourceExcerpt')}
+														>
+															{detail.value}
+														</dd>
+													</div>
+												{/each}
+											</dl>
+										{/if}
+										{#if draftReviewNote(artifact.resultMessage)}
+											<p class="artifact-note">{draftReviewNote(artifact.resultMessage)}</p>
+										{/if}
+
+										{#if resultDrafts(artifact.resultMessage).length && resultToolName(artifact.resultMessage) === 'derive_objective'}
+											<p class="artifact-note">
+												{$t('researchAgent.capability.derivationBasisShown', {
+													count: resultDrafts(artifact.resultMessage).reduce(
+														(total, draft) => total + draftBasisCount(draft),
+														0
+													)
+												})}
+											</p>
+										{/if}
+
+										{#if resultPlanContent(artifact.resultMessage)}
+											<div class="plan-preview">
+												{#if resultPlanTitle(artifact.resultMessage)}
+													<strong>{resultPlanTitle(artifact.resultMessage)}</strong>
+												{/if}
+												<pre>{resultPlanContent(artifact.resultMessage)}</pre>
+											</div>
+										{/if}
+
+										{#if resultTableMarkdown(artifact.resultMessage)}
+											<div class="table-preview">
+												<strong>{$t('researchAgent.capability.tablePreview')}</strong>
+												<pre>{resultTableMarkdown(artifact.resultMessage)}</pre>
+											</div>
+										{/if}
+
+										{#if resultSourceContent(artifact.resultMessage)}
+											<div class="source-preview">
+												<strong>{$t('researchAgent.capability.sourcePreview')}</strong>
+												<blockquote>{resultSourceContent(artifact.resultMessage)}</blockquote>
+											</div>
+										{/if}
+										{#if resultContinuationNote(artifact.resultMessage)}
+											<p class="artifact-note">{resultContinuationNote(artifact.resultMessage)}</p>
+										{/if}
+
+										{#if resultSourceMatches(artifact.resultMessage).length}
+											<ul class="source-match-list">
+												{#each resultSourceMatches(artifact.resultMessage) as match, matchIndex (String(match.source_ref ?? matchIndex))}
+													<li>
+														<strong>{String(match.source_ref ?? '')}</strong>
+														{#if match.content}<span>{String(match.content)}</span>{/if}
+													</li>
+												{/each}
+											</ul>
+										{/if}
+
+										{#if resultQuality(artifact.resultMessage)}
+											{@const quality = resultQuality(artifact.resultMessage)}
+											<div class="quality-preview">
+												<strong>{qualityStatusLabel(quality?.quality_status)}</strong>
+												<span>
+													{$t('researchAgent.capability.qualityDetails', {
+														findings: numberValue(quality ?? {}, 'finding_count'),
+														evidence: numberValue(quality ?? {}, 'total_evidence_count'),
+														gaps: numberValue(quality ?? {}, 'scientific_gap_count'),
+														failures: numberValue(quality ?? {}, 'technical_failure_count')
+													})}
+												</span>
+												{#if quality?.runtime_state === 'previous_published_result_available'}
+													<small>{$t('researchAgent.capability.previousResultRetained')}</small>
+												{/if}
+											</div>
 										{/if}
 
 										{#if resultResearchSteps(artifact.resultMessage).length}
@@ -2245,6 +2563,133 @@
 	.draft-list p,
 	.draft-list small {
 		margin: 4px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.draft-list .draft-basis {
+		display: block;
+		color: var(--text-tertiary);
+		font-style: italic;
+	}
+
+	.artifact-details {
+		display: grid;
+		gap: 8px;
+		margin: 14px 0 0;
+		padding-top: 12px;
+		border-top: 1px solid var(--border-default);
+	}
+
+	.artifact-details > div {
+		display: grid;
+		grid-template-columns: minmax(110px, 0.25fr) minmax(0, 1fr);
+		gap: 10px;
+		align-items: start;
+	}
+
+	.artifact-details dt {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.artifact-details dd {
+		margin: 0;
+		font-size: 12px;
+		line-height: 18px;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.artifact-detail-quote {
+		max-height: 150px;
+		overflow: auto;
+		padding: 8px 10px;
+		border-left: 2px solid var(--border-strong);
+		background: var(--bg-subtle);
+	}
+
+	.artifact-note {
+		margin: 10px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.plan-preview,
+	.table-preview,
+	.source-preview,
+	.quality-preview {
+		margin-top: 14px;
+		padding-top: 12px;
+		border-top: 1px solid var(--border-default);
+	}
+
+	.plan-preview strong,
+	.table-preview strong,
+	.source-preview strong,
+	.quality-preview strong {
+		display: block;
+		font-size: 12px;
+	}
+
+	.plan-preview pre,
+	.table-preview pre {
+		max-height: 260px;
+		margin: 8px 0 0;
+		padding: 10px;
+		overflow: auto;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--bg-subtle);
+		font: inherit;
+		font-size: 12px;
+		line-height: 18px;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.source-preview blockquote {
+		max-height: 260px;
+		overflow: auto;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.source-match-list {
+		display: grid;
+		gap: 8px;
+		margin: 14px 0 0;
+		padding: 12px 0 0 18px;
+		border-top: 1px solid var(--border-default);
+	}
+
+	.source-match-list li {
+		padding-left: 2px;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.source-match-list strong,
+	.source-match-list span {
+		display: block;
+	}
+
+	.source-match-list span {
+		margin-top: 2px;
+		max-height: 120px;
+		overflow: auto;
+		color: var(--text-secondary);
+		white-space: pre-wrap;
+	}
+
+	.quality-preview {
+		display: grid;
+		gap: 5px;
+	}
+
+	.quality-preview span,
+	.quality-preview small {
 		color: var(--text-secondary);
 		font-size: 12px;
 	}

@@ -166,12 +166,15 @@
 			collection_id: collectionId,
 			document_id: documentId,
 			document_title: model.title,
-			source_kind: selection.source_kind,
+			source_kind: ['table', 'figure'].includes(selection.source_kind)
+				? selection.source_kind
+				: 'text_window',
 			source_ref: sourceRef,
 			page: selection.page,
 			quote: sourceQuote.slice(0, 6000),
 			heading_path: selection.heading_path,
-			quote_truncated: sourceQuote.length > 6000
+			quote_truncated: sourceQuote.length > 6000,
+			source_digest: null
 		};
 		storePendingChatSourceContext(context);
 	}

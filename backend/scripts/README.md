@@ -46,6 +46,14 @@ python3 scripts/evaluation/expert_gold/evaluate_gold_vs_prediction.py \
   --gold-paper-id P001
 ```
 
+## Agent Behavior Promotion
+
+Use [`evaluation/agent_behavior_promotion/`](evaluation/agent_behavior_promotion/)
+to evaluate whether a generalized Deep Path research behavior has passed
+pre-registered expert Gold, independent fresh-paper, scientific-error, runtime,
+and cost boundaries. The gate only makes a behavior eligible for maintainer
+review; it never modifies Fast Path automatically.
+
 ## Extraction Trace Export
 
 Use `export_extraction_trace.py` when you want to inspect the concrete Source

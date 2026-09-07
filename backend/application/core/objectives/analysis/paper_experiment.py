@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v17"
 
 _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
+_OBJECTIVE_MATERIAL_CONTEXT_REF_LIMIT = 8
 _OBJECTIVE_GROUP_ALIAS_CONTEXT_REF_LIMIT = 8
 _OBJECTIVE_DERIVED_COMPARISON_ID_PREFIX = "oeu_cmp_"
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
@@ -46,6 +47,16 @@ _ENCODED_CONDITION_SCHEMA_PATTERN = re.compile(
     r"\((?P<body>[^()\n]{3,180})\)"
 )
 _ENCODED_CONDITION_LABEL_PATTERN = re.compile(r"\((?P<body>[^()]{3,120})\)")
+_MATERIAL_SUPPORTING_STRUCTURE_RE = re.compile(
+    r"\b(?:substrate|base\s+plate|build\s+plate|fixture|holder|support(?:ed|ing)?)\b",
+    re.IGNORECASE,
+)
+_MATERIAL_SPECIMEN_BINDING_RE = re.compile(
+    r"\b(?:specimen(?:s)?|sample(?:s)?|alloy|material|powder|feedstock|"
+    r"coupon|part(?:s)?|printed|fabricat(?:e|ed|es|ing)|"
+    r"manufactur(?:e|ed|es|ing)|machin(?:e|ed|es|ing)|prepared|used)\b",
+    re.IGNORECASE,
+)
 
 
 def _objective_pairwise_attribution_scope(
@@ -79,6 +90,14 @@ def reconstruct_paper_experiments(
     objectives: tuple[ResearchObjective, ...],
     document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]] | None = None,
 ) -> tuple[ExtractedEvidenceDraft, ...]:
+    # A result Source often omits the paper's material identity.  Reintroduce
+    # only an explicit same-paper material statement before context binding;
+    # this is a deterministic Source join, not a paper-map guess.
+    source_facts = _append_source_grounded_document_context(
+        source_facts,
+        objectives=objectives,
+        document_contexts=document_contexts or {},
+    )
     source_facts = _append_source_grounded_group_alias_context(
         source_facts,
         objectives=objectives,
@@ -475,6 +494,201 @@ def _document_context_source_ref(context: Mapping[str, Any]) -> dict[str, Any]:
             if context.get(key) not in (None, "", [], {})
         },
     }
+
+
+def _append_source_grounded_document_context(
+    units: tuple[ExtractedEvidenceDraft, ...],
+    *,
+    objectives: tuple[ResearchObjective, ...],
+    document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]],
+) -> tuple[ExtractedEvidenceDraft, ...]:
+    """Add explicit same-paper material context to the reconstruction stream.
+
+    Researchers carry a material identity from a paper's Methods, title, or
+    table into a result.  The result Source may not repeat it.  Only contexts
+    that explicitly mention exactly one material in the confirmed Objective
+    scope are promoted, and the originating Source locator is retained.  A
+    context that names multiple possible materials is left unresolved rather
+    than guessed.
+    """
+
+    if not document_contexts:
+        return units
+
+    objectives_by_id = {objective.objective_id: objective for objective in objectives}
+    existing_scopes = {
+        (unit.objective_id, unit.document_id)
+        for unit in units
+        if unit.reported_result is None and unit.scientific_context.material
+    }
+    augmented = list(units)
+    for objective_id, objective in objectives_by_id.items():
+        if not objective.material_scope:
+            continue
+        document_ids = {
+            unit.document_id for unit in units if unit.objective_id == objective_id
+        }
+        for document_id in sorted(document_ids):
+            if (objective_id, document_id) in existing_scopes:
+                continue
+            result_units = tuple(
+                unit
+                for unit in units
+                if unit.objective_id == objective_id
+                and unit.document_id == document_id
+                and unit.selection_status != "failed"
+                and unit.reported_result is not None
+            )
+            # A free-standing document context is not enough to choose which
+            # of several result records it describes.  In particular, do not
+            # spread a title/material mention from one result to another result
+            # that may represent a different specimen or material.  Explicit
+            # context Evidence already present in ``source_facts`` is handled
+            # by the stricter source-reference registry below.
+            if len(result_units) != 1 or result_units[0].scientific_context.material:
+                continue
+            matched: list[tuple[Mapping[str, Any], str]] = []
+            for context in document_contexts.get(document_id, ()):
+                if not isinstance(context, Mapping):
+                    continue
+                text = _document_context_text(context)
+                if not text:
+                    continue
+                scopes = tuple(
+                    scope
+                    for scope in objective.material_scope
+                    if _document_context_matches_material(
+                        text,
+                        scope,
+                        context=context,
+                    )
+                )
+                if len(scopes) == 1:
+                    matched.append((context, scopes[0]))
+            if not matched:
+                continue
+            material_values = {value for _context, value in matched}
+            if len(material_values) != 1:
+                continue
+            material_value = next(iter(material_values))
+            source_refs = tuple(
+                {
+                    **_document_context_source_ref(context),
+                    "supports": ["scientific_context.material"],
+                }
+                for context, _value in matched[:_OBJECTIVE_MATERIAL_CONTEXT_REF_LIMIT]
+                if _document_context_source_ref(context).get("source_ref")
+            )
+            if not source_refs:
+                continue
+            identity = json.dumps(
+                [objective_id, document_id, material_value, source_refs],
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            augmented.append(
+                ExtractedEvidenceDraft.from_mapping(
+                    {
+                        "evidence_id": f"ctx_{sha1(identity.encode('utf-8')).hexdigest()[:24]}",
+                        "objective_id": objective_id,
+                        "document_id": document_id,
+                        "source_kind": source_refs[0]["source_kind"],
+                        "source_ref": source_refs[0]["source_ref"],
+                        "evidence_role": "condition_context",
+                        "selection_reason": (
+                            "Material identity was explicitly named in a same-paper "
+                            "context Source and retained for result binding."
+                        ),
+                        "selection_status": "extracted",
+                        "scientific_context": {
+                            "material": [{"name": "material", "value": material_value}]
+                        },
+                        "source_refs": list(source_refs),
+                        "resolution_status": "resolved",
+                        "confidence": 1.0,
+                    }
+                )
+            )
+            existing_scopes.add((objective_id, document_id))
+    return tuple(augmented)
+
+
+def _document_context_matches_material(
+    text: str,
+    objective_scope: str,
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether a context explicitly binds the objective material.
+
+    A lexical hit alone is insufficient: papers routinely mention the alloy
+    of a substrate, base plate, or fixture while describing a different
+    specimen.  Table contexts are accepted when they contain the material
+    label, while prose must either bind it to a specimen/material noun or sit
+    under an explicit Materials/Methods heading.  This is a recall helper for
+    one same-paper result, not a material inference.
+    """
+
+    if not property_matching.source_text_mentions_material(text, objective_scope):
+        return False
+    context = context or {}
+    source_kind = str(context.get("source_kind") or "").casefold().strip()
+    for sentence in re.split(r"(?<=[.!?;])\s+|\n+", str(text or "")):
+        sentence = sentence.strip()
+        if not sentence or not property_matching.source_text_mentions_material(
+            sentence,
+            objective_scope,
+        ):
+            continue
+        if _material_mention_is_supporting_structure(sentence, objective_scope):
+            continue
+        if source_kind == "table":
+            return True
+        if _MATERIAL_SPECIMEN_BINDING_RE.search(sentence):
+            return True
+        heading = str(context.get("heading_path") or "").casefold()
+        if any(
+            marker in heading
+            for marker in ("material", "method", "experimental", "specimen")
+        ):
+            return True
+    return False
+
+
+def _material_mention_is_supporting_structure(text: str, objective_scope: str) -> bool:
+    """Detect a target material used as a substrate/fixture identity."""
+
+    normalized = " ".join(str(text or "").casefold().split())
+    for match in _MATERIAL_SUPPORTING_STRUCTURE_RE.finditer(normalized):
+        before = normalized[max(0, match.start() - 96) : match.start()]
+        after = normalized[match.end() : match.end() + 96]
+        if _material_window_has_target(before, objective_scope, trailing=True):
+            return True
+        if _material_window_has_target(after, objective_scope, trailing=False):
+            return True
+    return False
+
+
+def _material_window_has_target(
+    window: str,
+    objective_scope: str,
+    *,
+    trailing: bool,
+) -> bool:
+    tokens = re.findall(r"[a-z0-9][a-z0-9./+\-]*", window.casefold())
+    if not tokens:
+        return False
+    max_size = min(5, len(tokens))
+    for size in range(1, max_size + 1):
+        candidate = (
+            " ".join(tokens[-size:])
+            if trailing
+            else " ".join(tokens[:size])
+        )
+        if property_matching.source_text_mentions_material(candidate, objective_scope):
+            return True
+    return False
 
 
 def _append_source_grounded_group_alias_context(

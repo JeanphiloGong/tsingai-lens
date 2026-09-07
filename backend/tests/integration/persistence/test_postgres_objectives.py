@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
+from types import SimpleNamespace
 
 import pytest
 
+from application.core.objectives.agent_analysis_service import (
+    AgentObjectiveAnalysisService,
+)
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
@@ -264,6 +269,32 @@ async def test_objective_discovery_round_trips_exact_prepared_document_inputs(
     assert restored.research_objectives[0].seed_document_ids == ("doc_a", "doc_b")
 
 
+async def test_explicit_confirmation_does_not_start_an_analysis(
+    objective_repository,
+) -> None:
+    candidate = await objective_repository.read_objective(COLLECTION_ID, OBJECTIVE_ID)
+    assert candidate is not None
+    assert candidate.confirmation_status == "candidate"
+
+    confirmed = await objective_repository.confirm_objective(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+    )
+    repeated = await objective_repository.confirm_objective(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+    )
+
+    assert confirmed.confirmation_status == "confirmed"
+    assert confirmed.active_analysis_version is None
+    assert repeated == confirmed
+    assert await objective_repository.read_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        1,
+    ) is None
+
+
 async def test_authored_candidate_persists_without_an_objective_discovery_row(
     source_repository,
 ) -> None:
@@ -289,6 +320,54 @@ async def test_authored_candidate_persists_without_an_objective_discovery_row(
         COLLECTION_ID,
         created.objective_id,
     ) == records[0]
+
+
+async def test_authored_candidate_round_trips_derived_objective_lineage(
+    source_repository,
+) -> None:
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    objective = ResearchObjective.from_mapping(
+        {
+            "collection_id": COLLECTION_ID,
+            "question": "How does intermediate preheating affect fatigue life?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["build-plate preheating"],
+            "outcomes": ["fatigue life"],
+            "parent_objective_id": "objective-parent",
+            "parent_analysis_version": 3,
+            "derivation_basis": [
+                {
+                    "kind": "finding",
+                    "reference_id": "finding-parent",
+                    "rationale": "The published Finding leaves an intermediate range unresolved.",
+                    "status": "validated",
+                    "snapshot": {"statement": "Preheating changes elongation."},
+                }
+            ],
+            "origin": "chat_assisted",
+            "created_by_user_id": "user_source",
+            "created_by_tool_call_id": "call-derived-lineage",
+        }
+    )
+
+    created = await repository.create_authored_candidate(
+        objective,
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-derived-lineage",
+    )
+    restored = await repository.read_objective(COLLECTION_ID, created.objective_id)
+    assert restored is not None
+    assert restored.parent_objective_id == "objective-parent"
+    assert restored.parent_analysis_version == 3
+    assert restored.derivation_basis == objective.derivation_basis
+
+    retried = await repository.create_authored_candidate(
+        ResearchObjective.from_mapping({**objective.to_record(), "rank": None}),
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-derived-lineage",
+    )
+    assert retried.objective_id == created.objective_id
+    assert retried.rank == created.rank
 
 
 async def test_active_analysis_reuses_only_the_same_document_manifest(
@@ -410,6 +489,139 @@ async def test_analysis_publish_preserves_manifest_and_source_backed_results(
         OBJECTIVE_ID,
         analysis.analysis_version,
     ) == ((finding,), 1)
+
+
+async def test_agent_failure_persists_source_diagnostics_without_replacing_v1(
+    objective_repository,
+    source_repository,
+) -> None:
+    _, running_v1 = await _queue_and_claim(objective_repository)
+    _objective_v1, published_v1 = await objective_repository.publish_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        running_v1.analysis_version,
+        contributions=_analysis_contributions(running_v1.analysis_version),
+        evidence_records=_analysis_evidence(running_v1.analysis_version),
+        findings=(_finding(running_v1.analysis_version),),
+    )
+
+    class _OwnedReadyCollection:
+        async def get_collection_for_user(self, collection_id, user_id):
+            assert collection_id == COLLECTION_ID
+            assert user_id == "user_source"
+            return {"collection_id": collection_id}
+
+        async def get_document(self, collection_id, document_id):
+            assert collection_id == COLLECTION_ID
+            fingerprints = {
+                item.document_id: item.preparation_fingerprint
+                for item in _document_inputs()
+            }
+            return SimpleNamespace(
+                document_id=document_id,
+                status="ready",
+                preparation_fingerprint=fingerprints[document_id],
+            )
+
+    source_text = "Laser power increased from 100 W to 150 W."
+    source_digest = sha256(source_text.encode("utf-8")).hexdigest()
+    failure_reasons = {
+        "doc_a": "The provider returned malformed structured output for Paper A.",
+        "doc_b": "The provider timed out while extracting Paper B.",
+    }
+    summaries = tuple(
+        {
+            "document_id": document_id,
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "contribution_summary": (
+                "The relevant Source was inspected, but technical extraction failed."
+            ),
+            "confidence": 0.8,
+            "inspection_outcome": "extraction_failed",
+            "inspection_outcome_reason": failure_reasons[document_id],
+            "inspected_source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": f"block-{document_id}",
+                    "source_digest": source_digest,
+                }
+            ],
+        }
+        for document_id in ("doc_a", "doc_b")
+    )
+
+    failed_v2 = await AgentObjectiveAnalysisService(
+        collection_service=_OwnedReadyCollection(),
+        objective_repository=objective_repository,
+        source_artifact_repository=source_repository,
+    ).publish(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        document_ids=("doc_a", "doc_b"),
+        paper_summaries=summaries,
+        evidence_drafts=(),
+        model_name="agent-integration-test",
+        prompt_version="agent-failure-persistence.v1",
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-agent-all-extraction-failed",
+    )
+
+    reloaded_repository = PostgresObjectiveRepository(
+        source_repository.session_factory
+    )
+    restored_objective = await reloaded_repository.read_objective(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+    )
+    restored_v2 = await reloaded_repository.read_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        2,
+    )
+    restored_contributions = await reloaded_repository.list_contributions(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        2,
+    )
+
+    assert failed_v2.analysis.analysis_version == 2
+    assert failed_v2.analysis.status == "failed"
+    assert failed_v2.analysis.error_code == "agent_analysis_extraction_failed"
+    assert restored_v2 == failed_v2.analysis
+    assert restored_objective is not None
+    assert restored_objective.published_analysis_version == 1
+    assert await reloaded_repository.read_published_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+    ) == published_v1
+    assert restored_contributions == failed_v2.contributions
+    assert {item.document_id for item in restored_contributions} == {
+        "doc_a",
+        "doc_b",
+    }
+    for contribution in restored_contributions:
+        assert contribution.analysis_status == "failed"
+        assert contribution.evidence_disposition == "extraction_failed"
+        assert contribution.evidence_disposition_reason == failure_reasons[
+            contribution.document_id
+        ]
+        assert contribution.warnings == (
+            "Source extraction failed before Evidence could be recorded.",
+        )
+        assert contribution.routed_source_count == 2
+        assert contribution.extracted_source_count == 0
+        assert contribution.failed_source_count == 1
+        assert contribution.uninspected_source_count == 1
+        assert [
+            item.to_record() for item in contribution.inspected_source_refs
+        ] == [
+            {
+                "source_kind": "text_window",
+                "source_ref": f"block-{contribution.document_id}",
+                "source_digest": source_digest,
+            }
+        ]
 
 
 async def test_authored_finding_publishes_new_snapshot_without_mutating_source(

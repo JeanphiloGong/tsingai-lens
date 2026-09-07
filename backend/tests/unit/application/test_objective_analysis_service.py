@@ -609,6 +609,33 @@ async def test_objective_analysis_publishes_one_complete_version() -> None:
     assert repository.published_calls == 1
 
 
+async def test_objective_analysis_surfaces_authored_scientific_warnings() -> None:
+    evidence = replace(
+        _evidence(1),
+        warnings=("reported_result.unit='HV' is not grounded in SOURCE",),
+    )
+    finding = replace(
+        _finding(1),
+        warnings=("Finding statement contains an unverified material formula",),
+    )
+    artifacts = replace(
+        _artifacts(1),
+        evidence_records=(evidence,),
+        findings=(finding,),
+    )
+    service, _repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
+
+    assert any("reported_result.unit" in warning for warning in result["warnings"])
+    assert any("material formula" in warning for warning in result["warnings"])
+
+
 async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> None:
     repository = FakeObjectiveRepository(confirmation_status="candidate")
     service, _, _ = _service(repository=repository)

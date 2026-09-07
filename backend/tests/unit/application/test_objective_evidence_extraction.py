@@ -10604,6 +10604,29 @@ def test_llm_context_keeps_generic_process_when_value_is_source_grounded():
     ]
 
 
+def test_llm_context_keeps_generic_alloy_when_value_is_source_grounded():
+    record = source_validation._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "material": [
+                    {"name": "alloy", "value": "Ti-6Al-4V"}
+                ],
+                "sample": [],
+                "process": [],
+                "test": [],
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": "Ti-6Al-4V specimens were fabricated by LPBF.",
+        },
+    )
+
+    assert record["scientific_context"]["material"] == [
+        {"name": "alloy", "value": "Ti-6Al-4V"}
+    ]
+
+
 def test_llm_result_rejects_ungrounded_categorical_variable_endpoint():
 
     assert not source_validation._objective_extracted_result_is_source_grounded(
@@ -11196,6 +11219,33 @@ def test_source_grounding_keeps_only_outcome_applicability_named_by_source() -> 
     sem, optical = grounded["scientific_context"]["test"]
     assert sem["applies_to_outcomes"] == ["microstructure"]
     assert "applies_to_outcomes" not in optical
+
+
+def test_source_grounding_keeps_single_test_with_empty_outcome_scope() -> None:
+    """An explicit empty scope means the Source has one unassigned method."""
+
+    retained = source_validation._objective_retain_outcome_applicable_test_context(
+        {
+            "reported_result": {"outcome": "porosity"},
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "method",
+                        "value": "X-ray computed tomography",
+                        "applies_to_outcomes": [],
+                    }
+                ]
+            },
+        }
+    )
+
+    assert retained["scientific_context"]["test"] == [
+        {
+            "name": "method",
+            "value": "X-ray computed tomography",
+            "applies_to_outcomes": [],
+        }
+    ]
 
 
 def test_document_context_binds_only_test_method_applicable_to_result_outcome() -> None:

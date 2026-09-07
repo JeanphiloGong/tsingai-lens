@@ -47,8 +47,9 @@ async def _service():
                     document_id="doc-1",
                     block_type="paragraph",
                     text=(
+                        "Alloy A specimens were tested along the build direction. "
+                        "At a temperature of 400 C, tensile strength was 580 MPa. "
                         "At 500 C, tensile strength increased to 620 MPa. "
-                        "The specimens were tested along the build direction."
                     ),
                     block_order=7,
                     page=7,
@@ -239,6 +240,35 @@ async def test_rejects_ungrounded_or_out_of_scope_drafts_without_publication(
     objective = await repository.read_objective("col-gold", "obj-1")
     assert objective is not None
     assert objective.published_analysis_version == 1
+
+
+async def test_persists_warning_for_ungrounded_scientific_fields() -> None:
+    service, repository, _source_repository = await _service()
+
+    result = await service.create_version(
+        **_draft(
+            reported_result={
+                "outcome": "microhardness",
+                "value": 470,
+                "baseline_value": 410,
+                "target_value": 470,
+                "unit": "HV",
+                "direction": "increase",
+                "result_text": "At 500 C, tensile strength increased to 620 MPa.",
+            }
+        )
+    )
+
+    assert result.evidence.warnings
+    assert any("reported_result.outcome" in warning for warning in result.evidence.warnings)
+    persisted, _ = await repository.list_evidence(
+        "col-gold", "obj-1", result.analysis.analysis_version, offset=0, limit=20
+    )
+    authored = next(item for item in persisted if item.evidence_id == result.evidence.evidence_id)
+    assert authored.warnings == result.evidence.warnings
+    objective = await repository.read_objective("col-gold", "obj-1")
+    assert objective is not None
+    assert objective.published_analysis_version == 2
 
 
 async def test_rejects_stale_version_and_cross_collection_user() -> None:

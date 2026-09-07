@@ -925,6 +925,24 @@ def rebind_persisted_contribution(
         for evidence in evidence_records
         if evidence.document_id == contribution.document_id
     )
+    payload = contribution.to_record()
+    # Older document checkpoints predate the coverage ledger and legitimately
+    # contain none of its accounting fields.  Do not manufacture a partially
+    # populated ledger while rebinding those records: the domain model accepts
+    # the legacy shape, whereas a mixture of old ``None`` values and newly
+    # derived counts is invalid and would turn a recoverable retry into a
+    # failed analysis.
+    coverage_fields = (
+        "evidence_disposition",
+        "routed_source_count",
+        "extracted_source_count",
+        "comparable_evidence_count",
+        "failed_source_count",
+    )
+    if not all(payload.get(field) is not None for field in coverage_fields):
+        payload["analysis_version"] = analysis.analysis_version
+        return PaperContribution.from_mapping(payload)
+
     comparable_count = sum(
         FindingSynthesisService.is_synthesizable_result_evidence(
             objective,
@@ -936,7 +954,6 @@ def rebind_persisted_contribution(
         sorted(Counter(evidence.evidence_status for evidence in document_evidence).items())
     )
 
-    payload = contribution.to_record()
     payload["analysis_version"] = analysis.analysis_version
     payload["comparable_evidence_count"] = comparable_count
     payload["evidence_status_counts"] = {
@@ -1210,6 +1227,15 @@ def _analysis_contributions(
                 uninspected_source_count=uninspected_source_count,
                 evidence_disposition_reason=evidence_reason,
                 evidence_status_counts=evidence_status_counts,
+                inspected_source_refs=tuple(
+                    {
+                        "source_kind": source_kind,
+                        "source_ref": source_ref,
+                        "source_digest": None,
+                    }
+                    for source_kind, source_ref in sorted(inspected_source_refs)
+                    if source_kind in {"text_window", "table", "figure"}
+                ),
             )
         )
     return tuple(contributions)
@@ -1417,6 +1443,7 @@ def _analysis_evidence_records(
             ),
             failure_reason=draft.failure_reason,
             confidence=draft.confidence,
+            related_source_refs_explicit=True,
         )
         context_gaps = _objective_missing_context_fields(candidate, objective)
         if candidate.selection_status == "extracted" and context_gaps:

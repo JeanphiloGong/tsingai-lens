@@ -111,6 +111,57 @@ _RESULT_OBSERVATION_MARKERS = re.compile(
     r"[-+]?\d+(?:\.\d+)?\s*(?:%|mpa|gpa|kpa|pa|hv|°?c)\b",
     re.IGNORECASE,
 )
+_OBJECTIVE_DIRECTION_TERMS = {
+    "increase": (
+        "increase",
+        "increased",
+        "increases",
+        "increasing",
+        "higher",
+        "greater",
+        "larger",
+    ),
+    "decrease": (
+        "decrease",
+        "decreased",
+        "decreases",
+        "decreasing",
+        "lower",
+        "reduce",
+        "reduced",
+        "reduces",
+        "reducing",
+        "reduction",
+        "smaller",
+    ),
+    "improve": (
+        "improve",
+        "improved",
+        "improves",
+        "improving",
+        "better",
+        "enhance",
+        "enhanced",
+    ),
+    "worsen": (
+        "worsen",
+        "worsened",
+        "worsens",
+        "worsening",
+        "worse",
+        "degrade",
+        "degraded",
+        "deteriorate",
+        "deteriorated",
+    ),
+    "no_change": (
+        "no_change",
+        "no_significant_difference",
+        "similar",
+        "unchanged",
+        "remained_constant",
+    ),
+}
 
 
 def _source_validation_failure_record(
@@ -308,57 +359,7 @@ def validate_source_fact(
             f"_{_objective_column_key(result_value)}_"
             f"{_objective_column_key(normalized_result.get('result_text'))}_"
         )
-        direction_terms = {
-            "increase": (
-                "increase",
-                "increased",
-                "increases",
-                "increasing",
-                "higher",
-                "greater",
-                "larger",
-            ),
-            "decrease": (
-                "decrease",
-                "decreased",
-                "decreases",
-                "decreasing",
-                "lower",
-                "reduce",
-                "reduced",
-                "reduces",
-                "reducing",
-                "reduction",
-                "smaller",
-            ),
-            "improve": (
-                "improve",
-                "improved",
-                "improves",
-                "improving",
-                "better",
-                "enhance",
-                "enhanced",
-            ),
-            "worsen": (
-                "worsen",
-                "worsened",
-                "worsens",
-                "worsening",
-                "worse",
-                "degrade",
-                "degraded",
-                "deteriorate",
-                "deteriorated",
-            ),
-            "no_change": (
-                "no_change",
-                "no_significant_difference",
-                "similar",
-                "unchanged",
-                "remained_constant",
-            ),
-        }
+        direction_terms = _OBJECTIVE_DIRECTION_TERMS
         explicit_directions = [
             candidate_direction
             for candidate_direction, terms in direction_terms.items()
@@ -1597,6 +1598,153 @@ def _objective_extracted_result_is_source_grounded(
     return not _objective_evidence_grounding_errors(record, source=source)
 
 
+def authored_source_fact_grounding_warnings(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Report authored scientific fields that may exceed one canonical Source.
+
+    Automatic extraction applies its own strict publication policy. In the
+    Deep Path, a human or Agent may combine a source-local fact with reviewed
+    context, so these lexical mismatches stay attached to the immutable
+    Evidence record for later review instead of rejecting the authored write.
+    Canonical Source identity, excerpt, digest, scope, and version are enforced
+    separately.
+    """
+
+    source_text = _objective_source_grounding_text(source)
+    if not source_text:
+        return ("source has no text or table content for grounding",)
+    allow_missing_endpoints = str(record.get("attribution_scope") or "") not in {
+        "isolated_effect",
+        "joint_effect",
+    }
+    errors = [
+        *_objective_evidence_variable_grounding_errors(
+            record,
+            source=source,
+            source_text=source_text,
+            allow_missing_endpoints=allow_missing_endpoints,
+        ),
+        *_objective_evidence_comparison_grounding_errors(
+            record,
+            source_text=source_text,
+        ),
+        *_objective_evidence_result_grounding_errors(
+            record,
+            source=source,
+            source_text=source_text,
+        ),
+        *_objective_authored_result_direction_grounding_errors(record),
+        *_objective_evidence_context_grounding_errors(
+            record,
+            source=source,
+        ),
+    ]
+    reported_result = record.get("reported_result")
+    if isinstance(reported_result, Mapping) and not _objective_axis_is_source_grounded(
+        reported_result.get("outcome"),
+        source=source,
+        source_text=source_text,
+    ):
+        errors.append(
+            "reported_result.outcome="
+            f"{reported_result.get('outcome')!r} is not grounded in SOURCE"
+        )
+    comparison = record.get("comparison")
+    if (
+        isinstance(reported_result, Mapping)
+        and isinstance(comparison, Mapping)
+        and comparison.get("comparable") is True
+        and source.get("source_kind") == "table"
+        and source.get("table_matrix")
+        and not _objective_extracted_table_result_is_row_grounded(
+            record,
+            source=source,
+        )
+    ):
+        errors.append(
+            "table_rows do not bind the reported result to the selected "
+            "comparison endpoints in SOURCE"
+        )
+    return tuple(dict.fromkeys(errors))
+
+
+def _objective_authored_result_direction_grounding_errors(
+    record: Mapping[str, Any],
+) -> tuple[str, ...]:
+    reported_result = record.get("reported_result")
+    if not isinstance(reported_result, Mapping):
+        return ()
+    direction = str(reported_result.get("direction") or "unknown").strip()
+    if direction in {"unknown", "mixed"}:
+        return ()
+    result_text = f"_{_objective_column_key(reported_result.get('result_text'))}_"
+    if direction == "changed":
+        return (
+            ()
+            if _OBJECTIVE_OBSERVED_CHANGE_MARKERS.search(
+                str(reported_result.get("result_text") or "")
+            )
+            else ("reported_result.direction='changed' is not grounded in SOURCE",)
+        )
+
+    numeric_direction = _objective_numeric_result_direction(reported_result)
+    if (
+        numeric_direction is not None
+        and direction in {"increase", "decrease", "no_change"}
+        and numeric_direction != direction
+    ):
+        return (
+            f"reported_result.direction={direction!r} conflicts with its numeric "
+            "baseline and target values",
+        )
+    text_direction = _objective_result_direction_near_outcome(
+        result_text=str(reported_result.get("result_text") or ""),
+        outcome=str(reported_result.get("outcome") or ""),
+        direction_terms=_OBJECTIVE_DIRECTION_TERMS,
+    )
+    if text_direction is not None and text_direction != direction:
+        return (
+            f"reported_result.direction={direction!r} conflicts with the "
+            f"source-grounded result text direction {text_direction!r}",
+        )
+    if numeric_direction == direction or text_direction == direction:
+        return ()
+    terms = _OBJECTIVE_DIRECTION_TERMS.get(direction, ())
+    if any(f"_{term}_" in result_text for term in terms):
+        return ()
+    return (
+        f"reported_result.direction={direction!r} is not grounded in SOURCE",
+    )
+
+
+def _objective_numeric_result_direction(
+    reported_result: Mapping[str, Any],
+) -> str | None:
+    endpoint_numbers: list[float] = []
+    for field in ("baseline_value", "target_value"):
+        value = reported_result.get(field)
+        numbers = tuple(
+            float(match.group(0))
+            for match in _NUMBER_PATTERN.finditer(
+                str("" if value is None else value)
+                .replace(",", "")
+                .replace("\u2212", "-")
+            )
+        )
+        if len(numbers) != 1:
+            return None
+        endpoint_numbers.append(numbers[0])
+    baseline, target = endpoint_numbers
+    if target > baseline:
+        return "increase"
+    if target < baseline:
+        return "decrease"
+    return "no_change"
+
+
 def _objective_evidence_grounding_errors(
     record: Mapping[str, Any],
     *,
@@ -1635,6 +1783,41 @@ def _objective_evidence_grounding_errors(
             "table_rows do not bind the reported result to the selected "
             "comparison endpoints in SOURCE"
         )
+    return tuple(errors)
+
+
+def _objective_evidence_context_grounding_errors(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+) -> tuple[str, ...]:
+    scientific_context = record.get("scientific_context")
+    if not isinstance(scientific_context, Mapping):
+        return ()
+    grounded = _objective_retain_source_grounded_context(
+        record,
+        source=source,
+    ).get("scientific_context")
+    grounded_context = grounded if isinstance(grounded, Mapping) else {}
+    errors: list[str] = []
+    for group in ("material", "sample", "process", "test"):
+        grounded_attributes = tuple(
+            dict(attribute)
+            for attribute in grounded_context.get(group) or ()
+            if isinstance(attribute, Mapping)
+        )
+        for position, attribute in enumerate(scientific_context.get(group) or ()):
+            if not isinstance(attribute, Mapping):
+                errors.append(
+                    f"scientific_context.{group}[{position}] is not a structured "
+                    "attribute"
+                )
+                continue
+            if dict(attribute) not in grounded_attributes:
+                errors.append(
+                    f"scientific_context.{group}[{position}]={dict(attribute)!r} "
+                    "is not grounded in SOURCE"
+                )
     return tuple(errors)
 
 
@@ -1962,6 +2145,7 @@ def _objective_retain_source_grounded_context(
                 # when the concrete value is present in the same Source.
                 generic_context_names = {
                     "material",
+                    "alloy",
                     "sample",
                     "specimen",
                     "coupon",
@@ -1975,6 +2159,7 @@ def _objective_retain_source_grounded_context(
                     "method",
                     "test method",
                     "measurement method",
+                    "orientation",
                 }
                 if (
                     str(attribute.get("name") or "").strip().casefold()
@@ -2028,16 +2213,34 @@ def _objective_retain_outcome_applicable_test_context(
     test_attributes = context.get("test")
     if not isinstance(test_attributes, (list, tuple)):
         return retained
-    applicable = [
+
+    def has_explicit_outcome_scope(attribute: Mapping[str, Any]) -> bool:
+        raw_outcomes = attribute.get("applies_to_outcomes")
+        return isinstance(raw_outcomes, (list, tuple)) and any(
+            str(outcome).strip() for outcome in raw_outcomes
+        )
+
+    scoped = [
         dict(attribute)
         for attribute in test_attributes
         if isinstance(attribute, Mapping)
-        and isinstance(attribute.get("applies_to_outcomes"), (list, tuple))
+        and has_explicit_outcome_scope(attribute)
         and property_matching.outcome_matches_objective_scope(
             outcome,
             tuple(attribute["applies_to_outcomes"]),
         )
     ]
+    unscoped = [
+        dict(attribute)
+        for attribute in test_attributes
+        if isinstance(attribute, Mapping)
+        and not has_explicit_outcome_scope(attribute)
+    ]
+    # A single source-local test method without an explicit outcome tag is
+    # still usable when the Source exposes no competing test.  If multiple
+    # unscoped methods are present, keep the family unresolved instead of
+    # assigning one to the result by position or model confidence.
+    applicable = scoped or (unscoped if len(unscoped) == 1 else [])
     scientific_context = dict(context)
     scientific_context["test"] = applicable
     retained["scientific_context"] = scientific_context

@@ -621,6 +621,7 @@ class ObjectiveAnalysisService:
         if active is not None and active.error_code == "analysis_interrupted":
             active = None
         findings = ()
+        finding_total = 0
         paper_contributions = ()
         evidence_records = ()
         warnings: list[str] = []
@@ -630,7 +631,7 @@ class ObjectiveAnalysisService:
                 objective.objective_id,
                 published.analysis_version,
             )
-            findings, _total = await self.objective_repository.list_findings(
+            findings, finding_total = await self.objective_repository.list_findings(
                 collection_id,
                 objective.objective_id,
                 published.analysis_version,
@@ -677,6 +678,22 @@ class ObjectiveAnalysisService:
                     if scoped_reason not in seen_warnings:
                         seen_warnings.add(scoped_reason)
                         warnings.append(scoped_reason)
+            for evidence in evidence_records:
+                for warning in evidence.warnings:
+                    scoped_warning = (
+                        f"{evidence.document_id}/{evidence.source_ref}: {warning}"
+                    )
+                    if scoped_warning in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_warning)
+                    warnings.append(scoped_warning)
+            for finding in findings:
+                for warning in finding.warnings:
+                    scoped_warning = f"Finding {finding.finding_id}: {warning}"
+                    if scoped_warning in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_warning)
+                    warnings.append(scoped_warning)
         objective_record = await self.objective_repository.read_objective_record(
             collection_id,
             objective.objective_id,
@@ -688,6 +705,8 @@ class ObjectiveAnalysisService:
             "analysis": active,
             "published_analysis": published,
             "findings": findings,
+            "finding_total": finding_total,
+            "omitted_finding_count": max(0, finding_total - len(findings)),
             "paper_contributions": paper_contributions,
             "evidence_review": _evidence_review_summary(evidence_records),
             "warnings": warnings,

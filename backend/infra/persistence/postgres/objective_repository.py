@@ -210,10 +210,15 @@ class PostgresObjectiveRepository:
             )
             if prior is not None:
                 existing = self._objective_from_row(prior)
+                existing_record = existing.to_record()
+                objective_record = objective.to_record()
+                existing_record["rank"] = None
+                objective_record["rank"] = None
                 if (
                     existing.collection_id != objective.collection_id
                     or existing.objective_id != objective.objective_id
                     or existing.created_by_user_id != created_by_user_id
+                    or existing_record != objective_record
                 ):
                     raise ValueError(
                         "authored candidate tool call already created a different objective"
@@ -260,6 +265,20 @@ class PostgresObjectiveRepository:
                 (collection_id, objective_id),
             )
             return self._objective_record_from_row(row) if row is not None else None
+
+    async def confirm_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        async with self.session_factory.begin() as session:
+            row = await self._locked_objective(session, collection_id, objective_id)
+            objective = self._objective_from_row(row)
+            if objective.confirmation_status == "confirmed":
+                return objective
+            confirmed = objective.confirm()
+            self._write_objective(row, confirmed, now=datetime.now(timezone.utc))
+            return confirmed
 
     async def queue_analysis(
         self,
@@ -413,6 +432,7 @@ class PostgresObjectiveRepository:
         error_code: str,
         error_message: str,
         expected_status: str | None = None,
+        contributions: tuple[PaperContribution, ...] = (),
     ) -> ObjectiveAnalysis:
         async with self.session_factory.begin() as session:
             row = await self._locked_analysis(
@@ -421,6 +441,37 @@ class PostgresObjectiveRepository:
             analysis = self._analysis_from_row(row)
             if expected_status is not None and analysis.status != expected_status:
                 return analysis
+            key = (collection_id, objective_id, analysis_version)
+            if contributions:
+                if any(item.key[:3] != key for item in contributions):
+                    raise ValueError("analysis artifact belongs to another version")
+                input_documents = {
+                    item.document_id for item in analysis.document_inputs
+                }
+                if {item.document_id for item in contributions} != input_documents:
+                    raise ValueError(
+                        "paper contributions must cover every analysis input"
+                    )
+                await session.execute(
+                    delete(ObjectivePaperContributionRecord).where(
+                        ObjectivePaperContributionRecord.collection_id
+                        == collection_id,
+                        ObjectivePaperContributionRecord.objective_id
+                        == objective_id,
+                        ObjectivePaperContributionRecord.analysis_version
+                        == analysis_version,
+                    )
+                )
+                session.add_all(
+                    ObjectivePaperContributionRecord(
+                        collection_id=collection_id,
+                        objective_id=objective_id,
+                        analysis_version=analysis_version,
+                        source_document_id=item.document_id,
+                        payload=item.to_record(),
+                    )
+                    for item in contributions
+                )
             analysis = analysis.fail(
                 error_code=error_code,
                 error_message=error_message,

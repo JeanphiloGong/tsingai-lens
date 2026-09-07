@@ -99,8 +99,8 @@ def _material_attribute_is_primary(name: object) -> bool:
 def _material_context_source_binding_refs(
     evidence: ObjectiveEvidence,
 ) -> tuple[dict[str, Any], ...]:
-    return tuple(
-        {
+    def locator(source_ref: Mapping[str, Any]) -> dict[str, Any]:
+        return {
             key: source_ref[key]
             for key in (
                 "source_kind",
@@ -111,14 +111,75 @@ def _material_context_source_binding_refs(
             )
             if source_ref.get(key) not in (None, "")
         }
+
+    related_refs = tuple(
+        source_ref
         for source_ref in evidence.related_source_refs
+        if isinstance(source_ref, Mapping)
+        and str(source_ref.get("source_kind") or "").strip()
+        and str(source_ref.get("source_ref") or "").strip()
+    )
+    explicit = tuple(
+        locator(source_ref)
+        for source_ref in related_refs
         if "scientific_context.material"
         in {
             str(value).strip()
-            for value in source_ref.get("supports", ())
+            for value in (
+                (source_ref.get("supports"),)
+                if isinstance(source_ref.get("supports"), str)
+                else (source_ref.get("supports") or ())
+            )
             if str(value).strip()
         }
     )
+    if explicit:
+        return explicit
+    if related_refs and any("supports" in source_ref for source_ref in related_refs):
+        # A current record can explicitly say which fields a related Source
+        # supports.  Preserve that negative signal instead of promoting an
+        # unrelated process/baseline Source to material grounding.
+        return ()
+    if related_refs:
+        # Before field-level ``supports`` was persisted, related references
+        # represented source lineage only.  Treat those legacy locators as
+        # valid binding evidence and retain the primary Source as a fallback.
+        # This is a storage-compatibility rule, not a material inference: the
+        # material value still has to be present in scientific_context.
+        primary = (
+            {
+                "source_kind": evidence.source_kind,
+                "source_ref": evidence.source_ref,
+            }
+            if evidence.source_kind and evidence.source_ref
+            else None
+        )
+        binding_refs: list[dict[str, Any]] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for source_ref in (*related_refs, *((primary,) if primary else ())):
+            record = locator(source_ref) if isinstance(source_ref, Mapping) else {}
+            key = tuple(sorted((str(name), str(value)) for name, value in record.items()))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            binding_refs.append(record)
+        return tuple(binding_refs)
+    # Before related Source lineage existed, an Evidence record could carry
+    # source-extracted material on its primary Source without the field at
+    # all. Preserve only that genuinely omitted legacy shape. An explicitly
+    # persisted empty list is a negative binding signal and stays unresolved.
+    if (
+        not evidence.related_source_refs_explicit
+        and evidence.source_kind
+        and evidence.source_ref
+    ):
+        return (
+            {
+                "source_kind": evidence.source_kind,
+                "source_ref": evidence.source_ref,
+            },
+        )
+    return ()
 
 
 _FINDING_ASSERTION_STRENGTHS = {"causal", "associative", "descriptive"}
@@ -2803,12 +2864,12 @@ class FindingSynthesisService:
         if not evidence_values:
             status = "unresolved"
             reason = "Evidence has no primary specimen material value."
-        elif not binding_refs:
-            status = "unresolved"
-            reason = "Material text is not bound to an inspected supporting Source."
         elif MaterialMatchQuality.CONFLICT in best_relationships:
             status = "mismatched"
             reason = "At least one source-bound material explicitly conflicts with the Objective scope."
+        elif not binding_refs:
+            status = "unresolved"
+            reason = "Material text is not bound to an inspected supporting Source."
         elif best_relationships and all(
             item is MaterialMatchQuality.EXACT for item in best_relationships
         ):

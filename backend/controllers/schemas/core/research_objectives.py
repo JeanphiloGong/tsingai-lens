@@ -69,6 +69,9 @@ class ObjectiveSummaryResponse(BaseModel):
     confidence: float = 0.0
     reason: str | None = None
     source_relationship_ids: list[str] = Field(default_factory=list)
+    parent_objective_id: str | None = None
+    parent_analysis_version: int | None = Field(default=None, ge=1)
+    derivation_basis: list[dict[str, Any]] = Field(default_factory=list)
     confirmation_status: ConfirmationStatus
     active_analysis_version: int | None = None
     published_analysis_version: int | None = None
@@ -336,6 +339,7 @@ class FindingResponse(BaseModel):
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
     created_at: str | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ObjectiveEvidenceResponse(BaseModel):
@@ -368,6 +372,7 @@ class ObjectiveEvidenceResponse(BaseModel):
     failure_reason: str | None = None
     confidence: float
     supports_finding: bool = False
+    warnings: list[str] = Field(default_factory=list)
     origin: Literal[
         "system_generated", "human_authored", "human_revised", "agent_authored"
     ] = "system_generated"
@@ -527,6 +532,14 @@ class ObjectiveEvidenceMapResponse(BaseModel):
     coverage: ObjectiveEvidenceMapCoverageResponse
 
 
+class InspectedObjectiveSourceRefResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_kind: Literal["text_window", "table", "figure"]
+    source_ref: str
+    source_digest: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
+
+
 class PaperContributionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -557,6 +570,7 @@ class PaperContributionResponse(BaseModel):
     evidence_disposition: Literal[
         "excluded",
         "no_routable_evidence",
+        "no_grounded_evidence",
         "coverage_incomplete",
         "extraction_failed",
         "no_comparable_evidence",
@@ -569,6 +583,9 @@ class PaperContributionResponse(BaseModel):
     uninspected_source_count: int | None = Field(default=None, ge=0)
     evidence_disposition_reason: str | None = None
     evidence_status_counts: dict[EvidenceStatus, int] = Field(default_factory=dict)
+    inspected_source_refs: list[InspectedObjectiveSourceRefResponse] = Field(
+        default_factory=list
+    )
 
 
 class ObjectiveAnalysisResponse(BaseModel):

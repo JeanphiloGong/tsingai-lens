@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -370,6 +371,39 @@ def test_synthesis_keeps_source_result_when_material_scope_is_unresolved() -> No
         "Material scope is not confirmed" in limitation
         for limitation in finding.limitations
     )
+
+
+def test_synthesis_accepts_legacy_material_context_binding_without_supports_metadata() -> None:
+    """Pre-v17 Evidence used related source lineage without field supports."""
+
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    evidence = _evidence(
+        "ev-legacy-material-binding",
+        "paper-1",
+        material="316L",
+    )
+    legacy = replace(
+        evidence,
+        related_source_refs=(
+            {
+                "source_kind": evidence.source_kind,
+                "source_ref": "legacy-material-context",
+                "page": 2,
+            },
+        ),
+    )
+
+    assert service.material_scope_status(_objective(), legacy) == "matched"
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(legacy,),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].supporting_evidence_ids == (legacy.evidence_id,)
 
 
 def test_synthesis_excludes_result_with_explicitly_mismatched_material_scope() -> None:

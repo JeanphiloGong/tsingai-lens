@@ -35,6 +35,7 @@ PAPER_EVIDENCE_DISPOSITIONS: Final[frozenset[str]] = frozenset(
     {
         "excluded",
         "no_routable_evidence",
+        "no_grounded_evidence",
         "coverage_incomplete",
         "extraction_failed",
         "no_comparable_evidence",
@@ -111,6 +112,9 @@ OBJECTIVE_CONFIRMATION_STATUSES: Final[frozenset[str]] = frozenset(
 )
 OBJECTIVE_ORIGINS: Final[frozenset[str]] = frozenset(
     {"system_discovered", "chat_assisted"}
+)
+OBJECTIVE_DERIVATION_BASIS_KINDS: Final[frozenset[str]] = frozenset(
+    {"finding", "evidence_gap", "paper_contribution"}
 )
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"queued", "running", "succeeded", "failed"}
@@ -947,6 +951,9 @@ class ResearchObjective:
     confidence: float
     reason: str | None
     source_relationship_ids: tuple[str, ...] = ()
+    parent_objective_id: str | None = None
+    parent_analysis_version: int | None = None
+    derivation_basis: tuple[dict[str, Any], ...] = ()
     rank: int | None = None
     confirmation_status: str = "candidate"
     active_analysis_version: int | None = None
@@ -1005,6 +1012,20 @@ class ResearchObjective:
             raise ValueError(
                 "system-discovered objective cannot have Chat creator provenance"
             )
+        parent_objective_id = _text(self.parent_objective_id)
+        if parent_objective_id is not None and parent_objective_id == self.objective_id:
+            raise ValueError("objective cannot derive from itself")
+        if (parent_objective_id is None) != (self.parent_analysis_version is None):
+            raise ValueError(
+                "derived objective requires parent objective and analysis version"
+            )
+        if self.parent_analysis_version is not None and self.parent_analysis_version < 1:
+            raise ValueError("parent_analysis_version must be a positive integer")
+        basis = _objective_derivation_basis(self.derivation_basis)
+        if basis and parent_objective_id is None:
+            raise ValueError("derivation basis requires a parent objective")
+        object.__setattr__(self, "parent_objective_id", parent_objective_id)
+        object.__setattr__(self, "derivation_basis", basis)
         overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
         if overlap:
             raise ValueError(
@@ -1049,6 +1070,10 @@ class ResearchObjective:
                 mechanisms=mechanisms,
                 constraints=constraints,
                 requested_comparator=requested_comparator,
+                parent_objective_id=_text(payload.get("parent_objective_id")),
+                parent_analysis_version=_positive_int_or_none(
+                    payload.get("parent_analysis_version")
+                ),
             ),
             question=question,
             material_scope=material_scope,
@@ -1067,6 +1092,13 @@ class ResearchObjective:
             reason=_text(payload.get("reason")),
             source_relationship_ids=normalize_objective_terms(
                 payload.get("source_relationship_ids")
+            ),
+            parent_objective_id=_text(payload.get("parent_objective_id")),
+            parent_analysis_version=_positive_int_or_none(
+                payload.get("parent_analysis_version")
+            ),
+            derivation_basis=_objective_derivation_basis(
+                payload.get("derivation_basis")
             ),
             rank=_positive_int_or_none(payload.get("rank")),
             confirmation_status=_choice(
@@ -1136,6 +1168,9 @@ class ResearchObjective:
             "confidence": self.confidence,
             "reason": self.reason,
             "source_relationship_ids": list(self.source_relationship_ids),
+            "parent_objective_id": self.parent_objective_id,
+            "parent_analysis_version": self.parent_analysis_version,
+            "derivation_basis": [deepcopy(item) for item in self.derivation_basis],
             "rank": self.rank,
             "confirmation_status": self.confirmation_status,
             "active_analysis_version": self.active_analysis_version,
@@ -1415,6 +1450,65 @@ class ObjectiveAnalysis:
 
 
 @dataclass(frozen=True)
+class InspectedObjectiveSourceRef:
+    """Canonical Source identity inspected while evaluating one Objective."""
+
+    source_kind: str
+    source_ref: str
+    source_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_kind not in SOURCE_KIND_VALUES:
+            raise ValueError(f"unsupported inspected Source kind: {self.source_kind}")
+        if not _text(self.source_ref):
+            raise ValueError("inspected Source reference cannot be empty")
+        if self.source_digest is not None and not re.fullmatch(
+            r"[0-9a-fA-F]{64}", self.source_digest
+        ):
+            raise ValueError("inspected Source digest must be a SHA-256 hex digest")
+
+    @classmethod
+    def from_mapping(
+        cls, payload: Mapping[str, Any]
+    ) -> "InspectedObjectiveSourceRef":
+        return cls(
+            source_kind=_text(payload.get("source_kind")) or "",
+            source_ref=_text(payload.get("source_ref")) or "",
+            source_digest=_text(payload.get("source_digest")),
+        )
+
+    def to_record(self) -> dict[str, str | None]:
+        return {
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "source_digest": self.source_digest,
+        }
+
+
+def _inspected_objective_source_refs(
+    value: Any,
+) -> tuple[InspectedObjectiveSourceRef, ...]:
+    records: list[InspectedObjectiveSourceRef] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value or ():
+        record = (
+            item
+            if isinstance(item, InspectedObjectiveSourceRef)
+            else InspectedObjectiveSourceRef.from_mapping(item)
+            if isinstance(item, Mapping)
+            else None
+        )
+        if record is None:
+            continue
+        identity = (record.source_kind, record.source_ref)
+        if identity in seen:
+            raise ValueError(f"duplicate inspected Source: {record.source_kind}/{record.source_ref}")
+        seen.add(identity)
+        records.append(record)
+    return tuple(records)
+
+
+@dataclass(frozen=True)
 class PaperContribution:
     collection_id: str
     objective_id: str
@@ -1441,6 +1535,7 @@ class PaperContribution:
     uninspected_source_count: int | None = None
     evidence_disposition_reason: str | None = None
     evidence_status_counts: tuple[tuple[str, int], ...] = ()
+    inspected_source_refs: tuple[InspectedObjectiveSourceRef, ...] = ()
 
     def __post_init__(self) -> None:
         if not all(
@@ -1466,6 +1561,11 @@ class PaperContribution:
             raise ValueError(
                 "excluded or failed paper contribution requires a reason or warning"
             )
+        object.__setattr__(
+            self,
+            "inspected_source_refs",
+            _inspected_objective_source_refs(self.inspected_source_refs),
+        )
         self._validate_evidence_accounting()
         if self.uninspected_source_count is not None and self.uninspected_source_count < 0:
             raise ValueError("uninspected source count cannot be negative")
@@ -1543,6 +1643,23 @@ class PaperContribution:
             )
         if disposition == "no_routable_evidence" and (any(counts) or uninspected):
             raise ValueError("no_routable_evidence disposition requires zero counts")
+        if disposition == "no_grounded_evidence" and (
+            routed == 0
+            or extracted != 0
+            or comparable != 0
+            or failed != 0
+            or uninspected != 0
+        ):
+            raise ValueError(
+                "no_grounded_evidence disposition requires inspected routed Sources "
+                "without extracted Evidence"
+            )
+        if disposition == "no_grounded_evidence" and (
+            len(self.inspected_source_refs) != routed
+        ):
+            raise ValueError(
+                "no_grounded_evidence disposition must identify every inspected Source"
+            )
         if disposition == "no_comparable_evidence" and (
             routed == 0 or comparable != 0
         ):
@@ -1557,6 +1674,7 @@ class PaperContribution:
             )
         if disposition in {
             "no_routable_evidence",
+            "no_grounded_evidence",
             "extraction_failed",
             "no_comparable_evidence",
         } and not self.evidence_disposition_reason:
@@ -1628,6 +1746,9 @@ class PaperContribution:
             evidence_status_counts=_evidence_status_counts(
                 payload.get("evidence_status_counts")
             ),
+            inspected_source_refs=_inspected_objective_source_refs(
+                payload.get("inspected_source_refs")
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -1657,6 +1778,9 @@ class PaperContribution:
             "evidence_status_counts": {
                 status: count for status, count in self.evidence_status_counts
             },
+            "inspected_source_refs": [
+                item.to_record() for item in self.inspected_source_refs
+            ],
         }
 
 
@@ -1889,6 +2013,11 @@ class ObjectiveEvidence:
     resolution_status: str
     failure_reason: str | None
     confidence: float
+    related_source_refs_explicit: bool = field(
+        default=False,
+        repr=False,
+        compare=False,
+    )
     origin: str = "system_generated"
     source_analysis_version: int | None = None
     supersedes_evidence_id: str | None = None
@@ -1897,6 +2026,10 @@ class ObjectiveEvidence:
     created_by_tool_call_id: str | None = None
     created_at: datetime | None = None
     authoring_note: str | None = None
+    # Scientific review observations are advisory in authored Deep Path
+    # records. They remain attached to the immutable Evidence version so the
+    # reviewer can see why the record may need attention.
+    warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not all(
@@ -2129,6 +2262,7 @@ class ObjectiveEvidence:
             ),
             failure_reason=_text(payload.get("failure_reason")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
+            related_source_refs_explicit="related_source_refs" in payload,
             origin=_choice(
                 payload.get("origin"), EVIDENCE_ORIGINS, "system_generated"
             ),
@@ -2145,6 +2279,7 @@ class ObjectiveEvidence:
             ),
             created_at=_datetime_or_none(payload.get("created_at")),
             authoring_note=_text(payload.get("authoring_note")),
+            warnings=normalize_objective_terms(payload.get("warnings")),
         )
 
     def select(
@@ -2248,7 +2383,7 @@ class ObjectiveEvidence:
             raise ValueError("joint effect requires at least two changed variables")
 
     def to_record(self) -> dict[str, Any]:
-        return {
+        record = {
             "collection_id": self.collection_id,
             "objective_id": self.objective_id,
             "analysis_version": self.analysis_version,
@@ -2258,7 +2393,6 @@ class ObjectiveEvidence:
             "source_ref": self.source_ref,
             "source_excerpt": self.source_excerpt,
             "page_numbers": list(self.page_numbers),
-            "related_source_refs": [dict(item) for item in self.related_source_refs],
             "evidence_role": self.evidence_role,
             "selection_status": self.selection_status,
             "selection_reason": self.selection_reason,
@@ -2284,6 +2418,13 @@ class ObjectiveEvidence:
             "created_at": _datetime_record(self.created_at),
             "authoring_note": self.authoring_note,
         }
+        if self.warnings:
+            record["warnings"] = list(self.warnings)
+        if self.related_source_refs or self.related_source_refs_explicit:
+            record["related_source_refs"] = [
+                dict(item) for item in self.related_source_refs
+            ]
+        return record
 
 
 @dataclass(frozen=True)
@@ -2597,23 +2738,33 @@ def build_research_objective_id(
     mechanisms: tuple[str, ...],
     constraints: tuple[str, ...],
     requested_comparator: str | None,
+    parent_objective_id: str | None = None,
+    parent_analysis_version: int | None = None,
 ) -> str:
     normalized_question = (_text(question) or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
     if not slug:
         slug = "unspecified"
+    identity_payload = {
+        "question": normalized_question,
+        "material_scope": sorted(value.casefold() for value in material_scope),
+        "variables": sorted(value.casefold() for value in variables),
+        "outcomes": sorted(value.casefold() for value in outcomes),
+        "mechanisms": sorted(value.casefold() for value in mechanisms),
+        "constraints": sorted(value.casefold() for value in constraints),
+        "requested_comparator": (
+            requested_comparator.casefold() if requested_comparator else None
+        ),
+    }
+    if parent_objective_id is not None:
+        identity_payload.update(
+            {
+                "parent_objective_id": parent_objective_id,
+                "parent_analysis_version": parent_analysis_version,
+            }
+        )
     identity = json.dumps(
-        {
-            "question": normalized_question,
-            "material_scope": sorted(value.casefold() for value in material_scope),
-            "variables": sorted(value.casefold() for value in variables),
-            "outcomes": sorted(value.casefold() for value in outcomes),
-            "mechanisms": sorted(value.casefold() for value in mechanisms),
-            "constraints": sorted(value.casefold() for value in constraints),
-            "requested_comparator": (
-                requested_comparator.casefold() if requested_comparator else None
-            ),
-        },
+        identity_payload,
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
@@ -2694,6 +2845,39 @@ def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     return tuple(dict(item) for item in value if isinstance(item, Mapping))
+
+
+def _objective_derivation_basis(value: Any) -> tuple[dict[str, Any], ...]:
+    """Normalize scientific provenance attached to a derived Objective."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError("objective derivation basis entries must be mappings")
+        record = deepcopy(dict(item))
+        kind = _text(record.get("kind"))
+        reference_id = _text(record.get("reference_id"))
+        rationale = _text(record.get("rationale"))
+        if kind not in OBJECTIVE_DERIVATION_BASIS_KINDS:
+            raise ValueError(f"unsupported objective derivation basis kind: {kind}")
+        if reference_id is None or rationale is None:
+            raise ValueError(
+                "objective derivation basis requires reference_id and rationale"
+            )
+        identity = (kind, reference_id)
+        if identity in seen:
+            raise ValueError(
+                "objective derivation basis references must be unique"
+            )
+        seen.add(identity)
+        record["kind"] = kind
+        record["reference_id"] = reference_id
+        record["rationale"] = rationale
+        records.append(record)
+    return tuple(records)
 
 
 def _scientific_scalar(value: Any) -> EvidenceScalar | None:

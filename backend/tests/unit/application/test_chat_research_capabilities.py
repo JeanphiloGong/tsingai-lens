@@ -234,14 +234,14 @@ class _ObjectiveRepository:
         )
 
 
-class _TaskService:
-    def __init__(self, tasks: list[dict]) -> None:
-        self.tasks = tasks
+class _PipelineRunService:
+    def __init__(self, runs: list[dict]) -> None:
+        self.runs = runs
         self.calls: list[dict] = []
 
-    async def list_tasks(self, **kwargs) -> list[dict]:
+    async def list_runs(self, **kwargs) -> list[dict]:
         self.calls.append(kwargs)
-        return self.tasks
+        return self.runs
 
 
 class _DocumentPreparationService:
@@ -255,9 +255,11 @@ class _DocumentPreparationService:
             {"collection_id": collection_id, "document_id": document_id, **kwargs}
         )
         return {
-            "task_id": f"task-{document_id}",
+            "run_id": f"run-{document_id}",
             "collection_id": collection_id,
-            "document_id": document_id,
+            "pipeline_name": "document_preparation",
+            "scope_type": "document",
+            "scope_id": document_id,
             "status": "queued",
             "mode": "standard",
         }
@@ -1911,14 +1913,15 @@ async def test_agent_curation_reuses_complete_existing_finding_contract() -> Non
     assert result.resource_refs[0].resource_type == "finding"
 
 
-async def test_research_process_projects_canonical_task_without_retry_internals() -> None:
-    task_service = _TaskService(
+async def test_research_process_projects_canonical_run_without_retry_internals() -> None:
+    pipeline_run_service = _PipelineRunService(
         [
             {
-                "task_id": "task-1",
-                "document_id": "paper-1",
+                "run_id": "run-1",
+                "scope_type": "document",
+                "scope_id": "paper-1",
                 "status": "running",
-                "current_stage": "paper_map",
+                "current_node": "paper_map",
                 "progress_percent": 72,
                 "progress_detail": {"phase": "paper_map"},
                 "warnings": ["One paper could not be parsed."],
@@ -1928,7 +1931,7 @@ async def test_research_process_projects_canonical_task_without_retry_internals(
     )
     capability = InspectResearchProcessCapability(
         collection_service=_CollectionService(),
-        task_service=task_service,
+        pipeline_run_service=pipeline_run_service,
     )
 
     result = await capability.execute(_context(), capability.spec.input_model())
@@ -1944,7 +1947,7 @@ async def test_research_process_projects_canonical_task_without_retry_internals(
     assert result.data["process"]["documents"][0]["stage"] == "paper_map"
     assert result.data["process"]["documents"][0]["progress_percent"] == 72
     assert result.warnings == ("One paper could not be parsed.",)
-    assert task_service.calls == [
+    assert pipeline_run_service.calls == [
         {"collection_id": "col-1", "limit": 200, "offset": 0}
     ]
     assert result.resource_refs[0].href == "/collections/col-1"
@@ -1953,7 +1956,7 @@ async def test_research_process_projects_canonical_task_without_retry_internals(
 async def test_research_process_reports_not_started_without_faking_progress() -> None:
     capability = InspectResearchProcessCapability(
         collection_service=_CollectionService(),
-        task_service=_TaskService([]),
+        pipeline_run_service=_PipelineRunService([]),
     )
 
     result = await capability.execute(_context(), capability.spec.input_model())
@@ -1968,7 +1971,7 @@ async def test_research_process_reports_not_started_without_faking_progress() ->
                     "document_id": "paper-1",
                     "filename": "energy-input-tensile.pdf",
                 "status": "stored",
-                "task_id": None,
+                "run_id": None,
                 "stage": None,
                 "progress_percent": 0,
             },
@@ -1976,7 +1979,7 @@ async def test_research_process_reports_not_started_without_faking_progress() ->
                     "document_id": "paper-2",
                     "filename": "residual-stress-review.pdf",
                 "status": "stored",
-                "task_id": None,
+                "run_id": None,
                 "stage": None,
                 "progress_percent": 0,
             },
@@ -1990,13 +1993,14 @@ async def test_research_process_reports_not_started_without_faking_progress() ->
 async def test_research_process_treats_interrupted_preparation_as_not_started() -> None:
     capability = InspectResearchProcessCapability(
         collection_service=_CollectionService(),
-        task_service=_TaskService(
+        pipeline_run_service=_PipelineRunService(
             [
                 {
-                    "task_id": "task-interrupted",
-                    "document_id": "paper-1",
+                    "run_id": "run-interrupted",
+                    "scope_type": "document",
+                    "scope_id": "paper-1",
                     "status": "failed",
-                    "current_stage": "interrupted",
+                    "current_node": "interrupted",
                     "progress_percent": 68,
                     "warnings": [],
                     "errors": [
@@ -2091,18 +2095,22 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
     assert completed.tool_results[0].data == {
         "collection_id": "col-1",
         "document_ids": ["paper-1", "paper-2"],
-        "tasks": (
+        "runs": (
             {
-                "task_id": "task-paper-1",
+                "run_id": "run-paper-1",
                 "collection_id": "col-1",
-                "document_id": "paper-1",
+                "pipeline_name": "document_preparation",
+                "scope_type": "document",
+                "scope_id": "paper-1",
                 "status": "queued",
                 "mode": "standard",
             },
             {
-                "task_id": "task-paper-2",
+                "run_id": "run-paper-2",
                 "collection_id": "col-1",
-                "document_id": "paper-2",
+                "pipeline_name": "document_preparation",
+                "scope_type": "document",
+                "scope_id": "paper-2",
                 "status": "queued",
                 "mode": "standard",
             },
@@ -2112,7 +2120,7 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
         "objective_analysis_started": False,
     }
     assert completed.tool_results[0].resource_refs[0].resource_type == (
-        "document_preparation_task"
+        "pipeline_run"
     )
     assert completed.tool_results[0].resource_refs[0].href == "/collections/col-1"
 
@@ -2148,7 +2156,7 @@ def test_agent_write_contracts_accept_complete_scopes_beyond_one_hundred_documen
 
 
 @pytest.mark.parametrize(
-    ("task_status", "expected_process_status", "expected_document_status"),
+    ("run_status", "expected_process_status", "expected_document_status"),
     (
         (
             "completed",
@@ -2168,24 +2176,25 @@ def test_agent_write_contracts_accept_complete_scopes_beyond_one_hundred_documen
     ),
 )
 async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
-    task_status: str,
+    run_status: str,
     expected_process_status: str,
     expected_document_status: str,
 ) -> None:
     capability = InspectResearchProcessCapability(
         collection_service=_CollectionService(),
-        task_service=_TaskService(
+        pipeline_run_service=_PipelineRunService(
             [
                 {
-                    "task_id": "task-terminal",
-                    "document_id": "paper-1",
-                    "status": task_status,
+                    "run_id": "run-terminal",
+                    "scope_type": "document",
+                    "scope_id": "paper-1",
+                    "status": run_status,
                     "progress_percent": 100,
                     "progress_detail": {"message": "Build artifacts are ready."},
                     "warnings": [],
                     "errors": (
                         ["Source processing stopped."]
-                        if task_status == "failed"
+                        if run_status == "failed"
                         else []
                     ),
                 }
@@ -2201,7 +2210,7 @@ async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
         expected_document_status
     )
     assert result.data["process"]["failures"] == (
-        ["Source processing stopped."] if task_status == "failed" else []
+        ["Source processing stopped."] if run_status == "failed" else []
     )
 
 
@@ -2234,11 +2243,12 @@ async def test_agent_continues_from_observable_research_process_result() -> None
             (
                 InspectResearchProcessCapability(
                     collection_service=_CollectionService(),
-                    task_service=_TaskService(
+                    pipeline_run_service=_PipelineRunService(
                         [
                             {
-                                "task_id": "task-1",
-                                "document_id": "paper-1",
+                                "run_id": "run-1",
+                                "scope_type": "document",
+                                "scope_id": "paper-1",
                                 "status": "running",
                                 "progress_percent": 72,
                                 "progress_detail": {

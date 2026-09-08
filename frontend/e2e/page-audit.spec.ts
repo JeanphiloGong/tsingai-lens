@@ -420,7 +420,7 @@ test.describe('page interaction audit', () => {
 		expect(await visibleElementsFitViewport(page, '.finding-item')).toBe(true);
 	});
 
-	test('shows aggregate preparation progress for active paper tasks', async ({ page }) => {
+	test('shows aggregate preparation progress for active paper runs', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto(`/collections/${collectionId}?audit_state=processing`);
 
@@ -633,11 +633,11 @@ async function mockApis(page: Page) {
 				)
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/tasks`) {
+			if (path === `/api/v1/collections/${collectionId}/pipeline-runs`) {
 			return route.fulfill(
 				json(
 					auditState === 'processing'
-						? { collection_id: collectionId, count: 1, items: [processingTask()] }
+							? { collection_id: collectionId, count: 1, items: [processingRun()] }
 						: { collection_id: collectionId, count: 0, items: [] }
 				)
 			);
@@ -1021,16 +1021,17 @@ function processingDocument() {
 	};
 }
 
-function processingTask() {
+function processingRun() {
 	return {
-		task_id: 'task_processing',
+		run_id: 'run_processing',
 		collection_id: collectionId,
-		document_id: 'doc_2',
-		task_type: 'document_preparation',
+		pipeline_name: 'document_preparation',
+		scope_type: 'document',
+		scope_id: 'doc_2',
 		mode: 'standard',
 		input_fingerprint: 'fingerprint-doc-2',
 		status: 'running',
-		current_stage: 'paper_map',
+		current_node: 'paper_map',
 		progress_percent: 40,
 		progress_detail: {
 			phase: 'paper_map',
@@ -1038,6 +1039,9 @@ function processingTask() {
 		},
 		errors: [],
 		warnings: [],
+		nodes: {},
+		stats: {},
+		context: {},
 		created_at: now(),
 		updated_at: now(),
 		started_at: now(),

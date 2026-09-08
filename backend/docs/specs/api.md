@@ -43,21 +43,22 @@ login.
 - `POST /api/v1/collections/{collection_id}/documents`
 - `POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation`
 - `POST /api/v1/collections/{collection_id}/source-archives`
-- `GET /api/v1/collections/{collection_id}/tasks`
-- `GET /api/v1/tasks/{task_id}`
+- `GET /api/v1/collections/{collection_id}/pipeline-runs`
+- `GET /api/v1/pipeline-runs/{run_id}`
 
 A Collection groups current Documents. Each Document independently owns its
 preparation status, current Source structure, and current DocumentProfile. The
 preparation command queues only the named Document; it does not prepare other
 Collection members or discover Objectives. Paper Map construction is a lazy
-Objective-core operation over an explicit ready-document selection. Task
-responses expose `document_id`, input fingerprint, current stage, progress,
-warnings, terminal errors, timestamps, and retry-appropriate status. Tasks do
-not expose a filesystem output path; scientific artifacts are addressed by
+Objective-core operation over an explicit ready-document selection. Pipeline
+Run responses expose `run_id`, pipeline name, scope type and ID, input
+fingerprint, current node, progress, node telemetry, warnings, terminal errors,
+statistics, context, timestamps, and retry lineage. Runs do not expose a
+filesystem output path; scientific artifacts are addressed by
 their owning Document, Objective, analysis, Finding, or Evidence identities.
 
-At most one `document_preparation` task may be queued or running for a Document.
-Repeated requests reuse that active task. A completed task is reusable only when
+At most one `document_preparation` run may be queued or running for a Document.
+Repeated requests reuse that active run. A completed run is reusable only when
 its input fingerprint still matches the current document bytes, parser version,
 and Profile version. Source and Profile fingerprints are tracked separately so
 a downstream Profile change resumes from the latest still-valid stage. Different
@@ -71,9 +72,9 @@ PDF uploads are opened with the Source PDF engine before persistence. A damaged,
 incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
 not added to the collection. This check establishes parser readability only;
 scientific structure extraction happens during that Document's preparation.
-A later parser or Profile failure sets only that Document and task to `failed`.
+A later parser or Profile failure sets only that Document and run to `failed`.
 Paper Map failures belong to Objective discovery/analysis and do not change the
-Document preparation task. All such failures stay technical; they do not claim
+Document preparation run. All such failures stay technical; they do not claim
 scientific absence.
 
 The source archive request accepts between one and 100 unique collection
@@ -96,7 +97,7 @@ IDs from `Collection.documents` or from stage-specific failure lineage.
 The preparation command has no request body and runs the canonical Source and
 DocumentProfile preparation pipeline. It starts a process-local asyncio task
 and returns immediately; clients read persisted state through
-`GET /api/v1/tasks/{task_id}`. A
+`GET /api/v1/pipeline-runs/{run_id}`. A
 process-local semaphore defaults to 10 concurrent document preparations. This
 handoff and admission limit are not an external durable queue.
 
@@ -193,16 +194,16 @@ approval. The production Research Agent currently exposes these capabilities:
   table above the bounded response limit is split into row windows, and every
   window repeats the canonical headers and complete-table digest;
 - `inspect_research_process` reads each current Document and its latest
-  preparation task. It reports stored, processing, ready, and failed papers plus
+  preparation run. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,
   prompt repair, or retry internals;
 - `start_research_process` is a `write` capability. After exact-argument
   approval, it queues independent preparation for the supplied `document_ids`,
   or for all current Documents when the list is empty. It returns the per-paper
-  task records immediately. Preparation parses paper content and classifies
+  Pipeline Run records immediately. Preparation parses paper content and classifies
   paper type and role. It does not build a Paper Map, discover or confirm an
   Objective, run Objective-specific Evidence extraction, or publish a Finding.
-  Unknown IDs fail before any task is created. A Collection with no
+  Unknown IDs fail before any run is created. A Collection with no
   uploaded papers returns `collection_has_no_papers`;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
@@ -352,7 +353,7 @@ ends on an opaque tool message alone.
 
 Tool result status is `succeeded`, `queued`, or `failed`. A `queued` result is a
 successful asynchronous handoff, must include at least one canonical resource
-reference, and does not make the Agent wait for task completion. The final
+reference, and does not make the Agent wait for run completion. The final
 assistant response tells the researcher that work started and where its state
 can be inspected.
 
@@ -369,14 +370,14 @@ Documents. The explicit selection is not truncated or divided into independent
 discovery scopes, so candidate formation retains the complete cross-paper
 context. Every selected Document must be `ready` with a preparation fingerprint.
 The command freezes the resolved `(document_id, preparation_fingerprint)`
-values in one collection-scoped `objective_discovery` Task and returns that
-Task immediately. At most one discovery Task may be `queued` or `running` for
-a Collection; a repeated command returns the active Task without scheduling a
+values in one collection-scoped `objective_discovery` Pipeline Run and returns
+that run immediately. At most one discovery run may be `queued` or `running`
+for a Collection; a repeated command returns the active run without scheduling a
 second worker, even when another request reaches a different backend process.
-Clients restore and poll its state through the ordinary Collection Task and
-Task-detail endpoints. On completion they read the replaced candidate set from
-`GET .../objectives`; on failure the terminal Task error remains visible and a
-new command creates a retry Task. A backend restart marks an interrupted Task
+Clients restore and poll its state through the Collection Pipeline Run and
+run-detail endpoints. On completion they read the replaced candidate set from
+`GET .../objectives`; on failure the terminal run error remains visible and a
+new command creates a retry run. A backend restart marks an interrupted run
 failed rather than leaving it permanently active.
 
 The background worker lazily builds or reuses the selected Documents' current
@@ -384,7 +385,7 @@ Paper Maps, reads their Profiles and maps, and replaces the current generated
 candidates. It does not silently include all Collection papers. This is
 research-question formation, not Objective Evidence analysis: analysis still
 requires the later, explicit Objective command. The worker is process-local,
-while admission, progress, completion, and failure are persisted; the Task
+while admission, progress, completion, and failure are persisted; the Pipeline Run
 record is observable execution state rather than an external durable queue.
 
 A Paper Map is preliminary scope metadata: paper type, material and process
@@ -845,7 +846,7 @@ traces and credentials never enter the HTTP response.
 ## Frontend Integration
 
 - Use same-origin requests through the shared API helper.
-- Poll only queued/running task or Objective analysis states.
+- Poll only queued/running Pipeline Run or Objective analysis states.
 - On a failed Objective analysis, show retry while retaining the last published
   Findings if one exists.
 - Paginate Findings and Evidence; do not request a complete Objective object

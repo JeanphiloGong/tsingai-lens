@@ -19,7 +19,7 @@ from controllers.schemas.core.research_objectives import (
     ObjectiveScopeResponse,
     PaginatedObjectiveListResponse,
 )
-from controllers.schemas.source.task import TaskResponse
+from controllers.schemas.source.pipeline_run import PipelineRunResponse
 
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
@@ -27,16 +27,16 @@ router = APIRouter(prefix="/collections", tags=["research-objectives"])
 
 @router.post(
     "/{collection_id}/objective-discovery",
-    response_model=TaskResponse,
+    response_model=PipelineRunResponse,
     summary="Queue research question formation from selected ready documents",
 )
 async def discover_collection_objectives(
     collection_id: str,
     payload: DocumentSelectionRequest,
     request: Request,
-) -> TaskResponse:
+) -> PipelineRunResponse:
     try:
-        task = await request.app.state.research_objective_service.start_objective_discovery(
+        run = await request.app.state.research_objective_service.start_objective_discovery(
             collection_id,
             tuple(payload.document_ids),
         )
@@ -44,7 +44,7 @@ async def discover_collection_objectives(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return TaskResponse(**task)
+    return PipelineRunResponse(**run)
 
 
 @router.get(

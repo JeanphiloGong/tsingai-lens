@@ -3,7 +3,7 @@ from __future__ import annotations
 from asyncio import (
     CancelledError,
     Semaphore,
-    Task,
+    Task as AsyncTask,
     create_task,
     gather,
     get_running_loop,
@@ -83,8 +83,8 @@ from application.core.objectives.scope_screening import (
     screen_objective_scope,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.pipeline import PipelineRunService
 from application.source.collection_service import CollectionService
-from application.source.task_service import TaskService
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
@@ -215,8 +215,8 @@ class ResearchObjectiveService:
         objective_evidence_router: ObjectiveEvidenceRouter | None = None,
         objective_source_extractor: ObjectiveSourceExtractor | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
-        task_service: TaskService | None = None,
-        task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
+        pipeline_run_service: PipelineRunService | None = None,
+        worker_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
         self.collection_service = collection_service
         self._response_client = response_client
@@ -232,29 +232,29 @@ class ResearchObjectiveService:
         self.finding_synthesis_service = finding_synthesis_service
         self.objective_candidate_service = objective_candidate_service
         self.paper_map_service = paper_map_service
-        self.task_service = task_service
-        self._task_factory = task_factory
-        self._discovery_tasks: set[Any] = set()
+        self.pipeline_run_service = pipeline_run_service
+        self._worker_factory = worker_factory
+        self._discovery_workers: set[Any] = set()
 
     async def recover_interrupted_discoveries(self) -> int:
-        """Make persisted discovery tasks retryable after a backend restart."""
+        """Make persisted discovery runs retryable after a backend restart."""
 
-        task_service = self._require_task_service()
-        active_tasks = [
-            *await task_service.list_tasks(status="queued"),
-            *await task_service.list_tasks(status="running"),
+        run_service = self._require_pipeline_run_service()
+        active_runs = [
+            *await run_service.list_runs(status="queued"),
+            *await run_service.list_runs(status="running"),
         ]
         interrupted_count = 0
-        for task in active_tasks:
-            if task.get("task_type") != "objective_discovery":
+        for run in active_runs:
+            if run.get("pipeline_name") != "objective_discovery":
                 continue
-            await task_service.finish_task(
-                task["task_id"],
+            await run_service.finish_run(
+                run["run_id"],
                 status="failed",
-                current_stage="interrupted",
-                progress_percent=task.get("progress_percent", 0),
+                current_node="interrupted",
+                progress_percent=run.get("progress_percent", 0),
                 errors=[
-                    *task.get("errors", ()),
+                    *run.get("errors", ()),
                     "Research question formation was interrupted by a backend restart.",
                 ],
                 progress_detail={
@@ -266,7 +266,7 @@ class ResearchObjectiveService:
             interrupted_count += 1
         if interrupted_count:
             logger.warning(
-                "Recovered interrupted Objective Discovery tasks count=%s",
+                "Recovered interrupted Objective Discovery runs count=%s",
                 interrupted_count,
             )
         return interrupted_count
@@ -278,7 +278,7 @@ class ResearchObjectiveService:
         document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         """
-        Queue or reuse one collection-level Objective Discovery task.
+        Queue or reuse one collection-level Objective Discovery run.
         Args:
             collection_id: collection in which objectives will be discovered
             document_ids: exact papers selected for discovery
@@ -291,58 +291,56 @@ class ResearchObjectiveService:
             document_ids,
         )
 
-        # obtain the task service
-        task_service = self._require_task_service()
+        run_service = self._require_pipeline_run_service()
 
-        # create or reuse a task
-        task, created = await task_service.get_or_create_collection_task(
+        run, created = await run_service.get_or_create_collection_run(
             collection_id=collection_id,
-            task_type="objective_discovery",
+            pipeline_name="objective_discovery",
             input_fingerprint=self._objective_discovery_fingerprint(document_inputs),
-            details={
+            context={
                 "document_ids": [item.document_id for item in document_inputs],
             },
         )
         if not created:
-            return task
+            return run
 
-        coroutine = self.run_objective_discovery_task(
-            task["task_id"],
+        coroutine = self.run_objective_discovery(
+            run["run_id"],
             collection_id,
             tuple(item.document_id for item in document_inputs),
         )
         try:
-            background = self._task_factory(coroutine)
+            background = self._worker_factory(coroutine)
         except Exception as exc:  # noqa: BLE001
             coroutine.close()
-            await task_service.finish_task(
-                task["task_id"],
+            await run_service.finish_run(
+                run["run_id"],
                 status="failed",
-                current_stage="dispatch_failed",
+                current_node="dispatch_failed",
                 progress_percent=0,
                 errors=["Research question formation could not be scheduled."],
             )
             raise RuntimeError(
                 "Research question formation could not be scheduled. Retry it."
             ) from exc
-        self._discovery_tasks.add(background)
-        background.add_done_callback(self._discovery_tasks.discard)
+        self._discovery_workers.add(background)
+        background.add_done_callback(self._discovery_workers.discard)
         background.add_done_callback(self._log_unexpected_discovery_failure)
-        return task
+        return run
 
-    async def run_objective_discovery_task(
+    async def run_objective_discovery(
         self,
-        task_id: str,
+        run_id: str,
         collection_id: str,
         document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
-        """Execute one admitted Objective Discovery task and persist its state."""
+        """Execute one admitted Objective Discovery run and persist its state."""
 
-        task_service = self._require_task_service()
-        await task_service.update_task(
-            task_id,
+        run_service = self._require_pipeline_run_service()
+        await run_service.update_run(
+            run_id,
             status="running",
-            current_stage="paper_map",
+            current_node="paper_map",
             progress_percent=5,
             progress_detail={
                 "phase": "paper_map",
@@ -354,7 +352,7 @@ class ResearchObjectiveService:
         )
         pending_progress_updates = []
         progress_callback = self._build_discovery_progress_callback(
-            task_id,
+            run_id,
             pending_progress_updates,
         )
         try:
@@ -368,10 +366,10 @@ class ResearchObjectiveService:
                     *(wrap_future(item) for item in pending_progress_updates),
                     return_exceptions=True,
                 )
-            return await task_service.finish_task(
-                task_id,
+            return await run_service.finish_run(
+                run_id,
                 status="completed",
-                current_stage="objectives_ready",
+                current_node="objectives_ready",
                 progress_percent=100,
                 progress_detail={
                     "phase": "objectives_ready",
@@ -384,19 +382,19 @@ class ResearchObjectiveService:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "Objective Discovery failed collection_id=%s task_id=%s",
+                "Objective Discovery failed collection_id=%s run_id=%s",
                 collection_id,
-                task_id,
+                run_id,
             )
             if pending_progress_updates:
                 await gather(
                     *(wrap_future(item) for item in pending_progress_updates),
                     return_exceptions=True,
                 )
-            await task_service.finish_task(
-                task_id,
+            await run_service.finish_run(
+                run_id,
                 status="failed",
-                current_stage="failed",
+                current_node="failed",
                 progress_percent=100,
                 errors=[str(exc)],
                 progress_detail={
@@ -409,7 +407,7 @@ class ResearchObjectiveService:
 
     def _build_discovery_progress_callback(
         self,
-        task_id: str,
+        run_id: str,
         pending_updates: list[Any],
     ) -> ProgressCallback:
         loop = get_running_loop()
@@ -436,9 +434,9 @@ class ResearchObjectiveService:
                 last_percent = max(last_percent, min(95, percent))
                 pending_updates.append(
                     run_coroutine_threadsafe(
-                        self._require_task_service().update_task(
-                            task_id,
-                            current_stage=phase,
+                        self._require_pipeline_run_service().update_run(
+                            run_id,
+                            current_node=phase,
                             progress_percent=last_percent,
                             progress_detail=dict(progress),
                         ),
@@ -448,11 +446,10 @@ class ResearchObjectiveService:
 
         return update
 
-    # define a helper to obtain the task service
-    def _require_task_service(self) -> TaskService:
-        if self.task_service is None:
-            raise RuntimeError("Objective Discovery task service is not configured")
-        return self.task_service
+    def _require_pipeline_run_service(self) -> PipelineRunService:
+        if self.pipeline_run_service is None:
+            raise RuntimeError("Objective Discovery run service is not configured")
+        return self.pipeline_run_service
 
     # define a helper that calculate the fingerprint of the objective discovery
     @staticmethod
@@ -480,13 +477,13 @@ class ResearchObjectiveService:
             return None
 
     @staticmethod
-    def _log_unexpected_discovery_failure(task: Task[dict[str, Any]]) -> None:
+    def _log_unexpected_discovery_failure(worker: AsyncTask[dict[str, Any]]) -> None:
         try:
-            task.result()
+            worker.result()
         except CancelledError:
-            logger.info("Objective Discovery task cancelled during backend shutdown")
+            logger.info("Objective Discovery run cancelled during backend shutdown")
         except Exception:  # noqa: BLE001
-            logger.exception("Objective Discovery task crashed after scheduling")
+            logger.exception("Objective Discovery run crashed after scheduling")
 
     # define a main method for turning a completed collection build into candidate research objectives
     async def discover_and_replace_objective_candidates(
@@ -503,7 +500,7 @@ class ResearchObjectiveService:
         Args:
             collection_id: the collection being studied
             document_ids: exact ready document scope to inspect
-            progress_callback: reports progress to the collection task
+            progress_callback: reports progress to the collection run
         Returns:
             ObjectiveFactSet: selected inputs, candidate Objectives, and relationship dispositions.
         """

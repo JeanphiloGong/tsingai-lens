@@ -81,10 +81,13 @@ class ExecutionTimestamps:
     started_at: str | None = None
     finished_at: str | None = None
     created_at: str | None = None
+    updated_at: str | None = None
 
     def __post_init__(self) -> None:
         if self.created_at is not None:
             _timestamp(self.created_at)
+        if self.updated_at is not None:
+            _timestamp(self.updated_at)
         if self.started_at is not None:
             _timestamp(self.started_at)
         if self.finished_at is not None:
@@ -101,6 +104,7 @@ class ExecutionTimestamps:
         source = payload if isinstance(payload, Mapping) else {}
         return cls(
             created_at=_optional_text(source.get("created_at")),
+            updated_at=_optional_text(source.get("updated_at")),
             started_at=_optional_text(source.get("started_at")),
             finished_at=_optional_text(source.get("finished_at")),
         )
@@ -119,7 +123,9 @@ class ExecutionTimestamps:
             "finished_at": self.finished_at,
         }
         if self.created_at is not None:
-            return {"created_at": self.created_at, **record}
+            record = {"created_at": self.created_at, **record}
+        if self.updated_at is not None:
+            record = {**record, "updated_at": self.updated_at}
         return record
 
 
@@ -424,6 +430,7 @@ class PipelineRun:
     pipeline_name: str
     mode: str
     run_id: str
+    collection_id: str
     scope_type: str
     scope_id: str
     status: PipelineRunStatus
@@ -432,12 +439,19 @@ class PipelineRun:
     warnings: tuple[str, ...]
     stats: ExecutionStats
     timestamps: ExecutionTimestamps
+    input_fingerprint: str | None = None
+    current_node: str | None = None
+    progress_percent: int = 0
+    progress_detail: Mapping[str, Any] | None = None
+    context: Mapping[str, Any] = field(default_factory=dict)
+    resumed_from_run_id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
             "pipeline_name",
             "mode",
             "run_id",
+            "collection_id",
             "scope_type",
             "scope_id",
         ):
@@ -447,6 +461,19 @@ class PipelineRun:
         object.__setattr__(self, "nodes", tuple(self.nodes))
         object.__setattr__(self, "errors", tuple(self.errors))
         object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "input_fingerprint", _optional_text(self.input_fingerprint))
+        object.__setattr__(self, "current_node", _optional_text(self.current_node))
+        object.__setattr__(self, "resumed_from_run_id", _optional_text(self.resumed_from_run_id))
+        if not 0 <= self.progress_percent <= 100:
+            raise ValueError("progress_percent must be between zero and 100")
+        object.__setattr__(
+            self,
+            "progress_detail",
+            deepcopy(dict(self.progress_detail))
+            if self.progress_detail is not None
+            else None,
+        )
+        object.__setattr__(self, "context", deepcopy(dict(self.context)))
         names = tuple(node.name for node in self.nodes)
         if len(set(names)) != len(names):
             raise ValueError("pipeline node names must be unique")
@@ -486,8 +513,12 @@ class PipelineRun:
         pipeline_name: str,
         mode: str,
         run_id: str,
+        collection_id: str,
         scope_type: str,
         scope_id: str,
+        input_fingerprint: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        resumed_from_run_id: str | None = None,
         node_dependencies: Mapping[str, Iterable[str]],
         created_at: str,
     ) -> "PipelineRun":
@@ -495,6 +526,7 @@ class PipelineRun:
             pipeline_name=pipeline_name,
             mode=mode,
             run_id=run_id,
+            collection_id=collection_id,
             scope_type=scope_type,
             scope_id=scope_id,
             status=PipelineRunStatus.QUEUED,
@@ -505,7 +537,13 @@ class PipelineRun:
             errors=(),
             warnings=(),
             stats=ExecutionStats(),
-            timestamps=ExecutionTimestamps(created_at=created_at),
+            timestamps=ExecutionTimestamps(
+                created_at=created_at,
+                updated_at=created_at,
+            ),
+            input_fingerprint=input_fingerprint,
+            context=context or {},
+            resumed_from_run_id=resumed_from_run_id,
         )
 
     @classmethod
@@ -530,6 +568,7 @@ class PipelineRun:
             pipeline_name=str(payload.get("pipeline_name") or "").strip(),
             mode=str(payload.get("mode") or "").strip(),
             run_id=str(payload.get("run_id") or "").strip(),
+            collection_id=str(payload.get("collection_id") or "").strip(),
             scope_type=str(payload.get("scope_type") or "").strip(),
             scope_id=str(payload.get("scope_id") or "").strip(),
             status=_run_status(payload.get("status")),
@@ -538,6 +577,20 @@ class PipelineRun:
             warnings=tuple(str(item) for item in payload.get("warnings") or ()),
             stats=ExecutionStats.from_mapping(payload.get("stats")),
             timestamps=ExecutionTimestamps.from_mapping(payload.get("timestamps")),
+            input_fingerprint=_optional_text(payload.get("input_fingerprint")),
+            current_node=_optional_text(payload.get("current_node")),
+            progress_percent=int(payload.get("progress_percent") or 0),
+            progress_detail=(
+                dict(payload["progress_detail"])
+                if isinstance(payload.get("progress_detail"), Mapping)
+                else None
+            ),
+            context=(
+                dict(payload["context"])
+                if isinstance(payload.get("context"), Mapping)
+                else {}
+            ),
+            resumed_from_run_id=_optional_text(payload.get("resumed_from_run_id")),
         )
 
     def node(self, name: str) -> PipelineNodeRun:
@@ -550,7 +603,11 @@ class PipelineRun:
         return replace(
             self,
             status=PipelineRunStatus.RUNNING,
-            timestamps=replace(self.timestamps, started_at=started_at),
+            timestamps=replace(
+                self.timestamps,
+                started_at=started_at,
+                updated_at=started_at,
+            ),
         )
 
     def with_node(self, updated: PipelineNodeRun) -> "PipelineRun":
@@ -570,6 +627,20 @@ class PipelineRun:
             ),
         )
 
+    def with_progress(
+        self,
+        *,
+        current_node: str,
+        progress_percent: int,
+        progress_detail: Mapping[str, Any] | None = None,
+    ) -> "PipelineRun":
+        return replace(
+            self,
+            current_node=current_node,
+            progress_percent=progress_percent,
+            progress_detail=progress_detail,
+        )
+
     def finish(
         self,
         status: PipelineRunStatus,
@@ -578,7 +649,11 @@ class PipelineRun:
         resolved_status = _run_status(status)
         if not resolved_status.is_terminal:
             raise ValueError("finished pipeline run requires a terminal status")
-        timestamps = replace(self.timestamps, finished_at=finished_at)
+        timestamps = replace(
+            self.timestamps,
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
         return replace(
             self,
             status=resolved_status,
@@ -607,14 +682,25 @@ class PipelineRun:
             "pipeline_name": self.pipeline_name,
             "mode": self.mode,
             "run_id": self.run_id,
+            "collection_id": self.collection_id,
             "scope_type": self.scope_type,
             "scope_id": self.scope_id,
+            "input_fingerprint": self.input_fingerprint,
             "status": _run_status(self.status).value,
+            "current_node": self.current_node,
+            "progress_percent": self.progress_percent,
+            "progress_detail": (
+                deepcopy(dict(self.progress_detail))
+                if self.progress_detail is not None
+                else None
+            ),
             "nodes": {node.name: node.to_record() for node in self.nodes},
             "errors": list(self.errors),
             "warnings": list(self.warnings),
             "stats": self.stats.to_record(),
             "timestamps": self.timestamps.to_record(),
+            "context": deepcopy(dict(self.context)),
+            "resumed_from_run_id": self.resumed_from_run_id,
         }
 
 

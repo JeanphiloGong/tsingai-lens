@@ -237,18 +237,22 @@ function uploadedDocument(file: File, documentId = 'doc_upload_1') {
 
 function queuedPreparation(documentId = 'doc_upload_1') {
 	return {
-		task_id: `task_${documentId}`,
+		run_id: `run_${documentId}`,
 		collection_id: 'col_123',
-		document_id: documentId,
-		task_type: 'document_preparation',
+		pipeline_name: 'document_preparation',
+		scope_type: 'document',
+		scope_id: documentId,
 		mode: 'standard',
 		input_fingerprint: null,
 		status: 'queued',
-		current_stage: 'queued',
+		current_node: 'queued',
 		progress_percent: 0,
 		progress_detail: { phase: 'queued' },
+		nodes: {},
 		errors: [],
 		warnings: [],
+		stats: {},
+		context: {},
 		created_at: createdAt,
 		updated_at: createdAt,
 		started_at: null,
@@ -973,8 +977,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 							data: {},
 							resource_refs: [
 								{
-									resource_type: 'document_preparation_task',
-									resource_id: 'task_1',
+									resource_type: 'pipeline_run',
+									resource_id: 'run_1',
 									href: '/collections/col_123'
 								}
 							],
@@ -995,7 +999,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByText('Literature analysis started')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('In progress')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Task queued. You can continue while it runs.'))
+				.element(browserPage.getByText('Run queued. You can continue while it executes.'))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open literature analysis' }))

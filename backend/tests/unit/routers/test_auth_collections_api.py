@@ -61,8 +61,8 @@ def _build_client(
     auth_session_service,
     collection_service,
 ) -> Iterator[TestClient]:
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryTaskRepository
+    from application.pipeline import PipelineRunService
+    from infra.persistence.memory import MemoryPipelineRunRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -74,7 +74,7 @@ def _build_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryTaskRepository()),
+            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -146,8 +146,8 @@ def test_app_lifespan_composes_one_shared_collection_service(
     auth_session_service,
     collection_service,
 ) -> None:
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryTaskRepository
+    from application.pipeline import PipelineRunService
+    from infra.persistence.memory import MemoryPipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
@@ -157,7 +157,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryTaskRepository()),
+            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -220,15 +220,15 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
     from application.source.document_preparation_service import (
         DocumentPreparationService,
     )
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryTaskRepository
+    from application.pipeline import PipelineRunService
+    from infra.persistence.memory import MemoryPipelineRunRepository
     from main import create_app
 
     preparation_recovery = AsyncMock(return_value=0)
     analysis_recovery = AsyncMock(return_value=0)
     monkeypatch.setattr(
         DocumentPreparationService,
-        "recover_interrupted_tasks",
+        "recover_interrupted_runs",
         preparation_recovery,
     )
     monkeypatch.setattr(
@@ -243,7 +243,7 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryTaskRepository()),
+            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ):

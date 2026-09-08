@@ -8,7 +8,18 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 import pytest
-from sqlalchemy import MetaData, Table, create_engine, inspect, select
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    JSON,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    inspect,
+    select,
+)
 from sqlalchemy.engine import URL
 
 from infra.persistence.postgres.base import Base
@@ -16,7 +27,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0044"
+HEAD_REVISION = "20260908_0045"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -75,15 +86,20 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             }
         )
         assert "document_sources" in expected
-        task_columns = {
-            column["name"] for column in inspect(connection).get_columns("tasks")
+        pipeline_run_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("pipeline_runs")
         }
         assert {
-            "document_id",
+            "run_id",
+            "pipeline_name",
+            "scope_type",
+            "scope_id",
             "input_fingerprint",
-            "task_type",
-        }.issubset(task_columns)
-        assert "output_path" not in task_columns
+            "record_json",
+        }.issubset(pipeline_run_columns)
+        assert "tasks" not in expected
+        assert "task_stages" not in expected
         assert "payload" in {
             column["name"]
             for column in inspect(connection).get_columns("objective_analyses")
@@ -112,7 +128,7 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
     engine.dispose()
 
 
-def test_existing_0040_database_removes_retired_task_output_path(tmp_path) -> None:
+def test_existing_0040_database_replaces_retired_task_tables(tmp_path) -> None:
     engine = create_engine(
         URL.create(
             "sqlite+pysqlite",
@@ -124,26 +140,189 @@ def test_existing_0040_database_removes_retired_task_output_path(tmp_path) -> No
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, "20260831_0040")
-        if "output_path" not in {
-            column["name"] for column in inspect(connection).get_columns("tasks")
-        }:
-            connection.exec_driver_sql(
-                "ALTER TABLE tasks ADD COLUMN output_path TEXT"
-            )
-        assert "output_path" in {
-            column["name"] for column in inspect(connection).get_columns("tasks")
-        }
-
         command.upgrade(config, "head")
 
         assert MigrationContext.configure(connection).get_current_revision() == (
             HEAD_REVISION
         )
-        assert "output_path" not in {
-            column["name"] for column in inspect(connection).get_columns("tasks")
-        }
+        assert "pipeline_runs" in inspect(connection).get_table_names()
+        assert "tasks" not in inspect(connection).get_table_names()
+        assert "task_stages" not in inspect(connection).get_table_names()
 
     engine.dispose()
+
+
+def test_existing_0044_task_history_is_backfilled_as_one_pipeline_run(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "migration-task-history.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    now = datetime(2026, 9, 8, 8, 0, tzinfo=timezone.utc)
+    finished = datetime(2026, 9, 8, 8, 1, tzinfo=timezone.utc)
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260908_0044")
+        _create_legacy_task_tables(connection)
+        metadata = MetaData()
+        auth_users = Table("auth_users", metadata, autoload_with=connection)
+        collections = Table("collections", metadata, autoload_with=connection)
+        documents = Table("documents", metadata, autoload_with=connection)
+        tasks = Table("tasks", metadata, autoload_with=connection)
+        task_stages = Table("task_stages", metadata, autoload_with=connection)
+        connection.execute(
+            auth_users.insert().values(
+                user_id="migration-user",
+                email="migration@example.com",
+                display_name=None,
+                password_hash="synthetic-password-hash",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            collections.insert().values(
+                collection_id="migration-collection",
+                owner_user_id="migration-user",
+                name="Migration collection",
+                description=None,
+                status="processing",
+                paper_count=1,
+                created_at=now,
+                updated_at=finished,
+            )
+        )
+        connection.execute(
+            documents.insert().values(
+                document_id="migration-document",
+                collection_id="migration-collection",
+                original_filename="paper.pdf",
+                stored_filename="paper.pdf",
+                storage_key="migration-collection/inputs/paper.pdf",
+                sha256="a" * 64,
+                media_type="application/pdf",
+                status="processing",
+                size_bytes=100,
+                document_order=0,
+                created_at=now,
+                updated_at=finished,
+            )
+        )
+        connection.execute(
+            tasks.insert().values(
+                task_id="task-migration",
+                collection_id="migration-collection",
+                task_type="document_preparation",
+                document_id="migration-document",
+                mode="standard",
+                input_fingerprint="b" * 64,
+                status="failed",
+                current_stage="document_profile",
+                progress_percent=45,
+                progress_detail={"phase": "document_profile"},
+                errors=["profile extraction failed"],
+                warnings=["parser warning"],
+                details={"requested_by": "upload"},
+                created_at=now,
+                updated_at=finished,
+                started_at=now,
+                finished_at=finished,
+            )
+        )
+        connection.execute(
+            task_stages.insert().values(
+                stage_id="stage-migration",
+                task_id="task-migration",
+                stage_kind="document_profile",
+                stage_order=1,
+                status="failed",
+                started_at=now,
+                finished_at=finished,
+                errors=["profile extraction failed"],
+                warnings=[],
+                dependencies=[],
+                stats={"duration_ms": 60000},
+                output_summary={"profile_count": 0},
+            )
+        )
+
+        command.upgrade(config, "head")
+
+        pipeline_runs = Table(
+            "pipeline_runs", MetaData(), autoload_with=connection
+        )
+        row = connection.execute(
+            select(pipeline_runs).where(
+                pipeline_runs.c.run_id == "task-migration"
+            )
+        ).mappings().one()
+        assert row["pipeline_name"] == "document_preparation"
+        assert row["scope_type"] == "document"
+        assert row["scope_id"] == "migration-document"
+        assert row["record_json"]["context"] == {"requested_by": "upload"}
+        assert row["record_json"]["nodes"]["document_profile"] == {
+            "name": "document_profile",
+            "dependencies": [],
+            "status": "failed",
+            "errors": ["profile extraction failed"],
+            "warnings": [],
+            "stats": {"duration_ms": 60000},
+            "timestamps": {
+                "started_at": now.isoformat(),
+                "finished_at": finished.isoformat(),
+            },
+            "output_summary": {"profile_count": 0},
+        }
+        assert "tasks" not in inspect(connection).get_table_names()
+        assert "task_stages" not in inspect(connection).get_table_names()
+
+    engine.dispose()
+
+
+def _create_legacy_task_tables(connection) -> None:
+    if "tasks" in inspect(connection).get_table_names():
+        return
+    metadata = MetaData()
+    tasks = Table(
+        "tasks",
+        metadata,
+        Column("task_id", String(64), primary_key=True),
+        Column("collection_id", String(64), nullable=False),
+        Column("task_type", String(64), nullable=False),
+        Column("document_id", String(64)),
+        Column("mode", String(64), nullable=False),
+        Column("input_fingerprint", String(64)),
+        Column("status", String(32), nullable=False),
+        Column("current_stage", String(128), nullable=False),
+        Column("progress_percent", Integer, nullable=False),
+        Column("progress_detail", JSON),
+        Column("errors", JSON, nullable=False),
+        Column("warnings", JSON, nullable=False),
+        Column("details", JSON, nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        Column("updated_at", DateTime(timezone=True), nullable=False),
+        Column("started_at", DateTime(timezone=True)),
+        Column("finished_at", DateTime(timezone=True)),
+    )
+    Table(
+        "task_stages",
+        metadata,
+        Column("stage_id", String(64), primary_key=True),
+        Column("task_id", String(64), nullable=False),
+        Column("stage_kind", String(128), nullable=False),
+        Column("stage_order", Integer, nullable=False),
+        Column("status", String(32), nullable=False),
+        Column("started_at", DateTime(timezone=True)),
+        Column("finished_at", DateTime(timezone=True)),
+        Column("errors", JSON, nullable=False),
+        Column("warnings", JSON, nullable=False),
+        Column("dependencies", JSON, nullable=False),
+        Column("stats", JSON, nullable=False),
+        Column("output_summary", JSON, nullable=False),
+    )
+    metadata.create_all(connection, tables=[tasks, metadata.tables["task_stages"]])
 
 
 def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> None:

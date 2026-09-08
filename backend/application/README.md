@@ -25,11 +25,12 @@ Inside it, business responsibilities are now grouped as:
   Goal Brief intake and research-intent shaping
 - [`source/README.md`](source/README.md)
   Collection lifecycle, current Document membership, per-document preparation,
-  Source loading, and task state
+  and Source loading
 - [`chat/README.md`](chat/README.md)
   Collection-bound Research Agent trajectory, capabilities, and write approval
 - [`pipeline/README.md`](pipeline/README.md)
-  Shared observable pipeline records; workflow ordering stays in owning services
+  Pipeline Run admission, telemetry, persistence, and recovery; scientific
+  workflow ordering stays in owning services
 - [`core/README.md`](core/README.md)
   Document profiles, Paper Maps, Objectives, Evidence, and Findings
 - [`evaluation/README.md`](evaluation/README.md)

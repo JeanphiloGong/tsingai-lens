@@ -57,20 +57,24 @@ const storedDocument = {
 	preparation_fingerprint: null
 };
 
-function task(overrides: Record<string, unknown> = {}) {
+function pipelineRun(overrides: Record<string, unknown> = {}) {
 	return {
-		task_id: 'task_1',
+		run_id: 'run_1',
 		collection_id: 'col_123',
-		document_id: 'doc_stored',
-		task_type: 'document_preparation',
+		pipeline_name: 'document_preparation',
+		scope_type: 'document',
+		scope_id: 'doc_stored',
 		mode: 'standard',
 		input_fingerprint: 'fingerprint-stored',
 		status: 'running',
-		current_stage: 'source_parsing',
+		current_node: 'source_parsing',
 		progress_percent: 10,
 		progress_detail: { phase: 'source_parsing', message: 'Parsing paper.' },
+		nodes: {},
 		errors: [],
 		warnings: [],
+		stats: {},
+		context: {},
 		created_at: '2026-08-27T00:00:00Z',
 		updated_at: '2026-08-27T00:00:01Z',
 		started_at: '2026-08-27T00:00:01Z',
@@ -89,8 +93,8 @@ describe('current collection document workflow', () => {
 			if (url.pathname.endsWith('/documents') && method === 'GET') {
 				return jsonResponse({ items: [readyDocument, storedDocument] });
 			}
-			if (url.pathname.endsWith('/tasks') && method === 'GET') {
-				return jsonResponse({ collection_id: 'col_123', count: 1, items: [task()] });
+			if (url.pathname.endsWith('/pipeline-runs') && method === 'GET') {
+				return jsonResponse({ collection_id: 'col_123', count: 1, items: [pipelineRun()] });
 			}
 			if (url.pathname.endsWith('/objectives') && method === 'GET') {
 				return jsonResponse({ collection_id: 'col_123', objectives: [] });
@@ -102,17 +106,18 @@ describe('current collection document workflow', () => {
 				});
 			}
 			if (url.pathname.includes('/preparation') && method === 'POST') {
-				return jsonResponse(task({ status: 'queued' }));
+				return jsonResponse(pipelineRun({ status: 'queued' }));
 			}
 			if (url.pathname.endsWith('/objective-discovery') && method === 'POST') {
 				return jsonResponse(
-					task({
-						task_id: 'task_discovery',
+					pipelineRun({
+						run_id: 'run_discovery',
 						collection_id: 'col_123',
-						document_id: null,
-						task_type: 'objective_discovery',
+						pipeline_name: 'objective_discovery',
+						scope_type: 'collection',
+						scope_id: 'col_123',
 						status: 'queued',
-						current_stage: 'queued',
+						current_node: 'queued',
 						progress_percent: 0,
 						progress_detail: {
 							phase: 'queued',
@@ -172,24 +177,25 @@ describe('current collection document workflow', () => {
 		});
 	});
 
-	it('restores active research-question formation from the persisted task', async () => {
+	it('restores active research-question formation from the persisted run', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 			const url = new URL(raw, 'http://localhost');
 			if (url.pathname.endsWith('/documents')) {
 				return jsonResponse({ items: [readyDocument] });
 			}
-			if (url.pathname.endsWith('/tasks')) {
+			if (url.pathname.endsWith('/pipeline-runs')) {
 				return jsonResponse({
 					collection_id: 'col_123',
 					count: 1,
 					items: [
-						task({
-							task_id: 'task_discovery',
-							document_id: null,
-							task_type: 'objective_discovery',
+						pipelineRun({
+							run_id: 'run_discovery',
+							pipeline_name: 'objective_discovery',
+							scope_type: 'collection',
+							scope_id: 'col_123',
 							status: 'running',
-							current_stage: 'objective_discovery_started',
+							current_node: 'objective_discovery_started',
 							progress_percent: 64,
 							progress_detail: {
 								phase: 'objective_discovery_started',
@@ -216,37 +222,39 @@ describe('current collection document workflow', () => {
 	});
 
 	it('polls persisted research-question formation through completion', async () => {
-		let taskReads = 0;
+		let runReads = 0;
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 			const url = new URL(raw, 'http://localhost');
 			if (url.pathname.endsWith('/documents')) {
 				return jsonResponse({ items: [readyDocument] });
 			}
-			if (url.pathname.endsWith('/tasks')) {
+			if (url.pathname.endsWith('/pipeline-runs')) {
 				return jsonResponse({
 					collection_id: 'col_123',
 					count: 1,
 					items: [
-						task({
-							task_id: 'task_discovery',
-							document_id: null,
-							task_type: 'objective_discovery',
+						pipelineRun({
+							run_id: 'run_discovery',
+							pipeline_name: 'objective_discovery',
+							scope_type: 'collection',
+							scope_id: 'col_123',
 							status: 'running',
 							progress_percent: 64
 						})
 					]
 				});
 			}
-			if (url.pathname.endsWith('/tasks/task_discovery')) {
-				taskReads += 1;
+			if (url.pathname.endsWith('/pipeline-runs/run_discovery')) {
+				runReads += 1;
 				return jsonResponse(
-					task({
-						task_id: 'task_discovery',
-						document_id: null,
-						task_type: 'objective_discovery',
+					pipelineRun({
+						run_id: 'run_discovery',
+						pipeline_name: 'objective_discovery',
+						scope_type: 'collection',
+						scope_id: 'col_123',
 						status: 'completed',
-						current_stage: 'objectives_ready',
+						current_node: 'objectives_ready',
 						progress_percent: 100
 					})
 				);
@@ -255,7 +263,7 @@ describe('current collection document workflow', () => {
 				return jsonResponse({
 					collection_id: 'col_123',
 					objectives:
-						taskReads > 0
+							runReads > 0
 							? [{ objective_id: 'obj-1', question: 'How does heat affect strength?' }]
 							: []
 				});
@@ -272,7 +280,7 @@ describe('current collection document workflow', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Enter research objectives' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives');
-		expect(taskReads).toBe(1);
+		expect(runReads).toBe(1);
 	});
 
 	it('leads with existing research objectives instead of the paper management table', async () => {
@@ -281,7 +289,7 @@ describe('current collection document workflow', () => {
 			if (url.pathname.endsWith('/documents')) {
 				return jsonResponse({ items: [readyDocument] });
 			}
-			if (url.pathname.endsWith('/tasks')) {
+			if (url.pathname.endsWith('/pipeline-runs')) {
 				return jsonResponse({ collection_id: 'col_123', count: 0, items: [] });
 			}
 			if (url.pathname.endsWith('/objectives')) {

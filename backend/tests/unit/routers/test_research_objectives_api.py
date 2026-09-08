@@ -245,14 +245,15 @@ class _DiscoveryService:
     ):
         self.discovery_calls.append((collection_id, document_ids))
         return {
-            "task_id": "task-discovery-1",
+            "run_id": "run-discovery-1",
             "collection_id": collection_id,
-            "document_id": None,
-            "task_type": "objective_discovery",
+            "pipeline_name": "objective_discovery",
+            "scope_type": "collection",
+            "scope_id": collection_id,
             "mode": "standard",
             "input_fingerprint": "scope-fingerprint",
             "status": "queued",
-            "current_stage": "queued",
+            "current_node": "queued",
             "progress_percent": 0,
             "progress_detail": {
                 "phase": "queued",
@@ -701,8 +702,8 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
     assert discovery_response.status_code == 200
     assert analysis_response.status_code == 200
-    assert discovery_response.json()["task_id"] == "task-discovery-1"
-    assert discovery_response.json()["task_type"] == "objective_discovery"
+    assert discovery_response.json()["run_id"] == "run-discovery-1"
+    assert discovery_response.json()["pipeline_name"] == "objective_discovery"
     assert discovery_response.json()["status"] == "queued"
     assert discovery_service.discovery_calls == [
         ("col-1", tuple(document_ids)),

@@ -20,7 +20,7 @@
 	} from '../../../_shared/chatSessions';
 	import { uploadCollectionDocument } from '../../../_shared/collectionDocuments';
 	import { t } from '../../../_shared/i18n';
-	import { prepareCollectionDocument } from '../../../_shared/tasks';
+	import { prepareCollectionDocument } from '../../../_shared/pipelineRuns';
 	import {
 		buildChatPresentation,
 		type ChatPresentationItem,
@@ -1134,7 +1134,7 @@
 				return $t('researchAgent.resource.researchPlan');
 			case 'objective_analysis':
 				return $t('researchAgent.resource.analysis');
-			case 'document_preparation_task':
+			case 'pipeline_run':
 				return $t('researchAgent.resource.researchProcess');
 			default:
 				return $t('researchAgent.resource.other');

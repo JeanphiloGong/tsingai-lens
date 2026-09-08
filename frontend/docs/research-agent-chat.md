@@ -35,9 +35,9 @@ scientific fact store.
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
 - Core owns Research Objectives, Evidence, Findings, and Analysis.
-- Current Documents and their preparation tasks remain the runtime authority for
-  paper preparation progress. Chat reads that state; it does not persist another
-  workflow.
+- Current Documents and their preparation Pipeline Runs remain the runtime
+  authority for paper preparation progress. Chat reads that state; it does not
+  persist another workflow.
 - Paper Map relationships may support an Objective proposal but are labeled as
   proposal context, never Evidence.
 - Preparing papers and starting Objective analysis are separate approved writes.
@@ -96,7 +96,7 @@ to the model or stored as a Chat attachment, and uploading does not create an
 Objective, Evidence, or Finding. Each file reports its own stored, preparing,
 queued, upload-failed, or preparation-failed state. A preparation retry reuses
 the stored document ID, while the Collection workspace remains the canonical
-view for long-running task progress.
+view for long-running Pipeline Run progress.
 
 Message submission uses `Accept: text/event-stream` on the existing `POST
 /messages` endpoint. The browser appends `text_delta` events to one temporary
@@ -196,7 +196,7 @@ artifact. The browser does not synthesize decorative screenshots for routine
 tool work.
 
 A `queued` capability result is rendered as started rather than completed. It
-shows the canonical analysis or task link and lets the researcher continue the
+shows the canonical analysis or Pipeline Run link and lets the researcher continue the
 conversation instead of waiting for the long-running operation.
 
 Raw tool JSON is not presented as an assistant claim.

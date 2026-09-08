@@ -31,7 +31,7 @@ Collection
   -> current Documents
 
 Document
-  -> one active preparation task at most
+  -> one active preparation Pipeline Run at most
   -> current SourceDocument
   -> current DocumentProfile
   -> optional current PaperMap (lazy, selected by Objective work)
@@ -68,11 +68,12 @@ stores uploaded and extracted bytes. Local files are disposable runtime scratch.
 
 ## Concurrency And Reuse
 
-- One queued or running preparation task may exist per Document and task type.
+- One queued or running `document_preparation` Pipeline Run may exist per
+  Document scope.
 - Different Documents may prepare concurrently; the default process-local limit
   is `10`.
-- A queued or running task is reused even if a caller asks again.
-- A completed task is reused only when its input fingerprint still matches the
+- A queued or running run is reused even if a caller asks again.
+- A completed preparation run is reused only when its input fingerprint still matches the
   Document bytes and all preparation-stage versions.
 - Source and Profile fingerprints allow a retry or downstream version change to
   resume from the latest valid stage instead of rerunning Docling.
@@ -93,8 +94,8 @@ The process-local background workers are not durable queues. Before the API
 starts serving requests, startup recovery converts persisted work that no live
 worker can own into retryable state:
 
-- queued or running Document preparation tasks become failed with the
-  `interrupted` stage; a Document left in `processing` returns to `stored`, while
+- queued or running Document preparation runs become failed with the
+  `interrupted` node; a Document left in `processing` returns to `stored`, while
   already written Source and DocumentProfile artifacts remain
   available for fingerprinted reuse. Research-facing status projects this
   technical interruption as `not_started` rather than a scientific failure;

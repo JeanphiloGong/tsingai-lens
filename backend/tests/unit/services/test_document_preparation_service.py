@@ -13,9 +13,9 @@ from domain.core import DocumentProfile
 from domain.source import Document, SourceDocument
 from infra.persistence.memory import (
     MemorySourceArtifactRepository,
-    MemoryTaskRepository,
+    MemoryPipelineRunRepository,
 )
-from application.source.task_service import TaskService
+from application.pipeline import PipelineRunService
 
 
 pytestmark = pytest.mark.anyio
@@ -101,43 +101,43 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
             self.document = replace(self.document, **fields)
             return self.document
 
-    task_service = TaskService(MemoryTaskRepository())
-    task, created = await task_service.get_or_create_document_task(
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    task, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
-        task_type="document_preparation",
+        pipeline_name="document_preparation",
         input_fingerprint="old-preparation-input",
     )
     assert created is True
-    await task_service.update_task(task["task_id"], status="running")
+    await pipeline_run_service.update_run(task["run_id"], status="running")
     collection_service = CollectionService()
     service = DocumentPreparationService(
         collection_service=collection_service,
-        task_service=task_service,
+        pipeline_run_service=pipeline_run_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )
 
-    recovered = await service.recover_interrupted_tasks()
+    recovered = await service.recover_interrupted_runs()
 
-    interrupted = await task_service.get_task(task["task_id"])
+    interrupted = await pipeline_run_service.get_run(task["run_id"])
     assert recovered == 1
     assert interrupted["status"] == "failed"
-    assert interrupted["current_stage"] == "interrupted"
+    assert interrupted["current_node"] == "interrupted"
     assert interrupted["finished_at"] is not None
     assert collection_service.document == replace(original, status="stored")
 
     replacement, replacement_created = (
-        await task_service.get_or_create_document_task(
+        await pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
-            task_type="document_preparation",
+            pipeline_name="document_preparation",
             input_fingerprint="old-preparation-input",
         )
     )
     assert replacement_created is True
-    assert replacement["task_id"] != task["task_id"]
+    assert replacement["run_id"] != task["run_id"]
 
 
 async def test_restart_keeps_preparation_active_when_document_reset_fails() -> None:
@@ -163,26 +163,26 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
         async def update_document_preparation(self, *_args, **_fields) -> Document:
             raise OSError("database temporarily unavailable")
 
-    task_service = TaskService(MemoryTaskRepository())
-    task, _created = await task_service.get_or_create_document_task(
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    task, _created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
-        task_type="document_preparation",
+        pipeline_name="document_preparation",
         input_fingerprint="preparation-input",
     )
-    await task_service.update_task(task["task_id"], status="running")
+    await pipeline_run_service.update_run(task["run_id"], status="running")
     service = DocumentPreparationService(
         collection_service=CollectionService(),
-        task_service=task_service,
+        pipeline_run_service=pipeline_run_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )
 
     with pytest.raises(OSError, match="temporarily unavailable"):
-        await service.recover_interrupted_tasks()
+        await service.recover_interrupted_runs()
 
-    still_active = await task_service.get_task(task["task_id"])
+    still_active = await pipeline_run_service.get_run(task["run_id"])
     assert still_active["status"] == "running"
     assert still_active["finished_at"] is None
 
@@ -228,12 +228,12 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
             self.document = replace(self.document, **fields)
             return self.document
 
-    class TaskService:
-        async def update_task(self, task_id: str, **fields):
-            return {"task_id": task_id, **fields}
+    class PipelineRunService:
+        async def update_run(self, run_id: str, **fields):
+            return {"run_id": run_id, **fields}
 
-        async def finish_task(self, task_id: str, **fields):
-            return {"task_id": task_id, **fields}
+        async def finish_run(self, run_id: str, **fields):
+            return {"run_id": run_id, **fields}
 
     profile = DocumentProfile.from_mapping(
         {
@@ -270,14 +270,14 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     collection_service = CollectionService()
     service = DocumentPreparationService(
         collection_service=collection_service,
-        task_service=TaskService(),
+        pipeline_run_service=PipelineRunService(),
         source_artifact_repository=sources,
         document_profile_service=ProfileService(),
         source_artifact_builder=fail_if_parsed,
         max_concurrency=1,
     )
 
-    result = await service.run_document_preparation_task(
+    result = await service.run_document_preparation(
         "task_test",
         collection_id,
         document_id,
@@ -328,12 +328,12 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             self.document = replace(self.document, **fields)
             return self.document
 
-    class TaskService:
-        async def update_task(self, task_id: str, **fields):
-            return {"task_id": task_id, **fields}
+    class PipelineRunService:
+        async def update_run(self, run_id: str, **fields):
+            return {"run_id": run_id, **fields}
 
-        async def finish_task(self, task_id: str, **fields):
-            return {"task_id": task_id, **fields}
+        async def finish_run(self, run_id: str, **fields):
+            return {"run_id": run_id, **fields}
 
     class ProfileService:
         async def read_document_profile(self, owner: str, selected: str):
@@ -364,13 +364,13 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
     )
     service = DocumentPreparationService(
         collection_service=collection_service,
-        task_service=TaskService(),
+        pipeline_run_service=PipelineRunService(),
         source_artifact_repository=source_repository,
         document_profile_service=ProfileService(),
         max_concurrency=1,
     )
 
-    result = await service.run_document_preparation_task(
+    result = await service.run_document_preparation(
         "task_lazy_map",
         collection_id,
         document_id,

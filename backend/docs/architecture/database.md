@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260908_0044`. The identity and fingerprint rules are
+and the Alembic head `20260908_0045`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 30 application tables and 265 fields. A
+The current ORM metadata contains 29 application tables and 247 fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -28,8 +28,8 @@ another experiment is needed.
 flowchart LR
     U[Authenticated researcher] --> C[Collection]
     C --> D[Current Documents]
-    D --> T[Preparation Tasks]
-    T --> S[Current Source tree]
+    D --> PR[Preparation Pipeline Run]
+    PR --> S[Current Source tree]
     S --> P[Document Profile]
     P --> M[Lazy Paper Map]
     D -->|explicit ready selection| O[Objective discovery]
@@ -54,9 +54,9 @@ The database preserves two different kinds of state:
   publication, and review status. Most scientific payloads are kept in
   JSON/JSONB columns behind relational identities.
 - **Technical state** describes whether work can be executed or retried:
-  task stages, provider failures, progress, analysis status, and chat tool-call
-  status. Technical failure is never converted into a scientific absence or
-  conclusion.
+  pipeline-run nodes, provider failures, progress, analysis status, and Chat
+  tool-call status. Technical failure is never converted into a scientific
+  absence or conclusion.
 
 ## Persistence Boundaries
 
@@ -84,7 +84,7 @@ class is in `infra/persistence/postgres/models`.
 | --- | --- | --- | --- |
 | Authenticate and authorize | `application/auth`, `controllers/auth.py` | `auth_users`, `auth_sessions` | Normalized user identity and revocable browser sessions. |
 | Create a collection and add papers | `application/source`, `controllers/source/collections.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
-| Prepare documents and expose progress | `application/source`, `application/pipeline`, `controllers/source/tasks.py` | `tasks`, `task_stages` | Observable technical execution history, admission, and stage telemetry. |
+| Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_runs.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
 | Parse and navigate a paper | `infra/source`, `application/source` | `document_sources` | One format-neutral parsed artifact containing the complete Source tree, text units, blocks, tables, figures, and references. |
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `document_profiles`, `paper_maps`, `objective_discovery`, `research_objectives` | Current paper triage, bounded navigation maps, selected discovery inputs, and Objective candidates. |
 | Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses`, `objective_document_evidence_checkpoints`, `objective_paper_contributions`, `objective_evidence`, `objective_findings` | Frozen analysis versions, resumable per-document inspection, Source-backed evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
@@ -128,23 +128,24 @@ deletion is coordinated by `CollectionService`: it removes the collection
 directory/object files and deletes the PostgreSQL aggregate, allowing database
 cascades to remove dependent rows.
 
-### 3. Preparation Tasks and Pipeline Stages
+### 3. Pipeline Execution and Progress
 
-`TaskService` and `DocumentPreparationService` report technical progress while
-the source and profile pipeline runs.
+`PipelineRunService` records technical execution while
+`DocumentPreparationService` and Objective discovery write their scientific
+results to the owning Source, Profile, Map, and Objective tables.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `tasks` | `task_id` | Collection and optional Document ownership, `task_type`, mode, input fingerprint, status, current stage, progress, nested `details`, warnings/errors, and timestamps. |
-| `task_stages` | `stage_id` | Task ownership, stable `stage_kind` and `stage_order`, stage status, dependencies, statistics, output summary, warnings/errors, and timestamps. |
+| `pipeline_runs` | `run_id` | Collection ownership, pipeline and polymorphic scope, input fingerprint, status, searchable timestamps, and one typed JSON snapshot containing progress and node telemetry. |
 
-Task status is limited to `queued`, `running`, `completed`,
-`partial_success`, and `failed`. Stage status is limited to `queued`,
+Run status is limited to `queued`, `running`, `completed`,
+`partial_success`, and `failed`. Nested node status is limited to `queued`,
 `running`, `succeeded`, `failed`, and `skipped`. A partial unique index permits
-at most one queued or running task for a `(document_id, task_type)` pair.
-Task-specific admission values, such as Objective discovery's exact selected
-Document IDs, stay under `details`; tasks do not own scientific artifacts or
-filesystem output paths.
+at most one queued or running run for a
+`(pipeline_name, scope_type, scope_id)` tuple. Pipeline-specific admission
+values, such as Objective discovery's selected Document IDs, stay under
+`record_json.context`. A run does not own scientific artifacts or filesystem
+output paths.
 
 ### 4. Current Source and Traceable Paper Structure
 
@@ -299,9 +300,8 @@ erDiagram
     AUTH_USERS ||--o{ COLLECTIONS : owns
     AUTH_USERS ||--o{ CHAT_SESSIONS : opens
     COLLECTIONS ||--o{ DOCUMENTS : contains
-    COLLECTIONS ||--o{ TASKS : schedules
-    DOCUMENTS ||--o{ TASKS : prepares
-    TASKS ||--o{ TASK_STAGES : reports
+    COLLECTIONS ||--o{ PIPELINE_RUNS : executes
+    DOCUMENTS }o..o{ PIPELINE_RUNS : logical_scope
     DOCUMENTS ||--o| DOCUMENT_SOURCES : has_current
     DOCUMENTS ||--o| DOCUMENT_PROFILES : profiles
     DOCUMENTS ||--o| PAPER_MAPS : maps
@@ -369,7 +369,7 @@ The database therefore supports these observable outcomes:
 ## Deletion and Replacement Rules
 
 - Deleting a Collection cascades its Documents, current Source/Profile/Paper
-  Map rows, Tasks, Objectives, analyses, Findings, review records, Chat
+  Map rows, Pipeline Runs, Objectives, analyses, Findings, review records, Chat
   sessions, plans, and collection-owned evaluation inputs. Evaluation Runs
   protect their gold-set and prediction-snapshot inputs with `RESTRICT`, so a
   Collection deletion is blocked while those run dependencies exist. The same
@@ -378,12 +378,14 @@ The database therefore supports these observable outcomes:
 - Deleting an Auth User cascades sessions and Chat sessions but is restricted
   while the user still owns Collections or is recorded as a tool-call decision
   user. Plan author fields are nullable and use `SET NULL`.
-- Deleting a Document cascades preparation Tasks, current Source children,
-  Profile, Paper Map, and per-document Evidence checkpoints. Published
+- Deleting a Document cascades its current Source, Profile, Paper Map, and
+  per-document Evidence checkpoints. A document-scoped Pipeline Run uses a
+  polymorphic logical `scope_id`, so its execution history remains until the
+  owning Collection is deleted. Published
   Objective analysis rows are retained only while their parent Collection and
   Objective remain; a later analysis must select currently ready Documents.
 - Re-preparing a Document replaces its current Source and Profile only after
-  the owning step succeeds. Task history remains observable and old published
+  the owning step succeeds. Pipeline Run history remains observable and old published
   analyses remain readable as historical snapshots.
 - Evaluation Runs retain their referenced gold set and prediction snapshot by
   `RESTRICT`; those inputs cannot be deleted underneath a completed run.
@@ -395,8 +397,10 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260908_0044`, which moves preparation provenance to Source/Profile artifacts. The
-current ORM metadata and migration head are checked together by
+`20260908_0045`. Revision `0044` moves preparation provenance to Source/Profile
+artifacts; revision `0045` backfills historical Task rows into Pipeline Run
+snapshots and removes `tasks` and `task_stages`. The current ORM metadata and
+migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
 
 When a persisted contract changes, update these surfaces together:
@@ -418,7 +422,7 @@ identity used by the Evidence or Finding.
 | --- | --- |
 | `PostgresAuthRepository` | `auth_users`, `auth_sessions` |
 | `PostgresCollectionRepository` | `collections`, `documents` |
-| `PostgresTaskRepository` | `tasks`, `task_stages` |
+| `PostgresPipelineRunRepository` | `pipeline_runs` |
 | `PostgresSourceArtifactRepository` | `document_sources` |
 | `PostgresDocumentProfileRepository` | `document_profiles` |
 | `PostgresPaperMapRepository` | `paper_maps` |
@@ -453,7 +457,7 @@ they do not define production schema or behavior.
 ## Appendix: Complete Field Catalog
 
 The catalog below lists every field in the current ORM, grouped by the main
-logic flow (30 application tables and 265 fields).
+logic flow (29 application tables and 247 fields).
 Field names, types, and nullability follow `backend/infra/persistence/postgres/models/*.py`;
 descriptions explain each field's business role in the Lens research chain. `JSONB` means the ORM uses
 `JSON().with_variant(JSONB(), "postgresql")`, so PostgreSQL stores the value as
@@ -463,7 +467,7 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 ### Contents
 
 - [Authentication and access](#authentication-and-access)
-- [Collections, documents, and tasks](#collections-documents-and-tasks)
+- [Collections, documents, and pipeline runs](#collections-documents-and-pipeline-runs)
 - [Source parsing structure](#source-parsing-structure)
 - [Document Profiles and Objectives](#document-profiles-and-objectives)
 - [Agent Chat](#agent-chat)
@@ -510,7 +514,7 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 | `expires_at` | `TIMESTAMP WITH TIME ZONE` | No | `expires_at > created_at` | Expires timestamp. |
 | `revoked_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Revoked timestamp. |
 
-### Collections, documents, and tasks
+### Collections, documents, and pipeline runs
 
 #### `collections` — Paper collections
 
@@ -544,50 +548,57 @@ Document is the paper identity in the current model, not a publicly queryable ve
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 
-#### `tasks` — Observable execution tasks
+#### `pipeline_runs` — Observable technical pipeline execution
 
-Task rows record technical execution history, do not own scientific Artifacts, and do not store the retired
-`output_path`.
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `task_id` | `VARCHAR(64)` | No | PK | Stable identifier of the execution task. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research collection. |
-| `task_type` | `VARCHAR(64)` | No | — | Technical task kind, such as `document_preparation` or Objective discovery. |
-| `document_id` | `VARCHAR(64)` | Yes | FK -> `documents.document_id`; IDX; `ON DELETE CASCADE` | Stable identifier of the current Document. |
-| `mode` | `VARCHAR(64)` | No | — | Execution or entry mode selected for the task. |
-| `input_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the input state consumed by the task, used for reuse decisions. |
-| `status` | `VARCHAR(32)` | No | `queued` / `running` / `completed` / `partial_success` / `failed` | Lifecycle or execution status for the tasks record. |
-| `current_stage` | `VARCHAR(128)` | No | NOT NULL | Name of the stage currently being executed. |
-| `progress_percent` | `INTEGER` | No | `0..100` | Overall browser-facing progress percentage. |
-| `progress_detail` | `JSONB` | Yes | — | Fine-grained progress for the current stage. |
-| `errors` | `JSONB` | No | — | Structured list of technical errors for display or diagnosis. |
-| `warnings` | `JSONB` | No | — | Structured list of non-blocking warnings. |
-| `details` | `JSONB` | No | — | Task-specific admission and runtime metadata. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
-| `started_at` | `TIMESTAMP WITH TIME ZONE` | Yes | `started_at >= created_at` | Started timestamp. |
-| `finished_at` | `TIMESTAMP WITH TIME ZONE` | Yes | `finished_at >= created_at` | Finished timestamp. |
-
-The partial unique index `uq_tasks_active_document_type` ensures that one
-`(document_id, task_type)` pair has at most one `queued` or `running` task.
-
-#### `task_stages` — Task stage telemetry
+One row represents one pipeline invocation. The indexed relational columns
+support admission, reuse, polling, and collection history queries. The
+`record_json` column stores the complete typed `PipelineRun` snapshot in the
+same row; it replaces the former separate stage rows without becoming a store
+for Source, Profile, Objective, Evidence, or Finding results.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `stage_id` | `VARCHAR(64)` | No | PK | Stable identifier of the task stage. |
-| `task_id` | `VARCHAR(64)` | No | FK -> `tasks.task_id`; IDX; `ON DELETE CASCADE` | Stable identifier of the execution task. |
-| `stage_kind` | `VARCHAR(128)` | No | NOT NULL; per task UQ | Stable stage type or pipeline node name. |
-| `stage_order` | `INTEGER` | No | `>= 0`; per task UQ | Stable ordering or ranking value for stage order. |
-| `status` | `VARCHAR(32)` | No | `queued` / `running` / `succeeded` / `failed` / `skipped` | Lifecycle or execution status for the task stages record. |
-| `started_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Started timestamp. |
-| `finished_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Finished timestamp. |
-| `errors` | `JSONB` | No | — | Structured list of technical errors for display or diagnosis. |
-| `warnings` | `JSONB` | No | — | Structured list of non-blocking warnings. |
-| `dependencies` | `JSONB` | No | — | Declared prerequisite stages or inputs. |
-| `stats` | `JSONB` | No | — | Stage telemetry such as counts, duration, and model usage. |
-| `output_summary` | `JSONB` | No | — | Stage output summary; complete scientific objects are persisted by their owning repository. |
+| `run_id` | `VARCHAR(64)` | No | PK | Stable identifier of one pipeline invocation. |
+| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Collection in which the pipeline executes and the ownership boundary for run history. |
+| `pipeline_name` | `VARCHAR(64)` | No | IDX; non-empty | Stable executable flow name, currently `document_preparation` or `objective_discovery`. |
+| `scope_type` | `VARCHAR(32)` | No | IDX; non-empty | Kind of logical execution target, currently `document` or `collection`. |
+| `scope_id` | `VARCHAR(64)` | No | IDX; non-empty | Identifier of the logical target. For document runs this is `documents.document_id`; for collection runs it equals `collection_id`. It is intentionally not a foreign key because the column is polymorphic. |
+| `mode` | `VARCHAR(64)` | No | — | Execution or entry mode selected for this invocation, currently `standard` in the maintained flows. |
+| `input_fingerprint` | `VARCHAR(64)` | Yes | — | Identity of the complete input state consumed by the run. Matching successful document runs may be reused; collection runs reuse only active work. |
+| `status` | `VARCHAR(32)` | No | IDX; `queued` / `running` / `completed` / `partial_success` / `failed` | Current technical lifecycle state used for polling and recovery. |
+| `record_json` | `JSONB` | No | — | Complete validated Pipeline Run snapshot: current node, progress, node telemetry, errors, warnings, statistics, context, timestamps, and retry lineage. |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Time the run was admitted. Also mirrored inside the typed snapshot timestamps. |
+| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Last run-state update; used to order history and detect interrupted active runs. |
+
+The searchable identity and status values are duplicated inside `record_json`
+only as part of the serialized domain snapshot. The repository writes both
+representations in one transaction and overwrites those snapshot values from
+the relational columns when reading, so indexed columns remain authoritative
+for admission and queries while nested telemetry remains one typed aggregate.
+
+The partial unique index `uq_pipeline_runs_active_scope` ensures that one
+`(pipeline_name, scope_type, scope_id)` tuple has at most one `queued` or
+`running` run.
+
+`record_json` has the following top-level structure:
+
+| JSON field | Shape | Description |
+| :--- | :--- | :--- |
+| `run_id`, `collection_id`, `pipeline_name`, `scope_type`, `scope_id`, `mode`, `input_fingerprint`, `status` | scalar values | Serialized run identity and searchable state mirrored from relational columns. |
+| `current_node` | string or null | Current browser-facing phase or pipeline node. |
+| `progress_percent` | integer `0..100` | Overall browser-facing completion percentage. |
+| `progress_detail` | object or null | Fine-grained phase progress, such as current/total units, message, and active Document or Objective ID. |
+| `nodes` | object keyed by node name | Per-node runtime state. Each node stores `name`, `dependencies`, `status`, `errors`, `warnings`, `stats`, `timestamps`, and `output_summary`. |
+| `errors` | string array | Aggregated technical failures suitable for display or diagnosis. |
+| `warnings` | string array | Aggregated non-blocking execution warnings. |
+| `stats` | object | Aggregate duration, token usage, model usage, unreported request count, and prompt versions. |
+| `timestamps` | object | ISO-8601 `created_at`, `updated_at`, `started_at`, and `finished_at` values. |
+| `context` | object | Pipeline-specific admission context, such as exact discovery `document_ids`; not a scientific result store. |
+| `resumed_from_run_id` | string or null | Prior failed/interrupted run that this invocation resumes, when retry lineage exists. |
+
+Each `nodes.<name>` value uses `queued`, `running`, `succeeded`, `failed`, or
+`skipped` status. `output_summary` is bounded telemetry only; complete outputs
+remain in their owning artifact tables.
 
 ### Source parsing structure
 
@@ -618,6 +629,11 @@ than adding new tables for every file format. PDF pages, DOCX sections, and
 XLSX sheets can therefore share the same node kinds (`document`, `heading`,
 `text`, `table`, `row`, `cell`, `figure`, and `reference`) while retaining
 format metadata in each node's payload.
+
+This is a persistence capability, not a claim that every parser is currently
+enabled. The maintained upload and preparation runtime currently handles PDF
+and text inputs. Adding DOCX or XLSX later requires the corresponding parser
+and upload-validation support, but it does not require another Source table.
 
 ### Document Profiles and Objectives
 
@@ -975,4 +991,4 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0044`. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0045`. |

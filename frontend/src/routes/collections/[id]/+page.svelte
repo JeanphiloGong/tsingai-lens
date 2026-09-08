@@ -17,15 +17,15 @@
 	} from '../../_shared/researchView';
 	import {
 		formCollectionResearchQuestions,
-		getTask,
-		isTaskActive,
-		listCollectionTasks,
+		getPipelineRun,
+		isPipelineRunActive,
+		listCollectionPipelineRuns,
 		prepareCollectionDocument,
-		type Task
-	} from '../../_shared/tasks';
+		type PipelineRun
+	} from '../../_shared/pipelineRuns';
 
 	let documents: CollectionDocument[] = [];
-	let tasks: Task[] = [];
+	let runs: PipelineRun[] = [];
 	let objectiveList: ObjectiveList | null = null;
 	let selectedFiles: File[] = [];
 	let loading = false;
@@ -56,16 +56,17 @@
 	};
 
 	$: readyDocuments = documents.filter((document) => document.status === 'ready');
-	$: activeTasks = tasks.filter(isTaskActive);
-	$: activePreparationTasks = activeTasks.filter(
-		(task) => task.task_type === 'document_preparation'
+	$: activeRuns = runs.filter(isPipelineRunActive);
+	$: activePreparationRuns = activeRuns.filter(
+		(run) => run.pipeline_name === 'document_preparation'
 	);
-	$: activeDiscoveryTask =
-		activeTasks.find((task) => task.task_type === 'objective_discovery') ?? null;
-	$: discoveryLoading = discoverySubmitting || Boolean(activeDiscoveryTask);
+	$: activeDiscoveryRun =
+		activeRuns.find((run) => run.pipeline_name === 'objective_discovery') ?? null;
+	$: discoveryLoading = discoverySubmitting || Boolean(activeDiscoveryRun);
 	$: activeDocumentIds = new Set(
-		activePreparationTasks
-			.map((task) => task.document_id)
+		activePreparationRuns
+			.filter((run) => run.scope_type === 'document')
+			.map((run) => run.scope_id)
 			.filter((documentId): documentId is string => Boolean(documentId))
 	);
 	$: processingDocuments = documents.filter(
@@ -79,7 +80,7 @@
 	$: objectiveCount = objectiveList?.objectives.length ?? 0;
 	$: collectionStage = objectiveCount
 		? 'objectives'
-		: activeDiscoveryTask
+		: activeDiscoveryRun
 			? 'forming'
 			: processingDocuments.length
 				? 'processing'
@@ -88,7 +89,7 @@
 					: readyDocuments.length
 						? 'ready'
 						: 'empty';
-	$: preparationProgress = buildPreparationProgress(documents, activePreparationTasks);
+	$: preparationProgress = buildPreparationProgress(documents, activePreparationRuns);
 	$: archiveSelectionCount = selectedArchiveDocumentIds.length;
 	$: archiveSelectionTooMany = archiveSelectionCount > 100;
 
@@ -112,19 +113,19 @@
 
 	function schedulePoll() {
 		clearPoll();
-		if (!tasks.some(isTaskActive)) return;
-		pollTimer = setTimeout(() => void pollTasks(), 2500);
+		if (!runs.some(isPipelineRunActive)) return;
+		pollTimer = setTimeout(() => void pollRuns(), 2500);
 	}
 
-	async function pollTasks() {
-		const active = tasks.filter(isTaskActive);
+	async function pollRuns() {
+		const active = runs.filter(isPipelineRunActive);
 		if (!active.length) return;
 		try {
-			const refreshed = await Promise.all(active.map((task) => getTask(task.task_id)));
-			const refreshedById = new Map(refreshed.map((task) => [task.task_id, task]));
-			tasks = tasks.map((task) => refreshedById.get(task.task_id) ?? task);
+			const refreshed = await Promise.all(active.map((run) => getPipelineRun(run.run_id)));
+			const refreshedById = new Map(refreshed.map((run) => [run.run_id, run]));
+			runs = runs.map((run) => refreshedById.get(run.run_id) ?? run);
 			const finishedDiscovery = refreshed.find(
-				(task) => task.task_type === 'objective_discovery' && !isTaskActive(task)
+				(run) => run.pipeline_name === 'objective_discovery' && !isPipelineRunActive(run)
 			);
 			await Promise.all([loadDocuments(), loadObjectives()]);
 			if (
@@ -147,8 +148,8 @@
 		loading = true;
 		error = '';
 		try {
-			await Promise.all([loadDocuments(), loadTasks(), loadObjectives()]);
-			const latestDiscovery = tasks.find((task) => task.task_type === 'objective_discovery');
+			await Promise.all([loadDocuments(), loadRuns(), loadObjectives()]);
+			const latestDiscovery = runs.find((run) => run.pipeline_name === 'objective_discovery');
 			if (latestDiscovery?.status === 'failed') {
 				error = latestDiscovery.errors[0] || $t('overview.currentModel.discoveryFailed');
 			}
@@ -169,8 +170,8 @@
 		);
 	}
 
-	async function loadTasks() {
-		tasks = (await listCollectionTasks(collectionId, { limit: 100 })).items;
+	async function loadRuns() {
+		runs = (await listCollectionPipelineRuns(collectionId, { limit: 100 })).items;
 	}
 
 	async function loadObjectives() {
@@ -181,8 +182,10 @@
 		}
 	}
 
-	function taskFor(documentId: string) {
-		return tasks.find((task) => task.document_id === documentId) ?? null;
+	function runFor(documentId: string) {
+		return (
+			runs.find((run) => run.scope_type === 'document' && run.scope_id === documentId) ?? null
+		);
 	}
 
 	async function prepareDocuments(targets: CollectionDocument[]) {
@@ -194,8 +197,8 @@
 			const queued = await Promise.all(
 				targets.map((document) => prepareCollectionDocument(collectionId, document.document_id))
 			);
-			const queuedIds = new Set(queued.map((task) => task.task_id));
-			tasks = [...queued, ...tasks.filter((task) => !queuedIds.has(task.task_id))];
+			const queuedIds = new Set(queued.map((run) => run.run_id));
+			runs = [...queued, ...runs.filter((run) => !queuedIds.has(run.run_id))];
 			await loadDocuments();
 			notice = $t('overview.currentModel.preparationQueued', { count: queued.length });
 			schedulePoll();
@@ -213,8 +216,8 @@
 		notice = '';
 		try {
 			const documentIds = readyDocuments.map((document) => document.document_id);
-			const task = await formCollectionResearchQuestions(collectionId, documentIds);
-			tasks = [task, ...tasks.filter((item) => item.task_id !== task.task_id)];
+			const run = await formCollectionResearchQuestions(collectionId, documentIds);
+			runs = [run, ...runs.filter((item) => item.run_id !== run.run_id)];
 			notice = $t('overview.currentModel.discoveryQueued');
 			schedulePoll();
 		} catch (err) {
@@ -305,13 +308,14 @@
 
 	function buildPreparationProgress(
 		items: CollectionDocument[],
-		active: Task[]
+		active: PipelineRun[]
 	): PreparationProgressSummary | null {
 		if (!active.length) return null;
 
 		const activeDocumentIds = new Set(
 			active
-				.map((task) => task.document_id)
+				.filter((run) => run.scope_type === 'document')
+				.map((run) => run.scope_id)
 				.filter((documentId): documentId is string => Boolean(documentId))
 		);
 		const ready = items.filter(
@@ -319,12 +323,12 @@
 		).length;
 		const total = Math.max(items.length, ready + active.length);
 		const activeProgress = active.reduce(
-			(sum, task) => sum + Math.max(0, Math.min(100, Number(task.progress_percent) || 0)) / 100,
+			(sum, run) => sum + Math.max(0, Math.min(100, Number(run.progress_percent) || 0)) / 100,
 			0
 		);
 		const percent = Math.round(((ready + activeProgress) / total) * 100);
 		const message =
-			active.find((task) => task.progress_detail?.message)?.progress_detail?.message ?? '';
+			active.find((run) => run.progress_detail?.message)?.progress_detail?.message ?? '';
 
 		return {
 			ready,
@@ -431,7 +435,7 @@
 					{#if preparationProgress.message}<small>{preparationProgress.message}</small>{/if}
 				</div>
 			{/if}
-			{#if activeDiscoveryTask}
+			{#if activeDiscoveryRun}
 				<div
 					class="active-progress"
 					role="status"
@@ -439,7 +443,7 @@
 				>
 					<div class="active-progress__header">
 						<span>{$t('overview.currentModel.discoveryProgressTitle')}</span>
-						<strong>{activeDiscoveryTask.progress_percent}%</strong>
+						<strong>{activeDiscoveryRun.progress_percent}%</strong>
 					</div>
 					<div
 						class="active-progress__track"
@@ -447,13 +451,13 @@
 						aria-label={$t('overview.currentModel.discoveryProgressTitle')}
 						aria-valuemin="0"
 						aria-valuemax="100"
-						aria-valuenow={activeDiscoveryTask.progress_percent}
-						aria-valuetext={`${activeDiscoveryTask.progress_percent}%`}
+						aria-valuenow={activeDiscoveryRun.progress_percent}
+						aria-valuetext={`${activeDiscoveryRun.progress_percent}%`}
 					>
-						<span style={`width: ${activeDiscoveryTask.progress_percent}%`}></span>
+						<span style={`width: ${activeDiscoveryRun.progress_percent}%`}></span>
 					</div>
-					{#if activeDiscoveryTask.progress_detail?.message}
-						<small>{activeDiscoveryTask.progress_detail.message}</small>
+					{#if activeDiscoveryRun.progress_detail?.message}
+						<small>{activeDiscoveryRun.progress_detail.message}</small>
 					{/if}
 				</div>
 			{/if}
@@ -525,7 +529,7 @@
 				>
 			</div>
 		</div>
-		<div class:complete={objectiveCount > 0} class:active={Boolean(activeDiscoveryTask)}>
+		<div class:complete={objectiveCount > 0} class:active={Boolean(activeDiscoveryRun)}>
 			<span>3</span>
 			<div>
 				<strong>{$t('overview.currentModel.progress.objectives')}</strong><small
@@ -661,8 +665,8 @@
 						<div>
 							<strong>{document.original_filename}</strong>
 							<span>{documentStatus(document)}</span>
-							{#if taskFor(document.document_id)?.errors[0]}
-								<small class="failure">{taskFor(document.document_id)?.errors[0]}</small>
+								{#if runFor(document.document_id)?.errors[0]}
+									<small class="failure">{runFor(document.document_id)?.errors[0]}</small>
 							{/if}
 						</div>
 						<button

@@ -22,10 +22,13 @@ Collection
   -> Documents
 
 Document
-  -> Task history
   -> current DocumentSource (parsed tree aggregate)
   -> current DocumentProfile
   -> optional current PaperMap (built lazily by Objective work)
+
+PipelineRun
+  -> technical execution history for a Collection or Document scope
+  -> nested node telemetry
 
 Objective discovery
   -> current selected PreparedDocumentInputs
@@ -85,19 +88,22 @@ preparation fingerprint plus the current Paper Map policy and prompt versions.
 These values are not user-visible versions and do not create a snapshot
 hierarchy.
 
-### Task
+### Pipeline Run
 
-`tasks` stores observable execution history. A document-preparation task carries
-`collection_id`, `document_id`, `task_type`, `input_fingerprint`, mode, status,
-progress, warnings, errors, and timestamps. A partial unique index permits at
-most one queued or running task for one `(document_id, task_type)`. Task-specific
-admission metadata stays nested in `details`; Objective discovery records its
-exact selected `document_ids` there. Tasks do not own scientific artifacts or
-filesystem output paths.
+`pipeline_runs` stores observable technical execution history in one row per
+invocation. Indexed columns carry `collection_id`, `pipeline_name`,
+`scope_type`, `scope_id`, `input_fingerprint`, mode, status, and searchable
+timestamps. `record_json` carries the complete validated run snapshot,
+including current node, progress, nested node telemetry, warnings, errors,
+statistics, timestamps, context, and retry lineage. It does not own scientific
+artifacts or filesystem output paths.
 
-Active task reuse is based on Document ownership: a second request receives the
-existing queued or running task. A completed task can be reused only if its
-fingerprint equals the current requested fingerprint.
+A partial unique index permits at most one queued or running run for one
+`(pipeline_name, scope_type, scope_id)` tuple. A repeated Document preparation
+request receives the active run. A completed Document run can be reused only
+if its input fingerprint equals the current requested fingerprint. Objective
+discovery reuses an active Collection run but a later completed discovery does
+not suppress a new explicit discovery request.
 
 ### Objective discovery
 
@@ -159,7 +165,8 @@ become published. Failure leaves the prior published pointer unchanged.
 erDiagram
     USER ||--o{ COLLECTION : owns
     COLLECTION ||--o{ DOCUMENT : contains
-    DOCUMENT ||--o{ TASK : prepares
+    COLLECTION ||--o{ PIPELINE_RUN : executes
+    DOCUMENT }o..o{ PIPELINE_RUN : logical_scope
     DOCUMENT ||--o| DOCUMENT_SOURCE : has_current
     DOCUMENT ||--o| DOCUMENT_PROFILE : has_current
     DOCUMENT ||--o| PAPER_MAP : has_current
@@ -177,16 +184,18 @@ erDiagram
 
 - Re-preparing a Document replaces its current Source and Profile only after the
   owning step succeeds; a later Objective operation rebuilds its Paper Map when
-  the stored map fingerprint is stale. Task history remains observable.
+  the stored map fingerprint is stale. Pipeline Run history remains observable.
 - Uploading another Document adds a peer and does not touch prepared peers.
-- Deleting a Collection cascades its Documents, prepared artifacts, tasks,
+- Deleting a Collection cascades its Documents, prepared artifacts, Pipeline Runs,
   Objectives, analyses, and downstream records.
 - The destructive current-model migrations drop old collection-build,
   active-build, artifact-version, workspace-projection, persisted paper-fact,
   and comparison tables before creating the current model. Migration
   `20260908_0043` backfills the consolidated Source aggregate from the retired
   normalized Source tables before dropping them; migration `20260908_0044`
-  moves preparation provenance to Source/Profile ownership.
+  moves preparation provenance to Source/Profile ownership. Migration
+  `20260908_0045` backfills the former Task history into `pipeline_runs` and
+  removes `tasks` and `task_stages`.
 
 ## Implementation Boundary
 

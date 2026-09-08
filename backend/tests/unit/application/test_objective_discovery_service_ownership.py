@@ -9,9 +9,9 @@ from application.core.objectives.paper_research_map_service import PaperResearch
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
-from application.source.task_service import TaskService
+from application.pipeline import PipelineRunService
 from domain.core import ObjectiveFactSet, PreparedDocumentInput
-from infra.persistence.memory import MemoryTaskRepository
+from infra.persistence.memory import MemoryPipelineRunRepository
 
 
 pytestmark = pytest.mark.anyio
@@ -31,7 +31,7 @@ def test_objective_discovery_stages_have_direct_owners() -> None:
     assert "_build_objective_discovery_skim" not in ResearchObjectiveService.__dict__
 
 
-def _service(task_service: TaskService) -> ResearchObjectiveService:
+def _service(pipeline_run_service: PipelineRunService) -> ResearchObjectiveService:
     return ResearchObjectiveService(
         collection_service=object(),
         source_artifact_repository=object(),
@@ -41,15 +41,15 @@ def _service(task_service: TaskService) -> ResearchObjectiveService:
         finding_synthesis_service=object(),
         objective_candidate_service=object(),
         paper_map_service=object(),
-        task_service=task_service,
+        pipeline_run_service=pipeline_run_service,
     )
 
 
-async def test_objective_discovery_reuses_one_active_task_and_runs_once(
+async def test_objective_discovery_reuses_one_active_run_and_executes_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    task_service = TaskService(MemoryTaskRepository())
-    service = _service(task_service)
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    service = _service(pipeline_run_service)
     calls = 0
 
     async def resolve_inputs(collection_id, document_ids):
@@ -86,21 +86,21 @@ async def test_objective_discovery_reuses_one_active_task_and_runs_once(
         "col_a", ("doc_a", "doc_b")
     )
 
-    assert first["task_id"] == duplicate["task_id"]
+    assert first["run_id"] == duplicate["run_id"]
     assert first["status"] == "queued"
-    await asyncio.gather(*tuple(service._discovery_tasks))
+    await asyncio.gather(*tuple(service._discovery_workers))
 
-    completed = await task_service.get_task(first["task_id"])
+    completed = await pipeline_run_service.get_run(first["run_id"])
     assert calls == 1
     assert completed["status"] == "completed"
-    assert completed["current_stage"] == "objectives_ready"
+    assert completed["current_node"] == "objectives_ready"
 
 
 async def test_objective_discovery_records_failure_and_allows_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    task_service = TaskService(MemoryTaskRepository())
-    service = _service(task_service)
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    service = _service(pipeline_run_service)
 
     async def resolve_inputs(_collection_id, document_ids):
         return tuple(
@@ -119,28 +119,30 @@ async def test_objective_discovery_records_failure_and_allows_retry(
     )
 
     first = await service.start_objective_discovery("col_a", ("doc_a",))
-    await asyncio.gather(*tuple(service._discovery_tasks), return_exceptions=True)
-    failed = await task_service.get_task(first["task_id"])
+    await asyncio.gather(*tuple(service._discovery_workers), return_exceptions=True)
+    failed = await pipeline_run_service.get_run(first["run_id"])
 
     assert failed["status"] == "failed"
     assert failed["errors"] == ["model unavailable"]
 
     retry = await service.start_objective_discovery("col_a", ("doc_a",))
-    assert retry["task_id"] != first["task_id"]
-    await asyncio.gather(*tuple(service._discovery_tasks), return_exceptions=True)
+    assert retry["run_id"] != first["run_id"]
+    await asyncio.gather(*tuple(service._discovery_workers), return_exceptions=True)
 
 
 async def test_objective_discovery_progress_does_not_move_backwards() -> None:
-    task_service = TaskService(MemoryTaskRepository())
-    service = _service(task_service)
-    task = await task_service.create_task(
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    service = _service(pipeline_run_service)
+    run = await pipeline_run_service.create_run(
         "col_a",
-        task_type="objective_discovery",
+        "objective_discovery",
+        scope_type="collection",
+        scope_id="col_a",
         input_fingerprint="scope-a",
     )
     pending_updates = []
     report = service._build_discovery_progress_callback(
-        task["task_id"],
+        run["run_id"],
         pending_updates,
     )
 
@@ -153,7 +155,7 @@ async def test_objective_discovery_progress_does_not_move_backwards() -> None:
         }
     )
     await asyncio.wrap_future(pending_updates[-1])
-    mapped = await task_service.get_task(task["task_id"])
+    mapped = await pipeline_run_service.get_run(run["run_id"])
 
     report(
         {
@@ -164,33 +166,33 @@ async def test_objective_discovery_progress_does_not_move_backwards() -> None:
         }
     )
     await asyncio.wrap_future(pending_updates[-1])
-    aggregating = await task_service.get_task(task["task_id"])
+    aggregating = await pipeline_run_service.get_run(run["run_id"])
 
     assert aggregating["progress_percent"] >= mapped["progress_percent"]
 
 
 async def test_objective_discovery_restart_recovery_allows_retry() -> None:
-    task_service = TaskService(MemoryTaskRepository())
-    service = _service(task_service)
-    active, _created = await task_service.get_or_create_collection_task(
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    service = _service(pipeline_run_service)
+    active, _created = await pipeline_run_service.get_or_create_collection_run(
         collection_id="col_a",
-        task_type="objective_discovery",
+        pipeline_name="objective_discovery",
         input_fingerprint="scope-a",
-        details={"document_ids": ["doc_a"]},
+        context={"document_ids": ["doc_a"]},
     )
-    await task_service.update_task(active["task_id"], status="running")
+    await pipeline_run_service.update_run(active["run_id"], status="running")
 
     recovered = await service.recover_interrupted_discoveries()
-    interrupted = await task_service.get_task(active["task_id"])
-    retry, retry_created = await task_service.get_or_create_collection_task(
+    interrupted = await pipeline_run_service.get_run(active["run_id"])
+    retry, retry_created = await pipeline_run_service.get_or_create_collection_run(
         collection_id="col_a",
-        task_type="objective_discovery",
+        pipeline_name="objective_discovery",
         input_fingerprint="scope-a",
-        details={"document_ids": ["doc_a"]},
+        context={"document_ids": ["doc_a"]},
     )
 
     assert recovered == 1
     assert interrupted["status"] == "failed"
-    assert interrupted["current_stage"] == "interrupted"
+    assert interrupted["current_node"] == "interrupted"
     assert retry_created is True
-    assert retry["task_id"] != active["task_id"]
+    assert retry["run_id"] != active["run_id"]

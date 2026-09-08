@@ -19,7 +19,8 @@ operation creates a short task-local `AsyncSession`.
 
 - `PostgresCollectionRepository`: `Collection -> current Documents`, including
   file metadata and preparation state.
-- `PostgresTaskRepository`: observable per-document tasks and their stages.
+- `PostgresPipelineRunRepository`: observable Collection- or Document-scoped
+  execution and nested node telemetry in one row.
 - `PostgresSourceArtifactRepository`: the current Source aggregate for each
   Document.
 - `PostgresDocumentProfileRepository`: one current profile per Document.

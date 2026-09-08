@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asyncio import CancelledError, Semaphore, Task, create_task
+from asyncio import CancelledError, Semaphore, Task as AsyncTask, create_task
 from dataclasses import replace
 from hashlib import sha256 as hash_sha256
 import json
@@ -15,11 +15,11 @@ import pandas as pd
 
 from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.core.document_profiles.service import DocumentProfileService
+from application.pipeline import PipelineRunService
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from application.source.task_service import TaskService
 from domain.ports import SourceArtifactRepository
 from domain.source import Document, SourceDocument
 from infra.source.config.source_runtime_config import (
@@ -81,14 +81,14 @@ class DocumentPreparationService:
         self,
         *,
         collection_service: CollectionService,
-        task_service: TaskService,
+        pipeline_run_service: PipelineRunService,
         source_artifact_repository: SourceArtifactRepository,
         document_profile_service: DocumentProfileService,
         source_artifact_builder: SourceArtifactBuilder | None = None,
         max_concurrency: int | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.task_service = task_service
+        self.pipeline_run_service = pipeline_run_service
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
         self._source_artifact_builder = source_artifact_builder
@@ -101,49 +101,49 @@ class DocumentPreparationService:
         if resolved_concurrency < 1:
             raise ValueError("document preparation concurrency must be positive")
         self._semaphore = Semaphore(resolved_concurrency)
-        self._active_tasks: set[Task[dict[str, Any]]] = set()
+        self._active_workers: set[AsyncTask[dict[str, Any]]] = set()
 
-    async def recover_interrupted_tasks(self) -> int:
+    async def recover_interrupted_runs(self) -> int:
         """Make persisted work without a live worker retryable after restart."""
 
-        active_tasks = [
-            *await self.task_service.list_tasks(status="queued"),
-            *await self.task_service.list_tasks(status="running"),
+        active_runs = [
+            *await self.pipeline_run_service.list_runs(status="queued"),
+            *await self.pipeline_run_service.list_runs(status="running"),
         ]
         interrupted_count = 0
-        for task in active_tasks:
-            if task.get("task_type") != "document_preparation":
+        for run in active_runs:
+            if run.get("pipeline_name") != "document_preparation":
                 continue
-            document_id = task.get("document_id")
-            if not document_id:
+            if run.get("scope_type") != "document":
                 continue
+            document_id = str(run["scope_id"])
             try:
                 document = await self.collection_service.get_document(
-                    task["collection_id"],
+                    run["collection_id"],
                     document_id,
                 )
             except FileNotFoundError:
                 document = None
             if document is not None and document.status == "processing":
                 await self.collection_service.update_document_preparation(
-                    task["collection_id"],
+                    run["collection_id"],
                     document_id,
                     status="stored",
                 )
-            await self.task_service.finish_task(
-                task["task_id"],
+            await self.pipeline_run_service.finish_run(
+                run["run_id"],
                 status="failed",
-                current_stage="interrupted",
-                progress_percent=task.get("progress_percent", 0),
+                current_node="interrupted",
+                progress_percent=run.get("progress_percent", 0),
                 errors=[
-                    *task.get("errors", ()),
+                    *run.get("errors", ()),
                     "Document preparation was interrupted by a backend restart.",
                 ],
             )
             interrupted_count += 1
         if interrupted_count:
             logger.warning(
-                "Recovered interrupted document preparation tasks count=%s",
+                "Recovered interrupted document preparation runs count=%s",
                 interrupted_count,
             )
         return interrupted_count
@@ -162,29 +162,29 @@ class DocumentPreparationService:
             document_id,
         )
         fingerprint = self.fingerprint_for(document)
-        task, created = await self.task_service.get_or_create_document_task(
+        run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
-            task_type="document_preparation",
+            pipeline_name="document_preparation",
             input_fingerprint=fingerprint,
         )
         if created:
             background = create_task(
-                self.run_document_preparation_task(
-                    task["task_id"],
+                self.run_document_preparation(
+                    run["run_id"],
                     collection_id,
                     document_id,
                     request_id=request_id,
                 )
             )
-            self._active_tasks.add(background)
-            background.add_done_callback(self._active_tasks.discard)
+            self._active_workers.add(background)
+            background.add_done_callback(self._active_workers.discard)
             background.add_done_callback(self._log_unexpected_failure)
-        return task
+        return run
 
-    async def run_document_preparation_task(
+    async def run_document_preparation(
         self,
-        task_id: str,
+        run_id: str,
         collection_id: str,
         document_id: str,
         *,
@@ -198,10 +198,10 @@ class DocumentPreparationService:
             )
             source_identity, profile_identity = self.fingerprints_for(document)
             fingerprint = profile_identity
-            await self.task_service.update_task(
-                task_id,
+            await self.pipeline_run_service.update_run(
+                run_id,
                 status="running",
-                current_stage="source_parsing",
+                current_node="source_parsing",
                 progress_percent=5,
                 progress_detail={
                     "phase": "source_parsing",
@@ -245,9 +245,9 @@ class DocumentPreparationService:
                         source_fingerprint=source_identity,
                         parser_version=SOURCE_PARSER_VERSION,
                     )
-                await self.task_service.update_task(
-                    task_id,
-                    current_stage="document_profile",
+                await self.pipeline_run_service.update_run(
+                    run_id,
+                    current_node="document_profile",
                     progress_percent=45,
                     progress_detail={
                         "phase": "document_profile",
@@ -279,10 +279,10 @@ class DocumentPreparationService:
                     parser_version=SOURCE_PARSER_VERSION,
                     document_analysis_version=DOCUMENT_ANALYSIS_VERSION,
                 )
-                return await self.task_service.finish_task(
-                    task_id,
+                return await self.pipeline_run_service.finish_run(
+                    run_id,
                     status="completed",
-                    current_stage="ready",
+                    current_node="ready",
                     progress_percent=100,
                     progress_detail={
                         "phase": "ready",
@@ -292,20 +292,20 @@ class DocumentPreparationService:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception(
-                    "Document preparation failed collection_id=%s document_id=%s task_id=%s",
+                    "Document preparation failed collection_id=%s document_id=%s run_id=%s",
                     collection_id,
                     document_id,
-                    task_id,
+                    run_id,
                 )
                 await self.collection_service.update_document_preparation(
                     collection_id,
                     document_id,
                     status="failed",
                 )
-                await self.task_service.finish_task(
-                    task_id,
+                await self.pipeline_run_service.finish_run(
+                    run_id,
                     status="failed",
-                    current_stage="failed",
+                    current_node="failed",
                     progress_percent=100,
                     errors=[str(exc)],
                     progress_detail={
@@ -432,13 +432,13 @@ class DocumentPreparationService:
         return self._source_artifact_builder
 
     @staticmethod
-    def _log_unexpected_failure(task: Task[dict[str, Any]]) -> None:
+    def _log_unexpected_failure(worker: AsyncTask[dict[str, Any]]) -> None:
         try:
-            task.result()
+            worker.result()
         except CancelledError:
-            logger.info("Document preparation task cancelled during backend shutdown")
+            logger.info("Document preparation run cancelled during backend shutdown")
         except Exception:  # noqa: BLE001
-            logger.exception("Document preparation task crashed after scheduling")
+            logger.exception("Document preparation run crashed after scheduling")
 
 
 __all__ = [

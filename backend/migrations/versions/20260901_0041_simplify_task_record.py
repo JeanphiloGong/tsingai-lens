@@ -33,6 +33,8 @@ def downgrade() -> None:
 
 
 def _task_columns() -> set[str]:
+    if "tasks" not in sa.inspect(op.get_bind()).get_table_names():
+        return set()
     return {
         str(column["name"])
         for column in sa.inspect(op.get_bind()).get_columns("tasks")

@@ -248,7 +248,7 @@ const translations: Record<Language, Translations> = {
 				uploading: 'Uploading papers...',
 				openProgress: 'Open collection progress',
 				unsupportedFile: 'Only PDF papers can be uploaded here.',
-				queuedSummary: '{count} paper preparation task(s) queued.',
+				queuedSummary: '{count} paper preparation run(s) queued.',
 				failedSummary: '{count} paper(s) need attention before preparation can continue.',
 				status: {
 					selected: 'Ready to upload',
@@ -375,7 +375,7 @@ const translations: Record<Language, Translations> = {
 				analysisRunning: 'Evidence analysis is reviewing paper {current} of {total}.',
 				analysisSucceeded: 'Evidence analysis completed.',
 				analysisFailed: 'Evidence analysis did not complete.',
-				queuedDescription: 'Task queued. You can continue while it runs.',
+				queuedDescription: 'Run queued. You can continue while it executes.',
 				details: 'Structured result',
 				draftSupport: 'Proposal context: {status}'
 			},
@@ -917,7 +917,7 @@ const translations: Record<Language, Translations> = {
 				uploadSelected: 'Upload {count}',
 				uploadComplete: '{count} paper(s) uploaded.',
 				preparePending: 'Prepare {count} pending',
-				preparationQueued: '{count} paper preparation task(s) queued.',
+				preparationQueued: '{count} paper preparation run(s) queued.',
 				discover: 'Form research questions from {count}',
 				discovering: 'Forming research questions...',
 				discoveryQueued: 'Research question formation has started.',
@@ -992,7 +992,7 @@ const translations: Record<Language, Translations> = {
 				},
 				failed: {
 					title: 'Processing ran into a problem',
-					body: 'Some tasks failed. Check the task errors or rerun processing before trusting the outputs.'
+					body: 'Some runs failed. Check the run errors or rerun processing before trusting the outputs.'
 				}
 			},
 			actions: {
@@ -1043,7 +1043,7 @@ const translations: Record<Language, Translations> = {
 						'Wait for processing to finish before opening evidence or comparisons. Use the progress view while the run is active.',
 					failedTitle: 'Resolve processing errors',
 					failedBody:
-						'The latest run did not finish. Review task errors or retry processing before trusting downstream outputs.',
+						'The latest run did not finish. Review run errors or retry processing before trusting downstream outputs.',
 					comparison: 'Comparison',
 					evidence: 'Evidence',
 					documents: 'Documents'
@@ -1059,13 +1059,13 @@ const translations: Record<Language, Translations> = {
 					readyTypes: 'Check document types',
 					readyEvidence: 'Review evidence and comparability',
 					readyCompare: 'Open research objectives',
-					processingWait: 'Wait for tasks to finish',
+					processingWait: 'Wait for runs to finish',
 					processingLogs: 'Check processing log',
 					processingRefresh: 'Refresh status',
 					emptyUpload: 'Upload documents',
 					emptyDescribe: 'Add collection description',
 					emptyStart: 'Start parsing',
-					failedErrors: 'Review task errors',
+					failedErrors: 'Review run errors',
 					failedRetry: 'Retry processing',
 					failedEvidence: 'Check any partial evidence',
 					guide: 'View user guide'
@@ -1102,7 +1102,7 @@ const translations: Record<Language, Translations> = {
 				failed: {
 					label: 'Needs attention',
 					title: 'The latest run did not finish cleanly',
-					body: 'Check the task state and warnings before relying on this collection. You may need to rerun processing.'
+					body: 'Check the run state and warnings before relying on this collection. You may need to rerun processing.'
 				}
 			},
 			statusLabel: 'Status',
@@ -1120,7 +1120,7 @@ const translations: Record<Language, Translations> = {
 			},
 			metricPapers: 'Papers',
 			metricFiles: 'Files',
-			metricTasks: 'Recent Tasks',
+			metricTasks: 'Recent Runs',
 			updatedAt: 'Artifacts updated: {time}',
 			artifacts: {
 				documents: 'Documents',
@@ -1196,12 +1196,12 @@ const translations: Record<Language, Translations> = {
 			filesLead:
 				'Upload source papers here. They remain attached to this collection as the base material.',
 			filesCount: '{count} file(s) in this collection',
-			latestTaskTitle: 'Latest task',
+			latestTaskTitle: 'Latest run',
 			statusTitle: 'Current state',
 			statusLead:
 				'This section tells you what state the collection is in and what the next useful action is.',
 			statusFiles: 'Uploaded files',
-			statusLatestTask: 'Latest task',
+			statusLatestTask: 'Latest run',
 			statusStage: 'Now',
 			statusSubProgress: 'Step progress',
 			statusStageName: 'Stage',
@@ -1287,7 +1287,7 @@ const translations: Record<Language, Translations> = {
 				documents: 'Documents',
 				graph: 'Graph view'
 			},
-			noTasks: 'No processing task has run for this collection yet.',
+			noTasks: 'No processing run has started for this collection yet.',
 			warningsTitle: 'Collection warnings',
 			warningsLead:
 				'Use these warnings to decide how cautious you should be with the outputs below.',
@@ -1316,19 +1316,19 @@ const translations: Record<Language, Translations> = {
 				'These views can still help, but they should follow the main collection analysis rather than replace it.',
 			advancedTitle: 'Advanced analysis and settings',
 			advancedLead:
-				'Tasks, read-only settings, and debug metadata live here so the core workflow stays clean.',
+				'Runs, read-only settings, and debug metadata live here so the core workflow stays clean.',
 			debugTitle: 'Debug metadata',
-			debugTaskId: 'Latest task ID',
+			debugTaskId: 'Latest run ID',
 			debugCollectionId: 'Collection ID'
 		},
 		documents: {
 			title: 'Documents',
-			lead: 'Upload papers into the collection, then trigger and monitor processing tasks.',
+			lead: 'Upload papers into the collection, then trigger and monitor processing runs.',
 			addFiles: 'Add files',
 			startIndex: 'Start processing',
 			processingTitle: 'Processing progress',
-			processingLoading: 'Loading latest task...',
-			processingEmpty: 'No processing task has been created yet.',
+			processingLoading: 'Loading latest run...',
+			processingEmpty: 'No processing run has been created yet.',
 			artifactsTitle: 'Artifacts',
 			modalTitle: 'Add documents',
 			modalLead: 'Drop PDFs or TXT files to upload.',
@@ -2199,52 +2199,6 @@ const translations: Record<Language, Translations> = {
 			actionExport: 'Export',
 			loading: 'Loading paper workbench'
 		},
-		tasks: {
-			title: 'Task History',
-			lead: 'Track processing runs, progress, timestamps, and generated artifacts.',
-			loading: 'Loading tasks...',
-			submit: 'Refresh',
-			empty: 'No tasks found for this collection.',
-			resultTitle: 'Recent tasks',
-			backToDocuments: 'Back to documents',
-			filterStatusLabel: 'Status',
-			filterStatusAll: 'All statuses',
-			limitLabel: 'Limit',
-			tableTask: 'Task',
-			tableStatus: 'Status',
-			tableStage: 'Stage',
-			tableProgress: 'Progress',
-			tableCreated: 'Created',
-			tableStarted: 'Started',
-			tableFinished: 'Finished',
-			tableOutput: 'Output path',
-			artifactsTitle: 'Artifacts',
-			statusUnknown: 'Unknown',
-			status: {
-				queued: 'Queued',
-				running: 'Running',
-				completed: 'Completed',
-				partial_success: 'Partial Success',
-				failed: 'Failed'
-			},
-			stageUnknown: 'Unknown',
-			stage: {
-				queued: 'Queued',
-				source_parsing: 'Parsing Sources',
-				document_profile: 'Classifying Paper',
-				paper_map: 'Mapping Research Scope',
-				ready: 'Ready',
-				failed: 'Failed'
-			},
-			progressUnit: {
-				documents: 'documents',
-				objectives: 'objectives',
-				frames: 'frames',
-				routes: 'routes',
-				tables: 'tables',
-				steps: 'steps'
-			}
-		},
 		graph: {
 			title: 'Collection Knowledge Map',
 			lead: 'Explore material, property, comparison, and source-evidence relationships across this collection.',
@@ -2546,7 +2500,7 @@ const translations: Record<Language, Translations> = {
 			workflowUploadDesc:
 				'Open the collection workspace and add PDF/TXT files in the files section.',
 			workflowIndexTitle: 'Start processing',
-			workflowIndexDesc: 'Start processing from Workspace and watch task progress inline.',
+				workflowIndexDesc: 'Start processing from Workspace and watch run progress inline.',
 			workflowSearchTitle: 'Review evidence',
 			workflowSearchDesc:
 				'Use Evidence to verify where claims, materials, methods, and parameters came from.',
@@ -2568,7 +2522,7 @@ const translations: Record<Language, Translations> = {
 				'Use graph preview and GraphML export as secondary analysis, not the primary end state.',
 			advancedTitle: 'Advanced access',
 			advancedDesc:
-				'Tasks, read-only settings, and debug metadata stay inside the workspace so the primary route tree remains focused.',
+					'Runs, read-only settings, and debug metadata stay inside the workspace so the primary route tree remains focused.',
 			tutorialTitle: 'Visualizing Your Knowledge Graph (Gephi)',
 			tutorialSub: 'Export GraphML from the web UI and explore it in Gephi.',
 			tutorialStep1Title: '1. Build a collection graph',
@@ -2799,7 +2753,7 @@ const translations: Record<Language, Translations> = {
 				eyebrow: '页面已锁定',
 				title: '需要先完成处理',
 				readyToProcess: '请先处理该集合，再打开研究目标、证据、比较、材料或图谱页面。',
-				processing: '集合仍在处理中。当前任务完成后，研究页面会自动解锁。',
+				processing: '集合仍在处理中。当前运行完成后，研究页面会自动解锁。',
 				failed: '最近一次处理失败。请先在工作区查看状态或重新处理，再信任下游页面。',
 				empty: '请先上传文档并处理集合，再打开研究页面。',
 				backToWorkspace: '返回工作区'
@@ -2849,7 +2803,7 @@ const translations: Record<Language, Translations> = {
 				uploading: '正在上传论文...',
 				openProgress: '打开集合进度',
 				unsupportedFile: '此处仅支持上传 PDF 论文。',
-				queuedSummary: '已启动 {count} 个论文准备任务。',
+				queuedSummary: '已启动 {count} 个论文准备运行。',
 				failedSummary: '有 {count} 篇论文需要处理后才能继续准备。',
 				status: {
 					selected: '等待上传',
@@ -2972,7 +2926,7 @@ const translations: Record<Language, Translations> = {
 				analysisRunning: '正在分析第 {current}/{total} 篇论文。',
 				analysisSucceeded: '证据分析已完成。',
 				analysisFailed: '证据分析未完成。',
-				queuedDescription: '任务已进入队列，运行期间你可以继续其他工作。',
+				queuedDescription: '运行已进入队列，执行期间你可以继续其他工作。',
 				details: '结构化结果',
 				draftSupport: '提议上下文：{status}'
 			},
@@ -3493,7 +3447,7 @@ const translations: Record<Language, Translations> = {
 				uploadSelected: '上传 {count} 篇',
 				uploadComplete: '已上传 {count} 篇论文。',
 				preparePending: '准备 {count} 篇待处理论文',
-				preparationQueued: '已启动 {count} 个论文准备任务。',
+				preparationQueued: '已启动 {count} 个论文准备运行。',
 				discover: '从 {count} 篇论文形成研究问题',
 				discovering: '正在形成研究问题...',
 				discoveryQueued: '已开始形成研究问题。',
@@ -3504,7 +3458,7 @@ const translations: Record<Language, Translations> = {
 				documentsLead: '就绪状态属于每篇论文；一篇论文失败，不会阻塞已经就绪的论文。',
 				export: {
 					title: '导出集合资料',
-					lead: '选择原始论文并下载归档，同时保留 manifest，便于复核或复现失败任务。',
+					lead: '选择原始论文并下载归档，同时保留 manifest，便于复核或复现失败运行。',
 					selectAll: '选择全部论文',
 					selectDocument: '选择论文加入归档',
 					selected: '已选择 {count} 篇论文',
@@ -3566,7 +3520,7 @@ const translations: Record<Language, Translations> = {
 				},
 				failed: {
 					title: '处理遇到问题',
-					body: '部分任务失败，请查看任务日志或重新处理。'
+					body: '部分运行失败，请查看运行日志或重新处理。'
 				}
 			},
 			actions: {
@@ -3612,9 +3566,9 @@ const translations: Record<Language, Translations> = {
 					readyToProcessTitle: '需要先处理',
 					readyToProcessBody: '文件已上传，但证据、比较和研究目标要等处理完成后才可信。',
 					processingTitle: '处理正在进行',
-					processingBody: '任务运行时先查看进度，等待完成后再进入证据或比较视图。',
+					processingBody: '运行执行时先查看进度，等待完成后再进入证据或比较视图。',
 					failedTitle: '先处理错误',
-					failedBody: '最近一次任务没有完成。请先查看错误或重新处理，再信任下游结果。',
+					failedBody: '最近一次运行没有完成。请先查看错误或重新处理，再信任下游结果。',
 					comparison: '比较',
 					evidence: '证据',
 					documents: '文档'
@@ -3629,13 +3583,13 @@ const translations: Record<Language, Translations> = {
 					readyTypes: '检查文档类型',
 					readyEvidence: '查看证据与可比性',
 					readyCompare: '打开研究目标',
-					processingWait: '等待任务完成',
+					processingWait: '等待运行完成',
 					processingLogs: '查看处理日志',
 					processingRefresh: '刷新状态',
 					emptyUpload: '上传文档',
 					emptyDescribe: '添加集合说明',
 					emptyStart: '开始解析',
-					failedErrors: '查看任务错误',
+					failedErrors: '查看运行错误',
 					failedRetry: '重新处理',
 					failedEvidence: '检查部分证据',
 					guide: '查看使用指南'
@@ -3671,7 +3625,7 @@ const translations: Record<Language, Translations> = {
 				failed: {
 					label: '需要关注',
 					title: '最近一次处理没有完整结束',
-					body: '先看任务状态和提醒，再决定是否重跑，不要直接相信当前集合结果。'
+					body: '先看运行状态和提醒，再决定是否重跑，不要直接相信当前集合结果。'
 				}
 			},
 			statusLabel: '状态',
@@ -3689,7 +3643,7 @@ const translations: Record<Language, Translations> = {
 			},
 			metricPapers: '论文数',
 			metricFiles: '文件数',
-			metricTasks: '最近任务',
+			metricTasks: '最近运行',
 			updatedAt: '产物更新时间：{time}',
 			artifacts: {
 				documents: '文档',
@@ -3750,7 +3704,7 @@ const translations: Record<Language, Translations> = {
 			statusTitle: '当前状态',
 			statusLead: '这里告诉你这个集合现在到了哪一步，以及下一步最值得做什么。',
 			statusFiles: '已上传文件',
-			statusLatestTask: '最近任务',
+			statusLatestTask: '最近运行',
 			statusStage: '正在处理',
 			statusSubProgress: '子进度',
 			statusStageName: '阶段',
@@ -3789,7 +3743,7 @@ const translations: Record<Language, Translations> = {
 			surfaceStateNotes: {
 				empty: '没有上传材料前，这个页面不会有内容。',
 				ready_to_process: '先回到工作区启动处理，这个页面才会准备好。',
-				processing: '当前处理任务正在为这个页面准备内容。',
+				processing: '当前处理运行正在为这个页面准备内容。',
 				ready: '可以开始查看。',
 				limited: '页面已经有部分结果，但其中一些内容仍然需要谨慎解读。',
 				not_applicable: '对于当前集合，这个页面不是默认应该使用的研究入口。',
@@ -3839,7 +3793,7 @@ const translations: Record<Language, Translations> = {
 			additionalViewsLead: '这些页面仍然有用，但应当跟在主集合分析之后，而不是取代主线。',
 			filesLead: '在这里上传源论文。上传后文件会继续挂在这个集合下面。',
 			filesCount: '当前集合共有 {count} 个文件',
-			latestTaskTitle: '最近任务',
+			latestTaskTitle: '最近运行',
 			startIndex: '启动处理',
 			indexNoFiles: '请至少上传一个文件后再启动处理。',
 			indexStarted: '处理已启动',
@@ -3857,19 +3811,19 @@ const translations: Record<Language, Translations> = {
 			nextDocuments: '查看文档',
 			nextGraph: '打开图谱',
 			advancedTitle: '高级分析与设置',
-			advancedLead: '任务、只读设置和调试元数据都收进这里，保证主流程保持干净。',
+			advancedLead: '运行、只读设置和调试元数据都收进这里，保证主流程保持干净。',
 			debugTitle: '调试元数据',
-			debugTaskId: '最近任务 ID',
+			debugTaskId: '最近运行 ID',
 			debugCollectionId: '集合 ID'
 		},
 		documents: {
 			title: '文档',
-			lead: '上传论文到集合，并触发、跟踪处理任务。',
+			lead: '上传论文到集合，并触发、跟踪处理运行。',
 			addFiles: '添加文件',
 			startIndex: '启动处理',
 			processingTitle: '处理进度',
-			processingLoading: '正在加载最近任务...',
-			processingEmpty: '还没有创建处理任务。',
+			processingLoading: '正在加载最近运行...',
+			processingEmpty: '还没有创建处理运行。',
 			artifactsTitle: '产物状态',
 			modalTitle: '添加文档',
 			modalLead: '拖拽 PDF/TXT 到此处上传。',
@@ -4715,52 +4669,6 @@ const translations: Record<Language, Translations> = {
 			actionExport: '导出',
 			loading: '正在加载论文工作台'
 		},
-		tasks: {
-			title: '任务历史',
-			lead: '跟踪处理运行、进度、时间点与产物状态。',
-			loading: '任务加载中...',
-			submit: '刷新',
-			empty: '当前集合还没有任务。',
-			resultTitle: '最近任务',
-			backToDocuments: '返回文档页',
-			filterStatusLabel: '状态',
-			filterStatusAll: '全部状态',
-			limitLabel: '返回条数',
-			tableTask: '任务',
-			tableStatus: '状态',
-			tableStage: '阶段',
-			tableProgress: '进度',
-			tableCreated: '创建时间',
-			tableStarted: '开始时间',
-			tableFinished: '结束时间',
-			tableOutput: '输出目录',
-			artifactsTitle: '产物',
-			statusUnknown: '未知',
-			status: {
-				queued: '排队中',
-				running: '运行中',
-				completed: '已完成',
-				partial_success: '部分成功',
-				failed: '失败'
-			},
-			stageUnknown: '未知',
-			stage: {
-				queued: '排队中',
-				source_parsing: '正在解析文献',
-				document_profile: '正在识别论文类型',
-				paper_map: '正在梳理研究范围',
-				ready: '已就绪',
-				failed: '失败'
-			},
-			progressUnit: {
-				documents: '篇文档',
-				objectives: '个目标',
-				frames: '个文献-目标判断',
-				routes: '条证据路由',
-				tables: '张表格',
-				steps: '个步骤'
-			}
-		},
 		graph: {
 			title: '文献集合知识地图',
 			lead: '面向多篇论文的主题、证据与关系探索。',
@@ -5052,7 +4960,7 @@ const translations: Record<Language, Translations> = {
 			workflowUploadTitle: '上传文档',
 			workflowUploadDesc: '进入集合工作区，在文件区批量添加 PDF/TXT。',
 			workflowIndexTitle: '启动处理',
-			workflowIndexDesc: '在工作区里启动处理，并内联查看任务进度。',
+				workflowIndexDesc: '在工作区里启动处理，并内联查看运行进度。',
 			workflowSearchTitle: '审阅证据',
 			workflowSearchDesc: '在证据页确认结论、材料、方法和参数来自哪里。',
 			workflowGraphTitle: '进入比较',
@@ -5068,7 +4976,7 @@ const translations: Record<Language, Translations> = {
 			surfaceGraphTitle: '图谱',
 			surfaceGraphDesc: '图谱预览和 GraphML 导出属于辅助分析，不是主终点。',
 			advancedTitle: '高级入口',
-			advancedDesc: '任务、只读设置和调试元数据保留在工作区分区中，主路由树保持聚焦。',
+				advancedDesc: '运行、只读设置和调试元数据保留在工作区分区中，主路由树保持聚焦。',
 			tutorialTitle: '知识图谱可视化（Gephi）',
 			tutorialSub: '通过 Web 界面导出 GraphML，并在 Gephi 中分析结构。',
 			tutorialStep1Title: '1. 构建集合图谱',

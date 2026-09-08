@@ -8,10 +8,9 @@ from application.source.collection_service import CollectionService
 from application.source.document_preparation_service import (
     DocumentPreparationService,
 )
-from application.source.task_service import TaskService
-from controllers.schemas.source.task import TaskResponse
+from application.pipeline import PipelineRunService
+from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from domain.core import DocumentProfile, PaperResearchMap
-from domain.source import TaskRecord
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.memory import (
     MemoryPaperMapRepository,
@@ -22,15 +21,14 @@ from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
 )
 from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
-from infra.persistence.postgres.task_repository import PostgresTaskRepository
+from infra.persistence.postgres.pipeline_run_repository import (
+    PostgresPipelineRunRepository,
+)
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
 
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
-
-NOW = "2026-08-27T10:00:00+00:00"
-
 
 def _profile(document_id: str, title: str) -> DocumentProfile:
     return DocumentProfile.from_mapping(
@@ -58,36 +56,6 @@ def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
             "map_status": "insufficient_map" if limitation else "sufficient",
             "map_limitations": [limitation] if limitation else [],
         }
-    )
-
-
-def _task(task_id: str, fingerprint: str) -> TaskRecord:
-    return TaskRecord(
-        task_id=task_id,
-        collection_id=COLLECTION_ID,
-        document_id="doc_a",
-        task_type="document_preparation",
-        mode="standard",
-        input_fingerprint=fingerprint,
-        status="queued",
-        current_stage="queued",
-        progress_percent=0,
-        progress_detail=None,
-        errors=(),
-        warnings=(),
-        created_at=NOW,
-        updated_at=NOW,
-        started_at=None,
-        finished_at=None,
-    )
-
-
-def _collection_task(task_id: str, fingerprint: str) -> TaskRecord:
-    return replace(
-        _task(task_id, fingerprint),
-        document_id=None,
-        task_type="objective_discovery",
-        details={"document_ids": ["doc_a", "doc_b"]},
     )
 
 
@@ -119,70 +87,6 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
     )
 
 
-async def test_document_task_reuses_active_and_matching_completed_work(
-    source_repository,
-) -> None:
-    tasks = PostgresTaskRepository(source_repository.session_factory)
-    first = _task("task-first", "fingerprint-a")
-    stored, created = await tasks.get_or_create_document_task(first)
-    assert (stored, created) == (first, True)
-
-    active_request = _task("task-active-request", "fingerprint-b")
-    reused_active, created = await tasks.get_or_create_document_task(active_request)
-    assert (reused_active, created) == (first, False)
-
-    completed = replace(
-        first,
-        status="completed",
-        current_stage="completed",
-        progress_percent=100,
-        updated_at="2026-08-27T10:01:00+00:00",
-        started_at=NOW,
-        finished_at="2026-08-27T10:01:00+00:00",
-    )
-    assert await tasks.update_task(completed) is True
-
-    matching_request = _task("task-matching-request", "fingerprint-a")
-    reused_completed, created = await tasks.get_or_create_document_task(
-        matching_request
-    )
-    assert (reused_completed, created) == (completed, False)
-
-    changed_request = _task("task-changed-request", "fingerprint-b")
-    created_task, created = await tasks.get_or_create_document_task(changed_request)
-    assert (created_task, created) == (changed_request, True)
-
-
-async def test_collection_task_reuses_only_active_discovery_work(
-    source_repository,
-) -> None:
-    tasks = PostgresTaskRepository(source_repository.session_factory)
-    first = _collection_task("task-discovery-first", "scope-a")
-    stored, created = await tasks.get_or_create_collection_task(first)
-    assert (stored, created) == (first, True)
-
-    active_request = _collection_task("task-discovery-duplicate", "scope-b")
-    reused_active, created = await tasks.get_or_create_collection_task(
-        active_request
-    )
-    assert (reused_active, created) == (first, False)
-
-    completed = replace(
-        first,
-        status="completed",
-        current_stage="objectives_ready",
-        progress_percent=100,
-        updated_at="2026-08-27T10:01:00+00:00",
-        started_at=NOW,
-        finished_at="2026-08-27T10:01:00+00:00",
-    )
-    assert await tasks.update_task(completed) is True
-
-    retry = _collection_task("task-discovery-retry", "scope-b")
-    created_task, created = await tasks.get_or_create_collection_task(retry)
-    assert (created_task, created) == (retry, True)
-
-
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     source_repository,
     tmp_path,
@@ -196,41 +100,41 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
         "doc_a",
         status="processing",
     )
-    task_service = TaskService(
-        PostgresTaskRepository(source_repository.session_factory)
+    pipeline_run_service = PipelineRunService(
+        PostgresPipelineRunRepository(source_repository.session_factory)
     )
-    task, created = await task_service.get_or_create_document_task(
+    run, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=COLLECTION_ID,
         document_id="doc_a",
-        task_type="document_preparation",
+        pipeline_name="document_preparation",
         input_fingerprint="restart-input",
     )
     assert created is True
-    await task_service.update_task(task["task_id"], status="running")
+    await pipeline_run_service.update_run(run["run_id"], status="running")
     service = DocumentPreparationService(
         collection_service=collection_service,
-        task_service=task_service,
+        pipeline_run_service=pipeline_run_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )
 
-    recovered = await service.recover_interrupted_tasks()
+    recovered = await service.recover_interrupted_runs()
 
-    recovered_task = await task_service.get_task(task["task_id"])
+    recovered_run = await pipeline_run_service.get_run(run["run_id"])
     assert recovered == 1
-    assert recovered_task["status"] == "failed"
-    assert recovered_task["current_stage"] == "interrupted"
-    assert TaskResponse(**recovered_task).status == "failed"
+    assert recovered_run["status"] == "failed"
+    assert recovered_run["current_node"] == "interrupted"
+    assert PipelineRunResponse(**recovered_run).status == "failed"
     assert (await collection_service.get_document(COLLECTION_ID, "doc_a")).status == (
         "stored"
     )
 
-    retry, retry_created = await task_service.get_or_create_document_task(
+    retry, retry_created = await pipeline_run_service.get_or_create_document_run(
         collection_id=COLLECTION_ID,
         document_id="doc_a",
-        task_type="document_preparation",
+        pipeline_name="document_preparation",
         input_fingerprint="restart-input",
     )
     assert retry_created is True
-    assert retry["task_id"] != task["task_id"]
+    assert retry["run_id"] != run["run_id"]

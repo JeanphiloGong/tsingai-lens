@@ -40,7 +40,7 @@ export LENS_AGENT_MAX_MODEL_STEPS=12
 `4`.
 `DOCUMENT_PREPARATION_MAX_CONCURRENCY` is optional. When unset, up to `10`
 different Documents prepare concurrently in one backend process. The database
-still admits only one active preparation task for the same Document.
+still admits only one active preparation Pipeline Run for the same Document.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
 `LLM_REASONING_EFFORT` is optional. Set it to a value supported by the model
@@ -128,9 +128,9 @@ duplicate its destructive restore commands.
   Objective discovery or analysis while other papers remain stored, processing,
   or failed.
 - Document preparation starts as a process-local asyncio background task. The
-  request returns after scheduling, and clients poll `GET /api/v1/tasks/{task_id}`
-  for persisted progress. There is no dedicated executor queue or external task
-  broker.
+  request returns after scheduling, and clients poll
+  `GET /api/v1/pipeline-runs/{run_id}` for persisted progress. There is no
+  dedicated executor queue or external task broker.
 - Objective analysis starts as a process-local asyncio background task. An
   application semaphore allows four analyses to execute concurrently per
   backend process. Additional in-process tasks wait on that semaphore; this is
@@ -139,8 +139,8 @@ duplicate its destructive restore commands.
   uses awaited task-local `AsyncSession` transactions. There is no dedicated
   Objective executor queue or external task broker; persisted Objective
   analysis rows remain the status authority used by the polling API.
-- Startup marks orphaned queued or running Document preparation failed with the
-  `interrupted` stage and returns affected `processing` Documents to `stored`.
+- Startup marks orphaned queued or running Document preparation runs failed with
+  the `interrupted` node and returns affected `processing` Documents to `stored`.
   Research-facing status reports this as `not_started`. The next preparation
   request is a new attempt and may reuse fingerprint-matching Source and Profile
   artifacts.

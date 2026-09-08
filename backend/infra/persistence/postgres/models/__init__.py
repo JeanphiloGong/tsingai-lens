@@ -1,7 +1,7 @@
 """PostgreSQL ORM model registry."""
 
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
-from infra.persistence.postgres.models.task import Task, TaskStage
+from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
 from infra.persistence.postgres.models.chat import (
     ChatMessageRow,
     ChatSessionRow,
@@ -63,6 +63,5 @@ __all__ = [
     "ObjectivePaperContributionRecord",
     "ObjectiveResearchRecord",
     "PaperMapRow",
-    "Task",
-    "TaskStage",
+    "PipelineRunRow",
 ]

@@ -1,8 +1,8 @@
 import { requestJson } from './api';
 
-export type TaskStatus = 'queued' | 'running' | 'completed' | 'partial_success' | 'failed';
+export type PipelineRunStatus = 'queued' | 'running' | 'completed' | 'partial_success' | 'failed';
 
-export type TaskStage =
+export type PipelineRunPhase =
 	| 'queued'
 	| 'source_parsing'
 	| 'document_profile'
@@ -10,7 +10,7 @@ export type TaskStage =
 	| 'ready'
 	| 'failed';
 
-export type TaskProgressDetail = {
+export type PipelineRunProgressDetail = {
 	phase: string;
 	current?: number | null;
 	total?: number | null;
@@ -20,55 +20,75 @@ export type TaskProgressDetail = {
 	active_objective_id?: string | null;
 };
 
-export type Task = {
-	task_id: string;
+export type PipelineRun = {
+	run_id: string;
 	collection_id: string;
-	document_id: string | null;
-	task_type: string;
+	pipeline_name: string;
+	scope_type: string;
+	scope_id: string;
 	mode: string;
 	input_fingerprint: string | null;
-	status: TaskStatus;
-	current_stage: TaskStage;
+	status: PipelineRunStatus;
+	current_node: PipelineRunPhase;
 	progress_percent: number;
-	progress_detail?: TaskProgressDetail | null;
+	progress_detail?: PipelineRunProgressDetail | null;
+	nodes: Record<string, unknown>;
 	errors: string[];
 	warnings: string[];
+	stats: Record<string, unknown>;
+	context: Record<string, unknown>;
+	resumed_from_run_id?: string | null;
 	created_at: string;
 	updated_at: string;
 	started_at?: string | null;
 	finished_at?: string | null;
 };
 
-export type TaskListResponse = {
+export type PipelineRunListResponse = {
 	collection_id: string;
 	count: number;
-	items: Task[];
+	items: PipelineRun[];
 };
 
-function normalizeTask(item: unknown): Task | null {
+function normalizePipelineRun(item: unknown): PipelineRun | null {
 	if (!item || typeof item !== 'object') return null;
 	const record = item as Record<string, unknown>;
-	const taskId = String(record.task_id ?? '').trim();
+	const runId = String(record.run_id ?? '').trim();
 	const collectionId = String(record.collection_id ?? '').trim();
-	if (!taskId || !collectionId) return null;
+	if (!runId || !collectionId) return null;
 
 	return {
-		task_id: taskId,
+		run_id: runId,
 		collection_id: collectionId,
-		document_id: typeof record.document_id === 'string' ? record.document_id : null,
-		task_type: String(record.task_type ?? 'document_preparation'),
+		pipeline_name: String(record.pipeline_name ?? 'document_preparation'),
+		scope_type: String(record.scope_type ?? ''),
+		scope_id: String(record.scope_id ?? ''),
 		mode: String(record.mode ?? 'standard'),
 		input_fingerprint:
 			typeof record.input_fingerprint === 'string' ? record.input_fingerprint : null,
-		status: String(record.status ?? 'queued') as TaskStatus,
-		current_stage: String(record.current_stage ?? 'queued') as TaskStage,
+		status: String(record.status ?? 'queued') as PipelineRunStatus,
+		current_node: String(record.current_node ?? 'queued') as PipelineRunPhase,
 		progress_percent:
 			typeof record.progress_percent === 'number'
 				? record.progress_percent
 				: Number(record.progress_percent ?? 0),
 		progress_detail: normalizeProgressDetail(record.progress_detail),
+		nodes:
+			record.nodes && typeof record.nodes === 'object' && !Array.isArray(record.nodes)
+				? (record.nodes as Record<string, unknown>)
+				: {},
 		errors: Array.isArray(record.errors) ? record.errors.map((item) => String(item)) : [],
 		warnings: Array.isArray(record.warnings) ? record.warnings.map((item) => String(item)) : [],
+		stats:
+			record.stats && typeof record.stats === 'object' && !Array.isArray(record.stats)
+				? (record.stats as Record<string, unknown>)
+				: {},
+		context:
+			record.context && typeof record.context === 'object' && !Array.isArray(record.context)
+				? (record.context as Record<string, unknown>)
+				: {},
+		resumed_from_run_id:
+			typeof record.resumed_from_run_id === 'string' ? record.resumed_from_run_id : null,
 		created_at: String(record.created_at ?? ''),
 		updated_at: String(record.updated_at ?? ''),
 		started_at: typeof record.started_at === 'string' ? record.started_at : null,
@@ -76,7 +96,7 @@ function normalizeTask(item: unknown): Task | null {
 	};
 }
 
-function normalizeProgressDetail(value: unknown): TaskProgressDetail | null {
+function normalizeProgressDetail(value: unknown): PipelineRunProgressDetail | null {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 	const record = value as Record<string, unknown>;
 	const phase = String(record.phase ?? '').trim();
@@ -101,15 +121,15 @@ function normalizeOptionalNumber(value: unknown) {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function isTaskActive(task: Task | null | undefined) {
-	if (!task) return false;
-	return task.status === 'queued' || task.status === 'running';
+export function isPipelineRunActive(run: PipelineRun | null | undefined) {
+	if (!run) return false;
+	return run.status === 'queued' || run.status === 'running';
 }
 
-export function isTaskFinished(task: Task | null | undefined) {
-	if (!task) return false;
+export function isPipelineRunFinished(run: PipelineRun | null | undefined) {
+	if (!run) return false;
 	return (
-		task.status === 'completed' || task.status === 'partial_success' || task.status === 'failed'
+		run.status === 'completed' || run.status === 'partial_success' || run.status === 'failed'
 	);
 }
 
@@ -124,11 +144,11 @@ export async function prepareCollectionDocument(
 		}
 	);
 
-	const task = normalizeTask(data);
-	if (!task) {
-		throw new Error('Task response is missing task_id.');
+	const run = normalizePipelineRun(data);
+	if (!run) {
+		throw new Error('PipelineRun response is missing run_id.');
 	}
-	return task;
+	return run;
 }
 
 export async function formCollectionResearchQuestions(collectionId: string, documentIds: string[]) {
@@ -140,23 +160,23 @@ export async function formCollectionResearchQuestions(collectionId: string, docu
 		}
 	);
 
-	const task = normalizeTask(data);
-	if (!task) {
-		throw new Error('Task response is missing task_id.');
+	const run = normalizePipelineRun(data);
+	if (!run) {
+		throw new Error('PipelineRun response is missing run_id.');
 	}
-	return task;
+	return run;
 }
 
-export async function getTask(taskId: string) {
-	const data = await requestJson(`/tasks/${encodeURIComponent(taskId)}`, { method: 'GET' });
-	const task = normalizeTask(data);
-	if (!task) {
-		throw new Error('Task response is missing task_id.');
+export async function getPipelineRun(runId: string) {
+	const data = await requestJson(`/pipeline-runs/${encodeURIComponent(runId)}`, { method: 'GET' });
+	const run = normalizePipelineRun(data);
+	if (!run) {
+		throw new Error('PipelineRun response is missing run_id.');
 	}
-	return task;
+	return run;
 }
 
-export async function listCollectionTasks(
+export async function listCollectionPipelineRuns(
 	collectionId: string,
 	options: { status?: string; limit?: number; offset?: number } = {}
 ) {
@@ -166,18 +186,18 @@ export async function listCollectionTasks(
 	params.set('offset', String(options.offset ?? 0));
 
 	const data = await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/tasks?${params.toString()}`,
+		`/collections/${encodeURIComponent(collectionId)}/pipeline-runs?${params.toString()}`,
 		{ method: 'GET' }
 	);
 
 	const record = data as Record<string, unknown>;
 	const items = Array.isArray(record?.items)
-		? record.items.map((item) => normalizeTask(item)).filter((item): item is Task => item !== null)
+		? record.items.map((item) => normalizePipelineRun(item)).filter((item): item is PipelineRun => item !== null)
 		: [];
 
 	return {
 		collection_id: String(record?.collection_id ?? collectionId),
 		count: typeof record?.count === 'number' ? record.count : items.length,
 		items
-	} satisfies TaskListResponse;
+	} satisfies PipelineRunListResponse;
 }

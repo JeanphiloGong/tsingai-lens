@@ -15,7 +15,7 @@ from domain.core.research_objective import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.pipeline import ExecutionStats
+from domain.pipeline import ExecutionStats, PipelineRun
 from domain.core.finding import Finding
 from domain.source import (
     Collection,
@@ -29,8 +29,6 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
-    TaskRecord,
-    TaskStageRecord,
 )
 from domain.evaluation import (
     EvaluationGoldItem,
@@ -84,40 +82,31 @@ class CollectionRepository(Protocol):
     async def delete_collection(self, collection_id: str) -> bool: ...
 
 
-class TaskRepository(Protocol):
-    async def add_task(self, record: TaskRecord) -> TaskRecord: ...
+class PipelineRunRepository(Protocol):
+    async def add_run(self, run: PipelineRun) -> PipelineRun: ...
 
-    async def get_or_create_collection_task(
+    async def get_or_create_collection_run(
         self,
-        record: TaskRecord,
-    ) -> tuple[TaskRecord, bool]: ...
+        run: PipelineRun,
+    ) -> tuple[PipelineRun, bool]: ...
 
-    async def get_or_create_document_task(
+    async def get_or_create_document_run(
         self,
-        record: TaskRecord,
-    ) -> tuple[TaskRecord, bool]: ...
+        run: PipelineRun,
+    ) -> tuple[PipelineRun, bool]: ...
 
-    async def read_task(self, task_id: str) -> TaskRecord | None: ...
+    async def read_run(self, run_id: str) -> PipelineRun | None: ...
 
-    async def list_tasks(
+    async def list_runs(
         self,
         *,
         collection_id: str | None = None,
         status: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> tuple[TaskRecord, ...]: ...
+    ) -> tuple[PipelineRun, ...]: ...
 
-    async def update_task(
-        self,
-        record: TaskRecord,
-        *,
-        stages: tuple[TaskStageRecord, ...] | None = None,
-    ) -> bool: ...
-
-    async def list_stages(
-        self, task_id: str
-    ) -> tuple[TaskStageRecord, ...]: ...
+    async def update_run(self, run: PipelineRun) -> bool: ...
 
 
 class ChatRepository(Protocol):

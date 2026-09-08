@@ -15,13 +15,13 @@ from application.chat import (
 )
 from application.chat.capabilities import GetCollectionContextCapability
 from application.chat.session_service import ChatSessionService
-from application.source.task_service import TaskService
+from application.pipeline import PipelineRunService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
-    MemoryTaskRepository,
+    MemoryPipelineRunRepository,
 )
 from main import create_app
 from tests.support.chat_repository import MemoryChatRepository
@@ -178,7 +178,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app(
         auth_session_service=auth_session_service,
         collection_service=collection_service,
-        task_service=TaskService(MemoryTaskRepository()),
+        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
         source_artifact_repository=source_artifact_repository,
         document_profile_repository=MemoryDocumentProfileRepository(),
         paper_map_repository=MemoryPaperMapRepository(),

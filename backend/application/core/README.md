@@ -1,8 +1,8 @@
 # Core Application Layer
 
 This package owns scientific interpretation after one Document has parseable
-Source artifacts. It does not own Collection membership, file storage, task
-admission, or Agent conversation.
+Source artifacts. It does not own Collection membership, file storage, Pipeline
+Run admission, or Agent conversation.
 
 ## Document-Level Scientific Triage
 

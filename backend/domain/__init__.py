@@ -4,8 +4,8 @@ from domain.source import ArtifactStatusRecord, Collection, Document
 from domain.ports import (
     CollectionPaths,
     CollectionRepository,
+    PipelineRunRepository,
     SourceArtifactRepository,
-    TaskRepository,
 )
 
 __all__ = [
@@ -13,7 +13,7 @@ __all__ = [
     "CollectionPaths",
     "Collection",
     "CollectionRepository",
+    "PipelineRunRepository",
     "SourceArtifactRepository",
-    "TaskRepository",
     "Document",
 ]

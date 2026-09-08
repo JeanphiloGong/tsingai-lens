@@ -36,7 +36,7 @@ retries only papers whose inspection is missing, failed, or stale.
 
 - `controllers/`: HTTP routes and response schemas.
 - `application/source/`: Collection lifecycle, upload, per-document preparation,
-  task state, and Source reads.
+  run state, and Source reads.
 - `application/core/`: Document profiling, Paper Map creation, Objective
   discovery, Evidence extraction, and Finding synthesis.
 - `application/chat/`: Research Agent trajectory and approved capability calls.

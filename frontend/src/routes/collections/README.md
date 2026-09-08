@@ -11,14 +11,14 @@ This node owns the Collection route family.
   expandable attention section. Objective discovery uses the complete current
   ready-paper set without restoring the retired Collection build contract. The
   action is named research-question formation and returns a persisted
-  collection Task; queued/running progress survives navigation or refresh,
+  collection-scoped Pipeline Run; queued/running progress survives navigation or refresh,
   disables duplicate submission, and refreshes Objectives at completion. A
-  failed Task exposes its error and restores the retry action. This phase does
+  failed run exposes its error and restores the retry action. This phase does
   not claim that Objective Evidence analysis has started.
   The overview keeps a persistent four-stage research strip and, while paper
-  preparation tasks are queued or running, adds an aggregate progress bar with
-  ready/total papers, active task count, and weighted task completion. It does
-  not present one task as the progress of the entire collection, and it does
+  preparation runs are queued or running, adds an aggregate progress bar with
+  ready/total papers, active run count, and weighted run completion. It does
+  not present one run as the progress of the entire collection, and it does
   not count collection-level Objective discovery as paper preparation. A
   collapsed export section can download a user-selected set of original paper
   files as a bounded ZIP with its manifest; it does not change the research
@@ -59,10 +59,10 @@ This node owns the Collection route family.
   as an error. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.
   Its research-process capability projects the same current Documents and
-  persisted per-paper preparation tasks used by the Collection page; Chat does
+  persisted per-paper preparation runs used by the Collection page; Chat does
   not own a second progress model or expose model reasoning and retry internals.
   The Agent may propose preparing exact papers. The action requires approval,
-  returns their queued or reused tasks, and does not discover or confirm an
+  returns their queued or reused runs, and does not discover or confirm an
   Objective or start deep Objective analysis.
   For a researcher-authored question, the Agent can preview a bounded paper
   scope without claiming that mapped relationships or review citations are
@@ -90,11 +90,11 @@ This node owns the Collection route family.
   technical failure rather than silently saving a plan against newer results.
   The Agent composer can also add PDF papers directly to the current
   Collection. This user action reuses the canonical Collection document upload
-  endpoint and queues independent per-paper preparation tasks; it does not send
+  endpoint and queues independent per-paper preparation runs; it does not send
   file bytes through Chat, create an Agent-owned attachment, or form an
   Objective. Each selected paper remains visible with upload/preparation
   status, failures can be retried without duplicating a successful upload, and
-  the Collection workspace remains the canonical place to inspect full task
+  the Collection workspace remains the canonical place to inspect full run
   progress.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;

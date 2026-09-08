@@ -3,113 +3,177 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from domain.chat import ChatMessage, ChatMessageRole
 
 
+@dataclass(frozen=True)
+class ChatModelContext:
+    messages: tuple[ChatMessage, ...]
+    rollover_summary: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "messages", tuple(self.messages))
+        object.__setattr__(self, "rollover_summary", self.rollover_summary.strip())
+
+
+_LINEAGE_FIELDS = {
+    "collection_id", "document_id", "document_ids", "objective_id", "finding_id",
+    "evidence_id", "source_ref", "source_kind", "table_ref", "table_id", "source_digest",
+    "digest", "resource_id", "resource_type", "href", "task_id", "run_id", "status",
+    "draft_id", "analysis_version", "source_analysis_version", "source_finding_ids",
+    "source_evidence_ids", "offset", "next_offset", "row_offset", "next_row_offset",
+    "limit", "page", "error_code", "content_truncated", "has_more", "paper_total",
+}
+
+
 class ChatContextBuilder:
-    def __init__(self, *, max_messages: int = 40, max_chars: int = 32_000) -> None:
+    def __init__(
+        self,
+        *,
+        max_messages: int = 40,
+        max_chars: int = 32_000,
+        max_summary_chars: int | None = None,
+    ) -> None:
         if max_messages < 2:
             raise ValueError("max_messages must allow one tool call/result pair")
         if max_chars < 1_000:
             raise ValueError("max_chars must be at least 1000")
         self.max_messages = max_messages
         self.max_chars = max_chars
+        self.max_summary_chars = (
+            min(4_000, max_chars // 4)
+            if max_summary_chars is None else max_summary_chars
+        )
+        if not 0 < self.max_summary_chars < max_chars:
+            raise ValueError("summary budget must be positive and less than context budget")
 
     def for_model(
         self,
         messages: tuple[ChatMessage, ...],
-    ) -> tuple[ChatMessage, ...]:
+        *,
+        active_user_message_id: str | None = None,
+    ) -> ChatModelContext:
         units = self._protocol_units(messages)
-        active_user_index = next(
+        active_index = next(
             (
-                index
-                for index in range(len(units) - 1, -1, -1)
-                if len(units[index]) == 1
-                and units[index][0].role is ChatMessageRole.USER
+                i for i in range(len(units) - 1, -1, -1)
+                if units[i][0].role is ChatMessageRole.USER
+                and (
+                    active_user_message_id is None
+                    or units[i][0].message_id == active_user_message_id
+                )
             ),
             None,
         )
-        if active_user_index is not None and self._can_reserve_active_user(
-            units,
-            active_user_index,
-        ):
-            return self._select_around_active_user(units, active_user_index)
-
-        selected: list[tuple[ChatMessage, ...]] = []
-        message_count = 0
-        char_count = 0
-        for unit in reversed(units):
-            unit_chars = sum(self._size(item) for item in unit)
-            if (
-                message_count + len(unit) > self.max_messages
-                or char_count + unit_chars > self.max_chars
-            ):
-                break
-            selected.append(unit)
-            message_count += len(unit)
-            char_count += unit_chars
-        return tuple(message for unit in reversed(selected) for message in unit)
-
-    def _can_reserve_active_user(
-        self,
-        units: tuple[tuple[ChatMessage, ...], ...],
-        active_user_index: int,
-    ) -> bool:
-        user_unit = units[active_user_index]
-        user_chars = sum(self._size(item) for item in user_unit)
-        if len(user_unit) > self.max_messages or user_chars > self.max_chars:
-            return False
-        if active_user_index == len(units) - 1:
-            return True
-        newest_unit = units[-1]
-        newest_chars = sum(self._size(item) for item in newest_unit)
-        return (
-            len(user_unit) + len(newest_unit) <= self.max_messages
-            and user_chars + newest_chars <= self.max_chars
+        if active_user_message_id is not None and active_index is None:
+            raise ValueError("active user message is missing from context")
+        # Runner instructions follow the real user message and are transient.
+        pinned = {
+            i for i, unit in enumerate(units)
+            if active_index is not None and i >= active_index
+            and unit[0].role is ChatMessageRole.USER
+        }
+        selected = set(pinned)
+        char_count = sum(self._size(message) for i in pinned for message in units[i])
+        message_count = sum(len(units[i]) for i in pinned)
+        if char_count > self.max_chars or message_count > self.max_messages:
+            raise ValueError("active question and selected Source exceed context budget")
+        needs_rollover = (
+            sum(self._size(message) for message in messages) > self.max_chars
+            or len(messages) > self.max_messages
+            or sum(map(len, units)) != len(messages)
         )
-
-    def _select_around_active_user(
-        self,
-        units: tuple[tuple[ChatMessage, ...], ...],
-        active_user_index: int,
-    ) -> tuple[ChatMessage, ...]:
-        user_unit = units[active_user_index]
-        selected: list[tuple[int, tuple[ChatMessage, ...]]] = [
-            (active_user_index, user_unit)
-        ]
-        message_count = len(user_unit)
-        char_count = sum(self._size(item) for item in user_unit)
-
-        for index in range(len(units) - 1, active_user_index, -1):
-            unit = units[index]
-            unit_chars = sum(self._size(item) for item in unit)
-            if (
-                message_count + len(unit) > self.max_messages
-                or char_count + unit_chars > self.max_chars
-            ):
-                break
-            selected.append((index, unit))
-            message_count += len(unit)
-            char_count += unit_chars
-
-        for index in range(active_user_index - 1, -1, -1):
-            unit = units[index]
-            unit_chars = sum(self._size(item) for item in unit)
-            if (
-                message_count + len(unit) > self.max_messages
-                or char_count + unit_chars > self.max_chars
-            ):
-                break
-            selected.append((index, unit))
-            message_count += len(unit)
-            char_count += unit_chars
-
-        return tuple(
-            message
-            for _, unit in sorted(selected, key=lambda item: item[0])
-            for message in unit
+        summary_budget = (
+            min(self.max_summary_chars, self.max_chars - char_count)
+            if needs_rollover else 0
         )
+        for i in range(len(units) - 1, -1, -1):
+            if i in selected:
+                continue
+            size = sum(self._size(message) for message in units[i])
+            if (
+                char_count + size <= self.max_chars - summary_budget
+                and message_count + len(units[i]) <= self.max_messages
+            ):
+                selected.add(i)
+                char_count += size
+                message_count += len(units[i])
+        selected_messages = tuple(message for i in sorted(selected) for message in units[i])
+        selected_ids = {message.message_id for message in selected_messages}
+        omitted = tuple(
+            message for message in messages if message.message_id not in selected_ids
+        )
+        summary = self._rollover_summary(
+            omitted, min(self.max_summary_chars, self.max_chars - char_count)
+        )
+        return ChatModelContext(selected_messages, summary)
+
+    @staticmethod
+    def _rollover_summary(messages: tuple[ChatMessage, ...], budget: int) -> str:
+        def project(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                result = {}
+                for key, item in value.items():
+                    if key in _LINEAGE_FIELDS and (
+                        isinstance(item, (str, int, float, bool)) or item is None
+                    ):
+                        result[key] = item
+                    elif (
+                        key in _LINEAGE_FIELDS and isinstance(item, (list, tuple))
+                        and all(isinstance(part, (str, int)) for part in item)
+                    ):
+                        result[key] = list(item)
+                    elif isinstance(item, (Mapping, list, tuple)):
+                        child = project(item)
+                        if child:
+                            result[key] = child
+                return result
+            if isinstance(value, (list, tuple)):
+                return [
+                    child for item in value
+                    if isinstance(item, Mapping) and (child := project(item))
+                ]
+            return None
+
+        entries = []
+        for message in reversed(messages):
+            if message.tool_result:
+                result = message.tool_result
+                for ref in result.resource_refs:
+                    entries.append({
+                        "tool_call_id": result.tool_call_id, "resource": ref.to_record(),
+                    })
+                entries.append({
+                    "tool_call_id": result.tool_call_id, "status": result.status.value,
+                    "error_code": result.error_code, "data": project(result.data),
+                })
+            for request in message.tool_calls:
+                entries.append({
+                    "tool_call_id": request.tool_call_id, "name": request.name,
+                    "position": request.position, "arguments": project(request.arguments),
+                })
+            for source in message.source_contexts:
+                entries.append({
+                    "document_id": source.document_id, "source_ref": source.source_ref,
+                    "source_digest": source.source_digest,
+                    "resource": source.resource_ref.to_record(),
+                })
+        if not entries:
+            return ""
+        kept = []
+        summary = ""
+        for entry in entries:
+            candidate = json.dumps(
+                {"entries": [*kept, entry]}, ensure_ascii=True, separators=(",", ":")
+            )
+            if len(candidate) <= budget:
+                kept.append(entry)
+                summary = candidate
+        return summary
 
     @staticmethod
     def _protocol_units(
@@ -122,15 +186,15 @@ class ChatContextBuilder:
             if message.role is ChatMessageRole.TOOL:
                 position += 1
                 continue
-            if message.role is ChatMessageRole.ASSISTANT and message.tool_call_id:
-                following = messages[position + 1] if position + 1 < len(messages) else None
-                if (
-                    following is not None
-                    and following.role is ChatMessageRole.TOOL
-                    and following.tool_call_id == message.tool_call_id
+            if message.role is ChatMessageRole.ASSISTANT and message.tool_calls:
+                following = messages[position + 1:position + 1 + len(message.tool_calls)]
+                if len(following) == len(message.tool_calls) and all(
+                    result.role is ChatMessageRole.TOOL
+                    and result.tool_call_id == request.tool_call_id
+                    for request, result in zip(message.tool_calls, following)
                 ):
-                    units.append((message, following))
-                    position += 2
+                    units.append((message, *following))
+                    position += 1 + len(following)
                     continue
                 position += 1
                 continue
@@ -146,9 +210,10 @@ class ChatContextBuilder:
         }
         if message.tool_call_id:
             model_message["tool_call_id"] = message.tool_call_id
-        if message.role is ChatMessageRole.ASSISTANT and message.tool_call_id:
-            model_message["tool_name"] = message.tool_name
-            model_message["tool_arguments"] = dict(message.tool_arguments or {})
+        if message.tool_calls:
+            model_message["tool_calls"] = [
+                request.to_record() for request in message.tool_calls
+            ]
         if message.source_contexts:
             model_message["source_contexts"] = [
                 item.to_record() for item in message.source_contexts
@@ -163,4 +228,4 @@ class ChatContextBuilder:
         )
 
 
-__all__ = ["ChatContextBuilder"]
+__all__ = ["ChatContextBuilder", "ChatModelContext"]

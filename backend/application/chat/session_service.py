@@ -113,11 +113,10 @@ class ChatSessionService:
     ) -> ChatToolCall | None:
         messages = await self.list_messages_for_user(session_id, user_id)
         for message in reversed(messages):
-            if message.tool_call_id is None:
-                continue
-            call = await self.repository.read_tool_call(message.tool_call_id)
-            if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
-                return call
+            for request in message.tool_calls:
+                call = await self.repository.read_tool_call(request.tool_call_id)
+                if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
+                    return call
         return None
 
     async def post_message_for_user(
@@ -453,6 +452,8 @@ class ChatSessionService:
     ) -> dict[str, Any]:
         return {
             "status": result.status.value,
+            "completion_reason": result.completion_reason.value if result.completion_reason else None,
+            "warnings": result.warnings,
             "messages": result.messages[previous_count:],
             "pending_approval": result.pending_approval,
             "error_code": result.error_code,

@@ -33,7 +33,12 @@ export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export DOCUMENT_PREPARATION_MAX_CONCURRENCY=10
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
-export LENS_AGENT_MAX_MODEL_STEPS=12
+export LENS_AGENT_MAX_TURN_SECONDS=300
+export LENS_AGENT_MAX_TOOL_CALLS=24
+export LENS_AGENT_MAX_MODEL_TOKENS=160000
+export LENS_AGENT_NO_PROGRESS_LIMIT=2
+export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
+export LENS_AGENT_MAX_PARALLEL_READS=4
 ```
 
 `CORE_EXTRACTION_MAX_CONCURRENCY` is optional. When unset, Core extraction uses
@@ -61,11 +66,22 @@ If the provider returns an empty, reasoning-only, or structurally invalid
 streamed response, the runner retries once when no user-visible text was
 received. A second invalid response returns `model_response_invalid`; this is
 distinct from provider connectivity or availability failure.
-`LENS_AGENT_MAX_MODEL_STEPS` controls the maximum number of model-tool decision
-cycles in one Research Agent turn. It is optional and defaults to `6`; accepted
-values are `1` through `32`. Invalid or out-of-range values are logged and use
-the default. A value such as `12` gives a research turn more room to inspect
-multiple sources while retaining a bounded execution and cost limit.
+The six `LENS_AGENT_*` variables above are optional; the shown values are their
+defaults. Time must be finite and positive; counts must be positive integers.
+Invalid values are logged and use their defaults. These limits protect one
+technical turn and do not measure scientific completeness. A new Source can
+continue beyond six decisions. Repeated identical calls and observations count
+toward the no-progress limit. Only explicitly parallel-safe reads share the
+parallel-read allowance; writes always require exact approval.
+
+Elapsed time, executed tools, and provider-reported tokens bound normal work;
+the model-cycle ceiling is an emergency fuse. Providers without usage reports
+remain bounded by time, tools, and cycles. A reached limit permits exactly one
+answer-only finalization, outside the normal resource allowance. Successful
+finalization returns `completed` with a completion reason and scope warnings;
+provider or finalization failures remain technical failures. Structured cycle
+logs contain IDs, counts, usage, and termination reasons, never full arguments,
+paper bodies, credentials, or hidden reasoning.
 
 ## Initialize Or Upgrade The Schema
 

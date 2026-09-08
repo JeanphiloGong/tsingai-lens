@@ -386,8 +386,7 @@
 			content: text,
 			created_at: createdAt,
 			tool_call_id: null,
-			tool_name: null,
-			tool_arguments: null,
+			tool_calls: [],
 			tool_result: null,
 			source_contexts: sourceContexts
 		};
@@ -466,7 +465,7 @@
 		if (turn.status === 'failed') {
 			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
 		}
-		if (turn.status === 'step_limit_reached') {
+		if (turn.status === 'completed' && turn.warnings?.length) {
 			notice = $t('researchAgent.turnLimited');
 		}
 		if (session) {
@@ -611,10 +610,8 @@
 	function resultToolName(message: ChatMessage) {
 		if (!message.tool_call_id) return null;
 		return (
-			messages.find(
-				(candidate) =>
-					candidate.role === 'assistant' && candidate.tool_call_id === message.tool_call_id
-			)?.tool_name ?? null
+			messages.flatMap((candidate) => candidate.tool_calls)
+				.find((request) => request.tool_call_id === message.tool_call_id)?.name ?? null
 		);
 	}
 

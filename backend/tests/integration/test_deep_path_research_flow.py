@@ -78,12 +78,13 @@ class _QueuedModel:
     def queue_tool(self, name: str, arguments: dict[str, Any]) -> None:
         self.turns.extend(
             (
-                ModelTurn(tool_call=ModelToolCall(name=name, arguments=arguments)),
+                ModelTurn(tool_calls=(ModelToolCall(name=name, arguments=arguments),)),
                 ModelTurn(content=f"{name} completed."),
             )
         )
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         assert messages
         assert self.turns
         return self.turns.popleft()
@@ -1068,9 +1069,8 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
     messages = await fresh_chat.read_messages(session.session_id)
     tool_calls = []
     for message in messages:
-        if message.tool_call_id is None or message.role.value != "assistant":
-            continue
-        tool_calls.append(await fresh_chat.read_tool_call(message.tool_call_id))
+        for request in message.tool_calls:
+            tool_calls.append(await fresh_chat.read_tool_call(request.tool_call_id))
     write_calls = tuple(
         call for call in tool_calls if call is not None and call.risk.value == "write"
     )

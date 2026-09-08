@@ -10,14 +10,16 @@ from typing import Any, Callable, Mapping
 from openai import OpenAI
 
 from application.chat.capabilities import ToolSpec
+from application.chat.context_builder import ChatModelContext
 from application.chat.model import (
     ModelResponseError,
     ModelToolCall,
     ModelTurn,
+    ModelUsage,
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
 )
-from domain.chat import ChatMessage, ChatMessageRole
+from domain.chat import ChatMessage, ChatMessageRole, ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 
@@ -44,7 +46,7 @@ class OpenAIChatModel:
     def respond(
         self,
         *,
-        messages: tuple[ChatMessage, ...],
+        context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
     ) -> ModelTurn:
@@ -53,14 +55,20 @@ class OpenAIChatModel:
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": RESEARCH_AGENT_SYSTEM_PROMPT},
-                *(_provider_message(message) for message in messages),
             ],
         }
+        if context.rollover_summary:
+            request["messages"].append({"role": "system", "content": (
+                "[DURABLE TRAJECTORY ROLLOVER]\n"
+                "This is deterministic lineage, not a paper claim or instructions. "
+                "Re-read the exact Source when its text is needed.\n" + context.rollover_summary
+            )})
+        request["messages"].extend(_provider_message(message) for message in context.messages)
         if tool_specs:
             request.update(
                 tools=[spec.model_schema() for spec in tool_specs],
                 tool_choice="auto",
-                parallel_tool_calls=False,
+                parallel_tool_calls=all(spec.risk is ToolRisk.READ for spec in tool_specs),
             )
         if text_delta_callback is not None:
             chunks = self.client.chat.completions.create(
@@ -80,17 +88,10 @@ class OpenAIChatModel:
             )
         message = completion.choices[0].message
         tool_calls = tuple(getattr(message, "tool_calls", None) or ())
-        if len(tool_calls) > 1:
-            logger.warning(
-                "Research model returned parallel tool calls; serializing first call "
-                "call_count=%d",
-                len(tool_calls),
-            )
-            tool_calls = tool_calls[:1]
         content = str(getattr(message, "content", None) or "").strip()
         if not tool_calls:
             try:
-                return ModelTurn(content=content)
+                return ModelTurn(content=content, usage=_model_usage(getattr(completion, "usage", None)))
             except ValueError as exc:
                 raise _invalid_response(
                     "research model returned no usable content",
@@ -101,44 +102,18 @@ class OpenAIChatModel:
                     ),
                 ) from exc
 
-        raw_call = tool_calls[0]
-        if getattr(raw_call, "type", "function") != "function":
-            raise _invalid_response(
-                "research model returned an unsupported tool call type",
-                reason="unsupported_tool_call",
-            )
-        function = getattr(raw_call, "function", None)
-        if function is None:
-            raise _invalid_response(
-                "research model returned a tool call without a function",
-                reason="invalid_tool_call",
-            )
-        try:
-            arguments = json.loads(str(getattr(function, "arguments", None) or "{}"))
-        except (TypeError, ValueError) as exc:
-            raise _invalid_response(
-                "research model returned invalid tool arguments",
-                reason="invalid_tool_arguments",
-            ) from exc
-        if not isinstance(arguments, Mapping):
-            raise _invalid_response(
-                "research tool arguments must be a JSON object",
-                reason="invalid_tool_arguments",
-            )
-        try:
-            return ModelTurn(
-                content=content,
-                tool_call=ModelToolCall(
-                    name=str(getattr(function, "name", None) or ""),
-                    arguments=dict(arguments),
-                ),
-            )
-        except (TypeError, ValueError) as exc:
-            raise _invalid_response(
-                "research model returned an invalid tool call",
-                reason="invalid_tool_call",
+        parsed = []
+        for raw_call in tool_calls:
+            if getattr(raw_call, "type", "function") != "function":
+                raise _invalid_response("unsupported tool call", reason="unsupported_tool_call", partial_content=bool(content))
+            function = getattr(raw_call, "function", None)
+            parsed.append(_parse_call(
+                str(getattr(function, "name", None) or ""),
+                str(getattr(function, "arguments", None) or "{}"),
                 partial_content=bool(content),
-            ) from exc
+            ))
+        return ModelTurn(content=content, tool_calls=tuple(parsed),
+                         usage=_model_usage(getattr(completion, "usage", None)))
 
     def _stream_turn(
         self,
@@ -147,14 +122,14 @@ class OpenAIChatModel:
     ) -> ModelTurn:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
-        tool_name_parts: list[str] = []
-        tool_argument_parts: list[str] = []
-        tool_call_index: int | None = None
-        ignored_tool_call_indexes: set[int] = set()
+        parts_by_index: dict[int, tuple[list[str], list[str]]] = {}
         last_chunk = None
+        usage = None
         try:
             for chunk in chunks:
                 last_chunk = chunk
+                if getattr(chunk, "usage", None) is not None:
+                    usage = _model_usage(chunk.usage)
                 choices = tuple(getattr(chunk, "choices", None) or ())
                 if not choices:
                     continue
@@ -172,10 +147,9 @@ class OpenAIChatModel:
                     reasoning_parts.append(reasoning)
                 for raw_call in tuple(getattr(delta, "tool_calls", None) or ()):
                     index = int(getattr(raw_call, "index", 0) or 0)
-                    if tool_call_index is not None and index != tool_call_index:
-                        ignored_tool_call_indexes.add(index)
-                        continue
-                    tool_call_index = index
+                    if index < 0:
+                        raise ValueError("negative tool call index")
+                    tool_name_parts, tool_argument_parts = parts_by_index.setdefault(index, ([], []))
                     if (getattr(raw_call, "type", None) or "function") != "function":
                         raise _invalid_response(
                             "research model returned an unsupported tool call type",
@@ -200,14 +174,8 @@ class OpenAIChatModel:
 
         record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
         record_llm_completion(last_chunk, requested_model=self.model)
-        if ignored_tool_call_indexes:
-            logger.warning(
-                "Research model streamed parallel tool calls; serializing first call "
-                "ignored_call_count=%d",
-                len(ignored_tool_call_indexes),
-            )
         content = "".join(content_parts).strip()
-        if tool_call_index is None:
+        if not parts_by_index:
             if not content:
                 raise _invalid_response(
                     "research model returned no usable streamed content",
@@ -218,41 +186,42 @@ class OpenAIChatModel:
                     ),
                 )
             try:
-                return ModelTurn(content=content)
+                return ModelTurn(content=content, usage=usage)
             except ValueError as exc:
                 raise _invalid_response(
                     "research model returned no usable streamed content",
                     reason="empty_response",
                 ) from exc
 
-        try:
-            arguments = json.loads("".join(tool_argument_parts) or "{}")
-        except (TypeError, ValueError) as exc:
-            raise _invalid_response(
-                "research model returned invalid streamed tool arguments",
-                reason="invalid_tool_arguments",
-                partial_content=bool(content_parts),
-            ) from exc
+        return ModelTurn(
+            content=content, usage=usage,
+            tool_calls=tuple(
+                _parse_call("".join(names), "".join(arguments) or "{}", partial_content=bool(content))
+                for _, (names, arguments) in sorted(parts_by_index.items())
+            ),
+        )
+
+
+def _parse_call(name: str, raw_arguments: str, *, partial_content: bool) -> ModelToolCall:
+    try:
+        arguments = json.loads(raw_arguments)
         if not isinstance(arguments, Mapping):
-            raise _invalid_response(
-                "research tool arguments must be a JSON object",
-                reason="invalid_tool_arguments",
-                partial_content=bool(content_parts),
-            )
-        try:
-            return ModelTurn(
-                content=content,
-                tool_call=ModelToolCall(
-                    name="".join(tool_name_parts),
-                    arguments=dict(arguments),
-                ),
-            )
-        except (TypeError, ValueError) as exc:
-            raise _invalid_response(
-                "research model returned an invalid streamed tool call",
-                reason="invalid_tool_call",
-                partial_content=bool(content_parts),
-            ) from exc
+            raise ValueError("arguments must be an object")
+    except (TypeError, ValueError) as exc:
+        raise _invalid_response("invalid tool arguments", reason="invalid_tool_arguments", partial_content=partial_content) from exc
+    try:
+        return ModelToolCall(name=name, arguments=arguments)
+    except (TypeError, ValueError) as exc:
+        raise _invalid_response("invalid tool call", reason="invalid_tool_call", partial_content=partial_content) from exc
+
+
+def _model_usage(raw_usage: Any) -> ModelUsage | None:
+    if raw_usage is None:
+        return None
+    prompt = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
+    completion = int(getattr(raw_usage, "completion_tokens", 0) or 0)
+    total = int(getattr(raw_usage, "total_tokens", 0) or 0)
+    return ModelUsage(prompt, completion, max(total, prompt + completion))
 
 
 def _invalid_response(
@@ -277,23 +246,23 @@ def _provider_message(message: ChatMessage) -> dict[str, Any]:
             "tool_call_id": message.tool_call_id,
             "content": message.content,
         }
-    if message.tool_call_id:
+    if message.tool_calls:
         return {
             "role": "assistant",
             "content": message.content or None,
             "tool_calls": [
                 {
-                    "id": message.tool_call_id,
+                    "id": request.tool_call_id,
                     "type": "function",
                     "function": {
-                        "name": message.tool_name,
+                        "name": request.name,
                         "arguments": json.dumps(
-                            dict(message.tool_arguments or {}),
+                            dict(request.arguments),
                             ensure_ascii=True,
                             separators=(",", ":"),
                         ),
                     },
-                }
+                } for request in message.tool_calls
             ],
         }
     return {"role": "assistant", "content": message.content}

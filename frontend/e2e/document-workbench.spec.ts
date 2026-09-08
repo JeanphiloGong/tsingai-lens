@@ -71,8 +71,7 @@ async function mockPaperReaderApis(
 						content: payload.message,
 						created_at: '2026-08-31T00:00:01+00:00',
 						tool_call_id: null,
-						tool_name: null,
-						tool_arguments: null,
+						tool_calls: [],
 						tool_result: null,
 						source_contexts: sourceContexts
 					},
@@ -83,8 +82,7 @@ async function mockPaperReaderApis(
 						content: 'This passage reports a measured conductivity result.',
 						created_at: '2026-08-31T00:00:02+00:00',
 						tool_call_id: null,
-						tool_name: null,
-						tool_arguments: null,
+						tool_calls: [],
 						tool_result: null,
 						source_contexts: []
 					}

@@ -115,8 +115,8 @@ function message(
 		content,
 		created_at: createdAt,
 		tool_call_id: null,
-		tool_name: null,
-		tool_arguments: null,
+		tool_calls: [],
+
 		tool_result: null,
 		source_contexts: [],
 		...overrides
@@ -140,6 +140,7 @@ function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
 		tool_call_id: 'call_write_1',
 		session_id: session.session_id,
 		assistant_message_id: 'msg_call_write',
+		position: 0,
 		name: 'create_objective_candidate',
 		arguments: {
 			question: 'How does energy input affect grain morphology?',
@@ -451,6 +452,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_source_user', 'user', 'What does this result support?', {
 						source_contexts: [sourceContext]
@@ -536,6 +539,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Hello'),
 					message('msg_assistant_1', 'assistant', 'Hello. I can help inspect this collection.')
@@ -556,7 +561,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('keeps a bounded final answer visible without reporting it as a failed turn', async () => {
 		installApi({
 			messageTurn: {
-				status: 'step_limit_reached',
+				status: 'completed',
+				completion_reason: 'resource_budget',
+				warnings: ['Some papers remain unread.'],
 				messages: [
 					message('msg_user_limited', 'user', 'Compare the papers'),
 					message(
@@ -566,7 +573,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					)
 				],
 				pending_approval: null,
-				error_code: 'agent_step_limit_reached'
+				error_code: null
 			}
 		});
 
@@ -593,6 +600,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_repeat', 'user', 'First question'),
 					message('msg_assistant_repeat', 'assistant', 'First answer')
@@ -623,6 +632,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 			messageDelayMs: 100,
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_stream', 'user', 'Begin'),
 					message('msg_assistant_stream', 'assistant', 'Partial answer complete.')
@@ -653,9 +664,15 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: { query: 'energy input' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: { query: 'energy input' },
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_read_1',
@@ -676,6 +693,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 			messageDelayMs: 100,
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_stream', 'user', 'Explain the first finding'),
 					message('msg_assistant_stream', 'assistant', 'Following up with source context.')
@@ -711,12 +730,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'What findings are available?'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: { query: 'energy input' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: { query: 'energy input' },
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_read_1',
@@ -769,9 +796,15 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: { query: 'energy input' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: { query: 'energy input' },
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: null
@@ -794,12 +827,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Check the published findings'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: {}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_read_1',
@@ -835,16 +876,24 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Review this finding'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_finding_1',
-						tool_name: 'inspect_published_finding',
-						tool_arguments: {
-							objective_id: 'obj_1',
-							analysis_version: 2,
-							finding_id: 'finding_1'
-						}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_finding_1',
+								name: 'inspect_published_finding',
+								arguments: {
+									objective_id: 'obj_1',
+									analysis_version: 2,
+									finding_id: 'finding_1'
+								},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_finding_1',
@@ -882,12 +931,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'How far has the collection analysis progressed?'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_process_1',
-						tool_name: 'inspect_research_process',
-						tool_arguments: {}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_process_1',
+								name: 'inspect_research_process',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_process_1',
@@ -962,12 +1019,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Start understanding these papers'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_queued_1',
-						tool_name: 'start_research_process',
-						tool_arguments: {}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_queued_1',
+								name: 'start_research_process',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_queued_1',
@@ -999,7 +1064,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByText('Literature analysis started')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('In progress')).toBeInTheDocument();
 		await expect
-				.element(browserPage.getByText('Run queued. You can continue while it executes.'))
+			.element(browserPage.getByText('Run queued. You can continue while it executes.'))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open literature analysis' }))
@@ -1010,12 +1075,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Suggest objectives'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_draft_1',
-						tool_name: 'propose_objective_drafts',
-						tool_arguments: { question: 'energy input effects' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_draft_1',
+								name: 'propose_objective_drafts',
+								arguments: { question: 'energy input effects' },
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_draft_1',
@@ -1066,11 +1139,15 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Inspect this table and draft evidence'),
 					message('msg_call_table', 'assistant', '', {
-						tool_call_id: 'call_table',
-						tool_name: 'inspect_table'
+						tool_call_id: null,
+						tool_calls: [
+							{ tool_call_id: 'call_table', name: 'inspect_table', arguments: {}, position: 0 }
+						]
 					}),
 					message('msg_result_table', 'tool', '', {
 						tool_call_id: 'call_table',
@@ -1085,8 +1162,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 						}
 					}),
 					message('msg_call_source', 'assistant', '', {
-						tool_call_id: 'call_source',
-						tool_name: 'read_source'
+						tool_call_id: null,
+						tool_calls: [
+							{ tool_call_id: 'call_source', name: 'read_source', arguments: {}, position: 0 }
+						]
 					}),
 					message('msg_result_source', 'tool', '', {
 						tool_call_id: 'call_source',
@@ -1101,8 +1180,15 @@ describe('collections/[id]/assistant Research Agent', () => {
 						}
 					}),
 					message('msg_call_draft', 'assistant', '', {
-						tool_call_id: 'call_draft',
-						tool_name: 'create_evidence_draft'
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_draft',
+								name: 'create_evidence_draft',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_draft', 'tool', '', {
 						tool_call_id: 'call_draft',
@@ -1160,12 +1246,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Save the research plan'),
 					message('msg_call_plan', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1195,12 +1289,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Create the grain objective'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1242,12 +1344,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Record this as partly correct'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1294,12 +1404,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Narrow this conclusion'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1341,12 +1459,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Create this conclusion'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1407,12 +1533,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Record this source as Evidence'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1483,12 +1617,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Read these papers and analyze the question yourself'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1534,12 +1676,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Record that these results cannot be compared'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1579,15 +1729,23 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'rejected',
+				completion_reason: null,
+				warnings: [],
 				messages: [],
 				pending_approval: null,
 				error_code: null
@@ -1611,12 +1769,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Start understanding these papers'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1650,12 +1816,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Analyze this question'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1688,12 +1862,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Confirm this research question'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1727,15 +1909,23 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'rejected',
+				completion_reason: null,
+				warnings: [],
 				messages: [],
 				pending_approval: null,
 				error_code: null
@@ -1760,15 +1950,23 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'rejected',
+				completion_reason: null,
+				warnings: [],
 				messages: [],
 				pending_approval: null,
 				error_code: null
@@ -1804,15 +2002,23 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_result_write', 'tool', '', {
 						tool_call_id: call.tool_call_id,
@@ -1872,9 +2078,15 @@ describe('collections/[id]/assistant Research Agent', () => {
 			trajectory: {
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call

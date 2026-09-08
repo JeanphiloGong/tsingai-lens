@@ -332,10 +332,31 @@ approval. The production Research Agent currently exposes these capabilities:
   canonical Objective-scoped ExperimentPlan service; changed or unreviewed
   sources produce no plan record.
 
-Model context is a bounded recent suffix of the durable trajectory. An
-assistant tool call and its following tool result are retained or omitted as one
-protocol unit, so context trimming never sends an orphan tool result to the
-provider.
+Model context is a bounded transient view of the durable trajectory. It retains
+the active user question and selected Source context, then complete recent
+protocol units. One assistant request and all its ordered results form an
+indivisible unit; incomplete units are never sent to the provider. Omitted
+history contributes bounded deterministic IDs, Source references, digests,
+pagination boundaries, and stable error codes to a rollover system message.
+This summary is not persisted as conversation text and contains no Source body
+or new scientific claims. Source text must be read again when needed.
+
+An assistant message exposes `tool_calls`, an ordered array of immutable
+requests containing `tool_call_id`, `name`, `arguments`, and zero-based
+contiguous `position`. It no longer exposes scalar tool name or arguments.
+Only tool-result messages carry the scalar `tool_call_id`. Runtime call rows
+own status and approval, and each call also carries its request position.
+Historical single requests have position `0`. The ordered-call migration
+refuses downgrade if any assistant message has multiple calls; it never drops
+calls to restore the scalar schema.
+
+A model may request independent reads together or one draft/write action.
+Unknown or unavailable capabilities and mixed read/draft/write batches are
+rejected as a whole before side effects, with one result per request. Only
+explicitly declared parallel-safe reads execute concurrently, within the
+configured concurrency limit. Other read batches execute sequentially. A
+failed read does not discard successful peers; results are persisted in request
+order. A single write still requires its exact persisted approval.
 
 The server checkpoints the user message before the first model request, then
 checkpoints model tool intent, running call state, structured tool results, and
@@ -345,13 +366,21 @@ approved write appear never to have started. Lens allocates every durable tool
 call ID; any request-local identifier returned by a model provider is not a
 Chat identity and is not persisted.
 
-Turn status is one of `completed`, `approval_required`,
-`step_limit_reached`, `failed`, or `rejected`. Tool call and result failures are
+Turn status is one of `completed`, `approval_required`, `failed`, or `rejected`.
+Only `completed` has a non-null `completion_reason`: `model_answer`,
+`resource_budget`, `no_progress`, or `emergency_ceiling`. Every turn exposes
+`warnings` as an array. A completed answer may be partial: resource exhaustion,
+repeated identical observations, and the emergency ceiling allow one final
+model request with no tools, using inspected evidence and explicit unread or
+failed scope. It returns `completed` with warnings when an answer is available;
+finalization failure returns `failed` with a sanitized error code.
+
+Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,
 or Evidence status. Provider response objects and internal exceptions are not
-part of the public contract. Reaching the step limit appends a final assistant
-message that explains how the researcher can continue; the trajectory never
-ends on an opaque tool message alone.
+part of the public contract. Limits protect technical resources, not scientific
+completeness. The browser shows completed warnings as non-blocking notices,
+not failed turns.
 
 Tool result status is `succeeded`, `queued`, or `failed`. A `queued` result is a
 successful asynchronous handoff, must include at least one canonical resource

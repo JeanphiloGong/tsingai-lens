@@ -11,6 +11,7 @@ from domain.chat import (
     ChatMessage,
     ChatSession,
     ChatToolCall,
+    ChatToolRequest,
     ChatToolResult,
     ToolCallStatus,
 )
@@ -67,10 +68,17 @@ class PostgresChatRepository:
                     )
                 )
             } if result_ids else {}
+            requests: dict[str, list[ChatToolRequest]] = {}
+            for call_row in await session.scalars(
+                select(ChatToolCallRow).where(ChatToolCallRow.session_id == session_id)
+                .order_by(ChatToolCallRow.assistant_message_id, ChatToolCallRow.position)
+            ):
+                requests.setdefault(call_row.assistant_message_id, []).append(_call_record(call_row).to_request())
             return tuple(
                 _message_record(
                     row,
                     results.get(row.tool_call_id) if row.role == "tool" else None,
+                    tuple(requests.get(row.message_id, ())),
                 )
                 for row in rows
             )
@@ -131,12 +139,6 @@ class PostgresChatRepository:
                         role=message.role.value,
                         content=message.content,
                         tool_call_id=message.tool_call_id,
-                        tool_name=message.tool_name,
-                        tool_arguments=(
-                            dict(message.tool_arguments)
-                            if message.tool_arguments is not None
-                            else None
-                        ),
                         source_contexts=[
                             item.to_record() for item in message.source_contexts
                         ],
@@ -146,6 +148,9 @@ class PostgresChatRepository:
             await database.flush()
 
             for call in tool_calls:
+                assistant = next((message for message in messages if message.message_id == call.assistant_message_id), None)
+                if assistant is None or call.to_request() not in assistant.tool_calls:
+                    raise ValueError("tool call must match its assistant request")
                 row = await database.get(ChatToolCallRow, call.tool_call_id)
                 if row is None:
                     row = ChatToolCallRow(
@@ -153,6 +158,7 @@ class PostgresChatRepository:
                         session_id=call.session_id,
                         assistant_message_id=call.assistant_message_id,
                         name=call.name,
+                        position=call.position,
                         arguments=dict(call.arguments),
                         arguments_digest=call.arguments_digest,
                         risk=call.risk.value,
@@ -164,10 +170,19 @@ class PostgresChatRepository:
                     or row.assistant_message_id != call.assistant_message_id
                     or row.name != call.name
                     or row.arguments_digest != call.arguments_digest
+                    or row.position != call.position
                 ):
                     raise ValueError("tool call identity cannot be reassigned")
                 _update_call_row(row, call)
             await database.flush()
+
+            for message in messages:
+                for request in message.tool_calls:
+                    call_row = await database.get(ChatToolCallRow, request.tool_call_id)
+                    if (call_row is None or call_row.session_id != session.session_id
+                            or call_row.assistant_message_id != message.message_id
+                            or _call_record(call_row).to_request() != request):
+                        raise ValueError("assistant request must have an identical durable call")
 
             for result in tool_results:
                 call_row = await database.get(
@@ -303,6 +318,7 @@ def _call_record(row: ChatToolCallRow) -> ChatToolCall:
             "tool_call_id": row.tool_call_id,
             "session_id": row.session_id,
             "assistant_message_id": row.assistant_message_id,
+            "position": row.position,
             "name": row.name,
             "arguments": dict(row.arguments),
             "arguments_digest": row.arguments_digest,
@@ -321,6 +337,7 @@ def _call_record(row: ChatToolCallRow) -> ChatToolCall:
 def _message_record(
     row: ChatMessageRow,
     result: ChatToolResultRow | None,
+    requests: tuple[ChatToolRequest, ...],
 ) -> ChatMessage:
     return ChatMessage.from_mapping(
         {
@@ -330,8 +347,7 @@ def _message_record(
             "content": row.content,
             "created_at": _iso(row.created_at),
             "tool_call_id": row.tool_call_id,
-            "tool_name": row.tool_name,
-            "tool_arguments": row.tool_arguments,
+            "tool_calls": [request.to_record() for request in requests],
             "tool_result": _result_record(result) if result is not None else None,
             "source_contexts": list(row.source_contexts),
         }

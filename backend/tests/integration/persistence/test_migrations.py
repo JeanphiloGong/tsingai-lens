@@ -19,6 +19,7 @@ from sqlalchemy import (
     create_engine,
     inspect,
     select,
+    UniqueConstraint,
 )
 from sqlalchemy.engine import URL
 
@@ -27,7 +28,44 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0046"
+HEAD_REVISION = "7f4a0a872e9d"
+
+
+def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'chat-history.sqlite'}")
+    metadata = MetaData()
+    messages = Table("chat_messages", metadata,
+        Column("message_id", String, primary_key=True), Column("session_id", String),
+        Column("role", String), Column("content", String), Column("tool_call_id", String),
+        Column("tool_name", String), Column("tool_arguments", JSON))
+    calls = Table("chat_tool_calls", metadata,
+        Column("tool_call_id", String, primary_key=True), Column("session_id", String),
+        Column("assistant_message_id", String), Column("name", String), Column("arguments", JSON),
+        UniqueConstraint("assistant_message_id", name="uq_chat_tool_calls_assistant_message"))
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        metadata.create_all(connection)
+        command.stamp(config, "20260908_0046")
+        connection.execute(messages.insert().values(message_id="m1", session_id="s1", role="assistant", content="", tool_call_id="c1", tool_name="read_source", tool_arguments={"document_id": "p1"}))
+        connection.execute(calls.insert().values(tool_call_id="c1", session_id="s1", assistant_message_id="m1", name="read_source", arguments={"document_id": "p1"}))
+        command.upgrade(config, "head")
+        target_calls = Table("chat_tool_calls", MetaData(), autoload_with=connection)
+        assert connection.execute(select(target_calls.c.position)).scalar_one() == 0
+        assert "tool_arguments" not in {c["name"] for c in inspect(connection).get_columns("chat_messages")}
+        connection.execute(target_calls.insert().values(tool_call_id="c2", session_id="s1", assistant_message_id="m1", position=1, name="read_source", arguments={"document_id": "p2"}))
+        with pytest.raises(RuntimeError, match="multiple calls would be lost"):
+            command.downgrade(config, "20260908_0046")
+        assert len(connection.execute(select(target_calls)).all()) == 2
+        connection.execute(target_calls.delete().where(target_calls.c.tool_call_id == "c2"))
+        command.downgrade(config, "20260908_0046")
+        old_message = connection.execute(select(messages)).mappings().one()
+        assert old_message["tool_call_id"] == "c1"
+        assert old_message["tool_arguments"] == {"document_id": "p1"}
+        connection.execute(messages.update().values(tool_arguments={"document_id": "wrong"}))
+        with pytest.raises(RuntimeError, match="does not match durable calls"):
+            command.upgrade(config, "head")
+    engine.dispose()
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:

@@ -69,11 +69,6 @@ class ChatMessageRow(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tool_call_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    tool_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    tool_arguments: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT,
-        nullable=True,
-    )
     source_contexts: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_DOCUMENT,
         nullable=False,
@@ -97,8 +92,10 @@ class ChatToolCallRow(Base):
         ),
         UniqueConstraint(
             "assistant_message_id",
-            name="uq_chat_tool_calls_assistant_message",
+            "position",
+            name="uq_chat_tool_calls_assistant_position",
         ),
+        CheckConstraint("position >= 0", name="position_non_negative"),
     )
 
     tool_call_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -114,6 +111,7 @@ class ChatToolCallRow(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
     arguments: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     arguments_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     risk: Mapped[str] = mapped_column(String(16), nullable=False)

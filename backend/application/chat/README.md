@@ -1,8 +1,8 @@
 # Chat Application Layer
 
 This package owns the collection-bound Research Agent conversation. It turns
-an authenticated user's message into a bounded model decision, an optional
-typed capability call, and a durable, reviewable trajectory.
+an authenticated user's message into resource-bounded model decisions, ordered
+typed capability calls, and a durable, reviewable trajectory.
 
 Chat is the orchestration and approval boundary for the Agent. It references
 Source and Core application services for collection facts and scientific work;
@@ -15,8 +15,9 @@ authenticated user + collection
   -> ChatSessionService validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
   -> ResearchAgentRunner exposes capabilities relevant to the intent
-  -> ChatModel returns an answer or one typed capability call
-  -> capability returns a structured observation or approval_required
+  -> ChatModel returns an answer, independent reads, or one draft/write call
+  -> Runner checkpoints the complete ordered request before execution
+  -> capabilities return paired observations or exact approval_required
   -> ChatSessionService checkpoints the trajectory and final response
 ```
 
@@ -27,14 +28,19 @@ Evidence or permission to mutate a scientific record.
 Read and draft capabilities can execute during the turn. Write capabilities
 persist their exact arguments and digest, stop for the authenticated user's
 approval, and execute only that approved call once. Rejection, provider
-failure, malformed model output, and step limits remain technical trajectory
+failure, malformed model output, and resource limits remain technical trajectory
 outcomes; they are not scientific conclusions.
+
+If an approved write fails, its continuation explains that failure without
+starting more capability work. A fresh user decision can inspect changed
+Sources or propose a new exact approval; the failed action is not retried
+implicitly.
 
 ## Responsibilities
 
 - keep one ordered trajectory of user and assistant messages, capability calls,
   structured results, and approval decisions;
-- bound model context, capability exposure, execution steps, and continuation
+- bound model context, capability exposure, elapsed time, tools, model usage, and continuation
   behavior for each turn;
 - authorize capabilities by risk and bind writes to the exact stored arguments,
   user, and pending call;
@@ -48,10 +54,14 @@ outcomes; they are not scientific conclusions.
 - `session_service.py`: owns session reads, source-context validation, turn
   persistence, streaming, and approval execution.
 - `agent_runner.py`: runs the bounded model, capability, and continuation loop
-  and reports terminal statuses such as `completed`, `approval_required`,
-  `step_limit_reached`, and `failed`.
+  and reports `completed`, `approval_required`, or `failed`. Completion records
+  why work stopped: a model answer, resource budget, repeated observations, or
+  the emergency cycle ceiling. Technical limits permit one answer-only
+  finalization with scope warnings; a failed finalization remains a failure.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
-  while keeping tool-call and tool-result pairs together.
+  while pinning the active question and keeping whole request/result batches
+  together. Omitted history contributes deterministic lineage, not paper text
+  or scientific claims, to a transient rollover summary.
 - `model.py`: defines the provider-neutral model contract and the Research
   Agent instructions.
 - `authorization.py`: maps capability risk to automatic execution or exact

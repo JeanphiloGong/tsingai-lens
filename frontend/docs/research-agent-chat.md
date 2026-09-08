@@ -163,6 +163,11 @@ not provider calls, prompts, model reasoning, JSON payloads, or retry mechanics.
 A checkpointed capability request without a result remains visible as prepared
 research activity after reload.
 
+One assistant message can contain an ordered `tool_calls` batch. The browser
+matches each request to its own result by durable call ID and preserves request
+order, even when reads finish concurrently. An individual failed read does not
+hide successful results from the same batch.
+
 Reviewable research outputs remain visible outside that disclosure. These
 include Objective drafts, research-scope previews, literature and Objective
 analysis status, a complete Finding inspection, and the canonical outcome of
@@ -225,9 +230,15 @@ and creates no Finding. While approval is pending:
 The page does not allow editing the displayed arguments in place. Changed
 arguments require a new proposal and a new tool call.
 
-### Failure
+### Partial Completion And Failure
 
-Provider, capability, and step-limit failures remain visible and distinct from
+Completed turns carry `completion_reason`: `model_answer`, `resource_budget`,
+`no_progress`, or `emergency_ceiling`. Non-empty `warnings` produce a
+non-blocking notice while retaining the answer and allowing the next question.
+A budget stop is not a failed research conclusion; the answer distinguishes
+inspected Sources, unread scope, technical failures, and scientific uncertainty.
+
+Provider, capability, and finalization failures remain visible and distinct from
 scientific absence. A successful capability that finds no published Evidence
 is not rendered as a technical error.
 

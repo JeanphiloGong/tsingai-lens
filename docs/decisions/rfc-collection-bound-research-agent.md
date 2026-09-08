@@ -14,15 +14,16 @@ loop:
 User
   -> Research Agent
   -> LLM
-  -> optional Lens capability
-  -> structured observation
+  -> optional ordered independent reads or one draft/write
+  -> paired structured observations
   -> LLM continuation
   -> final answer or approval_required
 ```
 
 This follows the useful architectural lesson from small coding agents: keep the
 model decision separate from capability execution, persist the trajectory, and
-bound every turn by steps and time. Lens does not adopt a shell environment,
+bound each turn by time, tools, model usage, and an emergency cycle ceiling.
+Lens does not adopt a shell environment,
 generic plugins, filesystem tools, arbitrary HTTP tools, or untyped scientific
 state.
 
@@ -138,22 +139,36 @@ whole turn to finish: user message, model tool intent, running call, structured
 result, and final answer. The Runner reports checkpoints through a narrow
 callback while `ChatSessionService` remains the sole persistence owner.
 
-The Runner enforces a finite step limit and predictable terminal states:
+The Runner enforces resource budgets and predictable terminal states:
 
 - `completed`;
 - `approval_required`;
 - `rejected`;
-- `step_limit_reached`;
 - `failed`.
 
-Every terminal turn remains intelligible to the researcher. In particular,
-`step_limit_reached` appends a final assistant explanation rather than leaving
-the trajectory at an intermediate tool result. A long-running capability may
+Completed turns distinguish `model_answer`, `resource_budget`, `no_progress`,
+and `emergency_ceiling` through `completion_reason`. Technical exhaustion or
+repeated observations allow one answer-only finalization with scope warnings;
+they do not erase successful reads or establish scientific absence. A failed
+finalization remains `failed`. A long-running capability may
 return `queued`; that is a successful observation only when it includes a
 canonical resource reference the researcher can inspect while work continues.
 
 Retries, provider errors, malformed tool arguments, and time limits are
 technical states. They are never translated into scientific evidence states.
+
+Independent reads may form one ordered batch. The whole intent is durable
+before execution, mixed read/draft/write batches are rejected before effects,
+and each request retains its own result in request order. Concurrency requires
+an explicit safety declaration. Runtime call rows own state; assistant messages
+only project immutable requests. Historical single calls become position `0`,
+and downgrade refuses to discard multi-call history.
+
+Long conversations use a transient bounded model view: retain the active
+question, selected Source, and complete request/result units, then summarize
+omitted deterministic lineage without inventing claims. The full durable
+trajectory remains unchanged. A researcher comparing several papers can thus
+continue from an exact Source or an explicitly unread range on the next turn.
 
 ## Migration
 

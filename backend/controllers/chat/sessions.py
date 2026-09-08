@@ -238,6 +238,8 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
     pending = turn.get("pending_approval")
     return ChatTurnResponse(
         status=str(turn["status"]),
+        completion_reason=turn.get("completion_reason"),
+        warnings=list(turn.get("warnings") or ()),
         messages=[_message_response(item) for item in turn.get("messages") or ()],
         pending_approval=(
             ChatToolCallResponse.model_validate(pending.to_record())

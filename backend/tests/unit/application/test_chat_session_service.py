@@ -54,10 +54,11 @@ class _Model:
     def respond(
         self,
         *,
-        messages: tuple,
+        context: tuple,
         tool_specs: tuple,
         text_delta_callback=None,  # noqa: ANN001
     ) -> ModelTurn:
+        messages = context.messages
         turn = self.turns.popleft()
         if text_delta_callback is not None and turn.content:
             for chunk in (turn.content[:2], turn.content[2:]):
@@ -539,10 +540,10 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
     service = _service(
         _Model(
             ModelTurn(
-                tool_call=ModelToolCall(
+                tool_calls=(ModelToolCall(
                     name="get_collection_context",
                     arguments={"question": "What is in this collection?"},
-                )
+                ),)
             ),
             ModelTurn(content="The collection contains relevant papers."),
         ),
@@ -574,10 +575,10 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
         _Model(
             ModelTurn(
                 content="我准备保存候选目标。",
-                tool_call=ModelToolCall(
+                tool_calls=(ModelToolCall(
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
-                ),
+                ),),
             ),
             ModelTurn(content="候选目标已创建，尚未启动分析。"),
         ),
@@ -652,10 +653,10 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
     service = _service(
         _Model(
             ModelTurn(
-                tool_call=ModelToolCall(
+                tool_calls=(ModelToolCall(
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
-                )
+                ),)
             )
         ),
         repository,

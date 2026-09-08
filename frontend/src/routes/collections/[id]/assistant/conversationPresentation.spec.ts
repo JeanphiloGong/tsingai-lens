@@ -18,9 +18,18 @@ function message(
 		role,
 		content: options.content ?? '',
 		created_at: '2026-09-03T10:00:00+08:00',
-		tool_call_id: options.toolCallId ?? null,
-		tool_name: options.toolName ?? null,
-		tool_arguments: options.toolCallId ? {} : null,
+		tool_call_id: role === 'tool' ? (options.toolCallId ?? null) : null,
+		tool_calls:
+			role === 'assistant' && options.toolCallId
+				? [
+						{
+							tool_call_id: options.toolCallId,
+							name: options.toolName!,
+							arguments: {},
+							position: 0
+						}
+					]
+				: [],
 		tool_result: options.toolResult ?? null,
 		source_contexts: []
 	};

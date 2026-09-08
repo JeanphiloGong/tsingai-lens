@@ -123,6 +123,7 @@ class ReadSourceCapability:
         ),
         risk=ToolRisk.READ,
         input_model=ReadSourceArguments,
+        parallel_safe=True,
     )
 
     def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:
@@ -428,6 +429,7 @@ class InspectTableCapability:
         ),
         risk=ToolRisk.READ,
         input_model=InspectTableArguments,
+        parallel_safe=True,
     )
 
     def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:

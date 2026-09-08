@@ -10,10 +10,26 @@ from domain.chat import (
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ChatToolRequest,
     ChatToolResult,
     ToolCallStatus,
     ToolRisk,
 )
+
+
+def test_ordered_requests_round_trip_and_reject_gaps_and_duplicates() -> None:
+    first = ChatToolRequest("call-1", "read_source", {"document_id": "paper-1"}, 0)
+    second = ChatToolRequest("call-2", "read_source", {"document_id": "paper-2"}, 1)
+    message = ChatMessage.assistant_tool_calls(
+        message_id="msg-1", session_id="chat-1", content="",
+        created_at="2026-09-08T00:00:00+00:00", tool_calls=(first, second),
+    )
+    assert ChatMessage.from_mapping(message.to_record()) == message
+    for bad in (replace(second, position=2), replace(second, tool_call_id="call-1")):
+        with pytest.raises(ValueError):
+            replace(message, tool_calls=(first, bad))
+    with pytest.raises(ValueError):
+        replace(message, tool_call_id="call-1")
 
 
 def test_chat_session_round_trips_immutable_owner_and_collection() -> None:

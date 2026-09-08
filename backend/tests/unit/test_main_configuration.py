@@ -1,29 +1,38 @@
 import pytest
 
-from main import _parse_agent_max_model_steps
+from application.chat import AgentRunLimits
+from main import _parse_agent_run_limits
 
 
-def test_agent_step_limit_defaults_to_six_when_unset(
+def test_agent_limits_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LENS_AGENT_MAX_MODEL_STEPS", raising=False)
+    for name in ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    assert _parse_agent_run_limits() == AgentRunLimits()
 
-    assert _parse_agent_max_model_steps() == 6
 
-
-def test_agent_step_limit_accepts_a_valid_environment_value(
+def test_agent_limits_accept_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LENS_AGENT_MAX_MODEL_STEPS", "12")
+    monkeypatch.setenv("LENS_AGENT_MAX_TOOL_CALLS", "12")
+    monkeypatch.setenv("LENS_AGENT_MAX_TURN_SECONDS", "12.5")
+    assert _parse_agent_run_limits().max_tool_calls == 12
+    assert _parse_agent_run_limits().max_elapsed_seconds == 12.5
 
-    assert _parse_agent_max_model_steps() == 12
+
+ENV_NAMES = (
+    "LENS_AGENT_MAX_TURN_SECONDS", "LENS_AGENT_MAX_TOOL_CALLS",
+    "LENS_AGENT_MAX_MODEL_TOKENS", "LENS_AGENT_NO_PROGRESS_LIMIT",
+    "LENS_AGENT_EMERGENCY_MAX_CYCLES", "LENS_AGENT_MAX_PARALLEL_READS",
+)
 
 
-@pytest.mark.parametrize("value", ["not-a-number", "0", "33"])
-def test_agent_step_limit_falls_back_for_invalid_or_unsafe_values(
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-1", "nan", "inf"])
+def test_agent_limits_fall_back_for_invalid_values(
     monkeypatch: pytest.MonkeyPatch,
     value: str,
 ) -> None:
-    monkeypatch.setenv("LENS_AGENT_MAX_MODEL_STEPS", value)
-
-    assert _parse_agent_max_model_steps() == 6
+    for name in ENV_NAMES:
+        monkeypatch.setenv(name, value)
+    assert _parse_agent_run_limits() == AgentRunLimits()

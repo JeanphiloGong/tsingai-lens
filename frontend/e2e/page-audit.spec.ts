@@ -633,11 +633,11 @@ async function mockApis(page: Page) {
 				)
 			);
 		}
-			if (path === `/api/v1/collections/${collectionId}/pipeline-runs`) {
+		if (path === `/api/v1/collections/${collectionId}/pipeline-runs`) {
 			return route.fulfill(
 				json(
 					auditState === 'processing'
-							? { collection_id: collectionId, count: 1, items: [processingRun()] }
+						? { collection_id: collectionId, count: 1, items: [processingRun()] }
 						: { collection_id: collectionId, count: 0, items: [] }
 				)
 			);
@@ -725,7 +725,9 @@ function json(body: unknown, status = 200) {
 function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
 	const finalText = [...(turn.messages ?? [])]
 		.reverse()
-		.find((message) => message.role === 'assistant' && !message.tool_call_id)?.content;
+		.find(
+			(message) => message.role === 'assistant' && !(message.tool_calls as unknown[])?.length
+		)?.content;
 	const events = [];
 	if (typeof finalText === 'string' && finalText) {
 		events.push(`event: text_delta\ndata: ${JSON.stringify({ content: finalText })}`);
@@ -757,8 +759,7 @@ function agentMessage(
 		content,
 		created_at: now(),
 		tool_call_id: null,
-		tool_name: null,
-		tool_arguments: null,
+		tool_calls: [],
 		tool_result: null,
 		source_contexts: [],
 		...overrides
@@ -770,6 +771,8 @@ function agentTurn(prompt: string, sequence: number) {
 	if (prompt === 'Hello') {
 		return {
 			status: 'completed',
+			completion_reason: 'model_answer',
+			warnings: [],
 			messages: [
 				user,
 				agentMessage(
@@ -787,12 +790,19 @@ function agentTurn(prompt: string, sequence: number) {
 		const callId = `call_read_${sequence}`;
 		return {
 			status: 'completed',
+			completion_reason: 'model_answer',
+			warnings: [],
 			messages: [
 				user,
 				agentMessage(`msg_call_${sequence}`, 'assistant', '', {
-					tool_call_id: callId,
-					tool_name: 'query_published_findings',
-					tool_arguments: { query: 'energy input' }
+					tool_calls: [
+						{
+							tool_call_id: callId,
+							name: 'query_published_findings',
+							arguments: { query: 'energy input' },
+							position: 0
+						}
+					]
 				}),
 				agentMessage(`msg_result_${sequence}`, 'tool', '', {
 					tool_call_id: callId,
@@ -827,12 +837,19 @@ function agentTurn(prompt: string, sequence: number) {
 		const callId = `call_draft_${sequence}`;
 		return {
 			status: 'completed',
+			completion_reason: 'model_answer',
+			warnings: [],
 			messages: [
 				user,
 				agentMessage(`msg_call_${sequence}`, 'assistant', '', {
-					tool_call_id: callId,
-					tool_name: 'propose_objective_drafts',
-					tool_arguments: { question: 'energy input effects' }
+					tool_calls: [
+						{
+							tool_call_id: callId,
+							name: 'propose_objective_drafts',
+							arguments: { question: 'energy input effects' },
+							position: 0
+						}
+					]
 				}),
 				agentMessage(`msg_result_${sequence}`, 'tool', '', {
 					tool_call_id: callId,
@@ -877,6 +894,7 @@ function agentTurn(prompt: string, sequence: number) {
 		tool_call_id: callId,
 		session_id: sessionId,
 		assistant_message_id: `msg_call_${sequence}`,
+		position: 0,
 		name: 'create_objective_candidate',
 		arguments: arguments_,
 		arguments_digest: 'digest_exact_1',
@@ -891,12 +909,19 @@ function agentTurn(prompt: string, sequence: number) {
 	};
 	return {
 		status: 'approval_required',
+		completion_reason: null,
+		warnings: [],
 		messages: [
 			user,
 			agentMessage(`msg_call_${sequence}`, 'assistant', '', {
-				tool_call_id: callId,
-				tool_name: 'create_objective_candidate',
-				tool_arguments: arguments_
+				tool_calls: [
+					{
+						tool_call_id: callId,
+						name: 'create_objective_candidate',
+						arguments: arguments_,
+						position: 0
+					}
+				]
 			})
 		],
 		pending_approval: approval,
@@ -907,6 +932,8 @@ function agentTurn(prompt: string, sequence: number) {
 function approvedAgentTurn(callId: string) {
 	return {
 		status: 'completed',
+		completion_reason: 'model_answer',
+		warnings: [],
 		messages: [
 			agentMessage('msg_result_approved', 'tool', '', {
 				tool_call_id: callId,

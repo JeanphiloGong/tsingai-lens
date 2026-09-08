@@ -44,6 +44,11 @@ class ToolSpec:
     description: str
     risk: ToolRisk
     input_model: type[BaseModel]
+    parallel_safe: bool = False
+
+    def __post_init__(self) -> None:
+        if self.parallel_safe and self.risk is not ToolRisk.READ:
+            raise ValueError("only read capabilities may be parallel safe")
 
     def model_schema(self) -> dict[str, Any]:
         return {

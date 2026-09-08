@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ChatSessionCreateRequest(BaseModel):
@@ -53,6 +53,13 @@ class ChatToolResultResponse(BaseModel):
     error_message: str | None = None
 
 
+class ChatToolRequestResponse(BaseModel):
+    tool_call_id: str
+    name: str
+    arguments: dict[str, Any]
+    position: int = Field(ge=0)
+
+
 class ChatMessageResponse(BaseModel):
     message_id: str
     session_id: str
@@ -60,8 +67,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     created_at: str
     tool_call_id: str | None = None
-    tool_name: str | None = None
-    tool_arguments: dict[str, Any] | None = None
+    tool_calls: list[ChatToolRequestResponse] = Field(default_factory=list)
     tool_result: ChatToolResultResponse | None = None
     source_contexts: list[ChatSourceContextPayload] = Field(default_factory=list)
 
@@ -70,6 +76,7 @@ class ChatToolCallResponse(BaseModel):
     tool_call_id: str
     session_id: str
     assistant_message_id: str
+    position: int = Field(ge=0)
     name: str
     arguments: dict[str, Any]
     arguments_digest: str
@@ -112,13 +119,23 @@ class ChatTurnResponse(BaseModel):
     status: Literal[
         "completed",
         "approval_required",
-        "step_limit_reached",
         "failed",
         "rejected",
     ]
     messages: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
     error_code: str | None = None
+    completion_reason: Literal["model_answer", "resource_budget", "no_progress", "emergency_ceiling"] | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_completion(self) -> "ChatTurnResponse":
+        if self.status == "completed":
+            if self.completion_reason is None or self.error_code is not None:
+                raise ValueError("completed turn requires a reason and no error code")
+        elif self.completion_reason is not None:
+            raise ValueError("only completed turns have a completion reason")
+        return self
 
 
 class ChatMessageListResponse(BaseModel):

@@ -2,26 +2,29 @@
 
 from __future__ import annotations
 
-from asyncio import to_thread
+from asyncio import Semaphore, gather, to_thread, wait_for
 from collections.abc import Awaitable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
+from hashlib import sha256
 import json
 import logging
+from math import isfinite
+from threading import Event
+from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
 
 from pydantic import ValidationError
 
-from application.chat.authorization import evaluate_authorization
 from application.chat.capabilities import (
     AgentContext,
     CapabilityExecutionContext,
     CapabilityRegistry,
 )
 from application.chat.context_builder import ChatContextBuilder
-from application.chat.model import ChatModel, ModelResponseError
+from application.chat.model import ChatModel, ModelResponseError, ModelUsage
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -32,6 +35,7 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
+from utils.logger import get_request_id
 
 
 logger = logging.getLogger(__name__)
@@ -45,10 +49,6 @@ _TrajectoryCheckpoint = Callable[
     Awaitable[None],
 ]
 
-_STEP_LIMIT_MESSAGE = (
-    "I reached the Research Agent step limit before completing this request. "
-    "Please narrow the question or continue in a new message."
-)
 _REQUIRED_ACTION_FAILURE_MESSAGE = (
     "I could not complete the required source-backed research action, so I will "
     "not present an unsupported result. Please retry or narrow the request."
@@ -117,6 +117,7 @@ _RESEARCH_PLAN_CAPABILITIES = {
     "query_published_findings",
     "inspect_published_finding",
     "assess_objective_quality",
+    "inspect_research_plans",
     "propose_research_plan",
 }
 _RESEARCH_PLAN_READ_CAPABILITIES = {
@@ -124,6 +125,7 @@ _RESEARCH_PLAN_READ_CAPABILITIES = {
     "query_published_findings",
     "inspect_published_finding",
     "assess_objective_quality",
+    "inspect_research_plans",
 }
 _WRITE_CAPABILITIES = {
     "start_research_process",
@@ -335,6 +337,18 @@ _PLAN_TERMS = (
     "follow up experiment",
     "plan",
 )
+_PLAN_READ_TERMS = (
+    "查看",
+    "读取",
+    "列出",
+    "当前方案",
+    "已有方案",
+    "已保存的方案",
+    "saved plan",
+    "existing plan",
+    "list plans",
+    "inspect plan",
+)
 _PROCESS_TERMS = (
     "当前状态",
     "目前状态",
@@ -408,8 +422,101 @@ def _now_iso() -> str:
 class AgentRunStatus(StrEnum):
     COMPLETED = "completed"
     APPROVAL_REQUIRED = "approval_required"
-    STEP_LIMIT_REACHED = "step_limit_reached"
     FAILED = "failed"
+
+class AgentCompletionReason(StrEnum):
+    MODEL_ANSWER = "model_answer"
+    RESOURCE_BUDGET = "resource_budget"
+    NO_PROGRESS = "no_progress"
+    EMERGENCY_CEILING = "emergency_ceiling"
+
+
+@dataclass(frozen=True)
+class AgentRunLimits:
+    max_elapsed_seconds: float = 300.0
+    max_tool_calls: int = 24
+    max_model_tokens: int = 160_000
+    max_consecutive_no_progress: int = 2
+    emergency_max_model_cycles: int = 64
+    max_parallel_reads: int = 4
+
+    def __post_init__(self) -> None:
+        for name, value in vars(self).items():
+            if isinstance(value, bool) or not isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+            if name != "max_elapsed_seconds" and not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
+
+
+@dataclass
+class _RunProgress:
+    limits: AgentRunLimits
+    started_at: float = field(default_factory=monotonic)
+    model_cycles: int = 0
+    model_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    unreported_model_calls: int = 0
+    executed_tool_calls: int = 0
+    seen_observations: set[str] = field(default_factory=set)
+    consecutive_no_progress: int = 0
+    resource_refs: set[tuple[str, str]] = field(default_factory=set)
+
+    def remaining_seconds(self) -> float:
+        return max(0.0, self.limits.max_elapsed_seconds - (monotonic() - self.started_at))
+
+    def stop_before_model(self) -> AgentCompletionReason | None:
+        if self.model_cycles >= self.limits.emergency_max_model_cycles:
+            return AgentCompletionReason.EMERGENCY_CEILING
+        if (self.remaining_seconds() <= 0
+                or self.model_tokens >= self.limits.max_model_tokens
+                or self.executed_tool_calls >= self.limits.max_tool_calls):
+            return AgentCompletionReason.RESOURCE_BUDGET
+        if self.consecutive_no_progress >= self.limits.max_consecutive_no_progress:
+            return AgentCompletionReason.NO_PROGRESS
+        return None
+
+    def record_model_usage(self, usage: ModelUsage | None) -> None:
+        if usage is not None:
+            self.model_tokens += usage.total_tokens
+            self.prompt_tokens += usage.prompt_tokens
+            self.completion_tokens += usage.completion_tokens
+        else:
+            self.unreported_model_calls += 1
+
+    def observe(self, call: ChatToolCall, result: ChatToolResult) -> None:
+        payload = {
+            "tool": call.name, "arguments": dict(call.arguments),
+            "status": result.status.value, "data": dict(result.data),
+            "resource_refs": sorted(
+                (ref.resource_type, ref.resource_id, ref.href or "")
+                for ref in result.resource_refs
+            ),
+            "error_code": result.error_code,
+        }
+        digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.consecutive_no_progress = (
+            self.consecutive_no_progress + 1 if digest in self.seen_observations else 0
+        )
+        self.seen_observations.add(digest)
+        self.resource_refs.update((ref.resource_type, ref.resource_id) for ref in result.resource_refs)
+
+    def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
+              requested_count: int = 0, new_resources: int = 0,
+              termination_reason: str | None = None, final_answer: bool = False) -> None:
+        logger.info("Research Agent cycle %s", json.dumps({
+            "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
+            "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
+            "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
+            "total_tokens": self.model_tokens, "unreported_model_calls": self.unreported_model_calls,
+            "requested_tool_count": requested_count, "executed_tool_count": self.executed_tool_calls,
+            "new_resource_reference_count": new_resources,
+            "observation_digest_changed": self.consecutive_no_progress == 0,
+            "elapsed_ms": round((monotonic() - self.started_at) * 1000),
+            "remaining_tool_budget": max(0, self.limits.max_tool_calls - self.executed_tool_calls),
+            "remaining_token_budget": max(0, self.limits.max_model_tokens - self.model_tokens),
+            "termination_reason": termination_reason, "final_answer_present": final_answer,
+        }, separators=(",", ":")))
 
 
 @dataclass(frozen=True)
@@ -418,9 +525,17 @@ class AgentRunResult:
     messages: tuple[ChatMessage, ...]
     tool_calls: tuple[ChatToolCall, ...] = ()
     tool_results: tuple[ChatToolResult, ...] = ()
+    completion_reason: AgentCompletionReason | None = None
+    warnings: tuple[str, ...] = ()
     pending_approval: ChatToolCall | None = None
     error_code: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.status is AgentRunStatus.COMPLETED:
+            if self.completion_reason is None or self.error_code is not None:
+                raise ValueError("completed run requires a reason and no error code")
+        elif self.completion_reason is not None:
+            raise ValueError("only completed runs have a completion reason")
 
 class ResearchAgentRunner:
     def __init__(
@@ -429,14 +544,12 @@ class ResearchAgentRunner:
         model: ChatModel,
         capabilities: CapabilityRegistry,
         context_builder: ChatContextBuilder | None = None,
-        max_model_steps: int = 6,
+        limits: AgentRunLimits | None = None,
     ) -> None:
-        if max_model_steps < 1:
-            raise ValueError("max_model_steps must be positive")
         self.model = model
         self.capabilities = capabilities
         self.context_builder = context_builder or ChatContextBuilder()
-        self.max_model_steps = max_model_steps
+        self.limits = limits or AgentRunLimits()
 
     async def run_turn(
         self,
@@ -448,6 +561,7 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
+        progress = _RunProgress(self.limits)
         messages = [
             *previous_messages,
             ChatMessage.user(
@@ -469,6 +583,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             inherited_completed_writes=set(),
+            progress=progress,
         )
 
     async def resume_claimed_call(
@@ -480,6 +595,7 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
+        progress = _RunProgress(self.limits)
         self._validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
         inherited_completed_writes = self._completed_write_names(messages)
@@ -493,14 +609,12 @@ class ResearchAgentRunner:
                 "The approved research capability is not available.",
             )
         else:
-            call, result = await self._validate_and_execute(
-                context,
-                claimed_call,
-                handler,
-                messages=messages,
-                calls=calls,
-                results=results,
-                checkpoint=checkpoint,
+            error = self._batch_error(((claimed_call, handler),), messages)
+            if not error:
+                progress.executed_tool_calls += 1
+            call, result = (
+                self._failure(claimed_call, *error) if error
+                else await self._execute_one(context, claimed_call, handler)
             )
         calls[-1] = call
         results.append(result)
@@ -514,6 +628,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             inherited_completed_writes=inherited_completed_writes,
+            progress=progress,
         )
 
     async def _continue(
@@ -526,12 +641,25 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None,
         text_delta_callback: Callable[[str], None] | None,
         inherited_completed_writes: set[str],
+        progress: _RunProgress,
     ) -> AgentRunResult:
-        for step_index in range(1, self.max_model_steps + 1):
+        while True:
+            stop_reason = progress.stop_before_model()
+            if stop_reason is not None:
+                return await self._finalize_with_current_evidence(
+                    stop_reason, progress, context, messages, calls, results,
+                    checkpoint=checkpoint, text_delta_callback=text_delta_callback,
+                )
             response_retries = 0
             required_action_retries = 0
             required_action_instruction: ChatMessage | None = None
             while True:
+                stop_reason = progress.stop_before_model()
+                if stop_reason is not None:
+                    return await self._finalize_with_current_evidence(
+                        stop_reason, progress, context, messages, calls, results,
+                        checkpoint=checkpoint, text_delta_callback=text_delta_callback,
+                    )
                 try:
                     tool_specs = self._tool_specs_for_decision(
                         messages,
@@ -552,8 +680,8 @@ class ResearchAgentRunner:
                     logger.info(
                         "Research Agent capabilities selected step=%d max_steps=%d "
                         "tool_count=%d schema_chars=%d tools=%s",
-                        step_index,
-                        self.max_model_steps,
+                        progress.model_cycles + 1,
+                        self.limits.emergency_max_model_cycles,
                         len(tool_specs),
                         schema_chars,
                         ",".join(tool_names) or "none",
@@ -567,7 +695,7 @@ class ResearchAgentRunner:
                             context,
                             tool_names,
                             calls,
-                            successful_results=self._successful_results_by_name(messages),
+                            successful_results=self._active_successful_results_by_name(messages),
                         )
                         if stage_instruction is not None:
                             decision_messages = (*decision_messages, stage_instruction)
@@ -588,14 +716,37 @@ class ResearchAgentRunner:
                             ),
                         )
                     model_arguments: dict[str, Any] = {
-                        "messages": self.context_builder.for_model(decision_messages),
+                        "context": self.context_builder.for_model(
+                            decision_messages, active_user_message_id=next(
+                                message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
+                            ),
+                        ),
                         "tool_specs": tool_specs,
                     }
+                    accepting_text = Event()
+                    accepting_text.set()
                     if text_delta_callback is not None:
-                        model_arguments["text_delta_callback"] = text_delta_callback
-                    turn = await to_thread(
-                        self.model.respond,
-                        **model_arguments,
+                        def emit_current_text(text: str, active: Event = accepting_text) -> None:
+                            if active.is_set():
+                                text_delta_callback(text)
+                        model_arguments["text_delta_callback"] = emit_current_text
+                    progress.model_cycles += 1
+                    try:
+                        turn = await wait_for(
+                            to_thread(self.model.respond, **model_arguments),
+                            timeout=progress.remaining_seconds(),
+                        )
+                    finally:
+                        # Cancelling the await cannot stop a synchronous provider thread.
+                        accepting_text.clear()
+                    progress.record_model_usage(turn.usage)
+                    progress.trace(context, phase="model", capability_names=tool_names,
+                                   requested_count=len(turn.tool_calls))
+                except TimeoutError:
+                    return await self._finalize_with_current_evidence(
+                        AgentCompletionReason.RESOURCE_BUDGET,
+                        progress, context, messages, calls, results,
+                        checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                     )
                 except ModelResponseError as exc:
                     model_name = str(
@@ -609,7 +760,6 @@ class ResearchAgentRunner:
                         exc.reason,
                         exc.retryable,
                         exc.partial_content,
-                        exc_info=True,
                     )
                     if (
                         exc.retryable
@@ -632,6 +782,7 @@ class ResearchAgentRunner:
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
+                    progress.trace(context, phase="terminal", termination_reason="model_response_invalid")
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
@@ -646,11 +797,9 @@ class ResearchAgentRunner:
                     )
                     logger.warning(
                         "Research Agent model call failed model=%s "
-                        "exception_type=%s message=%s",
+                        "exception_type=%s",
                         model_name,
                         type(exc).__name__,
-                        str(exc)[:240],
-                        exc_info=True,
                     )
                     messages.append(
                         self._assistant(
@@ -659,6 +808,7 @@ class ResearchAgentRunner:
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
+                    progress.trace(context, phase="terminal", termination_reason="model_unavailable")
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
@@ -668,10 +818,10 @@ class ResearchAgentRunner:
                     )
                 required_tool = self._required_tool_before_answer(
                     tool_names,
-                    successful_results=self._successful_results_by_name(messages),
+                    successful_results=self._active_successful_results_by_name(messages),
                 )
                 if (
-                    turn.tool_call is None
+                    not turn.tool_calls
                     and required_tool is not None
                     and required_action_retries < _REQUIRED_ACTION_RETRY_LIMIT
                 ):
@@ -682,7 +832,7 @@ class ResearchAgentRunner:
                         content=(
                             "The active researcher explicitly requested a structured "
                             "research deliverable. Do not answer yet. Use the prior "
-                            "research results and call the only available required "
+                            "research results and call the required research "
                             f"action, `{required_tool}`, now."
                         ),
                         created_at=_now_iso(),
@@ -692,7 +842,7 @@ class ResearchAgentRunner:
                         required_tool,
                     )
                     continue
-                if turn.tool_call is None and required_tool is not None:
+                if not turn.tool_calls and required_tool is not None:
                     logger.warning(
                         "Research Agent required action not completed tool=%s",
                         required_tool,
@@ -701,6 +851,7 @@ class ResearchAgentRunner:
                         self._assistant(context, _REQUIRED_ACTION_FAILURE_MESSAGE)
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
+                    progress.trace(context, phase="terminal", termination_reason="required_research_action_not_completed")
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
@@ -710,90 +861,73 @@ class ResearchAgentRunner:
                     )
                 break
 
-            if turn.tool_call is None:
+            if not turn.tool_calls:
                 messages.append(self._assistant(context, turn.content))
                 await self._checkpoint(checkpoint, messages, calls, results)
-                return self._result(AgentRunStatus.COMPLETED, messages, calls, results)
+                progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
+                return self._result(
+                    AgentRunStatus.COMPLETED, messages, calls, results,
+                    completion_reason=AgentCompletionReason.MODEL_ANSWER,
+                )
 
-            call, handler = self._requested_call(
+            requested = self._requested_calls(
                 context,
                 messages,
                 turn,
                 allowed_names=set(tool_names),
             )
-            calls.append(call)
+            batch_start = len(calls)
+            calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
-            if handler is None:
-                registered_handler = self.capabilities.get(call.name)
-                call, capability_result = self._failure(
-                    call,
-                    (
-                        "capability_unavailable_for_turn"
-                        if registered_handler is not None
-                        else "unknown_capability"
-                    ),
-                    (
-                        "The requested research capability is not available for "
-                        "this research step."
-                        if registered_handler is not None
-                        else "The requested research capability is not available."
-                    ),
+            stop_reason = progress.stop_before_model()
+            if progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls:
+                stop_reason = AgentCompletionReason.RESOURCE_BUDGET
+            error = self._batch_error(requested, messages)
+            if stop_reason:
+                error = ("resource_budget", "These Sources or actions remain uninspected or unexecuted in this turn.")
+            if error:
+                completed = tuple(self._failure(call, *error) for call, _ in requested)
+            elif len(requested) == 1 and requested[0][0].risk is ToolRisk.WRITE:
+                pending = requested[0][0].require_approval()
+                calls[-1] = pending
+                await self._checkpoint(checkpoint, messages, calls, results)
+                progress.trace(context, phase="terminal", termination_reason="approval_required")
+                return AgentRunResult(
+                    status=AgentRunStatus.APPROVAL_REQUIRED,
+                    messages=tuple(messages), tool_calls=tuple(calls),
+                    tool_results=tuple(results), pending_approval=pending,
                 )
             else:
-                decision = evaluate_authorization(call.risk)
-                if decision.requires_approval:
-                    pending = call.require_approval()
-                    calls[-1] = pending
-                    await self._checkpoint(checkpoint, messages, calls, results)
-                    return AgentRunResult(
-                        status=AgentRunStatus.APPROVAL_REQUIRED,
-                        messages=tuple(messages),
-                        tool_calls=tuple(calls),
-                        tool_results=tuple(results),
-                        pending_approval=pending,
-                    )
-                if not decision.may_execute:
-                    call, capability_result = self._failure(
-                        call,
-                        "capability_not_authorized",
-                        "The research capability is not authorized.",
-                    )
-                else:
-                    call, capability_result = await self._validate_and_execute(
-                        context,
-                        call,
-                        handler,
-                        messages=messages,
-                        calls=calls,
-                        results=results,
-                        checkpoint=checkpoint,
-                    )
-            calls[-1] = call
-            results.append(capability_result)
-            messages.append(self._result_message(context, capability_result))
+                requested = tuple((call.start(_now_iso()), handler) for call, handler in requested)
+                calls[batch_start:] = [call for call, _ in requested]
+                await self._checkpoint(checkpoint, messages, calls, results)
+                progress.executed_tool_calls += len(requested)
+                completed = await self._execute_read_batch(context, requested, progress)
+            old_observation_count = len(progress.seen_observations)
+            old_resource_count = len(progress.resource_refs)
+            prior_no_progress = progress.consecutive_no_progress
+            for index, (call, capability_result) in enumerate(completed):
+                calls[batch_start + index] = call
+                results.append(capability_result)
+                messages.append(self._result_message(context, capability_result))
+                progress.observe(call, capability_result)
+            progress.consecutive_no_progress = (
+                prior_no_progress + 1 if len(progress.seen_observations) == old_observation_count else 0
+            )
             await self._checkpoint(checkpoint, messages, calls, results)
+            progress.trace(context, phase="tools", capability_names=tool_names, requested_count=len(requested),
+                           new_resources=len(progress.resource_refs) - old_resource_count,
+                           termination_reason=stop_reason.value if stop_reason else None)
+            if stop_reason:
+                return await self._finalize_with_current_evidence(
+                    stop_reason, progress, context, messages, calls, results,
+                    checkpoint=checkpoint, text_delta_callback=text_delta_callback,
+                )
 
-        final_answer = await self._final_answer_after_limit(
-            context,
-            messages,
-            calls,
-            results,
-            checkpoint=checkpoint,
-            text_delta_callback=text_delta_callback,
-        )
-        if not final_answer:
-            messages.append(self._assistant(context, _STEP_LIMIT_MESSAGE))
-        await self._checkpoint(checkpoint, messages, calls, results)
-        return self._result(
-            AgentRunStatus.STEP_LIMIT_REACHED,
-            messages,
-            calls,
-            results,
-            "agent_step_limit_reached",
-        )
-
-    async def _final_answer_after_limit(
+    async def _finalize_with_current_evidence(
         self,
+        reason: AgentCompletionReason,
+        progress: _RunProgress,
         context: AgentContext,
         messages: list[ChatMessage],
         calls: list[ChatToolCall],
@@ -801,7 +935,7 @@ class ResearchAgentRunner:
         *,
         checkpoint: _TrajectoryCheckpoint | None,
         text_delta_callback: Callable[[str], None] | None,
-    ) -> bool:
+    ) -> AgentRunResult:
         """Give the model one answer-only turn after tool decisions are spent."""
 
         instruction = self._answer_instruction(
@@ -811,37 +945,53 @@ class ResearchAgentRunner:
             results,
             budget_exhausted=True,
         )
-        model_arguments: dict[str, Any] = {
-            "messages": self.context_builder.for_model(
-                tuple([*messages, instruction])
-            ),
-            "tool_specs": (),
-        }
-        if text_delta_callback is not None:
-            model_arguments["text_delta_callback"] = text_delta_callback
         logger.info(
-            "Research Agent final answer turn step_limit=%d tools=none",
-            self.max_model_steps,
+            "Research Agent final answer reason=%s tools=none", reason.value,
         )
         try:
-            turn = await to_thread(self.model.respond, **model_arguments)
+            model_arguments: dict[str, Any] = {
+                "context": self.context_builder.for_model(
+                    (*messages, instruction), active_user_message_id=next(
+                        message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
+                    ),
+                ),
+                "tool_specs": (),
+            }
+            accepting_text = Event()
+            accepting_text.set()
+            if text_delta_callback is not None:
+                def emit_final_text(text: str) -> None:
+                    if accepting_text.is_set():
+                        text_delta_callback(text)
+                model_arguments["text_delta_callback"] = emit_final_text
+            progress.model_cycles += 1
+            try:
+                turn = await wait_for(
+                    to_thread(self.model.respond, **model_arguments),
+                    timeout=min(30.0, self.limits.max_elapsed_seconds),
+                )
+            finally:
+                accepting_text.clear()
+            progress.record_model_usage(turn.usage)
+            if turn.tool_calls or not turn.content:
+                raise ValueError("final answer must be answer-only")
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Research Agent final answer failed exception_type=%s message=%s",
+                "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
-                str(exc)[:240],
-                exc_info=True,
             )
-            return False
-        if turn.tool_call is not None or not turn.content:
-            logger.warning(
-                "Research Agent final answer was not answer-only has_tool_call=%s",
-                turn.tool_call is not None,
-            )
-            return False
+            messages.append(self._assistant(context, "The inspected results were preserved, but a final answer could not be completed. Please retry."))
+            progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
+            await self._checkpoint(checkpoint, messages, calls, results)
+            return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
         messages.append(self._assistant(context, turn.content))
+        progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True)
         await self._checkpoint(checkpoint, messages, calls, results)
-        return True
+        return self._result(
+            AgentRunStatus.COMPLETED, messages, calls, results,
+            completion_reason=reason,
+            warnings=("The answer covers only inspected Sources; unread or failed work remains unresolved.",),
+        )
 
     def _answer_instruction(
         self,
@@ -883,44 +1033,71 @@ class ResearchAgentRunner:
             created_at=_now_iso(),
         )
 
-    def _requested_call(
+    def _requested_calls(
         self,
         context: AgentContext,
         messages: list[ChatMessage],
         turn: Any,
         *,
         allowed_names: set[str],
-    ) -> tuple[ChatToolCall, Any]:
-        model_call = turn.tool_call
+    ) -> tuple[tuple[ChatToolCall, Any], ...]:
         assistant_message_id = self._message_id()
-        tool_call_id = self._tool_call_id()
+        requested = []
+        for position, model_call in enumerate(turn.tool_calls):
+            registered = self.capabilities.get(model_call.name)
+            call = ChatToolCall.requested(
+                tool_call_id=self._tool_call_id(), session_id=context.session_id,
+                assistant_message_id=assistant_message_id, position=position,
+                name=model_call.name, arguments=model_call.arguments,
+                risk=registered.spec.risk if registered else ToolRisk.UNKNOWN,
+            )
+            requested.append((call, registered if model_call.name in allowed_names else None))
         messages.append(
-            ChatMessage.assistant_tool_call(
+            ChatMessage.assistant_tool_calls(
                 message_id=assistant_message_id,
                 session_id=context.session_id,
                 content=turn.content,
-                tool_call_id=tool_call_id,
-                tool_name=model_call.name,
-                tool_arguments=model_call.arguments,
+                tool_calls=tuple(call.to_request() for call, _ in requested),
                 created_at=_now_iso(),
             )
         )
-        registered_handler = self.capabilities.get(model_call.name)
-        handler = (
-            registered_handler if model_call.name in allowed_names else None
-        )
-        return ChatToolCall.requested(
-            tool_call_id=tool_call_id,
-            session_id=context.session_id,
-            assistant_message_id=assistant_message_id,
-            name=model_call.name,
-            arguments=model_call.arguments,
-            risk=(
-                registered_handler.spec.risk
-                if registered_handler is not None
-                else ToolRisk.UNKNOWN
-            ),
-        ), handler
+        return tuple(requested)
+
+    def _batch_error(self, requested, messages) -> tuple[str, str] | None:
+        for call, handler in requested:
+            if handler is None:
+                code = "capability_unavailable_for_turn" if self.capabilities.get(call.name) else "unknown_capability"
+                return code, "The requested research capability is not available."
+            if call.risk is ToolRisk.UNKNOWN:
+                return "capability_not_authorized", "The research capability is not authorized."
+            try:
+                handler.spec.input_model.model_validate(call.arguments)
+            except ValidationError:
+                return "invalid_tool_arguments", "The research capability arguments are invalid."
+            if call.name == "inspect_published_finding":
+                allowed = self._published_finding_candidates(
+                    self._active_successful_results_by_name(messages)
+                )
+                finding = (str(call.arguments.get("objective_id") or "").strip(), str(call.arguments.get("finding_id") or "").strip())
+                if allowed and finding not in allowed:
+                    return "finding_reference_not_in_query", "Inspect a Finding identifier returned by the preceding query."
+        if len(requested) > 1 and any(call.risk is not ToolRisk.READ for call, _ in requested):
+            return "invalid_tool_batch", "Draft and write actions must be requested individually."
+        return None
+
+    async def _execute_read_batch(self, context, requested, progress):
+        semaphore = Semaphore(self.limits.max_parallel_reads)
+
+        async def bounded(call, handler):
+            async with semaphore:
+                try:
+                    return await wait_for(self._execute_one(context, call, handler), timeout=progress.remaining_seconds())
+                except TimeoutError:
+                    return self._failure(call, "capability_timeout", "The Source or action could not be completed in this turn.")
+
+        if all(handler.spec.parallel_safe for _, handler in requested):
+            return tuple(await gather(*(bounded(call, handler) for call, handler in requested)))
+        return tuple([await bounded(call, handler) for call, handler in requested])
 
     def _tool_specs_for_decision(
         self,
@@ -929,6 +1106,13 @@ class ResearchAgentRunner:
         *,
         inherited_completed_writes: set[str] | None = None,
     ) -> tuple[Any, ...]:
+        if any(
+            call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.FAILED
+            and call.decision_user_id is not None
+            for call in calls
+        ):
+            # A failed approved action needs an explanation before a new decision.
+            return ()
         specs = self.capabilities.specs
         registered_names = {spec.name for spec in specs}
         if not registered_names.intersection(_KNOWN_CAPABILITIES):
@@ -943,7 +1127,7 @@ class ResearchAgentRunner:
             None,
         )
         user_text = str(latest_user.content if latest_user is not None else "").casefold()
-        successful_results = self._successful_results_by_name(messages)
+        successful_results = self._active_successful_results_by_name(messages)
         if any(phrase in user_text for phrase in _NO_TOOL_PHRASES):
             allowed_names: set[str] = set()
         else:
@@ -953,11 +1137,9 @@ class ResearchAgentRunner:
                     latest_user is not None and latest_user.source_contexts
                 ),
                 prior_tool_names={
-                    message.tool_name
+                    request.name
                     for message in messages
-                    if message.role is ChatMessageRole.ASSISTANT
-                    and message.tool_call_id
-                    and message.tool_name
+                    for request in message.tool_calls
                 },
             )
 
@@ -982,9 +1164,11 @@ class ResearchAgentRunner:
         # than broadening the search or inspecting arbitrary pages.
         source_candidates = self._source_search_candidates(successful_results)
         if source_candidates and not self._has_successful_exact_source_read(
-            successful_results
+            successful_results, source_candidates
         ):
-            allowed_names.intersection_update({"read_source", "inspect_table"})
+            allowed_names.intersection_update(
+                {"read_source", "inspect_table", "inspect_document_sources"}
+            )
 
         # A cross-paper comparison or support claim needs source-backed facts,
         # not only the paper map. Once the map is complete, require a focused
@@ -995,7 +1179,9 @@ class ResearchAgentRunner:
             (comparison_intent or source_grounded_intent)
             and successful_results.get("browse_collection_papers")
             and not successful_results.get("search_sources")
-            and not self._has_successful_exact_source_read(successful_results)
+            and not self._has_successful_exact_source_read(
+                successful_results, source_candidates
+            )
         ):
             allowed_names.intersection_update({"search_sources"})
 
@@ -1055,15 +1241,38 @@ class ResearchAgentRunner:
         # A completed plan proposal belongs to the request that asked for it.
         # Do not let an older turn force its write capability onto a later,
         # unrelated review or reading request in the same Chat trajectory.
-        if proposed_plan_this_turn:
+        plan_revision_requested = any(
+            term in user_text for term in ("修改", "修订", "调整", "revise", "update")
+        )
+        plan_read_requested = any(term in user_text for term in _PLAN_READ_TERMS)
+        if (
+            plan_read_requested
+            and any(term in user_text for term in _PLAN_TERMS)
+            and not persist_requested
+            and not plan_revision_requested
+        ):
+            allowed_names = {"inspect_research_plans"}
+        elif proposed_plan_this_turn:
             if persist_requested:
-                allowed_names = {"create_research_plan"}
+                allowed_names = {
+                    "revise_research_plan"
+                    if plan_revision_requested
+                    else "create_research_plan"
+                }
             else:
                 allowed_names = set()
         elif finding_draft_this_turn:
             allowed_names = set()
         elif proposed_plan and any(term in user_text for term in _PLAN_TERMS) and persist_requested:
-            allowed_names = {"create_research_plan"}
+            allowed_names = {
+                "revise_research_plan"
+                if plan_revision_requested
+                else "create_research_plan"
+            }
+        elif plan_revision_requested and persist_requested and any(
+            term in user_text for term in _PLAN_TERMS
+        ):
+            allowed_names = {"revise_research_plan"}
         elif inspected_finding and any(
             phrase in user_text
             for phrase in ("结论草案", "修订草案", "finding draft", "draft finding")
@@ -1136,6 +1345,22 @@ class ResearchAgentRunner:
         *,
         successful_results: Mapping[str, list[Mapping[str, Any]]] | None = None,
     ) -> str | None:
+        reader_names = {"read_source", "inspect_table"}
+        source_reader_names = {*reader_names, "inspect_document_sources"}
+        if (
+            set(tool_names)
+            and set(tool_names).issubset(source_reader_names)
+            and (
+                set(tool_names).issubset(reader_names)
+                or (successful_results is not None and successful_results.get("search_sources"))
+            )
+        ):
+            if successful_results is not None and ResearchAgentRunner._has_successful_exact_source_read(
+                successful_results,
+                ResearchAgentRunner._source_search_candidates(successful_results),
+            ):
+                return None
+            return next((name for name in tool_names if name in source_reader_names), None)
         if len(tool_names) != 1:
             return None
         required_tool = tool_names[0]
@@ -1178,16 +1403,37 @@ class ResearchAgentRunner:
     @staticmethod
     def _has_successful_exact_source_read(
         successful_results: Mapping[str, list[Mapping[str, Any]]],
+        candidates: tuple[tuple[str, str, str], ...] = (),
     ) -> bool:
-        if successful_results.get("read_source") or successful_results.get("inspect_table"):
+        candidate_set = set(candidates)
+
+        def matches(
+            item: Mapping[str, Any], *, table: bool = False, parent_document_id: str = "",
+        ) -> bool:
+            document_id = str(parent_document_id or item.get("document_id") or "").strip()
+            source_ref = str(item.get("source_ref") or item.get("table_ref") or "").strip()
+            source_kind = str(item.get("source_kind") or ("table" if table else "")).strip()
+            identity = (document_id, source_kind, source_ref)
+            return (
+                bool(document_id and source_ref and item.get("source_digest"))
+                and item.get("content_truncated") is False
+                and (not candidate_set or identity in candidate_set)
+            )
+
+        if any(matches(item) for item in successful_results.get("read_source", ())):
             return True
-        return any(
-            isinstance(item, Mapping)
-            and item.get("content_truncated") is False
-            and item.get("source_digest")
-            for result in successful_results.get("inspect_document_sources", ())
-            for item in result.get("sources") or ()
-        )
+        if any(matches(item, table=True) for item in successful_results.get("inspect_table", ())):
+            return True
+        for result in successful_results.get("inspect_document_sources", ()):
+            document = result.get("document")
+            if not isinstance(document, Mapping):
+                continue
+            if any(
+                matches(item, parent_document_id=str(document.get("document_id") or ""))
+                for item in result.get("sources") or () if isinstance(item, Mapping)
+            ):
+                return True
+        return False
 
     @staticmethod
     def _confirmed_objective_ids(
@@ -1315,11 +1561,9 @@ class ResearchAgentRunner:
         read or draft step.
         """
         names_by_call_id = {
-            message.tool_call_id: message.tool_name
+            request.tool_call_id: request.name
             for message in messages
-            if message.role is ChatMessageRole.ASSISTANT
-            and message.tool_call_id
-            and message.tool_name
+            for request in message.tool_calls
         }
         return {
             name
@@ -1511,11 +1755,9 @@ class ResearchAgentRunner:
         messages: list[ChatMessage],
     ) -> dict[str, list[Mapping[str, Any]]]:
         names_by_call_id = {
-            message.tool_call_id: message.tool_name
+            request.tool_call_id: request.name
             for message in messages
-            if message.role is ChatMessageRole.ASSISTANT
-            and message.tool_call_id
-            and message.tool_name
+            for request in message.tool_calls
         }
         results: dict[str, list[Mapping[str, Any]]] = {}
         for message in messages:
@@ -1530,6 +1772,21 @@ class ResearchAgentRunner:
             if name:
                 results.setdefault(name, []).append(message.tool_result.data)
         return results
+
+    @staticmethod
+    def _active_successful_results_by_name(
+        messages: list[ChatMessage],
+    ) -> dict[str, list[Mapping[str, Any]]]:
+        """Return successful reads belonging to the latest user request."""
+        last_user_index = max(
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.role is ChatMessageRole.USER
+            ),
+            default=-1,
+        )
+        return ResearchAgentRunner._successful_results_by_name(messages[last_user_index:])
 
     @staticmethod
     def _active_user_request(messages: list[ChatMessage]) -> str:
@@ -1547,16 +1804,23 @@ class ResearchAgentRunner:
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
     ) -> str:
-        names_by_call_id = {call.tool_call_id: call.name for call in calls}
+        calls_by_id = {call.tool_call_id: call for call in calls}
         collection_paper_totals: set[int] = set()
         screened_documents: set[str] = set()
+        requested_documents = {
+            str(call.arguments["document_id"])
+            for call in calls if call.arguments.get("document_id")
+        }
+        read_documents: set[str] = set()
         exact_sources: set[str] = set()
         failed_documents: set[str] = set()
         for result in results:
-            name = names_by_call_id.get(result.tool_call_id)
+            call = calls_by_id.get(result.tool_call_id)
+            name = call.name if call else None
             if result.status is ToolResultStatus.FAILED:
-                document_id = str(result.data.get("document_id") or "").strip()
-                if document_id:
+                document_id = str(result.data.get("document_id") or
+                                  (call.arguments.get("document_id") if call else "") or "").strip()
+                if document_id and result.error_code not in {"resource_budget", "invalid_tool_batch", "capability_unavailable_for_turn"}:
                     failed_documents.add(document_id)
                 continue
             if name == "browse_collection_papers":
@@ -1576,14 +1840,17 @@ class ResearchAgentRunner:
                     else ""
                 ).strip()
                 if document_id:
-                    exact_sources.update(
+                    inspected = {
                         f"{document_id}:{source_ref}"
                         for item in result.data.get("sources") or ()
                         if isinstance(item, Mapping)
                         and item.get("content_truncated") is False
                         and item.get("source_digest")
                         and (source_ref := str(item.get("source_ref") or "").strip())
-                    )
+                    }
+                    exact_sources.update(inspected)
+                    if inspected:
+                        read_documents.add(document_id)
             if name in {"read_source", "inspect_table"}:
                 document_id = str(result.data.get("document_id") or "").strip()
                 source_ref = str(
@@ -1591,8 +1858,9 @@ class ResearchAgentRunner:
                     or result.data.get("table_ref")
                     or ""
                 ).strip()
-                if document_id and source_ref:
+                if document_id and source_ref and result.data.get("source_digest"):
                     exact_sources.add(f"{document_id}:{source_ref}")
+                    read_documents.add(document_id)
 
         def display(values: set[str]) -> str:
             return ", ".join(sorted(value for value in values if value)[:30]) or "none"
@@ -1600,6 +1868,7 @@ class ResearchAgentRunner:
         paper_total = (
             str(max(collection_paper_totals)) if collection_paper_totals else "unknown"
         )
+        unread_documents = (screened_documents | requested_documents) - read_documents - failed_documents
         return (
             f"Collection paper total: {paper_total}\n"
             f"Paper identities screened ({len(screened_documents)}): "
@@ -1607,7 +1876,9 @@ class ResearchAgentRunner:
             f"Exact paper Sources read ({len(exact_sources)}): "
             f"{display(exact_sources)}\n"
             f"Papers with failed exact reads ({len(failed_documents)}): "
-            f"{display(failed_documents)}"
+            f"{display(failed_documents)}\n"
+            f"Known papers without an exact read ({len(unread_documents)}): "
+            f"{display(unread_documents)}"
         )
 
     @staticmethod
@@ -1646,16 +1917,11 @@ class ResearchAgentRunner:
             )
         return None
 
-    async def _validate_and_execute(
+    async def _execute_one(
         self,
         context: AgentContext,
         call: ChatToolCall,
         handler: Any,
-        *,
-        messages: list[ChatMessage],
-        calls: list[ChatToolCall],
-        results: list[ChatToolResult],
-        checkpoint: _TrajectoryCheckpoint | None,
     ) -> tuple[ChatToolCall, ChatToolResult]:
         try:
             arguments = handler.spec.input_model.model_validate(call.arguments)
@@ -1665,25 +1931,6 @@ class ResearchAgentRunner:
                 "invalid_tool_arguments",
                 "The research capability arguments are invalid.",
             )
-        if call.name == "inspect_published_finding":
-            allowed_findings = self._published_finding_candidates(
-                self._successful_results_by_name(messages)
-            )
-            requested_finding = (
-                str(call.arguments.get("objective_id") or "").strip(),
-                str(call.arguments.get("finding_id") or "").strip(),
-            )
-            if allowed_findings and requested_finding not in allowed_findings:
-                return ResearchAgentRunner._failure(
-                    call,
-                    "finding_reference_not_in_query",
-                    "Inspect a Finding identifier returned by the preceding "
-                    "published-Finding query.",
-                )
-        if call.status is not ToolCallStatus.RUNNING:
-            call = call.start(_now_iso())
-            calls[-1] = call
-            await self._checkpoint(checkpoint, messages, calls, results)
         try:
             execution_context = CapabilityExecutionContext.for_call(
                 context,
@@ -1760,6 +2007,9 @@ class ResearchAgentRunner:
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
         error_code: str | None = None,
+        *,
+        completion_reason: AgentCompletionReason | None = None,
+        warnings: tuple[str, ...] = (),
     ) -> AgentRunResult:
         return AgentRunResult(
             status=status,
@@ -1767,6 +2017,8 @@ class ResearchAgentRunner:
             tool_calls=tuple(calls),
             tool_results=tuple(results),
             error_code=error_code,
+            completion_reason=completion_reason,
+            warnings=warnings,
         )
 
     @staticmethod
@@ -1791,5 +2043,7 @@ class ResearchAgentRunner:
 __all__ = [
     "AgentRunResult",
     "AgentRunStatus",
+    "AgentCompletionReason",
+    "AgentRunLimits",
     "ResearchAgentRunner",
 ]

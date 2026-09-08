@@ -219,17 +219,18 @@ class _Model:
             "create_research_plan",
         }
 
-    def respond(self, *, messages: tuple, tool_specs: tuple, text_delta_callback=None):
+    def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None):
+        messages = context.messages
         assert messages
         # Once the final approval write has completed, the runner deliberately
         # gives the model an answer-only turn so it cannot repeat that write.
         expected_tools = self.expected_tools
-        next_call = self.turns[0].tool_call if self.turns else None
+        next_call = self.turns[0].tool_calls[0] if self.turns and self.turns[0].tool_calls else None
         if next_call is not None and next_call.name == "create_research_plan":
             # After a transient proposal, only the exact approved write remains
             # available for the next model decision.
             expected_tools = {"create_research_plan"}
-        if len(self.turns) == 1 and self.turns[0].tool_call is None:
+        if len(self.turns) == 1 and not self.turns[0].tool_calls:
             expected_tools = set()
         assert {item.name for item in tool_specs} == expected_tools
         return self.turns.popleft()
@@ -413,17 +414,17 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
-                tool_call=ModelToolCall(
+                tool_calls=(ModelToolCall(
                     name="propose_research_plan",
                     arguments=plan_arguments,
-                )
+                ),)
             ),
             ModelTurn(
                 content="The research plan draft is ready for approval.",
-                tool_call=ModelToolCall(
+                tool_calls=(ModelToolCall(
                     name="create_research_plan",
                     arguments=write_arguments,
-                ),
+                ),),
             ),
             ModelTurn(content="The approved research plan draft has been saved."),
         ),
@@ -558,10 +559,10 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
         model=_Model(
             ModelTurn(
                 content="The revision is ready for approval.",
-                tool_call=ModelToolCall(
+                tool_calls=(ModelToolCall(
                     name="revise_research_plan",
                     arguments=arguments,
-                ),
+                ),),
             ),
             ModelTurn(content="The approved revision has been saved."),
             expected_tools={"revise_research_plan"},

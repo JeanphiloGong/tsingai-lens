@@ -46,28 +46,32 @@ export type ChatPresentationItem =
 	  };
 
 function isToolActivity(message: ChatMessage) {
-	return Boolean(message.tool_call_id || message.tool_result);
+	return Boolean(message.tool_calls.length || message.tool_result);
 }
 
 function operationsFrom(messages: ChatMessage[]) {
 	const operations: ToolActivityOperation[] = [];
 
 	for (const message of messages) {
+		for (const request of message.tool_calls) {
+			operations.push({
+				toolCallId: request.tool_call_id,
+				toolName: request.name,
+				requestMessage: message,
+				resultMessage: null
+			});
+		}
 		const toolCallId = message.tool_result?.tool_call_id ?? message.tool_call_id;
 		if (!toolCallId) continue;
 		let operation = operations.find((candidate) => candidate.toolCallId === toolCallId);
 		if (!operation) {
 			operation = {
 				toolCallId,
-				toolName: message.tool_name,
+				toolName: null,
 				requestMessage: null,
 				resultMessage: null
 			};
 			operations.push(operation);
-		}
-		if (message.role === 'assistant') {
-			operation.requestMessage = message;
-			operation.toolName = message.tool_name;
 		}
 		if (message.tool_result) operation.resultMessage = message;
 	}

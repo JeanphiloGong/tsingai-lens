@@ -30,6 +30,13 @@ export type ChatToolResult = {
 	error_message: string | null;
 };
 
+export type ChatToolRequest = {
+	tool_call_id: string;
+	name: string;
+	arguments: Record<string, unknown>;
+	position: number;
+};
+
 export type ChatMessage = {
 	message_id: string;
 	session_id: string;
@@ -37,8 +44,7 @@ export type ChatMessage = {
 	content: string;
 	created_at: string;
 	tool_call_id: string | null;
-	tool_name: string | null;
-	tool_arguments: Record<string, unknown> | null;
+	tool_calls: ChatToolRequest[];
 	tool_result: ChatToolResult | null;
 	source_contexts: ChatSourceContext[];
 };
@@ -55,6 +61,7 @@ export type ChatToolCall = {
 	tool_call_id: string;
 	session_id: string;
 	assistant_message_id: string;
+	position: number;
 	name: string;
 	arguments: Record<string, unknown>;
 	arguments_digest: string;
@@ -76,7 +83,14 @@ export type ChatToolCall = {
 };
 
 export type ChatTurn = {
-	status: 'completed' | 'approval_required' | 'step_limit_reached' | 'failed' | 'rejected';
+	status: 'completed' | 'approval_required' | 'failed' | 'rejected';
+	completion_reason:
+		| 'model_answer'
+		| 'resource_budget'
+		| 'no_progress'
+		| 'emergency_ceiling'
+		| null;
+	warnings: string[];
 	messages: ChatMessage[];
 	pending_approval: ChatToolCall | null;
 	error_code: string | null;

@@ -122,6 +122,8 @@ class _Service:
             )
         return {
             "status": "completed",
+            "completion_reason": "model_answer",
+            "warnings": [],
             "messages": self.messages,
             "pending_approval": None,
             "error_code": None,

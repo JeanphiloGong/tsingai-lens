@@ -501,9 +501,10 @@ class _StartResearchProcessModel:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         assert messages
-        if self.turns[0].tool_call is not None:
+        if self.turns[0].tool_calls != ():
             assert {item.name for item in tool_specs} == {"start_research_process"}
         else:
             assert tool_specs == ()
@@ -679,7 +680,8 @@ class _Model:
         self.turns = deque(turns)
         self.contexts: list[tuple] = []
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         self.contexts.append(messages)
         assert {item.name for item in tool_specs} == {
             "get_collection_context",
@@ -1247,7 +1249,7 @@ async def test_agent_records_finding_feedback_only_after_exact_approval() -> Non
                 (
                     ModelTurn(
                         content="I prepared a partial-correctness review for approval.",
-                        tool_call=ModelToolCall(
+                        tool_calls=(ModelToolCall(
                             name="record_finding_feedback",
                             arguments={
                                 "objective_id": "objective-published",
@@ -1257,15 +1259,16 @@ async def test_agent_records_finding_feedback_only_after_exact_approval() -> Non
                                 "issue_type": "overclaim",
                                 "note": "The direction is supported, but the wording is too broad.",
                             },
-                        ),
+                        ),),
                     ),
                     ModelTurn(content="The approved review has been recorded."),
                 )
             )
 
-        def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+        def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+            messages = context.messages
             assert messages
-            if self.turns[0].tool_call is not None:
+            if self.turns[0].tool_calls != ():
                 assert {item.name for item in tool_specs} == {
                     "record_finding_feedback"
                 }
@@ -1776,7 +1779,7 @@ async def test_agent_publishes_authored_finding_only_after_exact_approval() -> N
                 (
                     ModelTurn(
                         content="I prepared an evidence-backed conclusion for approval.",
-                        tool_call=ModelToolCall(
+                        tool_calls=(ModelToolCall(
                             name="create_finding_version",
                             arguments={
                                 "objective_id": "obj-1",
@@ -1795,15 +1798,16 @@ async def test_agent_publishes_authored_finding_only_after_exact_approval() -> N
                                 "parent_finding_id": None,
                                 "abstention_reason": None,
                             },
-                        ),
+                        ),),
                     ),
                     ModelTurn(content="The approved conclusion is now published as a new version."),
                 )
             )
 
-        def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+        def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+            messages = context.messages
             assert messages
-            if self.turns[0].tool_call is not None:
+            if self.turns[0].tool_calls != ():
                 assert {item.name for item in tool_specs} == {
                     "create_finding_version"
                 }
@@ -2033,7 +2037,7 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
     model = _StartResearchProcessModel(
         ModelTurn(
             content="I need your approval before I start reviewing the papers.",
-            tool_call=ModelToolCall(name="start_research_process", arguments={}),
+            tool_calls=(ModelToolCall(name="start_research_process", arguments={}),),
         ),
         ModelTurn(
             content=(
@@ -2215,7 +2219,8 @@ class _ResearchProcessModel:
         self.turns = deque(turns)
         self.contexts: list[tuple] = []
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         self.contexts.append(messages)
         assert {item.name for item in tool_specs} == {"inspect_research_process"}
         return self.turns.popleft()
@@ -2224,7 +2229,7 @@ class _ResearchProcessModel:
 async def test_agent_continues_from_observable_research_process_result() -> None:
     model = _ResearchProcessModel(
         ModelTurn(
-            tool_call=ModelToolCall(name="inspect_research_process", arguments={})
+            tool_calls=(ModelToolCall(name="inspect_research_process", arguments={}),)
         ),
         ModelTurn(
             content=(
@@ -2961,9 +2966,10 @@ class _ObjectiveAnalysisModel:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         assert messages
-        if self.turns[0].tool_call is not None:
+        if self.turns[0].tool_calls != ():
             assert {item.name for item in tool_specs} == {
                 "start_objective_analysis"
             }
@@ -2985,13 +2991,13 @@ async def test_agent_starts_objective_analysis_only_after_exact_approval() -> No
     model = _ObjectiveAnalysisModel(
         ModelTurn(
             content="This question is ready for your approval.",
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="start_objective_analysis",
                 arguments={
                     "objective_id": "objective-agent",
                     "document_ids": ["paper-1"],
                 },
-            ),
+            ),),
         ),
         ModelTurn(content="The question is queued for evidence analysis."),
     )
@@ -3670,7 +3676,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
             self.turns = deque(
                 (
                     ModelTurn(
-                        tool_call=ModelToolCall(
+                        tool_calls=(ModelToolCall(
                             name="preview_research_scope",
                             arguments={
                                 "question": objective.question,
@@ -3678,10 +3684,10 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                                 "variables": ["laser power", "scan speed"],
                                 "outcomes": ["ductility"],
                             },
-                        )
+                        ),)
                     ),
                     ModelTurn(
-                        tool_call=ModelToolCall(
+                        tool_calls=(ModelToolCall(
                             name="create_objective_candidate",
                             arguments={
                                 "question": objective.question,
@@ -3690,28 +3696,29 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                                 "outcomes": ["ductility"],
                                 "seed_document_ids": ["paper-1"],
                             },
-                        )
+                        ),)
                     ),
                     ModelTurn(
-                        tool_call=ModelToolCall(
+                        tool_calls=(ModelToolCall(
                             name="start_objective_analysis",
                             arguments={
                                 "objective_id": "objective-agent",
                                 "document_ids": ["paper-1"],
                             },
-                        )
+                        ),)
                     ),
                     ModelTurn(
-                        tool_call=ModelToolCall(
+                        tool_calls=(ModelToolCall(
                             name="inspect_objective_analysis",
                             arguments={"objective_id": "objective-agent"},
-                        )
+                        ),)
                     ),
                     ModelTurn(content="Evidence analysis is running for the approved question."),
                 )
             )
 
-        def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+        def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+            messages = context.messages
             assert messages
             next_turn = self.turns[0]
             expected = {
@@ -3720,10 +3727,10 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                 "start_objective_analysis",
                 "inspect_objective_analysis",
             }
-            if next_turn.tool_call is not None:
-                if next_turn.tool_call.name == "start_objective_analysis":
+            if next_turn.tool_calls != ():
+                if next_turn.tool_calls[0].name == "start_objective_analysis":
                     expected.remove("create_objective_candidate")
-                elif next_turn.tool_call.name == "inspect_objective_analysis":
+                elif next_turn.tool_calls[0].name == "inspect_objective_analysis":
                     expected.difference_update(
                         {"create_objective_candidate", "start_objective_analysis"}
                     )
@@ -3880,13 +3887,13 @@ async def test_agent_uses_collection_context_then_records_drafts_before_final_an
     collection_service = _CollectionService()
     model = _Model(
         ModelTurn(
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="get_collection_context",
                 arguments={},
-            )
+            ),)
         ),
         ModelTurn(
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="propose_objective_drafts",
                 arguments={
                     "drafts": [
@@ -3898,7 +3905,7 @@ async def test_agent_uses_collection_context_then_records_drafts_before_final_an
                         }
                     ]
                 },
-            )
+            ),)
         ),
         ModelTurn(content="I prepared one focused Objective draft for your review."),
     )

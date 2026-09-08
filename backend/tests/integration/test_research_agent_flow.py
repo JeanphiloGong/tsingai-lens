@@ -34,7 +34,8 @@ class _Model:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         assert messages
         latest_user = next(
             message
@@ -46,10 +47,9 @@ class _Model:
         elif "collection contain" in latest_user.content:
             assert {item.name for item in tool_specs} == {"get_collection_context"}
         elif any(
-            message.tool_name == "create_objective_candidate"
-            and message.tool_call_id
+            request.name == "create_objective_candidate"
             for message in messages
-            if message.role == "assistant"
+            for request in message.tool_calls
         ) and any(
             message.tool_result is not None
             and message.tool_result.status in {"succeeded", "queued"}
@@ -141,20 +141,20 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="get_collection_context",
                 arguments={},
-            )
+            ),)
         ),
         ModelTurn(content="This collection is ready for a focused research question."),
         ModelTurn(
             content="I prepared the exact candidate for your approval.",
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="create_objective_candidate",
                 arguments={
                     "question": "How does energy input affect grain morphology?"
                 },
-            ),
+            ),),
         ),
         ModelTurn(content="The candidate was created and still requires review."),
     )

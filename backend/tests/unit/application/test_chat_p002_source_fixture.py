@@ -355,18 +355,21 @@ class _WriteModel:
             (
                 ModelTurn(
                     content="I prepared the source-grounded Evidence for approval.",
-                    tool_call=ModelToolCall(
+                    tool_calls=(ModelToolCall(
                         name="create_evidence_version",
                         arguments=arguments,
-                    ),
+                    ),),
                 ),
                 ModelTurn(content="The approved Evidence draft was saved."),
             )
         )
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        messages = context.messages
         assert messages
-        assert {item.name for item in tool_specs} == {"create_evidence_version"}
+        assert {item.name for item in tool_specs} == (
+            {"create_evidence_version"} if len(self.turns) == 2 else set()
+        )
         return self.turns.popleft()
 
 
@@ -385,6 +388,7 @@ async def test_p002_evidence_write_stays_approval_gated() -> None:
                     evidence_id="evidence-p002-authored",
                     page_numbers=(8,),
                     supports_finding=True,
+                    warnings=(),
                     to_record=lambda: {
                         "evidence_id": "evidence-p002-authored",
                         "source_ref": "tbl_doc_ef59d1f3a006_2_table_2",
@@ -451,6 +455,7 @@ async def test_p002_evidence_write_stays_approval_gated() -> None:
         claimed_call=approved.start("2026-08-19T00:01:01+00:00"),
     )
     assert completed.status.value == "completed"
+    assert completed.tool_results[0].status.value == "succeeded"
     assert len(calls) == 1
     assert calls[0]["document_id"] == "doc_ef59d1f3a006"
     assert calls[0]["reported_result"]["direction"] == "increase"

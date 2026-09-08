@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat import ChatModelContext
+
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from application.chat import ToolSpec
 from application.chat.model import (
+    ModelUsage,
     ModelResponseError,
     ModelTurn,
     RESEARCH_AGENT_PROMPT_VERSION,
@@ -70,7 +73,7 @@ def _message() -> ChatMessage:
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v13.10"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v14.0"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -149,14 +152,46 @@ def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
     client, completions = _client(_completion(content="你好，我可以帮助分析文献。"))
     model = OpenAIChatModel(client=client, model="test-model")
 
-    turn = model.respond(messages=(_message(),), tool_specs=())
+    turn = model.respond(context=ChatModelContext((_message(),)), tool_specs=())
 
     assert turn.content == "你好，我可以帮助分析文献。"
-    assert turn.tool_call is None
+    assert turn.tool_calls == ()
     request = completions.calls[0]
     assert request["messages"][0]["role"] == "system"
     assert request["messages"][1] == {"role": "user", "content": "你好"}
     assert "tools" not in request
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_provider_usage_includes_usage_only_stream_chunk(stream: bool) -> None:
+    usage = SimpleNamespace(prompt_tokens=120, completion_tokens=30, total_tokens=150)
+    response = _completion(content="Done")
+    response.usage = usage
+    client, _ = _client(
+        [_stream_chunk(content="Done"), _stream_chunk(usage=usage)] if stream else response
+    )
+
+    turn = OpenAIChatModel(client=client, model="test-model").respond(
+        context=ChatModelContext((_message(),)), tool_specs=(),
+        text_delta_callback=(lambda _text: None) if stream else None,
+    )
+
+    assert turn.usage == ModelUsage(120, 30, 150)
+
+
+def test_rollover_is_a_separate_system_message_without_mutating_history() -> None:
+    messages = (_message(),)
+    context = ChatModelContext(messages, '{"entries":[{"source_ref":"methods-1"}]}')
+    client, completions = _client(_completion(content="Re-read the Source."))
+
+    OpenAIChatModel(client=client, model="test-model").respond(context=context, tool_specs=())
+
+    provider_messages = completions.calls[0]["messages"]
+    assert [item["role"] for item in provider_messages] == ["system", "system", "user"]
+    assert "deterministic lineage" in provider_messages[1]["content"]
+    assert context.rollover_summary in provider_messages[1]["content"]
+    assert context.messages == messages
+    assert messages[0].content == "你好"
 
 
 def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence() -> None:
@@ -189,7 +224,7 @@ def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence()
         ),
     )
 
-    model.respond(messages=(message,), tool_specs=())
+    model.respond(context=ChatModelContext((message,)), tool_specs=())
 
     provider_content = completions.calls[0]["messages"][1]["content"]
     assert "USER-SELECTED SOURCE CONTEXT" in provider_content
@@ -218,13 +253,13 @@ def test_openai_chat_model_parses_one_typed_tool_call() -> None:
         input_model=_NoArguments,
     )
 
-    turn = model.respond(messages=(_message(),), tool_specs=(spec,))
+    turn = model.respond(context=ChatModelContext((_message(),)), tool_specs=(spec,))
 
-    assert turn.tool_call is not None
-    assert turn.tool_call.name == "get_collection_context"
-    assert turn.tool_call.arguments == {"include_documents": True}
+    assert turn.tool_calls != ()
+    assert turn.tool_calls[0].name == "get_collection_context"
+    assert turn.tool_calls[0].arguments == {"include_documents": True}
     request = completions.calls[0]
-    assert request["parallel_tool_calls"] is False
+    assert request["parallel_tool_calls"] is True
     assert request["tools"][0]["function"]["name"] == "get_collection_context"
 
 
@@ -246,13 +281,15 @@ def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
     deltas: list[str] = []
 
     turn = model.respond(
-        messages=(_message(),),
+        context=ChatModelContext((_message(),)),
         tool_specs=(),
         text_delta_callback=deltas.append,
     )
 
     assert deltas == ["这批", "论文"]
-    assert turn == ModelTurn(content="这批论文")
+    assert turn.content == "这批论文"
+    assert turn.usage is not None
+    assert turn.usage.total_tokens == 12
     request = completions.calls[0]
     assert request["stream"] is True
     assert request["stream_options"] == {"include_usage": True}
@@ -282,14 +319,14 @@ def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
     model = OpenAIChatModel(client=client, model="test-model")
 
     turn = model.respond(
-        messages=(_message(),),
+        context=ChatModelContext((_message(),)),
         tool_specs=(),
         text_delta_callback=lambda _content: None,
     )
 
-    assert turn.tool_call is not None
-    assert turn.tool_call.name == "get_collection_context"
-    assert turn.tool_call.arguments == {}
+    assert turn.tool_calls != ()
+    assert turn.tool_calls[0].name == "get_collection_context"
+    assert turn.tool_calls[0].arguments == {}
 
 
 def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
@@ -306,11 +343,13 @@ def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
     client, _completions = _client(_completion(tool_calls=[first, second]))
     model = OpenAIChatModel(client=client, model="test-model")
 
-    turn = model.respond(messages=(_message(),), tool_specs=())
+    turn = model.respond(context=ChatModelContext((_message(),)), tool_specs=())
 
-    assert turn.tool_call is not None
-    assert turn.tool_call.name == "preview_research_scope"
-    assert turn.tool_call.arguments == {"outcomes": ["ductility"]}
+    assert turn.tool_calls != ()
+    assert turn.tool_calls[0].name == "preview_research_scope"
+    assert turn.tool_calls[0].arguments == {"outcomes": ["ductility"]}
+    assert len(turn.tool_calls) == 2
+    assert turn.tool_calls[1].arguments == {"outcomes": ["strength"]}
 
 
 def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() -> None:
@@ -338,14 +377,16 @@ def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() ->
     model = OpenAIChatModel(client=client, model="test-model")
 
     turn = model.respond(
-        messages=(_message(),),
+        context=ChatModelContext((_message(),)),
         tool_specs=(),
         text_delta_callback=lambda _content: None,
     )
 
-    assert turn.tool_call is not None
-    assert turn.tool_call.name == "preview_research_scope"
-    assert turn.tool_call.arguments == {"outcomes": ["ductility"]}
+    assert turn.tool_calls != ()
+    assert turn.tool_calls[0].name == "preview_research_scope"
+    assert turn.tool_calls[0].arguments == {"outcomes": ["ductility"]}
+    assert len(turn.tool_calls) == 2
+    assert turn.tool_calls[1].arguments == {"outcomes": ["strength"]}
 
 
 def test_openai_chat_model_rejects_non_object_tool_arguments() -> None:
@@ -358,8 +399,8 @@ def test_openai_chat_model_rejects_non_object_tool_arguments() -> None:
     client, _completions = _client(_completion(tool_calls=[invalid]))
     model = OpenAIChatModel(client=client, model="test-model")
 
-    with pytest.raises(ModelResponseError, match="JSON object") as exc_info:
-        model.respond(messages=(_message(),), tool_specs=())
+    with pytest.raises(ModelResponseError, match="invalid tool arguments") as exc_info:
+        model.respond(context=ChatModelContext((_message(),)), tool_specs=())
 
     assert exc_info.value.reason == "invalid_tool_arguments"
 
@@ -372,7 +413,7 @@ def test_openai_chat_model_marks_empty_stream_as_invalid_response() -> None:
 
     with pytest.raises(ModelResponseError) as exc_info:
         model.respond(
-            messages=(_message(),),
+            context=ChatModelContext((_message(),)),
             tool_specs=(),
             text_delta_callback=lambda _content: None,
         )
@@ -392,7 +433,7 @@ def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_response
 
     with pytest.raises(ModelResponseError) as exc_info:
         model.respond(
-            messages=(_message(),),
+            context=ChatModelContext((_message(),)),
             tool_specs=(),
             text_delta_callback=lambda _content: None,
         )

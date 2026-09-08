@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol
 
 from application.chat.capabilities.contracts import ToolSpec
-from domain.chat import ChatMessage
+from application.chat.context_builder import ChatModelContext
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v13.10"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v14.0"
 RESEARCH_AGENT_SYSTEM_PROMPT = """You are the TsingAI-Lens research agent. You collaborate with a researcher across a traceable research cycle, from forming a research objective to analyzing evidence, planning follow-up research, and validating the resulting claims.
 
 TASK
@@ -72,14 +72,14 @@ DECISION PROCESS
    remove, rename, or disambiguate a paper by its visible filename, title,
    author, or year. Preserve that choice and read only the newly selected
    paper's relevant Sources.
-7. Call exactly one relevant registered tool only when the user needs facts
+7. Request independent reads together, or one draft/write action, only when the user needs facts
    about the current collection's contents, papers, research questions, or
    analyzed results, or requests an action that Lens must perform.
 8. After a tool result, translate the supported result into its research meaning
    before offering a useful next step. Return to the active user request after
    every observation and complete every explicitly requested deliverable. Use
    only the completed trajectory and the conversation to answer or choose the
-   next single tool; never restart the greeting or capability introduction in
+   next read batch or single action; never restart the greeting or capability introduction in
    the middle of a research task.
 9. When data is absent, limited, conflicting, or a tool failed, state that
    boundary plainly and distinguish what is known from what still needs review.
@@ -306,7 +306,8 @@ EXAMPLES
   not yet provide enough support and name the next useful inspection or analysis.
 
 OUTPUT
-Return either a useful final answer or exactly one registered tool call.
+Return a final answer with no calls, an ordered batch of independent reads,
+or one draft/write call. Never mix reads with draft/write in one batch.
 """
 
 
@@ -339,21 +340,36 @@ class ModelResponseError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ModelUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    def __post_init__(self) -> None:
+        if min(self.prompt_tokens, self.completion_tokens, self.total_tokens) < 0:
+            raise ValueError("model usage cannot be negative")
+        if self.total_tokens < self.prompt_tokens + self.completion_tokens:
+            raise ValueError("total tokens cannot be smaller than token parts")
+
+
+@dataclass(frozen=True)
 class ModelTurn:
     content: str = ""
-    tool_call: ModelToolCall | None = None
+    tool_calls: tuple[ModelToolCall, ...] = ()
+    usage: ModelUsage | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "content", str(self.content or "").strip())
-        if not self.content and self.tool_call is None:
-            raise ValueError("model turn requires content or one tool call")
+        object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
+        if not self.content and not self.tool_calls:
+            raise ValueError("model turn requires content or tool calls")
 
 
 class ChatModel(Protocol):
     def respond(
         self,
         *,
-        messages: tuple[ChatMessage, ...],
+        context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
     ) -> ModelTurn: ...
@@ -364,6 +380,7 @@ __all__ = [
     "ModelResponseError",
     "ModelToolCall",
     "ModelTurn",
+    "ModelUsage",
     "RESEARCH_AGENT_PROMPT_VERSION",
     "RESEARCH_AGENT_SYSTEM_PROMPT",
 ]

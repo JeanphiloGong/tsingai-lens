@@ -49,6 +49,10 @@ _STEP_LIMIT_MESSAGE = (
     "I reached the Research Agent step limit before completing this request. "
     "Please narrow the question or continue in a new message."
 )
+_REQUIRED_ACTION_FAILURE_MESSAGE = (
+    "I could not complete the required source-backed research action, so I will "
+    "not present an unsupported result. Please retry or narrow the request."
+)
 _MODEL_RESPONSE_RETRY_LIMIT = 1
 _REQUIRED_ACTION_RETRY_LIMIT = 1
 _FINAL_ANSWER_INSTRUCTION = (
@@ -74,9 +78,14 @@ _SOURCE_READ_CAPABILITIES = {
     "read_source",
     "inspect_table",
 }
+_SOURCE_GROUNDED_CAPABILITIES = {
+    *_COLLECTION_READ_CAPABILITIES,
+    "search_sources",
+    "read_source",
+    "inspect_table",
+}
 _PROCESS_CAPABILITIES = {
     "get_collection_context",
-    "browse_collection_papers",
     "inspect_research_process",
     "inspect_objective_analysis",
 }
@@ -109,6 +118,12 @@ _RESEARCH_PLAN_CAPABILITIES = {
     "inspect_published_finding",
     "assess_objective_quality",
     "propose_research_plan",
+}
+_RESEARCH_PLAN_READ_CAPABILITIES = {
+    "get_collection_context",
+    "query_published_findings",
+    "inspect_published_finding",
+    "assess_objective_quality",
 }
 _WRITE_CAPABILITIES = {
     "start_research_process",
@@ -179,8 +194,6 @@ _PAPER_TERMS = (
     "source",
     "表格",
     "图注",
-    "查看",
-    "看看",
     "阅读",
     "读取",
 )
@@ -192,6 +205,35 @@ _COMPARISON_TERMS = (
     "supports",
     "support",
     "comparable",
+)
+_SOURCE_GROUNDED_TERMS = (
+    "根据这些论文",
+    "根据论文",
+    "基于这些论文",
+    "基于论文",
+    "文献中",
+    "文献依据",
+    "论文依据",
+    "原文依据",
+    "搜索相关论文",
+    "检索相关论文",
+    "搜索论文",
+    "检索论文",
+    "说说你的看法",
+    "谈谈你的看法",
+    "谈谈看法",
+    "你的判断",
+    "谈谈判断",
+    "给出判断",
+    "提出思路",
+    "给出思路",
+    "研究启发",
+    "based on these papers",
+    "based on the papers",
+    "from the literature",
+    "literature-based",
+    "literature based",
+    "what do you think",
 )
 _SOURCE_DETAIL_TERMS = (
     "原文",
@@ -294,6 +336,12 @@ _PLAN_TERMS = (
     "plan",
 )
 _PROCESS_TERMS = (
+    "当前状态",
+    "目前状态",
+    "现在的状态",
+    "current status",
+    "当前情况",
+    "现在怎么样",
     "进度",
     "论文处理状态",
     "文档处理状态",
@@ -644,6 +692,22 @@ class ResearchAgentRunner:
                         required_tool,
                     )
                     continue
+                if turn.tool_call is None and required_tool is not None:
+                    logger.warning(
+                        "Research Agent required action not completed tool=%s",
+                        required_tool,
+                    )
+                    messages.append(
+                        self._assistant(context, _REQUIRED_ACTION_FAILURE_MESSAGE)
+                    )
+                    await self._checkpoint(checkpoint, messages, calls, results)
+                    return self._result(
+                        AgentRunStatus.FAILED,
+                        messages,
+                        calls,
+                        results,
+                        "required_research_action_not_completed",
+                    )
                 break
 
             if turn.tool_call is None:
@@ -902,6 +966,13 @@ class ResearchAgentRunner:
             and result.get("next_offset") is None
             for result in successful_results.get("browse_collection_papers", ())
         )
+        source_grounded_intent = any(
+            term in user_text for term in _SOURCE_GROUNDED_TERMS
+        )
+        if source_grounded_intent and not successful_results.get(
+            "browse_collection_papers"
+        ):
+            allowed_names.intersection_update({"browse_collection_papers"})
         if completed_browse:
             allowed_names.discard("browse_collection_papers")
             allowed_names.discard("get_collection_context")
@@ -921,7 +992,7 @@ class ResearchAgentRunner:
         # inspection path.
         comparison_intent = any(term in user_text for term in _COMPARISON_TERMS)
         if (
-            comparison_intent
+            (comparison_intent or source_grounded_intent)
             and successful_results.get("browse_collection_papers")
             and not successful_results.get("search_sources")
             and not self._has_successful_exact_source_read(successful_results)
@@ -1069,6 +1140,10 @@ class ResearchAgentRunner:
             return None
         required_tool = tool_names[0]
         if required_tool in {
+            "browse_collection_papers",
+            "search_sources",
+            "read_source",
+            "inspect_table",
             "inspect_research_process",
             "inspect_objective_analysis",
             "inspect_published_finding",
@@ -1275,11 +1350,14 @@ class ResearchAgentRunner:
         finding_record_intent = mentions(_FINDING_RECORD_TERMS)
         plan_intent = mentions(_PLAN_TERMS)
         process_intent = mentions(_PROCESS_TERMS)
+        source_grounded_intent = mentions(_SOURCE_GROUNDED_TERMS)
 
         if paper_intent:
             allowed.update(_COLLECTION_READ_CAPABILITIES)
         if has_source_context or source_intent:
             allowed.update(_SOURCE_READ_CAPABILITIES)
+        if paper_intent and source_grounded_intent:
+            allowed.update(_SOURCE_GROUNDED_CAPABILITIES)
         if objective_intent:
             allowed.update(_OBJECTIVE_CAPABILITIES)
             if mentions(
@@ -1322,9 +1400,11 @@ class ResearchAgentRunner:
                 elif tool_name in _OBJECTIVE_CAPABILITIES:
                     allowed.update(_OBJECTIVE_CAPABILITIES)
                 elif tool_name in _FINDING_CAPABILITIES:
-                    allowed.update(_FINDING_CAPABILITIES)
+                    allowed.update(_FINDING_READ_CAPABILITIES)
                 elif tool_name in _RESEARCH_PLAN_CAPABILITIES:
-                    allowed.update(_RESEARCH_PLAN_CAPABILITIES)
+                    allowed.update(_RESEARCH_PLAN_READ_CAPABILITIES)
+                elif tool_name in _PROCESS_CAPABILITIES:
+                    allowed.update(_PROCESS_CAPABILITIES)
 
         persist_intent = mentions(_PERSIST_TERMS) and not any(
             phrase in user_text for phrase in _NO_WRITE_PHRASES

@@ -2310,6 +2310,25 @@ async def test_published_findings_reads_only_published_objective_versions() -> N
     )
 
 
+def test_published_finding_reads_keep_model_observations_bounded() -> None:
+    query_model = QueryPublishedFindingsCapability.spec.input_model
+    inspect_model = InspectPublishedFindingCapability.spec.input_model
+
+    assert query_model().evidence_limit_per_objective == 8
+    assert inspect_model(
+        objective_id="objective-1",
+        finding_id="finding-1",
+    ).evidence_limit == 12
+    with pytest.raises(ValidationError):
+        query_model(evidence_limit_per_objective=13)
+    with pytest.raises(ValidationError):
+        inspect_model(
+            objective_id="objective-1",
+            finding_id="finding-1",
+            evidence_limit=21,
+        )
+
+
 async def test_agent_reads_one_complete_published_finding_before_curation() -> None:
     analysis_service = _AnalysisService()
     capability = InspectPublishedFindingCapability(

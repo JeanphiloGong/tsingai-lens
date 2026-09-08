@@ -463,7 +463,9 @@ const translations: Record<Language, Translations> = {
 			evidenceAuthoringRejected: 'The proposed Evidence was not published.',
 			researchPlanRejected: 'The proposed research plan was not saved.',
 			agentObjectiveAnalysisRejected: 'The proposed Agent analysis was not published.',
-			turnFailed: 'The Agent turn stopped with error: {code}'
+			turnFailed: 'The Agent turn stopped with error: {code}',
+			turnLimited:
+				'The Agent reached its reading limit; the answer above is based on the completed inspection.'
 		},
 		research: {
 			emptyValue: '--',
@@ -3026,7 +3028,8 @@ const translations: Record<Language, Translations> = {
 			evidenceAuthoringRejected: '已取消发布拟议的 Evidence。',
 			researchPlanRejected: '已取消保存拟议的研究方案。',
 			agentObjectiveAnalysisRejected: '已取消发布 Agent 拟议的分析。',
-			turnFailed: 'Agent 本轮执行停止，错误：{code}'
+			turnFailed: 'Agent 本轮执行停止，错误：{code}',
+			turnLimited: 'Agent 已达到本轮阅读上限；上面的回答仅基于已经完成的检查。'
 		},
 		research: {
 			emptyValue: '--',

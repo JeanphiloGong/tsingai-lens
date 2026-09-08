@@ -22,7 +22,7 @@ class QueryPublishedFindingsArguments(BaseModel):
 
     objective_ids: list[ObjectiveId] = Field(default_factory=list, max_length=12)
     finding_limit_per_objective: int = Field(default=8, ge=1, le=20)
-    evidence_limit_per_objective: int = Field(default=8, ge=1, le=20)
+    evidence_limit_per_objective: int = Field(default=8, ge=1, le=12)
 
     @field_validator("objective_ids")
     @classmethod
@@ -45,7 +45,7 @@ class InspectPublishedFindingArguments(BaseModel):
     finding_id: str = Field(min_length=1, max_length=128)
     analysis_version: int | None = Field(default=None, ge=1)
     evidence_offset: int = Field(default=0, ge=0)
-    evidence_limit: int = Field(default=40, ge=1, le=100)
+    evidence_limit: int = Field(default=12, ge=1, le=20)
 
 
 class QueryPublishedFindingsCapability:

@@ -70,7 +70,7 @@ def _message() -> ChatMessage:
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v13.7"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v13.10"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -79,7 +79,9 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "never restart the greeting or capability introduction" in prompt
     assert "Use onboarding only for an actual greeting" in prompt
     assert "A paper survey and a Source search are navigation steps" in prompt
+    assert "complete, untruncated canonical content and its digest" in prompt
     assert "the actual transient plan draft before answering" in prompt
+    assert "Never describe an unmentioned value as researcher-specified" in prompt
     assert "insufficient map" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "inspect that paper's Sources" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "it is not verified Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -130,6 +132,7 @@ def test_prompt_separates_product_questions_from_collection_reads() -> None:
     assert "browse the visible paper" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "screening only" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "researcher may add" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "one highest-information clarification question" in RESEARCH_AGENT_SYSTEM_PROMPT
 
 
 def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:

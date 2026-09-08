@@ -278,6 +278,141 @@ async def test_literature_screening_receives_only_collection_read_capabilities()
     ]
 
 
+async def test_literature_based_opinion_exposes_source_reading_capabilities() -> None:
+    browse = _Capability(
+        "browse_collection_papers",
+        ToolRisk.READ,
+        result_data={
+            "paper_total": 2,
+            "returned_paper_count": 2,
+            "next_offset": None,
+            "papers": [{"document_id": "paper-1"}, {"document_id": "paper-2"}],
+        },
+    )
+    search = _Capability(
+        "search_sources",
+        ToolRisk.READ,
+        _QuestionArguments,
+        result_data={
+            "match_total": 1,
+            "matches": [
+                {
+                    "document_id": "paper-1",
+                    "source_kind": "text_window",
+                    "source_ref": "results-1",
+                }
+            ],
+        },
+    )
+    read = _Capability("read_source", ToolRisk.READ, _QuestionArguments)
+    model = _Model(
+        ModelTurn(content="孔隙率可能随能量输入降低。"),
+        ModelTurn(
+            tool_call=ModelToolCall(name="browse_collection_papers", arguments={})
+        ),
+        ModelTurn(
+            tool_call=ModelToolCall(
+                name="search_sources",
+                arguments={"question": "孔隙率"},
+            )
+        ),
+        ModelTurn(
+            tool_call=ModelToolCall(
+                name="read_source",
+                arguments={"question": "results-1"},
+            )
+        ),
+        ModelTurn(content="已读取结果原文；目前只能对第一篇论文形成有依据的初步判断。"),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(
+            (
+                _Capability("get_collection_context", ToolRisk.READ),
+                browse,
+                search,
+                read,
+            )
+        ),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="根据这些论文中关于孔隙率的内容，说说你的判断并提出思路。",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert [call.name for call in result.tool_calls] == [
+        "browse_collection_papers",
+        "search_sources",
+        "read_source",
+    ]
+    assert model.tool_spec_names[:4] == [
+        ("browse_collection_papers",),
+        ("browse_collection_papers",),
+        ("search_sources",),
+        ("read_source",),
+    ]
+
+    explicit_search = ResearchAgentRunner._capability_names_for_intent(
+        "请搜索相关论文然后谈谈判断。",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+    assert "search_sources" in explicit_search
+
+
+async def test_literature_based_opinion_fails_if_required_read_is_refused() -> None:
+    unsupported_answer = "不读取原文也可以判断能量输入降低了孔隙率。"
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(content=unsupported_answer),
+            ModelTurn(content=unsupported_answer),
+        ),
+        capabilities=CapabilityRegistry(
+            (_Capability("browse_collection_papers", ToolRisk.READ),)
+        ),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="根据这些论文谈谈能量输入对孔隙率的影响。",
+    )
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "required_research_action_not_completed"
+    assert result.messages[-1].content != unsupported_answer
+    assert "will not present an unsupported" in result.messages[-1].content
+
+
+async def test_continuation_does_not_restore_finding_draft_capabilities() -> None:
+    allowed = ResearchAgentRunner._capability_names_for_intent(
+        "继续看一下",
+        has_source_context=False,
+        prior_tool_names={"query_published_findings"},
+    )
+
+    assert "query_published_findings" in allowed
+    assert "inspect_published_finding" in allowed
+    assert "create_finding_draft" not in allowed
+    assert "create_evidence_draft" not in allowed
+    assert "derive_objective" not in allowed
+
+
+async def test_standalone_status_query_does_not_expose_paper_browsing() -> None:
+    allowed = ResearchAgentRunner._capability_names_for_intent(
+        "查看当前状态",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert "inspect_research_process" in allowed
+    assert "get_collection_context" in allowed
+    assert "browse_collection_papers" not in allowed
+
+
 async def test_research_plan_question_does_not_expose_finding_writes() -> None:
     model = _Model(ModelTurn(content="我会先根据现有证据拟定研究方案草案。"))
     runner = ResearchAgentRunner(
@@ -365,7 +500,6 @@ async def test_finding_review_does_not_expose_mutation_capabilities_without_save
     assert model.tool_spec_names == [
         (
             "get_collection_context",
-            "browse_collection_papers",
             "query_published_findings",
             "inspect_published_finding",
             "inspect_objective_analysis",

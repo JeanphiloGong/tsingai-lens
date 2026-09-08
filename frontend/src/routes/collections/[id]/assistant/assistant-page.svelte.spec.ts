@@ -549,6 +549,42 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByLabelText('Research activity')).not.toBeInTheDocument();
 	});
 
+	it('keeps a bounded final answer visible without reporting it as a failed turn', async () => {
+		installApi({
+			messageTurn: {
+				status: 'step_limit_reached',
+				messages: [
+					message('msg_user_limited', 'user', 'Compare the papers'),
+					message(
+						'msg_assistant_limited',
+						'assistant',
+						'The inspected Sources support a preliminary comparison; two papers remain unread.'
+					)
+				],
+				pending_approval: null,
+				error_code: 'agent_step_limit_reached'
+			}
+		});
+
+		await send('Compare the papers');
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'The inspected Sources support a preliminary comparison; two papers remain unread.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'The Agent reached its reading limit; the answer above is based on the completed inspection.'
+				)
+			)
+			.toBeInTheDocument();
+		expect(document.querySelector('[role="alert"]')).toBeNull();
+	});
+
 	it('allows a second question after the first turn is persisted', async () => {
 		installApi({
 			messageTurn: {
@@ -1637,7 +1673,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and analyze' }))
-				.toBeInTheDocument();
+			.toBeInTheDocument();
 	});
 
 	it('requires a separate approval to confirm a research question without starting analysis', async () => {

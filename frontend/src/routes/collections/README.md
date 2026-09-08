@@ -54,7 +54,9 @@ This node owns the Collection route family.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
-  write approval. A pending Source from the document reader is reviewable and
+  write approval. A bounded final answer remains visible with a limited-reading
+  notice when the Agent reaches its step limit; only a failed turn is presented
+  as an error. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.
   Its research-process capability projects the same current Documents and
   persisted per-paper preparation tasks used by the Collection page; Chat does

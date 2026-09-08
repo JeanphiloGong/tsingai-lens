@@ -463,8 +463,11 @@
 		if (turn.status === 'rejected') {
 			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
-		if (turn.status === 'failed' || turn.status === 'step_limit_reached') {
+		if (turn.status === 'failed') {
 			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
+		}
+		if (turn.status === 'step_limit_reached') {
+			notice = $t('researchAgent.turnLimited');
 		}
 		if (session) {
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;

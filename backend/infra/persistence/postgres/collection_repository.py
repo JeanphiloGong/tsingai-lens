@@ -32,7 +32,6 @@ class PostgresCollectionRepository:
                     name=record.name,
                     description=record.description,
                     status=record.status,
-                    paper_count=0,
                     created_at=_datetime(record.created_at),
                     updated_at=_datetime(record.updated_at),
                 )
@@ -101,7 +100,6 @@ class PostgresCollectionRepository:
             row.name = record.name
             row.description = record.description
             row.status = record.status
-            row.paper_count = len(record.documents)
             row.updated_at = _datetime(record.updated_at)
             return True
 
@@ -155,7 +153,6 @@ class PostgresCollectionRepository:
                 _document_row(collection_id, item, next_order + position)
                 for position, item in enumerate(documents)
             )
-            collection.paper_count = len(existing_ids) + len(documents)
             collection.status = "uploaded"
             collection.updated_at = _datetime(updated_at)
 
@@ -175,7 +172,6 @@ class PostgresCollectionRepository:
             source_row = await session.scalar(
                 select(DocumentSource).where(
                     DocumentSource.document_id == record.document_id,
-                    DocumentSource.collection_id == row.collection_id,
                 )
             )
             if source_row is not None:

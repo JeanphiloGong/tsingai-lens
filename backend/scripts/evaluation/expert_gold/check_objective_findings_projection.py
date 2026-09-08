@@ -1176,7 +1176,6 @@ async def _resolve_manifest_document_ids(
                         Document.document_id == DocumentSource.document_id,
                     )
                     .where(
-                        DocumentSource.collection_id == collection_id,
                         Document.collection_id == collection_id,
                         Document.sha256.in_(expected_hashes),
                     )

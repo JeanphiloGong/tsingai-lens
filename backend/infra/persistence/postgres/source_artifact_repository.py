@@ -46,7 +46,6 @@ class PostgresSourceArtifactRepository:
         self._validate_document_aggregate(document)
         artifact = _artifact_payload(document)
         references = SourceReferenceSet()
-        tree = _tree_payload(collection_id, document, references)
         metadata = dict(document.metadata)
         serialized = _canonical_json(artifact)
         source_fingerprint = str(
@@ -60,11 +59,9 @@ class PostgresSourceArtifactRepository:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{document.document_id}"
                 )
-            row = await session.get(DocumentSource, _source_id(document.document_id))
+            row = await session.get(DocumentSource, document.document_id)
             values = {
-                "source_id": _source_id(document.document_id),
                 "document_id": document.document_id,
-                "collection_id": collection_id,
                 "source_format": str(
                     metadata.get("source_format") or metadata.get("file_type") or "unknown"
                 ),
@@ -72,7 +69,6 @@ class PostgresSourceArtifactRepository:
                 "parser_version": str(metadata.get("parser_version") or "unknown"),
                 "source_fingerprint": source_fingerprint,
                 "artifact_json": {**artifact, "references": _references_payload(references)},
-                "tree_json": tree,
                 "updated_at": now,
             }
             if row is None:
@@ -121,7 +117,6 @@ class PostgresSourceArtifactRepository:
                 select(DocumentSource)
                 .join(DocumentRow, DocumentRow.document_id == DocumentSource.document_id)
                 .where(
-                    DocumentSource.collection_id == collection_id,
                     DocumentRow.collection_id == collection_id,
                 )
                 .order_by(DocumentRow.document_order, DocumentSource.document_id)
@@ -258,14 +253,13 @@ class PostgresSourceArtifactRepository:
     ) -> None:
         self._validate_references(document_id, references)
         async with self.session_factory.begin() as session:
-            row = await session.get(DocumentSource, _source_id(document_id))
+            row = await session.get(DocumentSource, document_id)
             if row is None:
                 raise FileNotFoundError(f"source document not found: {document_id}")
             artifact = dict(row.artifact_json or {})
             document = _document_from_artifact(artifact)
             artifact["references"] = _references_payload(references)
             row.artifact_json = artifact
-            row.tree_json = _tree_payload(row.collection_id, document, references)
             row.updated_at = datetime.now(timezone.utc)
 
     async def read_collection_references(
@@ -282,7 +276,7 @@ class PostgresSourceArtifactRepository:
 
     async def _read_references_for_document(self, document_id: str) -> SourceReferenceSet:
         async with self.session_factory() as session:
-            row = await session.get(DocumentSource, _source_id(document_id))
+            row = await session.get(DocumentSource, document_id)
         if row is None:
             return SourceReferenceSet()
         return _references_from_payload(dict(row.artifact_json or {}).get("references"))
@@ -313,10 +307,6 @@ class PostgresSourceArtifactRepository:
             raise ValueError("Reference resolutions must resolve within their document")
         if any(item.reference_id not in reference_ids for item in references.candidates):
             raise ValueError("Reference candidates must resolve within their document")
-
-
-def _source_id(document_id: str) -> str:
-    return f"src_{document_id}"
 
 
 def _artifact_payload(document: SourceDocument) -> dict[str, Any]:
@@ -373,21 +363,6 @@ def _references_from_payload(value: Any) -> SourceReferenceSet:
         resolutions=tuple(SourceReferenceResolution.from_record(item) for item in payload.get("resolutions") or []),
         candidates=tuple(SourceReferenceCandidate.from_record(item) for item in payload.get("candidates") or []),
     )
-
-
-def _tree_payload(
-    collection_id: str,
-    document: SourceDocument,
-    references: SourceReferenceSet,
-) -> dict[str, Any]:
-    return build_source_document_tree(
-        collection_id=collection_id,
-        document=document,
-        blocks=document.blocks,
-        tables=document.tables,
-        figures=document.figures,
-        references=references,
-    ).to_record()
 
 
 def _merge_reference_sets(reference_sets: Iterable[SourceReferenceSet]) -> SourceReferenceSet:

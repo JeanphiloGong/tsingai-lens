@@ -128,15 +128,12 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
     async with collection_repository.session_factory.begin() as session:
         session.add(
             DocumentSource(
-                source_id=f"src_{document.document_id}",
                 document_id=document.document_id,
-                collection_id=collection.collection_id,
                 source_format="pdf",
                 parser_name="test-parser",
                 parser_version="source-runtime.v1",
                 source_fingerprint="a" * 64,
                 artifact_json={"blocks": [], "tables": [], "figures": []},
-                tree_json={"nodes": {}},
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )

@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0051"
+HEAD_REVISION = "20260908_0052"
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
@@ -49,7 +49,7 @@ def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_pa
         command.stamp(config, "20260908_0046")
         connection.execute(messages.insert().values(message_id="m1", session_id="s1", role="assistant", content="", tool_call_id="c1", tool_name="read_source", tool_arguments={"document_id": "p1"}))
         connection.execute(calls.insert().values(tool_call_id="c1", session_id="s1", assistant_message_id="m1", name="read_source", arguments={"document_id": "p1"}))
-        command.upgrade(config, "head")
+        command.upgrade(config, "7f4a0a872e9d")
         target_calls = Table("chat_tool_calls", MetaData(), autoload_with=connection)
         assert connection.execute(select(target_calls.c.position)).scalar_one() == 0
         assert "tool_arguments" not in {c["name"] for c in inspect(connection).get_columns("chat_messages")}
@@ -65,7 +65,7 @@ def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_pa
         assert old_message["tool_arguments"] == {"document_id": "p1"}
         connection.execute(messages.update().values(tool_arguments={"document_id": "wrong"}))
         with pytest.raises(RuntimeError, match="does not match durable calls"):
-            command.upgrade(config, "head")
+            command.upgrade(config, "7f4a0a872e9d")
     engine.dispose()
 
 
@@ -157,6 +157,24 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             "paper_map_generated_at",
         }.issubset(profile_columns)
         assert "document_sources" in expected
+        collection_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("collections")
+        }
+        assert "paper_count" not in collection_columns
+        assert {
+            "document_id",
+            "source_format",
+            "parser_name",
+            "parser_version",
+            "source_fingerprint",
+            "artifact_json",
+            "created_at",
+            "updated_at",
+        } == {
+            column["name"]
+            for column in inspect(connection).get_columns("document_sources")
+        }
         pipeline_run_columns = {
             column["name"]
             for column in inspect(connection).get_columns("pipeline_runs")
@@ -196,6 +214,106 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
 
+    engine.dispose()
+
+
+def test_redundant_source_and_collection_fields_are_removed_without_data_loss(tmp_path) -> None:
+    engine = create_engine(
+        URL.create("sqlite+pysqlite", database=str(tmp_path / "compact-source.sqlite"))
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    now = datetime(2026, 9, 8, 9, tzinfo=timezone.utc)
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260908_0051")
+        metadata = MetaData()
+        auth_users = Table("auth_users", metadata, autoload_with=connection)
+        collections = Table("collections", metadata, autoload_with=connection)
+        documents = Table("documents", metadata, autoload_with=connection)
+        sources = Table("document_sources", metadata, autoload_with=connection)
+        connection.exec_driver_sql(
+            "ALTER TABLE collections ADD COLUMN paper_count INTEGER NOT NULL DEFAULT 0"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE document_sources ADD COLUMN source_id VARCHAR(128)"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE document_sources ADD COLUMN collection_id VARCHAR(64)"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE document_sources ADD COLUMN tree_json JSON"
+        )
+        metadata.clear()
+        auth_users = Table("auth_users", metadata, autoload_with=connection)
+        collections = Table("collections", metadata, autoload_with=connection)
+        documents = Table("documents", metadata, autoload_with=connection)
+        sources = Table("document_sources", metadata, autoload_with=connection)
+        connection.execute(
+            auth_users.insert().values(
+                user_id="compact-user",
+                email="compact@example.com",
+                display_name=None,
+                password_hash="synthetic-password-hash",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            collections.insert().values(
+                collection_id="compact-collection",
+                owner_user_id="compact-user",
+                name="Compact collection",
+                description=None,
+                status="uploaded",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        connection.execute(
+            documents.insert().values(
+                document_id="compact-document",
+                collection_id="compact-collection",
+                original_filename="paper.pdf",
+                stored_filename="paper.pdf",
+                storage_key="compact-collection/paper.pdf",
+                sha256="a" * 64,
+                media_type="application/pdf",
+                status="ready",
+                size_bytes=10,
+                document_order=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        artifact = {"document": {"document_id": "compact-document"}, "blocks": []}
+        connection.execute(
+            sources.insert().values(
+                source_id="src_compact-document",
+                document_id="compact-document",
+                collection_id="compact-collection",
+                source_format="pdf",
+                parser_name="legacy-parser",
+                parser_version="legacy.v1",
+                source_fingerprint="b" * 64,
+                artifact_json=artifact,
+                tree_json={"nodes": {"root": {}}},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+        command.upgrade(config, "head")
+        compact_sources = Table("document_sources", MetaData(), autoload_with=connection)
+        source = connection.execute(select(compact_sources)).mappings().one()
+        assert source["document_id"] == "compact-document"
+        assert source["artifact_json"] == artifact
+        assert "source_id" not in compact_sources.c
+        assert "collection_id" not in compact_sources.c
+        assert "tree_json" not in compact_sources.c
+        assert "paper_count" not in {
+            column["name"]
+            for column in inspect(connection).get_columns("collections")
+        }
     engine.dispose()
 
 
@@ -434,7 +552,6 @@ def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
                 name="Profile map migration",
                 description=None,
                 status="idle",
-                paper_count=1,
                 created_at=now,
                 updated_at=now,
             )
@@ -563,7 +680,6 @@ def test_existing_0044_task_history_is_backfilled_as_one_pipeline_run(tmp_path) 
                 name="Migration collection",
                 description=None,
                 status="processing",
-                paper_count=1,
                 created_at=now,
                 updated_at=finished,
             )
@@ -738,7 +854,6 @@ def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> 
                 name="Legacy collection",
                 description=None,
                 status="idle",
-                paper_count=0,
                 created_at=now,
                 updated_at=now,
             )

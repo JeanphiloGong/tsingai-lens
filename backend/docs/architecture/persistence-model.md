@@ -202,9 +202,9 @@ erDiagram
   normalized Source tables before dropping them; migration `20260908_0044`
   moves preparation provenance to Source/Profile ownership. Migration
   `20260908_0045` backfills the former Task history into `pipeline_runs` and
-  removes `tasks` and `task_stages`; `20260908_0047`-`0051` merge lifecycle-local
-  Paper Map, Chat result, analysis-intermediate, discovery, and evaluation child
-  records into their lifecycle owners.
+  removes `tasks` and `task_stages`; `20260908_0047`-`0052` merge lifecycle-local
+  Paper Map, Chat result, analysis-intermediate, discovery, evaluation child,
+  and redundant Source/count storage into their lifecycle owners.
 
 ## Implementation Boundary
 

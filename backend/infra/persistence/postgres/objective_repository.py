@@ -1009,7 +1009,6 @@ class PostgresObjectiveRepository:
         row = await session.scalar(
             select(DocumentSource).where(
                 DocumentSource.document_id == evidence.document_id,
-                DocumentSource.collection_id == collection_id,
             )
         )
         if row is None:

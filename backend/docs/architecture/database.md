@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260908_0051`. The identity and fingerprint rules are
+and the Alembic head `20260908_0052`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 20 application tables and 197 mapped fields. A
+The current ORM metadata contains 20 application tables and 193 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -113,7 +113,7 @@ membership used by every downstream flow.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `collections` | `collection_id` | `owner_user_id` (`RESTRICT` on user deletion), name/description, status, paper count, and timestamps. `paper_count` is non-negative. |
+| `collections` | `collection_id` | `owner_user_id` (`RESTRICT` on user deletion), name/description, status, discovery state, and timestamps. The document count is derived from current `documents` rows. |
 | `documents` | `document_id` | Direct `collection_id` membership, original/stored names, object-store `storage_key`, SHA-256, media type, byte size, display order, and current preparation status. |
 
 The database has no public collection-membership join object and no
@@ -156,7 +156,7 @@ remain in the current schema.
 
 | Table family | Table | Stored structure |
 | --- | --- | --- |
-| Source aggregate | `document_sources` | Source identity, format/parser provenance, complete parsed artifact JSON, and tree JSON. The artifact contains document metadata, text units, blocks, tables/rows/cells, figures, and reference entries/mentions/resolutions/candidates. |
+| Source aggregate | `document_sources` | One document-keyed Source identity, format/parser provenance, and complete parsed artifact JSON. The artifact contains document metadata, text units, blocks, tables/rows/cells, figures, and reference entries/mentions/resolutions/candidates. |
 
 Source replacement is document-scoped and transactional. A successful retry
 replaces the current Source tree; its new fingerprint remains on the Source row
@@ -389,10 +389,11 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260908_0051`. Revisions `0044` and `0045` move preparation provenance and
+`20260908_0052`. Revisions `0044` and `0045` move preparation provenance and
 Task history into the current Source/Profile and Pipeline Run records.
-Revisions `0047`-`0051` merge Paper Maps, Chat results, Objective intermediate,
-discovery, and evaluation child records into their lifecycle owners. The current ORM metadata and
+Revisions `0047`-`0052` merge Paper Maps, Chat results, Objective intermediate,
+discovery, evaluation child records, and redundant Source/count storage into
+their lifecycle owners. The current ORM metadata and
 migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
 
@@ -414,7 +415,7 @@ identity used by the Evidence or Finding.
 | Repository | Tables owned |
 | --- | --- |
 | `PostgresAuthRepository` | `auth_users`, `auth_sessions` |
-| `PostgresCollectionRepository` | `collections`, `documents` |
+| `PostgresCollectionRepository` | `collections`, `documents` (document count derived from current rows) |
 | `PostgresPipelineRunRepository` | `pipeline_runs` |
 | `PostgresSourceArtifactRepository` | `document_sources` |
 | `PostgresDocumentProfileRepository` | `document_profiles` |
@@ -450,7 +451,7 @@ they do not define production schema or behavior.
 ## Appendix: Complete Field Catalog
 
 The catalog below lists every field in the current ORM, grouped by the main
-logic flow (20 application tables and 197 mapped fields).
+logic flow (20 application tables and 193 mapped fields).
 Field names, types, and nullability follow `backend/infra/persistence/postgres/models/*.py`;
 descriptions explain each field's business role in the Lens research chain. `JSONB` means the ORM uses
 `JSON().with_variant(JSONB(), "postgresql")`, so PostgreSQL stores the value as
@@ -518,7 +519,6 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 | `name` | `TEXT` | No | — | Human-readable collection name. |
 | `description` | `TEXT` | Yes | — | Optional research purpose or background for the collection. |
 | `status` | `VARCHAR(64)` | No | — | Current collection lifecycle state, maintained by `CollectionService`. |
-| `paper_count` | `INTEGER` | No | `>= 0` | Number of current Documents in the collection. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
 | `discovery_ready` | `BOOLEAN` | No | default `false` | Whether the current collection discovery result is ready for review or confirmation. |
@@ -606,19 +606,16 @@ single tree-shaped artifact and evidence can always point back to the same
 document-scoped Source fingerprint. It does not itself represent a scientific
 conclusion.
 
-#### `document_sources` — Current parsed Source artifact and tree
+#### `document_sources` — Current parsed Source artifact
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `source_id` | `VARCHAR(128)` | No | PK | Stable identity of the current Source row. |
-| `document_id` | `VARCHAR(64)` | No | FK -> `documents.document_id`; IDX; UQ; `ON DELETE CASCADE` | Owning current Document; one Source aggregate is stored per document. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Owning research collection. |
+| `document_id` | `VARCHAR(64)` | No | PK; FK -> `documents.document_id`; `ON DELETE CASCADE` | Owning current Document; one Source aggregate is stored per document. The document's collection is resolved through `documents.collection_id`. |
 | `source_format` | `VARCHAR(32)` | No | — | Normalized input format, for example `pdf`, `docx`, or `xlsx`. |
 | `parser_name` | `VARCHAR(128)` | No | — | Parser implementation that produced the artifact. |
 | `parser_version` | `VARCHAR(128)` | No | — | Parser version that produced the current Source representation. |
 | `source_fingerprint` | `VARCHAR(64)` | No | — | SHA-256-style identity of the serialized Source artifact used for cache and analysis invalidation. |
 | `artifact_json` | `JSONB` | No | — | Complete parsed aggregate: `document`, `text_units`, `blocks`, `tables`, `table_rows`, `table_cells`, `figures`, and `references` (entries, mentions, resolutions, candidates). |
-| `tree_json` | `JSONB` | No | — | Materialized tree projection with root and child nodes for document navigation and exact Source locators. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | First creation timestamp for this current Source row. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Timestamp of the latest replacement. |
 
@@ -626,7 +623,8 @@ The JSON envelope keeps format-specific details inside typed tree nodes rather
 than adding new tables for every file format. PDF pages, DOCX sections, and
 XLSX sheets can therefore share the same node kinds (`document`, `heading`,
 `text`, `table`, `row`, `cell`, `figure`, and `reference`) while retaining
-format metadata in each node's payload.
+format metadata in each node's payload. The navigation tree is rebuilt from
+this canonical artifact when requested; it is not stored as a second copy.
 
 This is a persistence capability, not a claim that every parser is currently
 enabled. The maintained upload and preparation runtime currently handles PDF
@@ -905,4 +903,4 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0051`. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0052`. |

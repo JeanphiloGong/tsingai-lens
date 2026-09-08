@@ -66,6 +66,7 @@ _FINAL_ANSWER_INSTRUCTION = (
     "If the researcher requested more papers than the collection contains, state "
     "the actual collection total and do not invent missing or unread papers."
 )
+_FINAL_ANSWER_TIMEOUT_SECONDS = 300.0
 
 _COLLECTION_READ_CAPABILITIES = {
     "get_collection_context",
@@ -986,7 +987,10 @@ class ResearchAgentRunner:
             try:
                 turn = await wait_for(
                     to_thread(self.model.respond, **model_arguments),
-                    timeout=min(30.0, self.limits.max_elapsed_seconds),
+                    timeout=min(
+                        _FINAL_ANSWER_TIMEOUT_SECONDS,
+                        max(30.0, self.limits.max_elapsed_seconds),
+                    ),
                 )
             finally:
                 accepting_text.clear()

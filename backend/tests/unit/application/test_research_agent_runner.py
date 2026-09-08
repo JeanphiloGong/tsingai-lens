@@ -26,6 +26,7 @@ from application.chat import (
     ToolSpec,
     evaluate_authorization,
 )
+import application.chat.agent_runner as agent_runner_module
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -1487,6 +1488,43 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     assert model.contexts[-1][-1].role.value == "user"
     assert "ACTIVE RESEARCH REQUEST" in model.contexts[-1][-1].content
     assert user_request in model.contexts[-1][-1].content
+
+
+async def test_resource_budget_final_answer_has_time_to_summarize_large_trajectory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float] = []
+    original_wait_for = agent_runner_module.wait_for
+
+    async def recording_wait_for(awaitable, timeout):  # noqa: ANN001
+        observed_timeouts.append(timeout)
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(agent_runner_module, "wait_for", recording_wait_for)
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(
+                tool_calls=(ModelToolCall(
+                    name="get_collection_context",
+                    arguments={},
+                ),)
+            ),
+            ModelTurn(content="已整理当前已读取的证据范围。"),
+        ),
+        capabilities=CapabilityRegistry(
+            (_Capability("get_collection_context", ToolRisk.READ),)
+        ),
+        limits=AgentRunLimits(max_tool_calls=1),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="比较已读取的证据并说明剩余范围。",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert observed_timeouts[-1] == pytest.approx(300)
 
 
 async def test_resource_budget_ledger_counts_complete_inspected_source_as_read() -> None:

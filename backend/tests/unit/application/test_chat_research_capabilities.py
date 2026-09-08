@@ -248,7 +248,7 @@ class _DocumentPreparationService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def queue_document(
+    async def queue_document_preparation(
         self, collection_id: str, document_id: str, **kwargs
     ) -> dict:
         self.calls.append(
@@ -259,7 +259,7 @@ class _DocumentPreparationService:
             "collection_id": collection_id,
             "document_id": document_id,
             "status": "queued",
-            "mode": kwargs.get("mode", "standard"),
+            "mode": "standard",
         }
 
 
@@ -2081,12 +2081,10 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
         {
             "collection_id": "col-1",
             "document_id": "paper-1",
-            "mode": "standard",
         },
         {
             "collection_id": "col-1",
             "document_id": "paper-2",
-            "mode": "standard",
         }
     ]
     assert completed.tool_results[0].status.value == "queued"
@@ -2109,7 +2107,6 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
                 "mode": "standard",
             },
         ),
-        "mode": "standard",
         "research_scope": "document_preparation",
         "objective_discovery_started": False,
         "objective_analysis_started": False,

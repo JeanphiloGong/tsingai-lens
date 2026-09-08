@@ -84,7 +84,7 @@ def test_default_source_pipeline_uses_structure_first_handoff_workflow():
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
             continue
-        if node.targets[0].id != "_source_handoff_workflows":
+        if node.targets[0].id != "_DEFAULT_SOURCE_WORKFLOWS":
             continue
         workflow_names = [
             element.value
@@ -94,6 +94,7 @@ def test_default_source_pipeline_uses_structure_first_handoff_workflow():
         break
 
     assert workflow_names == [
+        "load_input_documents",
         "create_source_artifacts",
     ]
 

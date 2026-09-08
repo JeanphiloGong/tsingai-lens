@@ -182,6 +182,8 @@ async def _chat_event_stream(
             data: Any = _turn_response(item.get("turn") or {}).model_dump(mode="json")
         elif event_type == "text_delta":
             data = {"content": str(item.get("content") or "")}
+        elif event_type == "progress":
+            data = dict(item.get("progress") or {})
         else:
             event_type = "error"
             data = item.get("error") or {

@@ -451,6 +451,7 @@ class AgentRunLimits:
 @dataclass
 class _RunProgress:
     limits: AgentRunLimits
+    progress_callback: Callable[[dict[str, Any]], None] | None = None
     started_at: float = field(default_factory=monotonic)
     model_cycles: int = 0
     model_tokens: int = 0
@@ -504,7 +505,7 @@ class _RunProgress:
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
               requested_count: int = 0, new_resources: int = 0,
               termination_reason: str | None = None, final_answer: bool = False) -> None:
-        logger.info("Research Agent cycle %s", json.dumps({
+        payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
             "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
@@ -516,7 +517,10 @@ class _RunProgress:
             "remaining_tool_budget": max(0, self.limits.max_tool_calls - self.executed_tool_calls),
             "remaining_token_budget": max(0, self.limits.max_model_tokens - self.model_tokens),
             "termination_reason": termination_reason, "final_answer_present": final_answer,
-        }, separators=(",", ":")))
+        }
+        logger.info("Research Agent cycle %s", json.dumps(payload, separators=(",", ":")))
+        if self.progress_callback is not None:
+            self.progress_callback(payload)
 
 
 @dataclass(frozen=True)
@@ -560,8 +564,9 @@ class ResearchAgentRunner:
         source_contexts: tuple[ChatSourceContext, ...] = (),
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(self.limits)
+        progress = _RunProgress(self.limits, progress_callback=progress_callback)
         messages = [
             *previous_messages,
             ChatMessage.user(
@@ -594,8 +599,9 @@ class ResearchAgentRunner:
         claimed_call: ChatToolCall,
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(self.limits)
+        progress = _RunProgress(self.limits, progress_callback=progress_callback)
         self._validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
         inherited_completed_writes = self._completed_write_names(messages)
@@ -801,20 +807,32 @@ class ResearchAgentRunner:
                         model_name,
                         type(exc).__name__,
                     )
+                    provider_timeout = "timeout" in type(exc).__name__.lower()
                     messages.append(
                         self._assistant(
                             context,
-                            "The research model is unavailable for this turn.",
+                            (
+                                "The research model timed out for this turn; "
+                                "inspected results were preserved."
+                            )
+                            if provider_timeout
+                            else "The research model is unavailable for this turn.",
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
-                    progress.trace(context, phase="terminal", termination_reason="model_unavailable")
+                    progress.trace(
+                        context,
+                        phase="terminal",
+                        termination_reason=(
+                            "provider_timeout" if provider_timeout else "model_unavailable"
+                        ),
+                    )
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
                         calls,
                         results,
-                        "model_unavailable",
+                        "provider_timeout" if provider_timeout else "model_unavailable",
                     )
                 required_tool = self._required_tool_before_answer(
                     tool_names,

@@ -524,6 +524,10 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn() -> 
         {"type": "text_delta", "content": "回复"},
     ]
     assert events[-1]["type"] == "turn"
+    assert any(
+        event["type"] == "progress" and event["progress"]["phase"] == "model"
+        for event in events
+    )
     assert events[-1]["turn"]["messages"][-1].content == "逐段回复"
     assert (await repository.read_messages(session.session_id))[-1].content == "逐段回复"
 

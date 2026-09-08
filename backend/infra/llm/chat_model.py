@@ -38,10 +38,15 @@ class OpenAIChatModel:
             or os.getenv("LLM_MODEL")
             or "gpt-4o-mini"
         ).strip()
-        self.client = client or OpenAI(
-            api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
-            base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
-        )
+        if client is not None:
+            self.client = client
+        else:
+            self.client = OpenAI(
+                api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
+                base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
+                timeout=_env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0),
+                max_retries=_env_int("LLM_MAX_RETRIES", 2),
+            )
 
     def respond(
         self,
@@ -288,3 +293,19 @@ def _user_content(message: ChatMessage) -> str:
 
 
 __all__ = ["OpenAIChatModel"]
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default

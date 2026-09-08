@@ -164,6 +164,10 @@ class ChatSessionService:
         async def events() -> AsyncIterator[dict[str, Any]]:
             queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
             loop = asyncio.get_running_loop()
+            started_at = asyncio.get_running_loop().time()
+
+            def emit_progress(payload: dict[str, Any]) -> None:
+                queue.put_nowait({"type": "progress", "progress": payload})
 
             def emit_text_delta(content: str) -> None:
                 loop.call_soon_threadsafe(
@@ -180,6 +184,7 @@ class ChatSessionService:
                         source_contexts=source_contexts,
                         checkpoint=self._trajectory_checkpoint(session),
                         text_delta_callback=emit_text_delta,
+                        progress_callback=emit_progress,
                     )
                     await queue.put(
                         {
@@ -207,11 +212,28 @@ class ChatSessionService:
                 finally:
                     await queue.put(None)
 
+            async def heartbeat() -> None:
+                try:
+                    while True:
+                        await asyncio.sleep(15)
+                        emit_progress({
+                            "phase": "waiting",
+                            "cycle_index": 0,
+                            "elapsed_ms": round((loop.time() - started_at) * 1000),
+                        })
+                except asyncio.CancelledError:
+                    return
+
             task = asyncio.create_task(run_turn())
+            heartbeat_task = asyncio.create_task(heartbeat())
             self._active_stream_tasks.add(task)
             task.add_done_callback(self._active_stream_tasks.discard)
-            while (event := await queue.get()) is not None:
-                yield event
+            try:
+                while (event := await queue.get()) is not None:
+                    yield event
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
 
         return events()
 

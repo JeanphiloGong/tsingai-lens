@@ -12,6 +12,7 @@
 		readPendingChatSourceContext,
 		streamChatMessage,
 		type ChatMessage,
+		type ChatProgress,
 		type ChatResourceRef,
 		type ChatSession,
 		type ChatSourceContext,
@@ -81,6 +82,7 @@
 	let history: StoredChatSession[] = [];
 	let loading = false;
 	let sending = false;
+	let progress: ChatProgress | null = null;
 	let deciding = false;
 	let error = '';
 	let notice = '';
@@ -199,6 +201,7 @@
 		error = '';
 		notice = '';
 		pendingApproval = null;
+		progress = null;
 		pendingSourceContext = readPendingChatSourceContext(activeCollectionId);
 		if (!requestedSessionId) clearLegacySessionStorage();
 		history = readHistory();
@@ -415,6 +418,7 @@
 		messages = [...messages, optimisticMessage, streamingMessage];
 		input = '';
 		sending = true;
+		progress = { phase: 'starting', cycle_index: 0, elapsed_ms: 0 };
 		error = '';
 		notice = '';
 		try {
@@ -428,7 +432,10 @@
 							: message
 					);
 				},
-				sourceContexts
+				sourceContexts,
+				(nextProgress) => {
+					progress = nextProgress;
+				}
 			);
 			applyTurn(turn, [optimisticId, streamingId]);
 			if (sourceContexts.length) {
@@ -456,7 +463,15 @@
 			error = errorMessage(err);
 		} finally {
 			sending = false;
+			progress = null;
 		}
+	}
+
+	function progressLabel(value: ChatProgress | null) {
+		if (!value) return '';
+		const phase = value.phase;
+		const key = `researchAgent.progress.${phase}`;
+		return $t(key, { cycle: value.cycle_index ?? 0 });
 	}
 
 	function removePendingSourceContext() {
@@ -1367,6 +1382,15 @@
 		{#if notice}
 			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
+		{#if sending && progress}
+			<div class="status status-progress" role="status" data-testid="research-progress">
+				<span class="progress-dot" aria-hidden="true"></span>
+				{progressLabel(progress)}
+				{#if progress.elapsed_ms}
+					<small>{Math.round(progress.elapsed_ms / 1000)}s</small>
+				{/if}
+			</div>
+		{/if}
 
 		<div class="message-scroll" aria-live="polite" aria-busy={loading || sending || deciding}>
 			<div class="message-list">
@@ -2131,6 +2155,28 @@
 		border: 1px solid var(--warning-border);
 		background: var(--warning-bg);
 		color: var(--warning-text);
+	}
+
+	.status-progress {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border: 1px solid var(--border-default);
+		background: var(--surface-card);
+		color: var(--text-secondary);
+	}
+
+	.status-progress small {
+		margin-left: auto;
+		color: var(--text-tertiary);
+	}
+
+	.progress-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--brand-primary);
+		animation: stream-cursor 0.9s steps(1) infinite;
 	}
 
 	.message-scroll {

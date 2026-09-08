@@ -148,7 +148,10 @@ digest.
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
-`{"content": string}` data and are transient presentation updates. The stream
+`{"content": string}` data and are transient presentation updates. `progress`
+events carry phase, cycle, elapsed time, and budget fields while a turn runs;
+they are transient presentation updates and are not durable trajectory records.
+The stream
 ends with one `turn` event whose data is the complete `ChatTurnResponse` after
 the durable trajectory checkpoints have succeeded. A terminal `error` event
 contains only a stable code and sanitized message. Partial text is never a

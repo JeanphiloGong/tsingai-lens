@@ -235,6 +235,14 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
 			sending: 'Sending...',
+			progress: {
+				starting: 'Starting research...',
+				model: 'Planning research step {cycle}...',
+				tools: 'Inspecting sources...',
+				finalize: 'Preparing the answer...',
+				waiting: 'Waiting for the research model...',
+				terminal: 'Finishing research...'
+			},
 			upload: {
 				add: 'Add papers',
 				choose: 'Choose PDF papers',
@@ -2793,6 +2801,14 @@ const translations: Record<Language, Translations> = {
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
 			sending: '发送中...',
+			progress: {
+				starting: '正在开始研究...',
+				model: '正在规划第 {cycle} 个研究步骤...',
+				tools: '正在检查来源...',
+				finalize: '正在整理答案...',
+				waiting: '正在等待研究模型响应...',
+				terminal: '正在完成研究...'
+			},
 			upload: {
 				add: '添加论文',
 				choose: '选择 PDF 论文',

@@ -101,6 +101,17 @@ export type ChatTrajectory = {
 	pending_approval: ChatToolCall | null;
 };
 
+export type ChatProgress = {
+	phase: string;
+	cycle_index?: number;
+	selected_capability_names?: string[];
+	requested_tool_count?: number;
+	executed_tool_count?: number;
+	elapsed_ms?: number;
+	remaining_tool_budget?: number;
+	remaining_token_budget?: number;
+};
+
 function chatSessionPath(sessionId = '') {
 	return `/chat-sessions${sessionId ? `/${encodeURIComponent(sessionId)}` : ''}`;
 }
@@ -128,7 +139,8 @@ export async function streamChatMessage(
 	sessionId: string,
 	message: string,
 	onTextDelta: (content: string) => void,
-	sourceContexts: ChatSourceContext[] = []
+	sourceContexts: ChatSourceContext[] = [],
+	onProgress?: (progress: ChatProgress) => void
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		method: 'POST',
@@ -169,6 +181,12 @@ export async function streamChatMessage(
 		}
 		if (event === 'turn') {
 			turn = payload as ChatTurn;
+			return;
+		}
+		if (event === 'progress') {
+			if (payload && typeof payload === 'object' && 'phase' in payload) {
+				onProgress?.(payload as ChatProgress);
+			}
 			return;
 		}
 		if (event === 'error') {

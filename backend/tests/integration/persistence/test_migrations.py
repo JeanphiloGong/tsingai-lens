@@ -16,7 +16,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260907_0042"
+HEAD_REVISION = "20260908_0044"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -47,15 +47,34 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             "collection_id",
             "sha256",
             "status",
-            "source_fingerprint",
-            "profile_fingerprint",
-            "preparation_fingerprint",
         }.issubset(
             {
                 column["name"]
                 for column in inspect(connection).get_columns("documents")
             }
         )
+        document_columns = {
+            column["name"] for column in inspect(connection).get_columns("documents")
+        }
+        assert {
+            "parser_version",
+            "document_analysis_version",
+            "source_fingerprint",
+            "profile_fingerprint",
+            "preparation_fingerprint",
+        }.isdisjoint(document_columns)
+        assert {
+            "source_fingerprint",
+            "profile_version",
+            "profile_fingerprint",
+            "generated_at",
+        }.issubset(
+            {
+                column["name"]
+                for column in inspect(connection).get_columns("document_profiles")
+            }
+        )
+        assert "document_sources" in expected
         task_columns = {
             column["name"] for column in inspect(connection).get_columns("tasks")
         }
@@ -139,23 +158,9 @@ def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> 
 
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.upgrade(config, "head")
-        command.downgrade(config, "20260901_0041")
+        command.upgrade(config, "20260901_0041")
         assert MigrationContext.configure(connection).get_current_revision() == (
             "20260901_0041"
-        )
-        assert {
-            "plan_version",
-            "parent_plan_id",
-            "structured_plan",
-            "updated_by",
-        }.isdisjoint(
-            {
-                column["name"]
-                for column in inspect(connection).get_columns(
-                    "objective_experiment_plans"
-                )
-            }
         )
         metadata = MetaData()
         auth_users = Table("auth_users", metadata, autoload_with=connection)

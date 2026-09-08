@@ -9,13 +9,13 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260907_0042`. The identity and fingerprint rules are
+and the Alembic head `20260908_0044`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 41 application tables. A deployed database
-also contains Alembic's `alembic_version` bookkeeping table.
+The current ORM metadata contains 30 application tables and 265 fields. A
+deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
 
@@ -63,7 +63,7 @@ The database preserves two different kinds of state:
 | Boundary | Authority | Database implication |
 | --- | --- | --- |
 | Structured product state | PostgreSQL | Repositories read and write current records and analysis history. |
-| Uploaded PDFs and extracted figure bytes | Object storage | Tables keep a storage key, SHA-256, media type, and size; bytes are not stored in PostgreSQL. |
+| Uploaded source files and extracted figure bytes | Object storage | Tables keep a storage key, SHA-256, media type, and size; bytes are not stored in PostgreSQL. |
 | Parser, model, and pipeline scratch | Local runtime paths | Disposable cache/output paths are not product read authorities. |
 | Schema changes | Alembic | Startup does not create, probe, or infer tables. |
 | Test-only alternatives | Memory repositories | They implement ports for isolated tests and are not production storage. |
@@ -85,7 +85,7 @@ class is in `infra/persistence/postgres/models`.
 | Authenticate and authorize | `application/auth`, `controllers/auth.py` | `auth_users`, `auth_sessions` | Normalized user identity and revocable browser sessions. |
 | Create a collection and add papers | `application/source`, `controllers/source/collections.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
 | Prepare documents and expose progress | `application/source`, `application/pipeline`, `controllers/source/tasks.py` | `tasks`, `task_stages` | Observable technical execution history, admission, and stage telemetry. |
-| Parse and navigate a paper | `infra/source`, `application/source` | `source_documents`, `source_text_units`, `source_blocks`, `source_block_text_units`, `source_tables`, `source_table_rows`, `source_table_cells`, `source_figures`, `source_reference_entries`, `source_reference_mentions`, `source_reference_resolutions`, `source_reference_candidates` | The current Source tree and reference navigation needed for exact evidence traceback. |
+| Parse and navigate a paper | `infra/source`, `application/source` | `document_sources` | One format-neutral parsed artifact containing the complete Source tree, text units, blocks, tables, figures, and references. |
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `document_profiles`, `paper_maps`, `objective_discovery`, `research_objectives` | Current paper triage, bounded navigation maps, selected discovery inputs, and Objective candidates. |
 | Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses`, `objective_document_evidence_checkpoints`, `objective_paper_contributions`, `objective_evidence`, `objective_findings` | Frozen analysis versions, resumable per-document inspection, Source-backed evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
 | Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls`, `chat_tool_results` | Auditable conversation, capability calls, approval decisions, structured results, and selected Source context. |
@@ -114,7 +114,7 @@ membership used by every downstream flow.
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
 | `collections` | `collection_id` | `owner_user_id` (`RESTRICT` on user deletion), name/description, status, paper count, and timestamps. `paper_count` is non-negative. |
-| `documents` | `document_id` | Direct `collection_id` membership, original/stored names, object-store `storage_key`, SHA-256, media type, byte size, order, preparation status, parser/profile versions, and source/profile/preparation fingerprints. |
+| `documents` | `document_id` | Direct `collection_id` membership, original/stored names, object-store `storage_key`, SHA-256, media type, byte size, display order, and current preparation status. |
 
 The database has no public collection-membership join object and no
 `DocumentVersion` aggregate. A Document is the current paper in its
@@ -149,21 +149,17 @@ filesystem output paths.
 ### 4. Current Source and Traceable Paper Structure
 
 `PostgresSourceArtifactRepository` persists the parser's current Source
-aggregate. All Source children are keyed by `source_document_id`, which is the
-same identity as the owning `documents.document_id`.
+aggregate in one `document_sources` row. The row's JSON envelope contains all
+Source children and the materialized tree; no relational `source_*` child tables
+remain in the current schema.
 
-| Table family | Tables | Stored structure |
+| Table family | Table | Stored structure |
 | --- | --- | --- |
-| Source root | `source_documents` | Title, full text, document order, creation date, and parser metadata. It references both the current Document and Collection. |
-| Text navigation | `source_text_units`, `source_blocks`, `source_block_text_units` | Ordered chunks, layout/heading blocks, and the many-to-many association between blocks and text units. Child identities are composite with `source_document_id`. |
-| Tables | `source_tables`, `source_table_rows`, `source_table_cells` | Captions, headings, headers, matrix data, row/cell coordinates, spans, page numbers, and unit hints. Rows and cells use composite Source/table identities. |
-| Figures | `source_figures` | Figure order, labels/captions, page and heading location, optional object-store image key, MIME type, dimensions, SHA-256, size, and metadata. A check constraint requires all image-object fields together or all absent. |
-| References | `source_reference_entries`, `source_reference_mentions` | Bibliographic entries and in-text citation mentions with local Source locations and confidence. |
-| Reference enrichment | `source_reference_resolutions`, `source_reference_candidates` | Provider resolution attempts and ranked cited-paper candidates. `reference_id` and `cited_by_document_id` are logical links owned by the reference workflow; these tables intentionally do not declare cross-table foreign keys. |
+| Source aggregate | `document_sources` | Source identity, format/parser provenance, complete parsed artifact JSON, and tree JSON. The artifact contains document metadata, text units, blocks, tables/rows/cells, figures, and reference entries/mentions/resolutions/candidates. |
 
 Source replacement is document-scoped and transactional. A successful retry
-replaces the current Source tree; its new fingerprint is written back to
-`documents`. Source rows are not a scientific conclusion: they are the exact
+replaces the current Source tree; its new fingerprint remains on the Source row
+and is copied into the dependent profile result. Source rows are not a scientific conclusion: they are the exact
 material that later Objective analysis may inspect.
 
 ### 5. Document Triage and Objective Discovery
@@ -306,12 +302,7 @@ erDiagram
     COLLECTIONS ||--o{ TASKS : schedules
     DOCUMENTS ||--o{ TASKS : prepares
     TASKS ||--o{ TASK_STAGES : reports
-    DOCUMENTS ||--o| SOURCE_DOCUMENTS : has_current
-    SOURCE_DOCUMENTS ||--o{ SOURCE_TEXT_UNITS : chunks
-    SOURCE_DOCUMENTS ||--o{ SOURCE_BLOCKS : lays_out
-    SOURCE_DOCUMENTS ||--o{ SOURCE_TABLES : contains
-    SOURCE_DOCUMENTS ||--o{ SOURCE_FIGURES : contains
-    SOURCE_DOCUMENTS ||--o{ SOURCE_REFERENCE_ENTRIES : cites
+    DOCUMENTS ||--o| DOCUMENT_SOURCES : has_current
     DOCUMENTS ||--o| DOCUMENT_PROFILES : profiles
     DOCUMENTS ||--o| PAPER_MAPS : maps
     COLLECTIONS ||--o| OBJECTIVE_DISCOVERY : discovers
@@ -338,11 +329,9 @@ erDiagram
     CHAT_TOOL_CALLS }o..|| RESEARCH_OBJECTIVES : provenance_id
 ```
 
-`SOURCE_BLOCK_TEXT_UNITS`, `SOURCE_TABLE_ROWS`, and `SOURCE_TABLE_CELLS` use
-composite Source/table keys and are omitted from the high-level diagram for
-readability. `source_reference_resolutions` and
-`source_reference_candidates` also use logical reference IDs rather than
-foreign keys; their association is validated by the reference workflow.
+The Source JSON envelope replaces the former normalized `source_*` tables. The
+tree projection is rebuilt from the same aggregate, so a locator is always
+resolved against the exact artifact row that produced it.
 
 ## Fingerprints, Versions, and Reuse
 
@@ -406,7 +395,7 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260907_0042`, which adds immutable experiment-plan revision fields. The
+`20260908_0044`, which moves preparation provenance to Source/Profile artifacts. The
 current ORM metadata and migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
 
@@ -430,7 +419,7 @@ identity used by the Evidence or Finding.
 | `PostgresAuthRepository` | `auth_users`, `auth_sessions` |
 | `PostgresCollectionRepository` | `collections`, `documents` |
 | `PostgresTaskRepository` | `tasks`, `task_stages` |
-| `PostgresSourceArtifactRepository` | All `source_*` tables |
+| `PostgresSourceArtifactRepository` | `document_sources` |
 | `PostgresDocumentProfileRepository` | `document_profiles` |
 | `PostgresPaperMapRepository` | `paper_maps` |
 | `PostgresObjectiveRepository` | `objective_discovery`, `research_objectives`, `objective_analyses`, `objective_document_evidence_checkpoints`, `objective_paper_contributions`, `objective_evidence`, `objective_findings` |
@@ -464,7 +453,7 @@ they do not define production schema or behavior.
 ## Appendix: Complete Field Catalog
 
 The catalog below lists every field in the current ORM, grouped by the main
-logic flow (41 application tables and 371 fields).
+logic flow (30 application tables and 265 fields).
 Field names, types, and nullability follow `backend/infra/persistence/postgres/models/*.py`;
 descriptions explain each field's business role in the Lens research chain. `JSONB` means the ORM uses
 `JSON().with_variant(JSONB(), "postgresql")`, so PostgreSQL stores the value as
@@ -552,11 +541,6 @@ Document is the paper identity in the current model, not a publicly queryable ve
 | `status` | `VARCHAR(64)` | No | — | Current document preparation state, maintained by the Source application layer. |
 | `size_bytes` | `BIGINT` | No | `>= 0` | Size of the original file in bytes. |
 | `document_order` | `INTEGER` | No | `>= 0`; per collection UQ | Stable display and processing position within the collection. |
-| `parser_version` | `VARCHAR(128)` | Yes | — | Parser version that produced the current Source tree. |
-| `document_analysis_version` | `VARCHAR(128)` | Yes | — | Analysis version that produced the current Document Profile. |
-| `source_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the current Source representation. |
-| `profile_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the current Document Profile. |
-| `preparation_fingerprint` | `VARCHAR(64)` | Yes | — | Complete preparation fingerprint consumed by Objective analysis; currently equal to the profile fingerprint. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 
@@ -607,184 +591,33 @@ The partial unique index `uq_tasks_active_document_type` ensures that one
 
 ### Source parsing structure
 
-Source is the locatable text, layout, tables, figures, and references for each current Document.
-It records where the original text is; it does not itself represent a scientific conclusion.
+Source is the locatable text, layout, tables, figures, and references for each
+current Document. It is stored as one current aggregate so the API can return a
+single tree-shaped artifact and evidence can always point back to the same
+document-scoped Source fingerprint. It does not itself represent a scientific
+conclusion.
 
-#### `source_documents` — Source root documents
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `documents.document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research collection. |
-| `document_order` | `INTEGER` | No | `>= 0` | Stable position of the Source document within its collection. |
-| `title` | `TEXT` | No | — | Parsed or user-facing title. |
-| `text` | `TEXT` | No | — | Parsed or stored text content. |
-| `creation_date` | `TEXT` | Yes | — | Parser-provided document creation date, retained in its original string form. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
-
-#### `source_text_units` — Source text units
+#### `document_sources` — Current parsed Source artifact and tree
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `source_documents.source_document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `text_unit_id` | `VARCHAR(128)` | No | PK (composite with `source_document_id`) | Stable identifier of the Source text unit. |
-| `text_unit_order` | `INTEGER` | No | `>= 0` | Position of the text unit in the Source reading order. |
-| `text` | `TEXT` | No | — | Parsed or stored text content. |
-| `n_tokens` | `INTEGER` | Yes | `>= 0` when non-NULL | Estimated token count used for read windows and model budgets. |
+| `source_id` | `VARCHAR(128)` | No | PK | Stable identity of the current Source row. |
+| `document_id` | `VARCHAR(64)` | No | FK -> `documents.document_id`; IDX; UQ; `ON DELETE CASCADE` | Owning current Document; one Source aggregate is stored per document. |
+| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Owning research collection. |
+| `source_format` | `VARCHAR(32)` | No | — | Normalized input format, for example `pdf`, `docx`, or `xlsx`. |
+| `parser_name` | `VARCHAR(128)` | No | — | Parser implementation that produced the artifact. |
+| `parser_version` | `VARCHAR(128)` | No | — | Parser version that produced the current Source representation. |
+| `source_fingerprint` | `VARCHAR(64)` | No | — | SHA-256-style identity of the serialized Source artifact used for cache and analysis invalidation. |
+| `artifact_json` | `JSONB` | No | — | Complete parsed aggregate: `document`, `text_units`, `blocks`, `tables`, `table_rows`, `table_cells`, `figures`, and `references` (entries, mentions, resolutions, candidates). |
+| `tree_json` | `JSONB` | No | — | Materialized tree projection with root and child nodes for document navigation and exact Source locators. |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | First creation timestamp for this current Source row. |
+| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Timestamp of the latest replacement. |
 
-#### `source_blocks` — Layout and heading blocks
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `source_documents.source_document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `block_id` | `VARCHAR` | No | PK (composite with `source_document_id`) | Stable identifier of the layout block. |
-| `block_type` | `VARCHAR(64)` | No | — | Layout type such as paragraph, heading, list, or caption. |
-| `text` | `TEXT` | No | — | Parsed or stored text content. |
-| `block_order` | `INTEGER` | No | `>= 0` | Stable ordering or ranking value for block order. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the block, when known. |
-| `heading_path` | `TEXT` | Yes | — | Hierarchical heading path containing the block. |
-| `heading_level` | `INTEGER` | Yes | — | Heading depth; NULL for ordinary text blocks. |
-
-#### `source_block_text_units` — Block/text-unit associations
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; composite FK -> `source_blocks`, `source_text_units` | Identifier of the current Source document. |
-| `block_id` | `VARCHAR` | No | PK; FK -> `source_blocks.(source_document_id, block_id)`; `ON DELETE CASCADE` | Layout block linked to this association. |
-| `text_unit_id` | `VARCHAR(128)` | No | PK; FK -> `source_text_units.(source_document_id, text_unit_id)`; `ON DELETE CASCADE` | Text unit linked to this block; one block may cover multiple units. |
-
-#### `source_tables` — Parsed tables
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `source_documents.source_document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `table_id` | `VARCHAR` | No | PK (composite with `source_document_id`) | Stable identifier of the parsed table. |
-| `table_order` | `INTEGER` | No | `>= 0` | Position of the table in the document. |
-| `caption_text` | `TEXT` | Yes | — | Table caption or nearby caption text. |
-| `caption_block_id` | `VARCHAR` | Yes | — | Source block containing the table caption, when linked. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the table, when known. |
-| `heading_path` | `TEXT` | Yes | — | Hierarchical heading path containing the table. |
-| `header_row_count` | `INTEGER` | No | `>= 0` | Number of header rows in the parsed table. |
-| `column_headers` | `JSONB` | No | — | Ordered list of parsed column headers. |
-| `table_matrix` | `JSONB` | No | — | Parsed two-dimensional cell matrix used for reading and evidence location. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
-
-#### `source_table_rows` — Table rows
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; composite FK -> `source_tables`; ON DELETE CASCADE | Identifier of the current Source document. |
-| `row_id` | `VARCHAR` | No | PK (composite with `source_document_id`) | Stable identifier of the table row. |
-| `table_id` | `VARCHAR` | No | FK -> `source_tables.(source_document_id, table_id)`; `ON DELETE CASCADE` | Parsed table containing this row. |
-| `row_index` | `INTEGER` | No | `>= 0` | Zero-based row position within the table. |
-| `row_text` | `TEXT` | No | — | Normalized text for the complete table row. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the row, when known. |
-| `heading_path` | `TEXT` | Yes | — | Hierarchical heading path containing the row. |
-
-#### `source_table_cells` — Table cells
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; composite FK -> `source_tables`; ON DELETE CASCADE | Identifier of the current Source document. |
-| `cell_id` | `VARCHAR(128)` | No | PK (composite with `source_document_id`) | Stable identifier of the table cell. |
-| `table_id` | `VARCHAR` | No | FK -> `source_tables.(source_document_id, table_id)`; `ON DELETE CASCADE` | Parsed table containing this cell. |
-| `row_index` | `INTEGER` | No | `>= 0` | Zero-based starting row for the cell. |
-| `col_index` | `INTEGER` | No | `>= 0` | Zero-based starting column for the cell. |
-| `cell_text` | `TEXT` | No | — | Original text extracted for the cell. |
-| `row_span` | `INTEGER` | No | `>= 1` | Number of rows covered by the cell. |
-| `col_span` | `INTEGER` | No | `>= 1` | Number of columns covered by the cell. |
-| `column_header` | `BOOLEAN` | No | — | Whether the cell is a column header. |
-| `row_header` | `BOOLEAN` | No | — | Whether the cell is a row header. |
-| `row_section` | `BOOLEAN` | No | — | Whether the cell labels a row section. |
-| `header_path` | `TEXT` | Yes | — | Hierarchical table-header path inherited by the cell. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the cell, when known. |
-| `unit_hint` | `TEXT` | Yes | — | Parser-inferred unit hint, such as `%` or `MPa`. |
-
-#### `source_figures` — Figures and image objects
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `source_documents.source_document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `figure_id` | `VARCHAR(128)` | No | PK (composite with `source_document_id`) | Stable identifier of the figure. |
-| `figure_order` | `INTEGER` | No | `>= 0` | Position of the figure in the document. |
-| `figure_label` | `TEXT` | Yes | — | Figure number or label, for example `Figure 2`. |
-| `caption_text` | `TEXT` | Yes | — | Original figure caption text. |
-| `caption_block_id` | `VARCHAR` | Yes | — | Source block containing the figure caption, when linked. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the figure, when known. |
-| `heading_path` | `TEXT` | Yes | — | Hierarchical heading path containing the figure. |
-| `image_storage_key` | `TEXT` | Yes | must be present together with `asset_sha256` and `image_size_bytes`, or all NULL | Object-storage key for the extracted image; a caption may exist without a usable bitmap. |
-| `image_mime_type` | `VARCHAR(255)` | Yes | — | MIME type of the extracted image object. |
-| `image_width` | `INTEGER` | Yes | `>= 0` when non-NULL | Image width in pixels. |
-| `image_height` | `INTEGER` | Yes | `>= 0` when non-NULL | Image height in pixels. |
-| `asset_sha256` | `VARCHAR(64)` | Yes | grouped with image-object fields | SHA-256 digest of the extracted image object. |
-| `image_size_bytes` | `INTEGER` | Yes | `>= 0`; grouped with image-object fields | Extracted image object size in bytes. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
-
-#### `source_reference_entries` — Reference entries
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `source_documents.source_document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `reference_id` | `VARCHAR` | No | PK (composite with `source_document_id`) | Stable identifier of the reference within the Source document. |
-| `raw_reference` | `TEXT` | No | — | Original reference-list text. |
-| `reference_index` | `VARCHAR(64)` | Yes | — | Citation number or index, such as `[12]`. |
-| `title` | `TEXT` | Yes | — | Parsed or user-facing title. |
-| `authors_text` | `TEXT` | Yes | — | Authors as parsed from the reference text. |
-| `year` | `INTEGER` | Yes | `>= 0` when non-NULL | Publication year parsed from the reference. |
-| `doi` | `TEXT` | Yes | — | DOI parsed from the reference, when available. |
-| `source_block_id` | `VARCHAR` | Yes | — | Source block containing the reference entry. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the reference entry, when known. |
-| `confidence` | `FLOAT` | No | `0 <= confidence <= 1` | Confidence score in the range [0, 1]. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
-
-#### `source_reference_mentions` — In-text citation mentions
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `source_document_id` | `VARCHAR(128)` | No | PK; FK -> `source_documents.source_document_id`; `ON DELETE CASCADE` | Identifier of the current Source document. |
-| `mention_id` | `VARCHAR` | No | PK (composite with `source_document_id`) | Stable identifier of the in-text citation mention. |
-| `reference_id` | `VARCHAR` | Yes | — | Matched reference-entry ID; NULL when the marker cannot be matched. |
-| `citation_marker` | `TEXT` | No | — | Citation marker in the body text, such as `[12]`. |
-| `context_text` | `TEXT` | No | — | Original text surrounding the citation marker. |
-| `source_block_id` | `VARCHAR` | Yes | — | Source block containing the citation mention. |
-| `page` | `INTEGER` | Yes | `>= 0` when non-NULL | Page containing the citation mention, when known. |
-| `confidence` | `FLOAT` | No | `0 <= confidence <= 1` | Confidence score in the range [0, 1]. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
-
-#### `source_reference_resolutions` — External reference resolutions
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `resolution_id` | `VARCHAR(128)` | No | PK | Stable identifier of one external resolution attempt. |
-| `reference_id` | `VARCHAR` | No | IDX; logical link `source_reference_entries.reference_id` | Reference ID being resolved; no cross-document FK is declared. |
-| `provider` | `VARCHAR(128)` | No | — | External provider used for resolution. |
-| `status` | `VARCHAR(64)` | No | — | Resolution outcome, such as `resolved`, `partial`, or `unresolved`. |
-| `resolved_title` | `TEXT` | Yes | — | Title returned by the external provider. |
-| `resolved_authors_text` | `TEXT` | Yes | — | Authors returned by the external provider. |
-| `resolved_year` | `INTEGER` | Yes | `>= 0` when non-NULL | Publication year returned by the external resolver. |
-| `resolved_venue` | `TEXT` | Yes | — | Journal, conference, or publisher venue returned by the provider. |
-| `resolved_doi` | `TEXT` | Yes | — | DOI returned by the external resolver. |
-| `resolved_url` | `TEXT` | Yes | — | URL of the resolved external record. |
-| `open_access_url` | `TEXT` | Yes | — | Public full-text URL, when available. |
-| `confidence` | `FLOAT` | No | `0 <= confidence <= 1` | Confidence score in the range [0, 1]. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
-
-#### `source_reference_candidates` — Cited-paper candidates
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `candidate_id` | `VARCHAR` | No | PK | Stable identifier of a cited-paper candidate. |
-| `reference_id` | `VARCHAR` | No | IDX; logical link | Reference ID from which the candidate was derived. |
-| `status` | `VARCHAR(64)` | No | — | Candidate state, such as `pending`, `accepted`, or `rejected`. |
-| `relevance_score` | `FLOAT` | No | `0 <= relevance_score <= 1` | Relevance score for the current research Objective. |
-| `relevance_reason` | `TEXT` | Yes | — | Explanation for the relevance assessment. |
-| `cited_by_document_id` | `VARCHAR(128)` | Yes | logical link `documents.document_id` | Current Document that cites the reference. |
-| `mention_count` | `INTEGER` | No | `>= 0` | Number of times the reference appears in the source collection. |
-| `representative_context` | `TEXT` | Yes | — | Representative citation context for the candidate. |
-| `resolved_doi` | `TEXT` | Yes | — | Snapshot of the resolved DOI. |
-| `resolved_url` | `TEXT` | Yes | — | Snapshot of the resolved record URL. |
-| `open_access_url` | `TEXT` | Yes | — | Snapshot of the resolved open-access URL. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
+The JSON envelope keeps format-specific details inside typed tree nodes rather
+than adding new tables for every file format. PDF pages, DOCX sections, and
+XLSX sheets can therefore share the same node kinds (`document`, `heading`,
+`text`, `table`, `row`, `cell`, `figure`, and `reference`) while retaining
+format metadata in each node's payload.
 
 ### Document Profiles and Objectives
 
@@ -792,7 +625,7 @@ These tables carry the `document preparation -> research Objective -> evidence c
 are navigation and candidate-formation inputs; only the
 Evidence and Findings produced after Objective analysis reads exact Source material are scientific Artifacts in the conclusion chain.
 
-#### `document_profiles` — Document type and preparation profile
+#### `document_profiles` — Current document analysis profile
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
@@ -803,6 +636,15 @@ Evidence and Findings produced after Objective analysis reads exact Source mater
 | `doc_type` | `VARCHAR(32)` | No | — | Classified document type, such as `experimental`, `review`, `modeling`, or `mixed`. |
 | `parsing_warnings` | `JSONB` | No | — | Parser warnings that a researcher should inspect. |
 | `confidence` | `FLOAT` | No | `0 <= confidence <= 1` | Confidence score in the range [0, 1]. |
+| `source_fingerprint` | `VARCHAR(64)` | Yes | — | Source fingerprint consumed by this profile result. |
+| `profile_version` | `VARCHAR(128)` | Yes | — | Profile extraction or analysis version that produced this result. |
+| `profile_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the profile result and its Source input. It is also the current preparation fingerprint used by Objective analysis. |
+| `generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which this profile result was generated. |
+
+Parser and profile provenance belongs with the artifact that produced it:
+`document_sources` owns parser metadata and the Source fingerprint;
+`document_profiles` owns profile metadata and the profile fingerprint.
+`documents` remains file identity and current preparation status only.
 
 #### `paper_maps` — Lazy paper navigation maps
 
@@ -1133,4 +975,4 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260907_0042`. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0044`. |

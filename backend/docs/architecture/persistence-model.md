@@ -23,7 +23,7 @@ Collection
 
 Document
   -> Task history
-  -> current SourceDocument
+  -> current DocumentSource (parsed tree aggregate)
   -> current DocumentProfile
   -> optional current PaperMap (built lazily by Objective work)
 
@@ -43,9 +43,12 @@ ResearchObjective
 
 `Collection` is identified by `collection_id` and belongs to one user. It owns
 current Document membership. A Document is identified by `document_id`; its
-filename, storage key, SHA-256, media type, status, parser version,
-document-analysis version, Source fingerprint, Profile fingerprint, and current
-preparation fingerprint live on the Document record.
+filename, storage key, SHA-256, media type, status, size, and collection order
+live on the Document record. Parser provenance and the Source fingerprint live
+on the current `DocumentSource` row. Profile version, Source/profile
+fingerprints, and profile generation time live on the current
+`DocumentProfile` row. The domain-level preparation fingerprint is derived
+from the current profile fingerprint.
 
 There is no public CollectionDocument membership object and no DocumentVersion
 aggregate. A Document is the current paper in the Collection.
@@ -55,6 +58,10 @@ aggregate. A Document is the current paper in the Collection.
 Source, Profile, and Paper Map rows are keyed by `document_id` and cascade when
 that Document is deleted. Each record also stores `collection_id` to enforce and
 query ownership.
+
+`DocumentSource` stores one complete format-neutral parsed artifact and its tree
+projection in JSON. The envelope can represent PDF pages, DOCX sections, and
+XLSX sheets without adding a new relational table family for each format.
 
 Preparation uses a dependency chain rather than one all-or-nothing cache key:
 
@@ -153,7 +160,7 @@ erDiagram
     USER ||--o{ COLLECTION : owns
     COLLECTION ||--o{ DOCUMENT : contains
     DOCUMENT ||--o{ TASK : prepares
-    DOCUMENT ||--o| SOURCE_DOCUMENT : has_current
+    DOCUMENT ||--o| DOCUMENT_SOURCE : has_current
     DOCUMENT ||--o| DOCUMENT_PROFILE : has_current
     DOCUMENT ||--o| PAPER_MAP : has_current
     COLLECTION ||--o| OBJECTIVE_DISCOVERY : has_current
@@ -174,9 +181,12 @@ erDiagram
 - Uploading another Document adds a peer and does not touch prepared peers.
 - Deleting a Collection cascades its Documents, prepared artifacts, tasks,
   Objectives, analyses, and downstream records.
-- The destructive current-model migration drops old collection-build,
+- The destructive current-model migrations drop old collection-build,
   active-build, artifact-version, workspace-projection, persisted paper-fact,
-  and comparison tables before creating the current model. There is no backfill.
+  and comparison tables before creating the current model. Migration
+  `20260908_0043` backfills the consolidated Source aggregate from the retired
+  normalized Source tables before dropping them; migration `20260908_0044`
+  moves preparation provenance to Source/Profile ownership.
 
 ## Implementation Boundary
 

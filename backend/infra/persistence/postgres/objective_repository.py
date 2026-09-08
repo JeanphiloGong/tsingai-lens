@@ -30,12 +30,7 @@ from infra.persistence.postgres.models.objective import (
     ObjectivePaperContributionRecord,
     ObjectiveResearchRecord,
 )
-from infra.persistence.postgres.models.source import (
-    SourceBlock,
-    SourceDocument,
-    SourceFigure,
-    SourceTable,
-)
+from infra.persistence.postgres.models.document_source import DocumentSource
 
 
 class PostgresObjectiveRepository:
@@ -1057,27 +1052,30 @@ class PostgresObjectiveRepository:
         collection_id: str,
         evidence: ObjectiveEvidence,
     ) -> None:
-        document_collection = await session.scalar(
-            select(SourceDocument.collection_id).where(
-                SourceDocument.source_document_id == evidence.document_id
+        row = await session.scalar(
+            select(DocumentSource).where(
+                DocumentSource.document_id == evidence.document_id,
+                DocumentSource.collection_id == collection_id,
             )
         )
-        if document_collection != collection_id:
+        if row is None:
             raise FileNotFoundError(
                 f"source document not found: {collection_id}/{evidence.document_id}"
             )
-        model, identity = {
-            "text_window": (SourceBlock, SourceBlock.block_id),
-            "table": (SourceTable, SourceTable.table_id),
-            "figure": (SourceFigure, SourceFigure.figure_id),
+        artifact = dict(row.artifact_json or {})
+        source_rows = {
+            "text_window": artifact.get("blocks") or [],
+            "table": artifact.get("tables") or [],
+            "figure": artifact.get("figures") or [],
+        }.get(evidence.source_kind)
+        if source_rows is None:
+            raise ValueError(f"unsupported objective evidence source kind: {evidence.source_kind}")
+        identity_key = {
+            "text_window": "block_id",
+            "table": "table_id",
+            "figure": "figure_id",
         }[evidence.source_kind]
-        exists = await session.scalar(
-            select(func.count()).select_from(model).where(
-                model.source_document_id == evidence.document_id,
-                identity == evidence.source_ref,
-            )
-        )
-        if not exists:
+        if not any(str(item.get(identity_key)) == evidence.source_ref for item in source_rows):
             raise FileNotFoundError(
                 "objective evidence source not found: "
                 f"{collection_id}/{evidence.document_id}/"

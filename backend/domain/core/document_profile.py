@@ -21,6 +21,10 @@ class DocumentProfile:
     doc_type: str
     parsing_warnings: tuple[str, ...]
     confidence: float
+    source_fingerprint: str | None = None
+    profile_version: str | None = None
+    profile_fingerprint: str | None = None
+    generated_at: str | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "DocumentProfile":
@@ -34,6 +38,12 @@ class DocumentProfile:
             doc_type=doc_type,
             parsing_warnings=warnings,
             confidence=round(float(payload.get("confidence") or 0.0), 2),
+            source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
+            profile_version=_normalize_optional_text(payload.get("profile_version")),
+            profile_fingerprint=_normalize_optional_text(
+                payload.get("profile_fingerprint")
+            ),
+            generated_at=_normalize_optional_text(payload.get("generated_at")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -45,6 +55,10 @@ class DocumentProfile:
             "doc_type": self.doc_type,
             "parsing_warnings": list(self.parsing_warnings),
             "confidence": round(float(self.confidence), 2),
+            "source_fingerprint": self.source_fingerprint,
+            "profile_version": self.profile_version,
+            "profile_fingerprint": self.profile_fingerprint,
+            "generated_at": self.generated_at,
         }
 
 

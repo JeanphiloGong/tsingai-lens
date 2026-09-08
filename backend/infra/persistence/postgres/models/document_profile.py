@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, JSON, String, Text
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +37,12 @@ class DocumentProfileRow(Base):
     doc_type: Mapped[str] = mapped_column(String(32), nullable=False)
     parsing_warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    profile_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    profile_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 __all__ = ["DocumentProfileRow"]

@@ -12,6 +12,8 @@ from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.document_profile import DocumentProfileRow
+from infra.persistence.postgres.models.document_source import DocumentSource
 
 
 class PostgresCollectionRepository:
@@ -73,13 +75,22 @@ class PostgresCollectionRepository:
         document_id: str,
     ) -> DocumentAggregate | None:
         async with self.session_factory() as session:
-            row = await session.scalar(
-                select(Document).where(
+            row = (await session.execute(
+                select(Document, DocumentSource, DocumentProfileRow)
+                .outerjoin(
+                    DocumentSource,
+                    DocumentSource.document_id == Document.document_id,
+                )
+                .outerjoin(
+                    DocumentProfileRow,
+                    DocumentProfileRow.document_id == Document.document_id,
+                )
+                .where(
                     Document.collection_id == collection_id,
                     Document.document_id == document_id,
                 )
-            )
-            return _to_document(row) if row is not None else None
+            )).one_or_none()
+            return _to_document(*row) if row is not None else None
 
     async def update_collection(self, record: CollectionAggregate) -> bool:
         async with self.session_factory.begin() as session:
@@ -160,12 +171,34 @@ class PostgresCollectionRepository:
             row.media_type = record.media_type
             row.status = record.status
             row.size_bytes = record.size_bytes
-            row.parser_version = record.parser_version
-            row.document_analysis_version = record.document_analysis_version
-            row.source_fingerprint = record.source_fingerprint
-            row.profile_fingerprint = record.profile_fingerprint
-            row.preparation_fingerprint = record.preparation_fingerprint
             row.updated_at = _datetime(record.updated_at or record.created_at)
+            source_row = await session.scalar(
+                select(DocumentSource).where(
+                    DocumentSource.document_id == record.document_id,
+                    DocumentSource.collection_id == row.collection_id,
+                )
+            )
+            if source_row is not None:
+                if record.parser_version is not None:
+                    source_row.parser_version = record.parser_version
+                if record.source_fingerprint is not None:
+                    source_row.source_fingerprint = record.source_fingerprint
+            profile_row = await session.get(DocumentProfileRow, record.document_id)
+            if profile_row is not None:
+                provenance_updated = False
+                if record.source_fingerprint is not None:
+                    profile_row.source_fingerprint = record.source_fingerprint
+                    provenance_updated = True
+                if record.document_analysis_version is not None:
+                    profile_row.profile_version = record.document_analysis_version
+                    provenance_updated = True
+                if record.profile_fingerprint is not None:
+                    profile_row.profile_fingerprint = record.profile_fingerprint
+                    provenance_updated = True
+                if provenance_updated:
+                    profile_row.generated_at = _datetime(
+                        record.updated_at or record.created_at
+                    )
             return True
 
     async def delete_collection(self, collection_id: str) -> bool:
@@ -209,17 +242,22 @@ def _document_row(
         status=record.status,
         size_bytes=record.size_bytes,
         document_order=document_order,
-        parser_version=record.parser_version,
-        document_analysis_version=record.document_analysis_version,
-        source_fingerprint=record.source_fingerprint,
-        profile_fingerprint=record.profile_fingerprint,
-        preparation_fingerprint=record.preparation_fingerprint,
         created_at=_datetime(record.created_at),
         updated_at=_datetime(record.updated_at or record.created_at),
     )
 
 
-def _to_document(row: Document) -> DocumentAggregate:
+def _to_document(
+    row: Document,
+    source_row: DocumentSource | None = None,
+    profile_row: DocumentProfileRow | None = None,
+) -> DocumentAggregate:
+    source_fingerprint = (
+        source_row.source_fingerprint if source_row is not None else None
+    )
+    profile_fingerprint = (
+        profile_row.profile_fingerprint if profile_row is not None else None
+    )
     return DocumentAggregate(
         document_id=row.document_id,
         original_filename=row.original_filename,
@@ -231,11 +269,17 @@ def _to_document(row: Document) -> DocumentAggregate:
         size_bytes=row.size_bytes,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
-        parser_version=row.parser_version,
-        document_analysis_version=row.document_analysis_version,
-        source_fingerprint=row.source_fingerprint,
-        profile_fingerprint=row.profile_fingerprint,
-        preparation_fingerprint=row.preparation_fingerprint,
+        parser_version=source_row.parser_version if source_row is not None else None,
+        document_analysis_version=(
+            profile_row.profile_version if profile_row is not None else None
+        ),
+        source_fingerprint=source_fingerprint,
+        profile_fingerprint=profile_fingerprint,
+        # A fully prepared document uses the profile fingerprint as its
+        # preparation identity.  Source-only fixtures and documents that are
+        # still between parsing and profile generation retain a usable
+        # source identity until the profile artifact is available.
+        preparation_fingerprint=profile_fingerprint or source_fingerprint,
     )
 
 
@@ -243,12 +287,20 @@ async def _documents_for_collection(
     session: AsyncSession,
     collection_id: str,
 ) -> tuple[DocumentAggregate, ...]:
-    rows = await session.scalars(
-        select(Document)
+    rows = await session.execute(
+        select(Document, DocumentSource, DocumentProfileRow)
+        .outerjoin(
+            DocumentSource,
+            DocumentSource.document_id == Document.document_id,
+        )
+        .outerjoin(
+            DocumentProfileRow,
+            DocumentProfileRow.document_id == Document.document_id,
+        )
         .where(Document.collection_id == collection_id)
         .order_by(Document.document_order)
     )
-    return tuple(_to_document(row) for row in rows)
+    return tuple(_to_document(*row) for row in rows)
 
 
 def _datetime(value: Any) -> datetime:

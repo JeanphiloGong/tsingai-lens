@@ -47,15 +47,6 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     document_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    parser_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    document_analysis_version: Mapped[str | None] = mapped_column(
-        String(128), nullable=True
-    )
-    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    profile_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    preparation_fingerprint: Mapped[str | None] = mapped_column(
-        String(64), nullable=True
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

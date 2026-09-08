@@ -11,6 +11,8 @@ from domain.source import Collection, Document
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.postgres.models.document import Document as DocumentRow
+from infra.persistence.postgres.models.document_profile import DocumentProfileRow
+from infra.persistence.postgres.models.document_source import DocumentSource
 
 
 pytestmark = pytest.mark.anyio
@@ -123,6 +125,37 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         (document,),
         updated_at=document.created_at,
     )
+    async with collection_repository.session_factory.begin() as session:
+        session.add(
+            DocumentSource(
+                source_id=f"src_{document.document_id}",
+                document_id=document.document_id,
+                collection_id=collection.collection_id,
+                source_format="pdf",
+                parser_name="test-parser",
+                parser_version="source-runtime.v1",
+                source_fingerprint="a" * 64,
+                artifact_json={"blocks": [], "tables": [], "figures": []},
+                tree_json={"nodes": {}},
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        session.add(
+            DocumentProfileRow(
+                document_id=document.document_id,
+                collection_id=collection.collection_id,
+                title="Paper",
+                source_filename=document.original_filename,
+                doc_type="uncertain",
+                parsing_warnings=[],
+                confidence=0.0,
+                source_fingerprint="a" * 64,
+                profile_version="document-profile.v1+paper-map.v1",
+                profile_fingerprint="b" * 64,
+                generated_at=datetime.now(timezone.utc),
+            )
+        )
     prepared = replace(
         document,
         status="ready",
@@ -130,7 +163,7 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         document_analysis_version="document-profile.v1+paper-map.v1",
         source_fingerprint="a" * 64,
         profile_fingerprint="b" * 64,
-        preparation_fingerprint="c" * 64,
+        preparation_fingerprint="b" * 64,
         updated_at="2026-08-27T00:02:00+00:00",
     )
 

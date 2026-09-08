@@ -10,6 +10,7 @@ from infra.persistence.postgres.models.chat import (
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.document_source import DocumentSource
 from infra.persistence.postgres.models.document_profile import DocumentProfileRow
 from infra.persistence.postgres.models.evaluation import (
     EvaluationFailureRecord,
@@ -33,20 +34,6 @@ from infra.persistence.postgres.models.objective import (
     ObjectiveResearchRecord,
 )
 from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlan
-from infra.persistence.postgres.models.source import (
-    SourceBlock,
-    SourceBlockTextUnit,
-    SourceDocument,
-    SourceFigure,
-    SourceReferenceCandidate,
-    SourceReferenceEntry,
-    SourceReferenceMention,
-    SourceReferenceResolution,
-    SourceTable,
-    SourceTableCell,
-    SourceTableRow,
-    SourceTextUnit,
-)
 __all__ = [
     "AuthSession",
     "AuthUser",
@@ -56,6 +43,7 @@ __all__ = [
     "ChatToolResultRow",
     "Collection",
     "Document",
+    "DocumentSource",
     "DocumentProfileRow",
     "EvaluationFailureRecord",
     "EvaluationGoldItemRecord",
@@ -75,18 +63,6 @@ __all__ = [
     "ObjectivePaperContributionRecord",
     "ObjectiveResearchRecord",
     "PaperMapRow",
-    "SourceBlock",
-    "SourceBlockTextUnit",
-    "SourceDocument",
-    "SourceFigure",
-    "SourceReferenceCandidate",
-    "SourceReferenceEntry",
-    "SourceReferenceMention",
-    "SourceReferenceResolution",
-    "SourceTable",
-    "SourceTableCell",
-    "SourceTableRow",
-    "SourceTextUnit",
     "Task",
     "TaskStage",
 ]

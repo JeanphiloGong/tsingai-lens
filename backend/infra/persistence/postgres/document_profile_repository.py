@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -32,6 +34,14 @@ class PostgresDocumentProfileRepository:
             row.doc_type = profile.doc_type
             row.parsing_warnings = list(profile.parsing_warnings)
             row.confidence = profile.confidence
+            if profile.source_fingerprint is not None:
+                row.source_fingerprint = profile.source_fingerprint
+            if profile.profile_version is not None:
+                row.profile_version = profile.profile_version
+            if profile.profile_fingerprint is not None:
+                row.profile_fingerprint = profile.profile_fingerprint
+            if profile.generated_at is not None:
+                row.generated_at = _datetime(profile.generated_at)
 
     async def read(
         self,
@@ -74,6 +84,10 @@ def _to_row(profile: DocumentProfile) -> DocumentProfileRow:
         doc_type=profile.doc_type,
         parsing_warnings=list(profile.parsing_warnings),
         confidence=profile.confidence,
+        source_fingerprint=profile.source_fingerprint,
+        profile_version=profile.profile_version,
+        profile_fingerprint=profile.profile_fingerprint,
+        generated_at=_datetime(profile.generated_at) if profile.generated_at else None,
     )
 
 
@@ -87,8 +101,17 @@ def _from_row(row: DocumentProfileRow) -> DocumentProfile:
             "doc_type": row.doc_type,
             "parsing_warnings": row.parsing_warnings,
             "confidence": row.confidence,
+            "source_fingerprint": row.source_fingerprint,
+            "profile_version": row.profile_version,
+            "profile_fingerprint": row.profile_fingerprint,
+            "generated_at": row.generated_at.isoformat() if row.generated_at else None,
         }
     )
+
+
+def _datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 __all__ = ["PostgresDocumentProfileRepository"]

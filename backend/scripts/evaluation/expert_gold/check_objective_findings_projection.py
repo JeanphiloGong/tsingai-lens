@@ -1162,21 +1162,21 @@ async def _resolve_manifest_document_ids(
         from infra.persistence.postgres.models.document import (  # noqa: PLC0415
             Document,
         )
-        from infra.persistence.postgres.models.source import (  # noqa: PLC0415
-            SourceDocument,
+        from infra.persistence.postgres.models.document_source import (  # noqa: PLC0415
+            DocumentSource,
         )
 
         engine = build_database_engine(DatabaseSettings())
         try:
             async with build_session_factory(engine)() as session:
                 rows = (await session.execute(
-                    select(SourceDocument.source_document_id, Document.sha256)
+                    select(DocumentSource.document_id, Document.sha256)
                     .join(
                         Document,
-                        Document.document_id == SourceDocument.source_document_id,
+                        Document.document_id == DocumentSource.document_id,
                     )
                     .where(
-                        SourceDocument.collection_id == collection_id,
+                        DocumentSource.collection_id == collection_id,
                         Document.collection_id == collection_id,
                         Document.sha256.in_(expected_hashes),
                     )

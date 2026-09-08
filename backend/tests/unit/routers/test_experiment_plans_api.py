@@ -130,6 +130,19 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan() -> None:
     assert updated.parent_plan_id == created.plan_id
     assert updated.updated_by == "expert-a"
     assert historical.plan_id == created.plan_id
+
+    title_only = asyncio.run(
+        experiment_plans_controller.update_experiment_plan(
+            "col_1",
+            "objective_1",
+            updated.plan_id,
+            ExperimentPlanUpdateRequest(title="Title-only edit"),
+            request,
+        )
+    )
+    assert title_only.title == "Title-only edit"
+    assert title_only.content == updated.content
+    assert title_only.status == updated.status
     assert historical.plan_version == 1
 
 
@@ -142,6 +155,15 @@ def test_experiment_plan_create_contract_rejects_chat_message_provenance() -> No
                 "source_message_id": "msg_chat",
             }
         )
+
+
+def test_experiment_plan_update_contract_allows_partial_patch() -> None:
+    payload = ExperimentPlanUpdateRequest.model_validate({"title": "Renamed"})
+
+    assert payload.title == "Renamed"
+    assert payload.content is None
+    assert payload.status is None
+    assert payload.structured_plan is None
 
 
 def test_experiment_plan_routes_hide_other_collection_from_non_owner() -> None:

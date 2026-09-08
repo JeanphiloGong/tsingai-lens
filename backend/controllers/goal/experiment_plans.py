@@ -121,13 +121,18 @@ async def update_experiment_plan(
             collection_id,
             await current_user_id(request),
         )
+        current = await request.app.state.experiment_plan_service.read_plan(
+            collection_id,
+            objective_id,
+            plan_id,
+        )
         plan = await request.app.state.experiment_plan_service.update_plan(
             collection_id=collection_id,
             objective_id=objective_id,
             plan_id=plan_id,
-            title=payload.title,
-            content=payload.content,
-            status=payload.status,
+            title=payload.title if payload.title is not None else current.title,
+            content=payload.content if payload.content is not None else current.content,
+            status=payload.status if payload.status is not None else current.status,
             structured_plan=(
                 payload.structured_plan.model_dump()
                 if payload.structured_plan is not None

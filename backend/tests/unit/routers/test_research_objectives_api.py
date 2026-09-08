@@ -334,6 +334,24 @@ class _Service:
             "warnings": [],
         }
 
+    async def get_analysis_status(self, collection_id, objective_id):
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective_id,
+            "analysis_version": 1,
+            "status": self.analysis_status,
+            "phase": "started" if self.analysis_status == "running" else self.analysis_status,
+            "processed_document_count": 0,
+            "total_document_count": 1,
+            "current_document_id": "paper-1" if self.analysis_status == "running" else None,
+            "progress_message": "Analysis is running." if self.analysis_status == "running" else None,
+            "error_code": None,
+            "error_message": None,
+            "created_at": "2026-08-31T00:00:00+00:00",
+            "started_at": "2026-08-31T00:00:01+00:00" if self.analysis_status == "running" else None,
+            "completed_at": None,
+        }
+
     async def list_findings(self, collection_id, objective_id, **kwargs):
         return {
             "collection_id": collection_id,
@@ -780,6 +798,20 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
     }
     assert "status" not in payload["objective"]
     assert "understanding" not in payload
+
+
+def test_objective_analysis_status_api_returns_only_progress_state() -> None:
+    response = _client(_Service(queued=True)).get(
+        "/collections/col-1/objectives/obj-1/analysis/status"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "queued"
+    assert payload["analysis_version"] == 1
+    assert "paper_contributions" not in payload
+    assert "published_analysis" not in payload
+    assert "stats" not in payload
 
 
 def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:

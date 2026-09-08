@@ -12,6 +12,7 @@
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
 		fetchObjectiveAnalysis,
+		fetchObjectiveAnalysisStatus,
 		fetchObjectiveEvidence,
 		fetchObjectiveFindings,
 		objectiveFindingDatasetUrl,
@@ -359,20 +360,29 @@
 
 	async function refreshAnalysis() {
 		try {
+			const status = await fetchObjectiveAnalysisStatus(collectionId, objectiveId);
 			const previousVersion = analysis?.objective.published_analysis_version ?? null;
-			const refreshed = await fetchObjectiveAnalysis(collectionId, objectiveId);
-			const nextVersion = refreshed.objective.published_analysis_version;
-			if (nextVersion !== previousVersion) {
-				findingRequestSequence += 1;
-				selectedFinding = null;
-				evidence = [];
-				closeAuthoring();
-				authoringEvidence = [];
-				authoringEvidenceVersion = null;
+			if (analysis?.active_analysis && status.status) {
+				analysis = {
+					...analysis,
+					active_analysis: { ...analysis.active_analysis, ...status }
+				};
 			}
-			analysis = refreshed;
-			if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
-				await loadFindings();
+			if (status.status !== 'queued' && status.status !== 'running') {
+				const refreshed = await fetchObjectiveAnalysis(collectionId, objectiveId);
+				const nextVersion = refreshed.objective.published_analysis_version;
+				if (nextVersion !== previousVersion) {
+					findingRequestSequence += 1;
+					selectedFinding = null;
+					evidence = [];
+					closeAuthoring();
+					authoringEvidence = [];
+					authoringEvidenceVersion = null;
+				}
+				analysis = refreshed;
+				if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
+					await loadFindings();
+				}
 			}
 			schedulePoll();
 		} catch (err) {

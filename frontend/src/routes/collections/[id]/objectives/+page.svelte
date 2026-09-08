@@ -10,9 +10,11 @@
 	import {
 		fetchCollectionObjectives,
 		fetchObjectiveAnalysis,
+		fetchObjectiveAnalysisStatus,
 		fetchObjectiveScope,
 		runObjectiveAnalysis,
 		type ObjectiveAnalysisState,
+		type ObjectiveAnalysisProgress,
 		type ObjectiveList,
 		type ObjectiveScope,
 		type ObjectiveScopeDecision,
@@ -117,9 +119,15 @@
 		if (!objectiveIds.length) return;
 		try {
 			const snapshots = await Promise.all(
-				objectiveIds.map((objectiveId) => fetchObjectiveAnalysis(collectionId, objectiveId))
+				objectiveIds.map((objectiveId) => fetchObjectiveAnalysisStatus(collectionId, objectiveId))
 			);
-			for (const snapshot of snapshots) applyAnalysisSnapshot(snapshot);
+			for (const snapshot of snapshots) {
+				if (snapshot.status === 'succeeded' || snapshot.status === 'failed') {
+					applyAnalysisSnapshot(await fetchObjectiveAnalysis(collectionId, snapshot.objective_id));
+				} else {
+					applyAnalysisStatus(snapshot);
+				}
+			}
 		} catch (err) {
 			error = errorMessage(err);
 		}
@@ -140,6 +148,15 @@
 		analysisStates = {
 			...analysisStates,
 			[snapshot.objective.objective_id]: snapshot.active_analysis
+		};
+	}
+
+	function applyAnalysisStatus(status: ObjectiveAnalysisProgress) {
+		const previous = analysisStates[status.objective_id];
+		if (!previous) return;
+		analysisStates = {
+			...analysisStates,
+			[status.objective_id]: { ...previous, ...status }
 		};
 	}
 

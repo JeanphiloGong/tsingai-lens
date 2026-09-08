@@ -62,6 +62,13 @@ context, timestamps, and retry lineage. Runs do not expose a filesystem output
 path; scientific artifacts are addressed by their owning Document, Objective,
 analysis, Finding, or Evidence identities.
 
+`GET /api/v1/collections` is the collection-picker projection. Each item
+contains collection identity, name, description, status, paper count, and
+compact current-document rows (`document_id`, filename, media type, status,
+size, and timestamps). It intentionally omits storage keys, SHA-256 values,
+parser versions, and preparation fingerprints. Use the collection detail or
+document-list endpoints when those operational fields are required.
+
 At most one `document_preparation` run may be queued or running for a Document.
 Repeated requests reuse that active run. A completed run is reusable only when
 its input fingerprint still matches the current document bytes, parser version,
@@ -400,6 +407,7 @@ can be inspected.
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/scope`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis/status`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
 Discovery accepts `{"document_ids": [...]}` with one or more unique current
@@ -472,6 +480,13 @@ citation leads require researcher inspection and are not selected by default.
 The endpoint performs no LLM call and persists no scope. An unknown Objective
 returns `404`; a Collection with no Paper Maps returns
 `409 objective_scope_not_ready`.
+
+`GET .../analysis/status` is the polling projection for the active analysis.
+It returns only lifecycle state, phase, processed/total document counts, the
+current document, a bounded progress message, terminal error fields, and
+timestamps. It does not include Findings, Evidence, contributions, telemetry,
+or other scientific result payloads. Clients should fetch `GET .../analysis`
+once the status is `succeeded` or `failed`.
 
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
 `analysis_version`. It contains immutable selected `document_inputs`,
@@ -832,6 +847,10 @@ Finding/Evidence fingerprints. Reads recheck those snapshots; stale grounded
 plans cannot be promoted to `ready_for_review`. Historical plans that reference
 a migrated Chat message retain their existing lineage and validation rules.
 Saving a plan never schedules or claims that an experiment was executed.
+`PATCH` is a partial update: omitted fields retain their previous values and
+the request must include at least one of `title`, `content`, `status`, or
+`structured_plan`. The service creates a new immutable plan revision; it does
+not mutate the historical revision addressed by `plan_id`.
 
 ### Documents And Source Verification
 

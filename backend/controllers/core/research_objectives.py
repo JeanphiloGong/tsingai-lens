@@ -14,6 +14,7 @@ from controllers.schemas.core.research_objectives import (
     FindingListResponse,
     DocumentSelectionRequest,
     ObjectiveAnalysisResponse,
+    ObjectiveAnalysisStatusResponse,
     ObjectiveEvidenceListResponse,
     ObjectiveEvidenceMapResponse,
     ObjectiveScopeResponse,
@@ -150,6 +151,26 @@ async def start_collection_objective_analysis(
             },
         ) from exc
     return _to_objective_analysis_response(payload)
+
+
+@router.get(
+    "/{collection_id}/objectives/{objective_id}/analysis/status",
+    response_model=ObjectiveAnalysisStatusResponse,
+    summary="Read lightweight research objective analysis progress",
+)
+async def get_collection_objective_analysis_status(
+    collection_id: str,
+    objective_id: str,
+    request: Request,
+) -> ObjectiveAnalysisStatusResponse:
+    try:
+        payload = await request.app.state.objective_analysis_service.get_analysis_status(
+            collection_id,
+            objective_id,
+        )
+    except FileNotFoundError as exc:
+        raise _objective_not_found(collection_id, objective_id, exc) from exc
+    return ObjectiveAnalysisStatusResponse(**payload)
 
 
 @router.get(

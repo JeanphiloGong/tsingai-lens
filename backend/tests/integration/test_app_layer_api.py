@@ -137,6 +137,23 @@ def test_request_id_is_generated_and_echoed(app_client) -> None:
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
+def test_collection_list_returns_compact_document_rows(app_client) -> None:
+    collection_id = _create_collection(app_client)
+    uploaded = _upload(app_client, collection_id, "paper-a.txt", b"Methods\nPaper A")
+
+    response = app_client.get(f"{API_V1_PREFIX}/collections")
+
+    assert response.status_code == 200
+    document = response.json()["items"][0]["documents"][0]
+    assert document["document_id"] == uploaded["document_id"]
+    assert document["original_filename"] == "paper-a.txt"
+    assert document["status"] == "stored"
+    assert "storage_key" not in document
+    assert "sha256" not in document
+    assert "parser_version" not in document
+    assert "preparation_fingerprint" not in document
+
+
 def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_work(
     app_client,
 ) -> None:

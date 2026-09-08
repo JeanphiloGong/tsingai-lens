@@ -198,6 +198,25 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     abstention_note: str | None = None
 
 
+class ObjectiveAnalysisStatusResponse(BaseModel):
+    """Small progress payload used while an Objective analysis is running."""
+
+    collection_id: str
+    objective_id: str
+    analysis_version: int | None = Field(default=None, ge=1)
+    status: AnalysisStatus | None = None
+    phase: str | None = None
+    processed_document_count: int = Field(default=0, ge=0)
+    total_document_count: int = Field(default=0, ge=0)
+    current_document_id: str | None = None
+    progress_message: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
 class ObjectiveEvidenceGapResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

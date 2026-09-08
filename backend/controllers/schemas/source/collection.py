@@ -37,6 +37,34 @@ class CollectionDocumentResponse(BaseModel):
     preparation_fingerprint: str | None = Field(default=None)
 
 
+class CollectionDocumentSummaryResponse(BaseModel):
+    """Browser-facing document fields needed in collection listings."""
+
+    document_id: str = Field(..., description="Document ID")
+    original_filename: str = Field(..., description="Original filename")
+    media_type: str | None = Field(default=None, description="Media type")
+    status: str = Field(..., description="Document preparation status")
+    size_bytes: int = Field(default=0, description="Document size in bytes")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last preparation-state update")
+
+
+class CollectionSummaryResponse(BaseModel):
+    """Compact collection row used by the collection listing."""
+
+    collection_id: str = Field(..., description="Collection ID")
+    name: str = Field(..., description="Collection name")
+    description: str | None = Field(default=None, description="Collection description")
+    status: str = Field(..., description="Collection status")
+    paper_count: int = Field(default=0, description="Number of current documents")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last update timestamp")
+    documents: list[CollectionDocumentSummaryResponse] = Field(
+        default_factory=list,
+        description="Compact current document rows",
+    )
+
+
 class CollectionResponse(BaseModel):
     """Collection metadata and its current documents."""
 
@@ -56,7 +84,7 @@ class CollectionResponse(BaseModel):
 class CollectionListResponse(BaseModel):
     """Collection listing payload."""
 
-    items: list[CollectionResponse] = Field(
+    items: list[CollectionSummaryResponse] = Field(
         default_factory=list,
         description="Collections",
     )

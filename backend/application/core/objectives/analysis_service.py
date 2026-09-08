@@ -296,6 +296,53 @@ class ObjectiveAnalysisService:
         objective = await self._require_objective(collection_id, objective_id)
         return await self._result(collection_id, objective)
 
+    async def get_analysis_status(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
+        """Read only the active analysis progress needed for polling."""
+
+        objective = await self._require_objective(collection_id, objective_id)
+        analysis = await self.objective_repository.read_analysis(
+            collection_id,
+            objective.objective_id,
+            objective.active_analysis_version,
+        )
+        if analysis is None:
+            return {
+                "collection_id": collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": None,
+                "status": None,
+                "phase": None,
+                "processed_document_count": 0,
+                "total_document_count": 0,
+                "current_document_id": None,
+                "progress_message": None,
+                "error_code": None,
+                "error_message": None,
+                "created_at": None,
+                "started_at": None,
+                "completed_at": None,
+            }
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": analysis.analysis_version,
+            "status": analysis.status,
+            "phase": analysis.phase,
+            "processed_document_count": analysis.processed_document_count,
+            "total_document_count": analysis.total_document_count,
+            "current_document_id": analysis.current_document_id,
+            "progress_message": analysis.progress_message,
+            "error_code": analysis.error_code,
+            "error_message": analysis.error_message,
+            "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+            "started_at": analysis.started_at.isoformat() if analysis.started_at else None,
+            "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
+        }
+
     async def list_findings(
         self,
         collection_id: str,

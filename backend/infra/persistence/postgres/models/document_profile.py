@@ -1,45 +1,7 @@
-"""Current document-level profile owned by one collection document."""
+"""Deprecated import path for the unified document preparation model."""
 
-from __future__ import annotations
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
-from datetime import datetime
-
-from typing import Any
-
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, JSON, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
-
-from infra.persistence.postgres.base import Base
-
-
-_JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
-
-
-class DocumentProfileRow(Base):
-    __tablename__ = "document_profiles"
-    __table_args__ = (
-        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
-    )
-
-    document_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("documents.document_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    doc_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    profile_warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    profile_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    profile_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    generated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    paper_map_payload: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-
+DocumentProfileRow = DocumentPreparationRow
 
 __all__ = ["DocumentProfileRow"]

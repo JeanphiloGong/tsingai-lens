@@ -22,9 +22,7 @@ Collection
   -> Documents
 
 Document
-  -> current DocumentSource (parsed tree aggregate)
-  -> current DocumentProfile
-     -> optional PaperMap cache (built lazily by Objective work)
+  -> current DocumentPreparation (Source + Profile + optional PaperMap)
 
 PipelineRun
   -> technical execution history for a Collection or Document scope
@@ -47,10 +45,10 @@ ResearchObjective
 current Document membership. A Document is identified by `document_id`; its
 filename, storage key, SHA-256, media type, status, size, and collection order
 live on the Document record. Parser provenance and the Source fingerprint live
-on the current `DocumentSource` row. Profile version, Source/profile
-fingerprints, and profile generation time live on the current
-`DocumentProfile` row. The domain-level preparation fingerprint is derived
-from the current profile fingerprint.
+in the Source section of the current `DocumentPreparation` row. Profile
+version, Source/profile fingerprints, and profile generation time live in its
+Profile section. The domain-level preparation fingerprint is derived from the
+current profile fingerprint.
 
 There is no public CollectionDocument membership object and no DocumentVersion
 aggregate. A Document is the current paper in the Collection.
@@ -63,13 +61,14 @@ aggregate or historical snapshot.
 
 ### Document preparation
 
-Source and Profile rows belong to one `document_id` and cascade when that
-Document is deleted. The Paper Map cache is stored on the Profile row, so it
-shares the Profile's identity and deletion boundary.
+Source, Profile, and Paper Map sections belong to one `document_id` and
+cascade when that Document is deleted. They share one current preparation
+identity and deletion boundary.
 
-`DocumentSource` stores one complete format-neutral parsed artifact and its tree
-projection in JSON. The envelope can represent PDF pages, DOCX sections, and
-XLSX sheets without adding a new relational table family for each format.
+`DocumentPreparation` stores one complete format-neutral parsed artifact and
+its Profile and Paper Map results in named JSON sections. The envelope can
+represent PDF pages, DOCX sections, and XLSX sheets without adding a new
+relational table family for each format.
 
 Preparation uses a dependency chain rather than one all-or-nothing cache key:
 
@@ -147,7 +146,7 @@ The fingerprint covers the Objective scientific intent, the Document
 `preparation_fingerprint`, the Evidence extraction version, and model identity.
 Only `succeeded` checkpoint entries are reusable. A succeeded checkpoint
 contains one `PaperContribution` and its zero or more `ObjectiveEvidence`
-records; zero
+records in the same analysis payload; zero
 Evidence can mean a valid scientific absence. `failed` and unfinished `running`
 checkpoints are technical work and are replaced on retry.
 
@@ -156,7 +155,8 @@ reused, they are rebound to the new `analysis_version` before one cross-paper
 Finding synthesis. They are not published children and are never read by the
 Finding or Evidence APIs.
 
-Public analysis children use the same Objective/version identity:
+Public analysis results use the same Objective/version identity inside the
+`objective_analyses.payload` arrays:
 
 - ObjectiveEvidence adds `evidence_id` and references one contribution.
 - Finding adds `finding_id`.
@@ -177,9 +177,10 @@ erDiagram
     COLLECTION ||--o{ DOCUMENT : contains
     COLLECTION ||--o{ PIPELINE_RUN : executes
     DOCUMENT }o..o{ PIPELINE_RUN : logical_scope
-    DOCUMENT ||--o| DOCUMENT_SOURCE : has_current
-    DOCUMENT ||--o| DOCUMENT_PROFILE : has_current
-    DOCUMENT_PROFILE ||--o| PAPER_MAP_CACHE : embeds
+    DOCUMENT ||--o| DOCUMENT_PREPARATION : has_current
+    DOCUMENT_PREPARATION ||--o| SOURCE_SECTION : embeds
+    DOCUMENT_PREPARATION ||--o| PROFILE_SECTION : embeds
+    DOCUMENT_PREPARATION ||--o| PAPER_MAP_CACHE : embeds
     COLLECTION ||--o| DISCOVERY_STATE : embeds
     COLLECTION ||--o{ RESEARCH_OBJECTIVE : frames
     RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_ANALYSIS : retries
@@ -189,9 +190,10 @@ erDiagram
 
 ## Replacement And Deletion
 
-- Re-preparing a Document replaces its current Source and Profile only after the
-  owning step succeeds; a later Objective operation rebuilds the embedded Paper
-  Map cache when its fingerprint is stale. Pipeline Run history remains observable.
+- Re-preparing a Document replaces the relevant Source/Profile sections of its
+  current preparation row only after the owning step succeeds; a later
+  Objective operation rebuilds the embedded Paper Map cache when its
+  fingerprint is stale. Pipeline Run history remains observable.
 - Uploading another Document adds a peer and does not touch prepared peers.
 - Deleting a Collection cascades its Documents, prepared artifacts, Pipeline Runs,
   Objectives, analyses, and downstream records.
@@ -200,11 +202,12 @@ erDiagram
   and comparison tables before creating the current model. Migration
   `20260908_0043` backfills the consolidated Source aggregate from the retired
   normalized Source tables before dropping them; migration `20260908_0044`
-  moves preparation provenance to Source/Profile ownership. Migration
+  moves preparation provenance to artifact ownership. Migration
   `20260908_0045` backfills the former Task history into `pipeline_runs` and
-  removes `tasks` and `task_stages`; `20260908_0047`-`0052` merge lifecycle-local
+  removes `tasks` and `task_stages`; `20260908_0047`-`0053` merge lifecycle-local
   Paper Map, Chat result, analysis-intermediate, discovery, evaluation child,
-  and redundant Source/count storage into their lifecycle owners.
+  and redundant Source/count storage; `0054` merges current document
+  preparation artifacts and `0055` merges public Objective result records.
 
 ## Implementation Boundary
 

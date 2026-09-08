@@ -11,8 +11,7 @@ from domain.source import Collection, Document
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.postgres.models.document import Document as DocumentRow
-from infra.persistence.postgres.models.document_profile import DocumentProfileRow
-from infra.persistence.postgres.models.document_source import DocumentSource
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 
 pytestmark = pytest.mark.anyio
@@ -127,28 +126,26 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
     )
     async with collection_repository.session_factory.begin() as session:
         session.add(
-            DocumentSource(
+            DocumentPreparationRow(
                 document_id=document.document_id,
                 source_format="pdf",
                 parser_name="test-parser",
                 parser_version="source-runtime.v1",
                 source_fingerprint="a" * 64,
                 artifact_json={"blocks": [], "tables": [], "figures": []},
+                profile_json={
+                    "document_id": document.document_id,
+                    "title": "Paper",
+                    "doc_type": "uncertain",
+                    "profile_warnings": [],
+                    "confidence": 0.0,
+                    "source_fingerprint": "a" * 64,
+                    "profile_version": "document-profile.v1+paper-map.v1",
+                    "profile_fingerprint": "b" * 64,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                },
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
-            )
-        )
-        session.add(
-            DocumentProfileRow(
-                document_id=document.document_id,
-                title="Paper",
-                doc_type="uncertain",
-                profile_warnings=[],
-                confidence=0.0,
-                source_fingerprint="a" * 64,
-                profile_version="document-profile.v1+paper-map.v1",
-                profile_fingerprint="b" * 64,
-                generated_at=datetime.now(timezone.utc),
             )
         )
     prepared = replace(

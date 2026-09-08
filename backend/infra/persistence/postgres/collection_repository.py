@@ -12,8 +12,7 @@ from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
-from infra.persistence.postgres.models.document_profile import DocumentProfileRow
-from infra.persistence.postgres.models.document_source import DocumentSource
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 
 class PostgresCollectionRepository:
@@ -75,14 +74,10 @@ class PostgresCollectionRepository:
     ) -> DocumentAggregate | None:
         async with self.session_factory() as session:
             row = (await session.execute(
-                select(Document, DocumentSource, DocumentProfileRow)
+                select(Document, DocumentPreparationRow)
                 .outerjoin(
-                    DocumentSource,
-                    DocumentSource.document_id == Document.document_id,
-                )
-                .outerjoin(
-                    DocumentProfileRow,
-                    DocumentProfileRow.document_id == Document.document_id,
+                    DocumentPreparationRow,
+                    DocumentPreparationRow.document_id == Document.document_id,
                 )
                 .where(
                     Document.collection_id == collection_id,
@@ -169,32 +164,29 @@ class PostgresCollectionRepository:
             row.status = record.status
             row.size_bytes = record.size_bytes
             row.updated_at = _datetime(record.updated_at or record.created_at)
-            source_row = await session.scalar(
-                select(DocumentSource).where(
-                    DocumentSource.document_id == record.document_id,
+            preparation_row = await session.scalar(
+                select(DocumentPreparationRow).where(
+                    DocumentPreparationRow.document_id == record.document_id,
                 )
             )
-            if source_row is not None:
+            if preparation_row is not None:
                 if record.parser_version is not None:
-                    source_row.parser_version = record.parser_version
+                    preparation_row.parser_version = record.parser_version
                 if record.source_fingerprint is not None:
-                    source_row.source_fingerprint = record.source_fingerprint
-            profile_row = await session.get(DocumentProfileRow, record.document_id)
-            if profile_row is not None:
-                provenance_updated = False
+                    preparation_row.source_fingerprint = record.source_fingerprint
+                profile_payload = dict(preparation_row.profile_json or {})
                 if record.source_fingerprint is not None:
-                    profile_row.source_fingerprint = record.source_fingerprint
-                    provenance_updated = True
+                    profile_payload["source_fingerprint"] = record.source_fingerprint
                 if record.document_analysis_version is not None:
-                    profile_row.profile_version = record.document_analysis_version
-                    provenance_updated = True
+                    profile_payload["profile_version"] = record.document_analysis_version
                 if record.profile_fingerprint is not None:
-                    profile_row.profile_fingerprint = record.profile_fingerprint
-                    provenance_updated = True
-                if provenance_updated:
-                    profile_row.generated_at = _datetime(
-                        record.updated_at or record.created_at
+                    profile_payload["profile_fingerprint"] = record.profile_fingerprint
+                if profile_payload:
+                    profile_payload["generated_at"] = _iso(
+                        _datetime(record.updated_at or record.created_at)
                     )
+                    preparation_row.profile_json = profile_payload
+                preparation_row.updated_at = _datetime(record.updated_at or record.created_at)
             return True
 
     async def delete_collection(self, collection_id: str) -> bool:
@@ -245,15 +237,11 @@ def _document_row(
 
 def _to_document(
     row: Document,
-    source_row: DocumentSource | None = None,
-    profile_row: DocumentProfileRow | None = None,
+    preparation_row: DocumentPreparationRow | None = None,
 ) -> DocumentAggregate:
-    source_fingerprint = (
-        source_row.source_fingerprint if source_row is not None else None
-    )
-    profile_fingerprint = (
-        profile_row.profile_fingerprint if profile_row is not None else None
-    )
+    profile_payload = dict(preparation_row.profile_json or {}) if preparation_row else {}
+    source_fingerprint = preparation_row.source_fingerprint if preparation_row else None
+    profile_fingerprint = profile_payload.get("profile_fingerprint")
     return DocumentAggregate(
         document_id=row.document_id,
         original_filename=row.original_filename,
@@ -265,10 +253,8 @@ def _to_document(
         size_bytes=row.size_bytes,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
-        parser_version=source_row.parser_version if source_row is not None else None,
-        document_analysis_version=(
-            profile_row.profile_version if profile_row is not None else None
-        ),
+        parser_version=preparation_row.parser_version if preparation_row else None,
+        document_analysis_version=profile_payload.get("profile_version"),
         source_fingerprint=source_fingerprint,
         profile_fingerprint=profile_fingerprint,
         # A fully prepared document uses the profile fingerprint as its
@@ -284,14 +270,10 @@ async def _documents_for_collection(
     collection_id: str,
 ) -> tuple[DocumentAggregate, ...]:
     rows = await session.execute(
-        select(Document, DocumentSource, DocumentProfileRow)
+        select(Document, DocumentPreparationRow)
         .outerjoin(
-            DocumentSource,
-            DocumentSource.document_id == Document.document_id,
-        )
-        .outerjoin(
-            DocumentProfileRow,
-            DocumentProfileRow.document_id == Document.document_id,
+            DocumentPreparationRow,
+            DocumentPreparationRow.document_id == Document.document_id,
         )
         .where(Document.collection_id == collection_id)
         .order_by(Document.document_order)

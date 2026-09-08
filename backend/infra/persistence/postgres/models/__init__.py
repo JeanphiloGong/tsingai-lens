@@ -9,8 +9,7 @@ from infra.persistence.postgres.models.chat import (
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
-from infra.persistence.postgres.models.document_source import DocumentSource
-from infra.persistence.postgres.models.document_profile import DocumentProfileRow
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 from infra.persistence.postgres.models.evaluation import (
     EvaluationGoldSetRecord,
     EvaluationPredictionSnapshotRecord,
@@ -20,8 +19,6 @@ from infra.persistence.postgres.models.evaluation import (
 )
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
-    ObjectiveEvidenceRecord,
-    ObjectiveFindingRecord,
     ObjectiveResearchRecord,
 )
 from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlan
@@ -33,8 +30,7 @@ __all__ = [
     "ChatToolCallRow",
     "Collection",
     "Document",
-    "DocumentSource",
-    "DocumentProfileRow",
+    "DocumentPreparationRow",
     "EvaluationGoldSetRecord",
     "EvaluationPredictionSnapshotRecord",
     "EvaluationRunRecord",
@@ -42,8 +38,6 @@ __all__ = [
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
     "ObjectiveExperimentPlan",
-    "ObjectiveEvidenceRecord",
-    "ObjectiveFindingRecord",
     "ObjectiveResearchRecord",
     "PipelineRunRow",
 ]

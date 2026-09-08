@@ -22,7 +22,7 @@ from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
 )
 from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
-from infra.persistence.postgres.models.document_profile import DocumentProfileRow
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 from infra.persistence.postgres.pipeline_run_repository import (
     PostgresPipelineRunRepository,
 )
@@ -90,7 +90,9 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
     )
     async with source_repository.session_factory() as session:
         stored_map = await session.scalar(
-            select(DocumentProfileRow).where(DocumentProfileRow.document_id == "doc_a")
+            select(DocumentPreparationRow).where(
+                DocumentPreparationRow.document_id == "doc_a"
+            )
         )
     assert stored_map.paper_map_payload["input_fingerprint"] == revised_map.input_fingerprint
     assert stored_map.paper_map_payload["map_version"] == revised_map.map_version

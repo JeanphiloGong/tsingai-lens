@@ -27,7 +27,7 @@ from domain.source import (
     build_source_document_tree,
 )
 from infra.persistence.postgres.models.document import Document as DocumentRow
-from infra.persistence.postgres.models.document_source import DocumentSource
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 
 class PostgresSourceArtifactRepository:
@@ -59,7 +59,7 @@ class PostgresSourceArtifactRepository:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{document.document_id}"
                 )
-            row = await session.get(DocumentSource, document.document_id)
+            row = await session.get(DocumentPreparationRow, document.document_id)
             values = {
                 "document_id": document.document_id,
                 "source_format": str(
@@ -72,7 +72,7 @@ class PostgresSourceArtifactRepository:
                 "updated_at": now,
             }
             if row is None:
-                session.add(DocumentSource(created_at=now, **values))
+                session.add(DocumentPreparationRow(created_at=now, **values))
             else:
                 for key, value in values.items():
                     setattr(row, key, value)
@@ -114,15 +114,20 @@ class PostgresSourceArtifactRepository:
     ) -> tuple[SourceDocument, ...]:
         async with self.session_factory() as session:
             statement = (
-                select(DocumentSource)
-                .join(DocumentRow, DocumentRow.document_id == DocumentSource.document_id)
+                select(DocumentPreparationRow)
+                .join(
+                    DocumentRow,
+                    DocumentRow.document_id == DocumentPreparationRow.document_id,
+                )
                 .where(
                     DocumentRow.collection_id == collection_id,
                 )
-                .order_by(DocumentRow.document_order, DocumentSource.document_id)
+                .order_by(DocumentRow.document_order, DocumentPreparationRow.document_id)
             )
             if document_ids is not None:
-                statement = statement.where(DocumentSource.document_id.in_(document_ids))
+                statement = statement.where(
+                    DocumentPreparationRow.document_id.in_(document_ids)
+                )
             rows = tuple(await session.scalars(statement))
         return tuple(_document_from_row(row) for row in rows)
 
@@ -253,7 +258,7 @@ class PostgresSourceArtifactRepository:
     ) -> None:
         self._validate_references(document_id, references)
         async with self.session_factory.begin() as session:
-            row = await session.get(DocumentSource, document_id)
+            row = await session.get(DocumentPreparationRow, document_id)
             if row is None:
                 raise FileNotFoundError(f"source document not found: {document_id}")
             artifact = dict(row.artifact_json or {})
@@ -276,7 +281,7 @@ class PostgresSourceArtifactRepository:
 
     async def _read_references_for_document(self, document_id: str) -> SourceReferenceSet:
         async with self.session_factory() as session:
-            row = await session.get(DocumentSource, document_id)
+            row = await session.get(DocumentPreparationRow, document_id)
         if row is None:
             return SourceReferenceSet()
         return _references_from_payload(dict(row.artifact_json or {}).get("references"))
@@ -328,7 +333,7 @@ def _artifact_payload(document: SourceDocument) -> dict[str, Any]:
     }
 
 
-def _document_from_row(row: DocumentSource) -> SourceDocument:
+def _document_from_row(row: DocumentPreparationRow) -> SourceDocument:
     return _document_from_artifact(dict(row.artifact_json or {}))
 
 

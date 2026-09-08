@@ -72,55 +72,7 @@ class ObjectiveAnalysisRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ObjectiveEvidenceRecord(Base):
-    __tablename__ = "objective_evidence"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version"],
-            [
-                "objective_analyses.collection_id",
-                "objective_analyses.objective_id",
-                "objective_analyses.analysis_version",
-            ],
-            name="fk_objective_evidence_analysis",
-            ondelete="CASCADE",
-        ),
-    )
-
-    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    analysis_version: Mapped[int] = mapped_column(Integer, primary_key=True)
-    evidence_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-
-
-class ObjectiveFindingRecord(Base):
-    __tablename__ = "objective_findings"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version"],
-            [
-                "objective_analyses.collection_id",
-                "objective_analyses.objective_id",
-                "objective_analyses.analysis_version",
-            ],
-            name="fk_objective_findings_analysis",
-            ondelete="CASCADE",
-        ),
-    )
-
-    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    analysis_version: Mapped[int] = mapped_column(Integer, primary_key=True)
-    finding_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    display_rank: Mapped[int] = mapped_column(Integer, nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-
-
 __all__ = [
     "ObjectiveAnalysisRecord",
-    "ObjectiveEvidenceRecord",
-    "ObjectiveFindingRecord",
     "ObjectiveResearchRecord",
 ]

@@ -12,6 +12,7 @@ from infra.persistence.postgres.models.evaluation import (
     FindingCurationRecord,
     FindingFeedbackRecord,
 )
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 
 
 class PostgresFindingReviewRepository:
@@ -26,6 +27,7 @@ class PostgresFindingReviewRepository:
         self, feedback: FindingFeedback
     ) -> FindingFeedback:
         async with self.session_factory.begin() as session:
+            await _require_finding(session, feedback)
             existing = await session.get(
                 FindingFeedbackRecord, feedback.feedback_id
             )
@@ -83,6 +85,7 @@ class PostgresFindingReviewRepository:
         self, curation: FindingCuration
     ) -> FindingCuration:
         async with self.session_factory.begin() as session:
+            await _require_finding(session, curation)
             existing = await session.get(
                 FindingCurationRecord, curation.curation_id
             )
@@ -197,6 +200,26 @@ def _isoformat(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
+
+
+async def _require_finding(session: AsyncSession, value: object) -> None:
+    row = await session.get(
+        ObjectiveAnalysisRecord,
+        (
+            value.collection_id,
+            value.objective_id,
+            value.analysis_version,
+        ),
+    )
+    if row is None or not any(
+        item.get("finding_id") == value.finding_id
+        for item in (row.payload or {}).get("findings", ())
+    ):
+        raise ValueError(
+            "finding does not exist in the requested objective analysis: "
+            f"{value.collection_id}/{value.objective_id}/"
+            f"{value.analysis_version}/{value.finding_id}"
+        )
 
 
 __all__ = ["PostgresFindingReviewRepository"]

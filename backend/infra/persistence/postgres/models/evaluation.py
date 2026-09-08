@@ -118,17 +118,8 @@ class EvaluationRunRecord(Base):
 class FindingFeedbackRecord(Base):
     __tablename__ = "finding_feedback_records"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version", "finding_id"],
-            [
-                "objective_findings.collection_id",
-                "objective_findings.objective_id",
-                "objective_findings.analysis_version",
-                "objective_findings.finding_id",
-            ],
-            name="fk_finding_feedback_finding",
-            ondelete="CASCADE",
-        ),
+        # Finding identity is validated against the JSON result payload by
+        # the review repository; Findings are no longer separate SQL rows.
     )
 
     feedback_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -148,17 +139,8 @@ class FindingFeedbackRecord(Base):
 class FindingCurationRecord(Base):
     __tablename__ = "finding_curation_records"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version", "finding_id"],
-            [
-                "objective_findings.collection_id",
-                "objective_findings.objective_id",
-                "objective_findings.analysis_version",
-                "objective_findings.finding_id",
-            ],
-            name="fk_finding_curations_finding",
-            ondelete="CASCADE",
-        ),
+        # Finding identity is validated against the JSON result payload by
+        # the review repository; Findings are no longer separate SQL rows.
     )
 
     curation_id: Mapped[str] = mapped_column(String(128), primary_key=True)

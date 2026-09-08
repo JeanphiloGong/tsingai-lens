@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0053"
+HEAD_REVISION = "20260908_0055"
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
@@ -113,25 +113,19 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             "profile_fingerprint",
             "preparation_fingerprint",
         }.isdisjoint(document_columns)
-        assert {
-            "source_fingerprint",
-            "profile_version",
-            "profile_fingerprint",
-            "generated_at",
-        }.issubset(
-            {
-                column["name"]
-                for column in inspect(connection).get_columns("document_profiles")
-            }
-        )
-        profile_columns = {
+        preparation_columns = {
             column["name"]
-            for column in inspect(connection).get_columns("document_profiles")
+            for column in inspect(connection).get_columns("document_preparations")
         }
-        assert "profile_warnings" in profile_columns
-        assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
-            profile_columns
-        )
+        assert {
+            "source_format",
+            "parser_name",
+            "parser_version",
+            "source_fingerprint",
+            "artifact_json",
+            "profile_json",
+            "paper_map_payload",
+        }.issubset(preparation_columns)
         assert "paper_maps" not in expected
         assert "evaluation_gold_items" not in expected
         assert "evaluation_prediction_items" not in expected
@@ -150,33 +144,16 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         assert {"scores", "failures"}.issubset(
             {column["name"] for column in inspect(connection).get_columns("evaluation_runs")}
         )
-        assert {
-            "paper_map_payload",
-        }.issubset(profile_columns)
-        assert {
-            "paper_map_input_fingerprint",
-            "paper_map_version",
-            "paper_map_generated_at",
-        }.isdisjoint(profile_columns)
-        assert "document_sources" in expected
+        assert "document_sources" not in expected
+        assert "document_profiles" not in expected
         collection_columns = {
             column["name"]
             for column in inspect(connection).get_columns("collections")
         }
         assert "paper_count" not in collection_columns
-        assert {
-            "document_id",
-            "source_format",
-            "parser_name",
-            "parser_version",
-            "source_fingerprint",
-            "artifact_json",
-            "created_at",
-            "updated_at",
-        } == {
-            column["name"]
-            for column in inspect(connection).get_columns("document_sources")
-        }
+        assert {"document_id", "created_at", "updated_at"}.issubset(
+            preparation_columns
+        )
         pipeline_run_columns = {
             column["name"]
             for column in inspect(connection).get_columns("pipeline_runs")
@@ -305,13 +282,15 @@ def test_redundant_source_and_collection_fields_are_removed_without_data_loss(tm
         )
 
         command.upgrade(config, "head")
-        compact_sources = Table("document_sources", MetaData(), autoload_with=connection)
-        source = connection.execute(select(compact_sources)).mappings().one()
+        preparations = Table(
+            "document_preparations", MetaData(), autoload_with=connection
+        )
+        source = connection.execute(select(preparations)).mappings().one()
         assert source["document_id"] == "compact-document"
         assert source["artifact_json"] == artifact
-        assert "source_id" not in compact_sources.c
-        assert "collection_id" not in compact_sources.c
-        assert "tree_json" not in compact_sources.c
+        assert "profile_json" in preparations.c
+        assert "paper_map_payload" in preparations.c
+        assert "document_sources" not in inspect(connection).get_table_names()
         assert "paper_count" not in {
             column["name"]
             for column in inspect(connection).get_columns("collections")
@@ -604,15 +583,17 @@ def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
 
         command.upgrade(config, "head")
 
-        upgraded_profiles = Table(
-            "document_profiles", MetaData(), autoload_with=connection
+        upgraded_preparations = Table(
+            "document_preparations", MetaData(), autoload_with=connection
         )
-        profile = connection.execute(select(upgraded_profiles)).mappings().one()
-        assert profile["profile_warnings"] == ["classification_uncertain"]
+        preparation = connection.execute(select(upgraded_preparations)).mappings().one()
+        assert preparation["profile_json"]["profile_warnings"] == [
+            "classification_uncertain"
+        ]
         assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
-            upgraded_profiles.c.keys()
+            upgraded_preparations.c.keys()
         )
-        assert profile["paper_map_payload"] == {
+        assert preparation["paper_map_payload"] == {
             "document_id": "profile-map-document",
             "doc_role": "experimental",
             "studies": [],

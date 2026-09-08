@@ -92,13 +92,10 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
         stored_map = await session.scalar(
             select(DocumentProfileRow).where(DocumentProfileRow.document_id == "doc_a")
         )
-    assert stored_map.paper_map_input_fingerprint == revised_map.input_fingerprint
-    assert stored_map.paper_map_version == revised_map.map_version
-    assert stored_map.paper_map_generated_at is not None
-    assert "document_id" not in stored_map.paper_map_payload
-    assert "input_fingerprint" not in stored_map.paper_map_payload
-    assert "map_version" not in stored_map.paper_map_payload
-    assert "generated_at" not in stored_map.paper_map_payload
+    assert stored_map.paper_map_payload["input_fingerprint"] == revised_map.input_fingerprint
+    assert stored_map.paper_map_payload["map_version"] == revised_map.map_version
+    assert stored_map.paper_map_payload["generated_at"] is not None
+    assert stored_map.paper_map_payload["document_id"] == revised_map.document_id
 
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(

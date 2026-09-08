@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -73,45 +71,17 @@ class PostgresPaperMapRepository:
 
 
 def _payload(paper_map: PaperResearchMap) -> dict[str, object]:
-    payload = paper_map.to_record()
-    for field_name in (
-        "document_id",
-        "input_fingerprint",
-        "map_version",
-        "generated_at",
-    ):
-        payload.pop(field_name, None)
-    return payload
+    return paper_map.to_record()
 
 
 def _replace_row(row: DocumentProfileRow, paper_map: PaperResearchMap) -> None:
-    row.paper_map_input_fingerprint = paper_map.input_fingerprint
-    row.paper_map_version = paper_map.map_version
-    row.paper_map_generated_at = (
-        _datetime(paper_map.generated_at) if paper_map.generated_at else None
-    )
     row.paper_map_payload = _payload(paper_map)
 
 
 def _from_row(row: DocumentProfileRow) -> PaperResearchMap:
-    return PaperResearchMap.from_mapping(
-        {
-            **(row.paper_map_payload or {}),
-            "document_id": row.document_id,
-            "input_fingerprint": row.paper_map_input_fingerprint,
-            "map_version": row.paper_map_version,
-            "generated_at": (
-                row.paper_map_generated_at.isoformat()
-                if row.paper_map_generated_at
-                else None
-            ),
-        }
-    )
-
-
-def _datetime(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    payload = dict(row.paper_map_payload or {})
+    payload.setdefault("document_id", row.document_id)
+    return PaperResearchMap.from_mapping(payload)
 
 
 __all__ = ["PostgresPaperMapRepository"]

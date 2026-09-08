@@ -318,8 +318,8 @@ The Source JSON envelope replaces the former normalized `source_*` tables. The
 tree projection is rebuilt from the same aggregate, so a locator is always
 resolved against the exact artifact row that produced it.
 
-The current model keeps lifecycle-local state together: Paper Map cache fields
-live on `document_profiles`, discovery state lives on `collections`, analysis
+The current model keeps lifecycle-local state together: the complete Paper Map
+cache lives in the Profile JSON payload on `document_profiles`, discovery state lives on `collections`, analysis
 checkpoints and paper contributions live in `objective_analyses.payload`, and
 capability results live on `chat_tool_calls`. These embedded values are not
 independent query identities.
@@ -339,8 +339,8 @@ Preparation fingerprint
   = Profile fingerprint
 ```
 
-Paper Maps add their own policy/prompt input fingerprint while reusing the
-current preparation fingerprint. Objective analysis adds a frozen list of
+Paper Maps add their own policy/prompt input fingerprint inside that same
+payload while reusing the current preparation fingerprint. Objective analysis adds a frozen list of
 `document_id + preparation_fingerprint` inputs and a versioned analysis
 identity. Changing document bytes or parser logic invalidates every dependent
 preparation stage; changing profile logic can reuse Source; changing Paper Map
@@ -391,7 +391,7 @@ The database therefore supports these observable outcomes:
 Alembic is the only schema authority. The maintained head is
 `20260908_0052`. Revisions `0044` and `0045` move preparation provenance and
 Task history into the current Source/Profile and Pipeline Run records.
-Revisions `0047`-`0052` merge Paper Maps, Chat results, Objective intermediate,
+Revisions `0047`-`0053` merge Paper Maps, Chat results, Objective intermediate,
 discovery, evaluation child records, and redundant Source/count storage into
 their lifecycle owners. The current ORM metadata and
 migration head are checked together by
@@ -650,10 +650,7 @@ Evidence and Findings produced after Objective analysis reads exact Source mater
 | `profile_version` | `VARCHAR(128)` | Yes | — | Profile extraction or analysis version that produced this result. |
 | `profile_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the profile result and its Source input. It is also the current preparation fingerprint used by Objective analysis. |
 | `generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which this profile result was generated. |
-| `paper_map_payload` | `JSONB` | Yes | — | Optional navigation-only Paper Map payload: paper role, studies, candidate relationships, unresolved signals, Source coverage, limitations, and review synthesis. |
-| `paper_map_input_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the prepared Document and Paper Map policy consumed by this cache. |
-| `paper_map_version` | `VARCHAR(128)` | Yes | — | Paper Map policy and prompt version that produced the cache. |
-| `paper_map_generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which the Paper Map cache was generated. |
+| `paper_map_payload` | `JSONB` | Yes | — | Optional navigation-only Paper Map document, including its `document_id`, `input_fingerprint`, `map_version`, `generated_at`, paper role, studies, candidate relationships, unresolved signals, Source coverage, limitations, and review synthesis. |
 
 Parser and profile provenance belongs with the artifact that produced it:
 `document_sources` owns parser metadata and the Source fingerprint;
@@ -679,7 +676,7 @@ is stored in `payload` rather than split into a wide table detached from the dom
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK (composite); database FK is not declared by the current model | Identifier of the owning research collection. |
+| `collection_id` | `VARCHAR(64)` | No | PK (composite); FK -> `collections.collection_id`; `ON DELETE CASCADE` | Identifier of the owning research collection. |
 | `objective_id` | `VARCHAR(128)` | No | PK (composite) | Stable identifier of the research Objective. |
 | `rank` | `INTEGER` | No | — | Candidate order in the discovery result. |
 | `origin` | `VARCHAR(32)` | No | `system_discovered` / `chat_assisted` | Whether the Objective came from system discovery or Chat-assisted creation. |
@@ -765,7 +762,7 @@ paper-fact model.
 | :--- | :--- | :---: | :--- | :--- |
 | `tool_call_id` | `VARCHAR(128)` | No | PK | Stable identifier of the capability call. |
 | `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions.session_id`; IDX; `ON DELETE CASCADE` | Stable identifier of the Chat session. |
-| `assistant_message_id` | `VARCHAR(128)` | No | FK -> `chat_messages.message_id`; UQ; `ON DELETE CASCADE` | Assistant message that triggered this call; at most one call per assistant message. |
+| `assistant_message_id` | `VARCHAR(128)` | No | FK -> `chat_messages.message_id`; UQ with `position`; `ON DELETE CASCADE` | Assistant message that triggered this call. Multiple ordered calls are allowed per assistant message. |
 | `name` | `VARCHAR(128)` | No | — | Capability name requested by the Agent. |
 | `position` | `INTEGER` | No | `>= 0`; UQ per assistant message | Order of this capability call within the assistant turn. |
 | `arguments` | `JSONB` | No | — | Schema-validated capability arguments. |

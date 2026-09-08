@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0052"
+HEAD_REVISION = "20260908_0053"
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
@@ -152,10 +152,12 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         )
         assert {
             "paper_map_payload",
+        }.issubset(profile_columns)
+        assert {
             "paper_map_input_fingerprint",
             "paper_map_version",
             "paper_map_generated_at",
-        }.issubset(profile_columns)
+        }.isdisjoint(profile_columns)
         assert "document_sources" in expected
         collection_columns = {
             column["name"]
@@ -610,10 +612,11 @@ def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
         assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
             upgraded_profiles.c.keys()
         )
-        assert profile["paper_map_input_fingerprint"] == "d" * 64
         assert profile["paper_map_payload"] == {
+            "document_id": "profile-map-document",
             "doc_role": "experimental",
             "studies": [],
+            "input_fingerprint": "d" * 64,
         }
 
     engine.dispose()

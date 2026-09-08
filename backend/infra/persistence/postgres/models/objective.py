@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKeyConstraint, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +27,12 @@ class ObjectiveResearchRecord(Base):
 
     __tablename__ = "research_objectives"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["collection_id"],
+            ["collections.collection_id"],
+            name="fk_research_objectives_collection",
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
             "created_by_tool_call_id",
             name="uq_research_objectives_created_by_tool_call",

@@ -88,11 +88,11 @@ Changing Paper Map logic reuses Source and Profile because Paper Maps are built
 by Objective work. Changing Profile logic reuses Source; changing document bytes
 or parser logic invalidates all dependent preparation stages. The preparation
 fingerprint identifies the exact ready Source/Profile state used by discovery or
-analysis. The Profile row stores typed Paper Map `input_fingerprint`,
-`map_version`, and `generated_at` columns outside the navigation payload. The input fingerprint
-contains the preparation fingerprint plus the current Paper Map policy and
-prompt versions. These values are not user-visible versions and do not create a
-snapshot hierarchy.
+analysis. The Profile row stores the complete Paper Map, including its
+`input_fingerprint`, `map_version`, and `generated_at`, in one navigation
+payload. The input fingerprint contains the preparation fingerprint plus the
+current Paper Map policy and prompt versions. These values are not user-visible
+versions and do not create a snapshot hierarchy.
 
 ### Pipeline Run
 

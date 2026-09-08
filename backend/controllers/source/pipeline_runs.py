@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.pipeline_run import (
     PipelineRunListResponse,
     PipelineRunResponse,
@@ -76,6 +77,10 @@ async def list_collection_pipeline_runs(
 async def get_pipeline_run(run_id: str, request: Request) -> PipelineRunResponse:
     try:
         record = await request.app.state.pipeline_run_service.get_run(run_id)
+        await request.app.state.collection_service.get_collection_for_user(
+            record["collection_id"],
+            await current_user_id(request),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return PipelineRunResponse(**record)

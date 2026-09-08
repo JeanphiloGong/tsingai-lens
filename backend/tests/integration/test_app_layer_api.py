@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from hashlib import sha256
 
 import pytest
@@ -217,6 +218,31 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
         "started_at",
         "finished_at",
     } <= set(run_detail.json())
+
+
+def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
+    collection_id = _create_collection(app_client, "Private pipeline run")
+    document = _upload(app_client, collection_id, "paper.txt", b"Methods")
+    prepared = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{document['document_id']}/preparation",
+    )
+    assert prepared.status_code == 200
+
+    auth = app_client.app.state.auth_session_service
+    asyncio.run(
+        auth.create_user(email="other@example.com", password="other-password")
+    )
+    login = app_client.post(
+        f"{API_V1_PREFIX}/auth/login",
+        json={"email": "other@example.com", "password": "other-password"},
+    )
+    assert login.status_code == 200
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['run_id']}"
+    )
+    assert response.status_code == 404
 
 
 def test_document_preparation_contract_has_no_request_body(app_client) -> None:

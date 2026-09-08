@@ -92,6 +92,26 @@ class is in `infra/persistence/postgres/models`.
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
 | Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. Evaluation items, scores, and failures remain inside their aggregate payloads. |
 
+### Why the remaining tables stay separate
+
+The simplification rule is lifecycle ownership, not the smallest possible table
+count. The remaining tables are separate for these concrete reasons:
+
+| Group | Why it remains relationally separate |
+| --- | --- |
+| `auth_users`, `auth_sessions` | One user has many independently revocable sessions; session expiry and revocation are not user metadata. |
+| `chat_sessions`, `chat_messages`, `chat_tool_calls` | A session contains ordered messages, and each assistant turn can contain ordered capability calls with approval and execution state. These are different cardinalities and audit events. Tool results are already embedded in their call. |
+| `collections`, `documents`, `document_preparations` | Collection ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
+| `pipeline_runs` | Technical retry/progress history must remain observable without being confused with scientific artifacts. |
+| `research_objectives`, `objective_analyses` | One Objective can have multiple immutable analysis attempts; the analysis version is the scientific result boundary. |
+| `objective_experiment_plans` | Plan revisions form an immutable successor chain and are optional downstream decisions, not analysis output. |
+| `finding_feedback_records`, `finding_curation_records` | Feedback is append-only judgment history; curation is one replaceable canonical state. They intentionally have different cardinality and update semantics. |
+| `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Gold data and prediction snapshots are reusable immutable inputs; runs reference both and retain reproducible scores/failures. |
+
+Only lifecycle-local children that are always read and replaced with their
+owner are embedded in JSON aggregates. This keeps the relational schema small
+without weakening identity, versioning, or audit boundaries.
+
 ## Schema by Main Logic Flow
 
 ### 1. Authentication
@@ -159,8 +179,9 @@ producer can replace its own result without creating parallel current tables.
 | Preparation aggregate | `document_preparations` | One document-keyed row with parser metadata, Source artifact JSON, Profile JSON, and optional Paper Map JSON. The Source artifact contains document metadata, text units, blocks, tables/rows/cells, figures, and reference entries/mentions/resolutions/candidates. |
 
 Source replacement is document-scoped and transactional. A successful retry
-replaces the current Source tree; its new fingerprint remains on the Source row
-and is copied into the dependent profile result. Source rows are not a scientific conclusion: they are the exact
+replaces the Source section of the current preparation row; its new fingerprint
+remains beside the Source artifact and is copied into the dependent Profile
+result. The Source section is not a scientific conclusion: it is the exact
 material that later Objective analysis may inspect.
 
 ### 5. Document Triage and Objective Discovery
@@ -178,8 +199,8 @@ Discovery requires an explicit non-empty set of ready Document IDs. Each
 `document_inputs` item freezes the pair `{document_id,
 preparation_fingerprint}`. Replacing discovery changes the current candidates
 for that Collection; it does not create a Collection snapshot or duplicate the
-Source/Profile rows. Paper Map data is a navigation cache inside the Profile row,
-not a second artifact identity.
+Source/Profile aggregates. Paper Map data is a navigation cache inside the
+preparation row, not a second artifact identity.
 
 The Objective payload carries confirmation and published/active analysis
 version pointers. The composite identity keeps Objectives from different
@@ -266,6 +287,12 @@ table after migration `20260908_0055`.
 - `finding_curation_records` stores one complete canonical `curated_finding`
   payload, curated status, note, reviewer, and update time. Partial corrections
   or alternate conclusion IDs are not valid records.
+
+These two review tables intentionally remain separate. Feedback is an append-only
+sequence of independent judgments, while curation is one replaceable canonical
+record for the current reviewed Finding. Combining them would make both the
+event history and the current state nullable, type-discriminated columns in one
+less-readable table.
 
 #### Evaluation lineage
 
@@ -653,7 +680,7 @@ cache is rebuilt when its input fingerprint or map version is stale.
 
 Discovery state is stored in the `collections.discovery_*` fields. Replacing
 that state changes the current candidates for the Collection; it does not
-create a Collection snapshot or duplicate Source/Profile rows.
+create a Collection snapshot or duplicate preparation aggregates.
 
 #### `research_objectives` — Research Objectives
 

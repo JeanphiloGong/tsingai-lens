@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260908_0050`. The identity and fingerprint rules are
+and the Alembic head `20260908_0051`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 24 application tables and 230 mapped fields. A
+The current ORM metadata contains 20 application tables and 197 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -90,7 +90,7 @@ class is in `infra/persistence/postgres/models`.
 | Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses`, `objective_evidence`, `objective_findings` | Versioned analysis payloads (including private checkpoints and paper contributions), Source-backed Evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
 | Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
-| Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_gold_items`, `evaluation_prediction_snapshots`, `evaluation_prediction_items`, `evaluation_runs`, `evaluation_scores`, `evaluation_failures` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. |
+| Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. Evaluation items, scores, and failures remain inside their aggregate payloads. |
 
 ## Schema by Main Logic Flow
 
@@ -272,13 +272,9 @@ deletion.
 
 | Table | Identity and role |
 | --- | --- |
-| `evaluation_gold_sets` | `gold_id`; versioned collection gold metadata, target layer, and metric profile. |
-| `evaluation_gold_items` | `gold_item_id`; expected item payload, family/key, document ID, Evidence references, and metadata. Cascades from its gold set. |
-| `evaluation_prediction_snapshots` | `snapshot_id`; frozen collection prediction context, source label, artifact counts, and creation time. |
-| `evaluation_prediction_items` | `(snapshot_id, item_id)`; prediction payload, Source references, family/key, document ID, and optional confidence. |
-| `evaluation_runs` | `evaluation_run_id`; joins one gold set and one prediction snapshot, preserving target layer, metric profile, status, and summary. Gold/snapshot links are `RESTRICT`-protected. |
-| `evaluation_scores` | `score_id`; per-run metric values and optional numerator/denominator, optionally per document. |
-| `evaluation_failures` | `failure_id`; per-run failure type, likely layer, severity, matched gold/prediction IDs, reason, and Source references. |
+| `evaluation_gold_sets` | `gold_id`; versioned collection gold metadata and complete expected-item payload. |
+| `evaluation_prediction_snapshots` | `snapshot_id`; frozen collection prediction context and complete prediction-item payload. |
+| `evaluation_runs` | `evaluation_run_id`; gold/prediction references, summary, complete score payload, and complete failure payload. |
 
 Evaluation payloads retain the exact evidence and prediction snapshots used for
 the score. Document IDs and Source references inside gold/prediction items are
@@ -313,12 +309,8 @@ erDiagram
     OBJECTIVE_FINDINGS ||--o{ FINDING_FEEDBACK_RECORDS : reviews
     OBJECTIVE_FINDINGS ||--o{ FINDING_CURATION_RECORDS : curates
     COLLECTIONS ||--o{ EVALUATION_GOLD_SETS : defines
-    EVALUATION_GOLD_SETS ||--o{ EVALUATION_GOLD_ITEMS : contains
-    EVALUATION_PREDICTION_SNAPSHOTS ||--o{ EVALUATION_PREDICTION_ITEMS : contains
     EVALUATION_GOLD_SETS ||--o{ EVALUATION_RUNS : scores_against
     EVALUATION_PREDICTION_SNAPSHOTS ||--o{ EVALUATION_RUNS : evaluates
-    EVALUATION_RUNS ||--o{ EVALUATION_SCORES : produces
-    EVALUATION_RUNS ||--o{ EVALUATION_FAILURES : explains
     CHAT_TOOL_CALLS }o..|| RESEARCH_OBJECTIVES : provenance_id
 ```
 
@@ -397,10 +389,10 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260908_0050`. Revisions `0044` and `0045` move preparation provenance and
+`20260908_0051`. Revisions `0044` and `0045` move preparation provenance and
 Task history into the current Source/Profile and Pipeline Run records.
-Revisions `0047`-`0050` merge Paper Maps, Chat results, Objective intermediate
-records, and discovery state into their lifecycle owners. The current ORM metadata and
+Revisions `0047`-`0051` merge Paper Maps, Chat results, Objective intermediate,
+discovery, and evaluation child records into their lifecycle owners. The current ORM metadata and
 migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
 
@@ -458,7 +450,7 @@ they do not define production schema or behavior.
 ## Appendix: Complete Field Catalog
 
 The catalog below lists every field in the current ORM, grouped by the main
-logic flow (24 application tables and 230 mapped fields).
+logic flow (20 application tables and 197 mapped fields).
 Field names, types, and nullability follow `backend/infra/persistence/postgres/models/*.py`;
 descriptions explain each field's business role in the Lens research chain. `JSONB` means the ORM uses
 `JSON().with_variant(JSONB(), "postgresql")`, so PostgreSQL stores the value as
@@ -871,20 +863,8 @@ analysis. Review records always bind to the exact Finding version.
 | `metric_profile` | `VARCHAR(128)` | No | — | Metric configuration used for evaluation. |
 | `description` | `TEXT` | Yes | — | Optional purpose or annotation note for the gold set. |
 | `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
+| `items` | `JSONB` | No | default `[]` | Complete expected-item array. Each item contains `gold_item_id`, `document_id`, `family`, `item_key`, `payload`, `evidence_refs`, and `metadata_json`. Items are embedded because they are always written and read as part of this immutable gold-set version. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
-
-#### `evaluation_gold_items` — Evaluation gold items
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `gold_item_id` | `VARCHAR(128)` | No | PK | Stable identifier of one expected evaluation item. |
-| `gold_id` | `VARCHAR(128)` | No | FK -> `evaluation_gold_sets.gold_id`; `ON DELETE CASCADE`; IDX(`gold_id`,`family`,`document_id`) | Gold set containing this item. |
-| `document_id` | `TEXT` | No | — | Document ID associated with the expected item; external or historical IDs are allowed. |
-| `family` | `VARCHAR(128)` | No | — | Artifact family for the expected item. |
-| `item_key` | `TEXT` | No | — | Stable comparison key within the Artifact family. |
-| `payload` | `JSONB` | No | — | Expected fact, conclusion, or structured value. |
-| `evidence_refs` | `JSONB` | No | — | Structured references to the supporting Source, Evidence, Finding, or related resource. |
-| `metadata_json` | `JSONB` | No | — | Parser, provider, annotation, or display metadata. |
 
 #### `evaluation_prediction_snapshots` — Prediction snapshots
 
@@ -896,20 +876,8 @@ analysis. Review records always bind to the exact Finding version.
 | `fact_source` | `VARCHAR(64)` | No | — | Label for the fact source used to produce predictions. |
 | `system_context` | `JSONB` | No | — | Structured system context captured for this record. |
 | `artifact_counts` | `JSONB` | No | — | Counts of each Artifact family included in the snapshot. |
+| `items` | `JSONB` | No | default `[]` | Complete prediction-item array. Each item contains `item_id`, `document_id`, `family`, `item_key`, `payload`, `source_refs`, and optional `confidence`. Items are embedded because they are always part of this frozen prediction snapshot. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-
-#### `evaluation_prediction_items` — Prediction items
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `snapshot_id` | `VARCHAR(128)` | No | PK (composite); FK -> `evaluation_prediction_snapshots.snapshot_id`; `ON DELETE CASCADE`; IDX(`snapshot_id`,`family`,`document_id`) | Identifier of the owning prediction snapshot. |
-| `item_id` | `VARCHAR(128)` | No | PK (composite) | Stable identifier of the prediction item within the snapshot. |
-| `document_id` | `TEXT` | No | — | Stable identifier of the current Document. |
-| `family` | `VARCHAR(128)` | No | — | Artifact family predicted by the system. |
-| `item_key` | `TEXT` | No | — | Stable comparison key within the Artifact family. |
-| `payload` | `JSONB` | No | — | System prediction content. |
-| `source_refs` | `JSONB` | No | — | Structured references to the supporting Source, Evidence, Finding, or related resource. |
-| `confidence` | `FLOAT` | Yes | — | Confidence score in the range [0, 1]. |
 
 #### `evaluation_runs` — Evaluation runs
 
@@ -924,38 +892,9 @@ analysis. Review records always bind to the exact Finding version.
 | `metric_profile` | `VARCHAR(128)` | No | — | Metric configuration executed by the run. |
 | `status` | `VARCHAR(64)` | No | — | Evaluation run lifecycle state. |
 | `summary` | `JSONB` | No | — | Overall scores, counts, and run summary. |
+| `scores` | `JSONB` | No | default `[]` | Complete score array. Each score contains `score_id`, optional `document_id`, `family`, `metric`, `value`, and optional `numerator`/`denominator`. Scores are embedded because they are produced and consumed only as part of this run. |
+| `failures` | `JSONB` | No | default `[]` | Complete failure-detail array. Each failure contains `failure_id`, `document_id`, `family`, `failure_type`, `likely_layer`, `severity`, optional matched item IDs and snapshots, `reason`, and `source_refs`. Failure details remain inside the run so the run is one reproducible result snapshot. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-
-#### `evaluation_scores` — Evaluation scores
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `score_id` | `VARCHAR(128)` | No | PK | Stable identifier of one metric score. |
-| `evaluation_run_id` | `VARCHAR(128)` | No | FK -> `evaluation_runs.evaluation_run_id`; IDX; `ON DELETE CASCADE` | Evaluation run containing the score. |
-| `document_id` | `TEXT` | Yes | — | Document for a document-level score; NULL for the overall score. |
-| `family` | `VARCHAR(128)` | No | — | Artifact family scored. |
-| `metric` | `VARCHAR(128)` | No | — | Metric name. |
-| `value` | `FLOAT` | No | — | Calculated metric value. |
-| `numerator` | `FLOAT` | Yes | — | Optional numerator retained to make the metric calculation auditable. |
-| `denominator` | `FLOAT` | Yes | — | Optional denominator retained to make the metric calculation auditable. |
-
-#### `evaluation_failures` — Evaluation failure details
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `failure_id` | `VARCHAR(128)` | No | PK | Stable identifier of one evaluation failure detail. |
-| `evaluation_run_id` | `VARCHAR(128)` | No | FK -> `evaluation_runs.evaluation_run_id`; IDX(`evaluation_run_id`,`family`,`failure_type`); `ON DELETE CASCADE` | Evaluation run containing the failure. |
-| `document_id` | `TEXT` | No | — | Document associated with the failure. |
-| `family` | `VARCHAR(128)` | No | — | Artifact family in which the failure occurred. |
-| `failure_type` | `VARCHAR(64)` | No | domain failure type | Failure category, such as `missing_gold_item`, `numeric_value_mismatch`, or `evidence_not_grounded`. |
-| `likely_layer` | `VARCHAR(64)` | No | domain layer | Suspected layer, such as `source`, `core_extraction`, or `goal`. |
-| `severity` | `VARCHAR(32)` | No | — | Severity assigned to the failure. |
-| `gold_item_id` | `VARCHAR(128)` | Yes | — | Matched gold item ID, when available. |
-| `prediction_item_id` | `VARCHAR(128)` | Yes | — | Matched prediction item ID, when available. |
-| `gold` | `JSONB` | Yes | — | Gold content snapshot captured when the failure occurred. |
-| `prediction` | `JSONB` | Yes | — | Prediction content snapshot captured when the failure occurred. |
-| `reason` | `TEXT` | Yes | — | Diagnostic explanation of the failure. |
-| `source_refs` | `JSONB` | No | — | Structured references to the supporting Source, Evidence, Finding, or related resource. |
 
 ### Alembic version table
 
@@ -966,4 +905,4 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0050`. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0051`. |

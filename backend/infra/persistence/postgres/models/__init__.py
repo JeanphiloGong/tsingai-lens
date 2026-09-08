@@ -12,13 +12,9 @@ from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_source import DocumentSource
 from infra.persistence.postgres.models.document_profile import DocumentProfileRow
 from infra.persistence.postgres.models.evaluation import (
-    EvaluationFailureRecord,
-    EvaluationGoldItemRecord,
     EvaluationGoldSetRecord,
-    EvaluationPredictionItemRecord,
     EvaluationPredictionSnapshotRecord,
     EvaluationRunRecord,
-    EvaluationScoreRecord,
     FindingCurationRecord,
     FindingFeedbackRecord,
 )
@@ -39,13 +35,9 @@ __all__ = [
     "Document",
     "DocumentSource",
     "DocumentProfileRow",
-    "EvaluationFailureRecord",
-    "EvaluationGoldItemRecord",
     "EvaluationGoldSetRecord",
-    "EvaluationPredictionItemRecord",
     "EvaluationPredictionSnapshotRecord",
     "EvaluationRunRecord",
-    "EvaluationScoreRecord",
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",

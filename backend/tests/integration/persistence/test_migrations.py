@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0050"
+HEAD_REVISION = "20260908_0051"
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
@@ -133,6 +133,23 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             profile_columns
         )
         assert "paper_maps" not in expected
+        assert "evaluation_gold_items" not in expected
+        assert "evaluation_prediction_items" not in expected
+        assert "evaluation_scores" not in expected
+        assert "evaluation_failures" not in expected
+        assert {
+            "items",
+        }.issubset(
+            {column["name"] for column in inspect(connection).get_columns("evaluation_gold_sets")}
+        )
+        assert {
+            "items",
+        }.issubset(
+            {column["name"] for column in inspect(connection).get_columns("evaluation_prediction_snapshots")}
+        )
+        assert {"scores", "failures"}.issubset(
+            {column["name"] for column in inspect(connection).get_columns("evaluation_runs")}
+        )
         assert {
             "paper_map_payload",
             "paper_map_input_fingerprint",
@@ -179,6 +196,189 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
 
+    engine.dispose()
+
+
+def test_evaluation_children_are_embedded_before_tables_are_removed(tmp_path) -> None:
+    engine = create_engine(
+        URL.create("sqlite+pysqlite", database=str(tmp_path / "evaluation-merge.sqlite"))
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260908_0050")
+        metadata = MetaData()
+        gold_sets = Table("evaluation_gold_sets", metadata, autoload_with=connection)
+        gold_items = Table(
+            "evaluation_gold_items",
+            metadata,
+            Column("gold_item_id", String, primary_key=True),
+            Column("gold_id", String, nullable=False),
+            Column("document_id", String, nullable=False),
+            Column("family", String, nullable=False),
+            Column("item_key", String, nullable=False),
+            Column("payload", JSON, nullable=False),
+            Column("evidence_refs", JSON, nullable=False),
+            Column("metadata_json", JSON, nullable=False),
+        )
+        snapshots = Table(
+            "evaluation_prediction_snapshots", metadata, autoload_with=connection
+        )
+        prediction_items = Table(
+            "evaluation_prediction_items",
+            metadata,
+            Column("snapshot_id", String, primary_key=True),
+            Column("item_id", String, primary_key=True),
+            Column("document_id", String, nullable=False),
+            Column("family", String, nullable=False),
+            Column("item_key", String, nullable=False),
+            Column("payload", JSON, nullable=False),
+            Column("source_refs", JSON, nullable=False),
+            Column("confidence", Integer, nullable=True),
+        )
+        runs = Table("evaluation_runs", metadata, autoload_with=connection)
+        scores = Table(
+            "evaluation_scores",
+            metadata,
+            Column("score_id", String, primary_key=True),
+            Column("evaluation_run_id", String, nullable=False),
+            Column("document_id", String, nullable=True),
+            Column("family", String, nullable=False),
+            Column("metric", String, nullable=False),
+            Column("value", Integer, nullable=False),
+            Column("numerator", Integer, nullable=True),
+            Column("denominator", Integer, nullable=True),
+        )
+        failures = Table(
+            "evaluation_failures",
+            metadata,
+            Column("failure_id", String, primary_key=True),
+            Column("evaluation_run_id", String, nullable=False),
+            Column("document_id", String, nullable=False),
+            Column("family", String, nullable=False),
+            Column("failure_type", String, nullable=False),
+            Column("likely_layer", String, nullable=False),
+            Column("severity", String, nullable=False),
+            Column("gold_item_id", String, nullable=True),
+            Column("prediction_item_id", String, nullable=True),
+            Column("gold", JSON, nullable=True),
+            Column("prediction", JSON, nullable=True),
+            Column("reason", String, nullable=True),
+            Column("source_refs", JSON, nullable=False),
+        )
+        gold_items.create(connection)
+        prediction_items.create(connection)
+        scores.create(connection)
+        failures.create(connection)
+
+        connection.execute(
+            gold_sets.insert().values(
+                gold_id="gold-migrate",
+                collection_id="collection-migrate",
+                version="v1",
+                target_layer="core",
+                metric_profile="profile",
+                metadata_json={},
+                updated_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
+            )
+        )
+        connection.execute(
+            gold_items.insert().values(
+                gold_item_id="gold-item-migrate",
+                gold_id="gold-migrate",
+                document_id="doc-1",
+                family="facts",
+                item_key="doc-1:key",
+                payload={"value": 1},
+                evidence_refs=[],
+                metadata_json={},
+            )
+        )
+        connection.execute(
+            snapshots.insert().values(
+                snapshot_id="snapshot-migrate",
+                collection_id="collection-migrate",
+                target_layer="core",
+                fact_source="source",
+                system_context={},
+                artifact_counts={},
+                created_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
+            )
+        )
+        connection.execute(
+            prediction_items.insert().values(
+                snapshot_id="snapshot-migrate",
+                item_id="prediction-migrate",
+                document_id="doc-1",
+                family="facts",
+                item_key="doc-1:key",
+                payload={"value": 2},
+                source_refs=[],
+                confidence=0.5,
+            )
+        )
+        connection.execute(
+            runs.insert().values(
+                evaluation_run_id="run-migrate",
+                collection_id="collection-migrate",
+                gold_id="gold-migrate",
+                prediction_snapshot_id="snapshot-migrate",
+                target_layer="core",
+                fact_source="source",
+                metric_profile="profile",
+                status="ready",
+                summary={},
+                created_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
+            )
+        )
+        connection.execute(
+            scores.insert().values(
+                score_id="score-migrate",
+                evaluation_run_id="run-migrate",
+                family="facts",
+                metric="accuracy",
+                value=0.5,
+            )
+        )
+        connection.execute(
+            failures.insert().values(
+                failure_id="failure-migrate",
+                evaluation_run_id="run-migrate",
+                document_id="doc-1",
+                family="facts",
+                failure_type="numeric_value_mismatch",
+                likely_layer="core_extraction",
+                severity="medium",
+                source_refs=[],
+            )
+        )
+
+        command.upgrade(config, "head")
+        merged_gold = Table("evaluation_gold_sets", MetaData(), autoload_with=connection)
+        merged_snapshot = Table(
+            "evaluation_prediction_snapshots", MetaData(), autoload_with=connection
+        )
+        merged_run = Table("evaluation_runs", MetaData(), autoload_with=connection)
+        assert connection.execute(
+            select(merged_gold.c["items"]).where(merged_gold.c.gold_id == "gold-migrate")
+        ).scalar_one()[0]["gold_item_id"] == "gold-item-migrate"
+        assert connection.execute(
+            select(merged_snapshot.c["items"]).where(
+                merged_snapshot.c.snapshot_id == "snapshot-migrate"
+            )
+        ).scalar_one()[0]["item_id"] == "prediction-migrate"
+        run_row = connection.execute(
+            select(merged_run).where(merged_run.c.evaluation_run_id == "run-migrate")
+        ).mappings().one()
+        assert run_row["scores"][0]["score_id"] == "score-migrate"
+        assert run_row["failures"][0]["failure_id"] == "failure-migrate"
+        assert not {
+            "evaluation_gold_items",
+            "evaluation_prediction_items",
+            "evaluation_scores",
+            "evaluation_failures",
+        }.intersection(inspect(connection).get_table_names())
     engine.dispose()
 
 

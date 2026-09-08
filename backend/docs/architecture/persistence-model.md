@@ -179,14 +179,11 @@ erDiagram
     DOCUMENT }o..o{ PIPELINE_RUN : logical_scope
     DOCUMENT ||--o| DOCUMENT_SOURCE : has_current
     DOCUMENT ||--o| DOCUMENT_PROFILE : has_current
-    DOCUMENT ||--o| PAPER_MAP : has_current
-    COLLECTION ||--o| OBJECTIVE_DISCOVERY : has_current
+    DOCUMENT_PROFILE ||--o| PAPER_MAP_CACHE : embeds
+    COLLECTION ||--o| DISCOVERY_STATE : embeds
     COLLECTION ||--o{ RESEARCH_OBJECTIVE : frames
-    RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_DOCUMENT_EVIDENCE : inspects
-    DOCUMENT ||--o{ OBJECTIVE_DOCUMENT_EVIDENCE : supplies
     RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_ANALYSIS : retries
-    OBJECTIVE_ANALYSIS ||--o{ PAPER_CONTRIBUTION : inspects
-    PAPER_CONTRIBUTION ||--o{ OBJECTIVE_EVIDENCE : grounds
+    OBJECTIVE_ANALYSIS ||--o{ OBJECTIVE_EVIDENCE : grounds
     OBJECTIVE_ANALYSIS ||--o{ FINDING : publishes
 ```
 
@@ -205,8 +202,9 @@ erDiagram
   normalized Source tables before dropping them; migration `20260908_0044`
   moves preparation provenance to Source/Profile ownership. Migration
   `20260908_0045` backfills the former Task history into `pipeline_runs` and
-  removes `tasks` and `task_stages`; `20260908_0047`-`0050` merge lifecycle-local
-  Paper Map, Chat result, analysis-intermediate, and discovery records.
+  removes `tasks` and `task_stages`; `20260908_0047`-`0051` merge lifecycle-local
+  Paper Map, Chat result, analysis-intermediate, discovery, and evaluation child
+  records into their lifecycle owners.
 
 ## Implementation Boundary
 

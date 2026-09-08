@@ -185,7 +185,38 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     )
     assert run_list.status_code == 200
     assert run_list.json()["count"] == 1
-    assert run_list.json()["items"][0]["pipeline_name"] == "document_preparation"
+    run_summary = run_list.json()["items"][0]
+    assert set(run_summary) == {
+        "run_id",
+        "pipeline_name",
+        "scope_type",
+        "scope_id",
+        "status",
+        "current_node",
+        "progress_percent",
+        "progress_detail",
+        "errors",
+        "warnings",
+        "updated_at",
+    }
+    assert run_summary["pipeline_name"] == "document_preparation"
+
+    run_detail = app_client.get(
+        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['run_id']}"
+    )
+    assert run_detail.status_code == 200
+    assert {
+        "collection_id",
+        "mode",
+        "input_fingerprint",
+        "nodes",
+        "stats",
+        "context",
+        "resumed_from_run_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+    } <= set(run_detail.json())
 
 
 def test_document_preparation_contract_has_no_request_body(app_client) -> None:

@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestJson } from './api';
-import { formCollectionResearchQuestions, prepareCollectionDocument } from './pipelineRuns';
+import {
+	formCollectionResearchQuestions,
+	listCollectionPipelineRuns,
+	prepareCollectionDocument
+} from './pipelineRuns';
 
 vi.mock('./api', () => ({ requestJson: vi.fn() }));
 const request = vi.mocked(requestJson);
@@ -68,6 +72,58 @@ describe('document preparation API', () => {
 			run_id: 'run_discovery',
 			pipeline_name: 'objective_discovery',
 			status: 'queued'
+		});
+	});
+
+	it('normalizes collection history as compact run summaries', async () => {
+		request.mockResolvedValue({
+			collection_id: 'col_1',
+			count: 1,
+			items: [
+				{
+					run_id: 'run_1',
+					pipeline_name: 'document_preparation',
+					scope_type: 'document',
+					scope_id: 'doc_1',
+					status: 'running',
+					current_node: 'document_profile',
+					progress_percent: 45,
+					progress_detail: {
+						phase: 'document_profile',
+						message: 'Classifying the paper.'
+					},
+					errors: [],
+					warnings: [],
+					updated_at: '2026-09-08T00:00:00Z'
+				}
+			]
+		});
+
+		const result = await listCollectionPipelineRuns('col_1', { limit: 100 });
+
+		expect(request).toHaveBeenCalledWith('/collections/col_1/pipeline-runs?limit=100&offset=0', {
+			method: 'GET'
+		});
+		expect(result.items[0]).toEqual({
+			run_id: 'run_1',
+			pipeline_name: 'document_preparation',
+			scope_type: 'document',
+			scope_id: 'doc_1',
+			status: 'running',
+			current_node: 'document_profile',
+			progress_percent: 45,
+			progress_detail: {
+				phase: 'document_profile',
+				current: null,
+				total: null,
+				unit: null,
+				message: 'Classifying the paper.',
+				active_document_id: null,
+				active_objective_id: null
+			},
+			errors: [],
+			warnings: [],
+			updated_at: '2026-09-08T00:00:00Z'
 		});
 	});
 });

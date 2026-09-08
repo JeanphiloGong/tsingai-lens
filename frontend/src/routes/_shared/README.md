@@ -18,8 +18,9 @@ This node owns browser-side helpers shared across frontend routes.
   downloads used by source archives and Finding dataset exports.
 - `collections.ts`, `collectionDocuments.ts`, `pipelineRuns.ts`
   Collection upload, current Document, independent preparation, and Pipeline
-  Run progress contracts. `pipelineRuns.ts` also queues collection-level
-  research-question formation and normalizes its persisted
+  Run progress contracts. Collection history uses compact run summaries; one
+  run read retains complete diagnostic state. `pipelineRuns.ts` also queues
+  collection-level research-question formation and normalizes its persisted
   `objective_discovery` Pipeline Run.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads

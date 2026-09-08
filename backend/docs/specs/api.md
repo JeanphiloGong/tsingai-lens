@@ -50,12 +50,14 @@ A Collection groups current Documents. Each Document independently owns its
 preparation status, current Source structure, and current DocumentProfile. The
 preparation command queues only the named Document; it does not prepare other
 Collection members or discover Objectives. Paper Map construction is a lazy
-Objective-core operation over an explicit ready-document selection. Pipeline
-Run responses expose `run_id`, pipeline name, scope type and ID, input
-fingerprint, current node, progress, node telemetry, warnings, terminal errors,
-statistics, context, timestamps, and retry lineage. Runs do not expose a
-filesystem output path; scientific artifacts are addressed by
-their owning Document, Objective, analysis, Finding, or Evidence identities.
+Objective-core operation over an explicit ready-document selection. Collection
+Pipeline Run history returns compact rows with run identity,
+pipeline and scope, status, current node, progress, warnings, terminal errors,
+and last-update time. `GET /api/v1/pipeline-runs/{run_id}` returns the complete
+technical record, including the input fingerprint, node telemetry, statistics,
+context, timestamps, and retry lineage. Runs do not expose a filesystem output
+path; scientific artifacts are addressed by their owning Document, Objective,
+analysis, Finding, or Evidence identities.
 
 At most one `document_preparation` run may be queued or running for a Document.
 Repeated requests reuse that active run. A completed run is reusable only when

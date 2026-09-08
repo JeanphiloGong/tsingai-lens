@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from controllers.schemas.source.pipeline_run import (
     PipelineRunListResponse,
     PipelineRunResponse,
+    PipelineRunSummaryResponse,
 )
 
 
@@ -52,7 +53,7 @@ async def list_collection_pipeline_runs(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     items = [
-        PipelineRunResponse(**record)
+        PipelineRunSummaryResponse(**record)
         for record in await request.app.state.pipeline_run_service.list_runs(
             collection_id=collection_id,
             status=status,

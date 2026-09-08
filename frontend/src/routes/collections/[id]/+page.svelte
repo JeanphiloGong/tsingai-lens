@@ -21,11 +21,11 @@
 		isPipelineRunActive,
 		listCollectionPipelineRuns,
 		prepareCollectionDocument,
-		type PipelineRun
+		type PipelineRunSummary
 	} from '../../_shared/pipelineRuns';
 
 	let documents: CollectionDocument[] = [];
-	let runs: PipelineRun[] = [];
+	let runs: PipelineRunSummary[] = [];
 	let objectiveList: ObjectiveList | null = null;
 	let selectedFiles: File[] = [];
 	let loading = false;
@@ -183,9 +183,7 @@
 	}
 
 	function runFor(documentId: string) {
-		return (
-			runs.find((run) => run.scope_type === 'document' && run.scope_id === documentId) ?? null
-		);
+		return runs.find((run) => run.scope_type === 'document' && run.scope_id === documentId) ?? null;
 	}
 
 	async function prepareDocuments(targets: CollectionDocument[]) {
@@ -308,7 +306,7 @@
 
 	function buildPreparationProgress(
 		items: CollectionDocument[],
-		active: PipelineRun[]
+		active: PipelineRunSummary[]
 	): PreparationProgressSummary | null {
 		if (!active.length) return null;
 
@@ -665,8 +663,8 @@
 						<div>
 							<strong>{document.original_filename}</strong>
 							<span>{documentStatus(document)}</span>
-								{#if runFor(document.document_id)?.errors[0]}
-									<small class="failure">{runFor(document.document_id)?.errors[0]}</small>
+							{#if runFor(document.document_id)?.errors[0]}
+								<small class="failure">{runFor(document.document_id)?.errors[0]}</small>
 							{/if}
 						</div>
 						<button

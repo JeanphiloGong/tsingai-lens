@@ -134,35 +134,22 @@ class ChatToolCallRow(Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-
-
-class ChatToolResultRow(Base):
-    __tablename__ = "chat_tool_results"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('succeeded', 'queued', 'failed')",
-            name="status_valid",
-        ),
+    result_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    result_data: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
     )
-
-    tool_call_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("chat_tool_calls.tool_call_id", ondelete="CASCADE"),
-        primary_key=True,
+    result_resource_refs: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    data: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    resource_refs: Mapped[list[dict[str, Any]]] = mapped_column(
-        _JSON_DOCUMENT, nullable=False
+    result_warnings: Mapped[list[str] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
     )
-    warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    result_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 __all__ = [
     "ChatMessageRow",
     "ChatSessionRow",
     "ChatToolCallRow",
-    "ChatToolResultRow",
 ]

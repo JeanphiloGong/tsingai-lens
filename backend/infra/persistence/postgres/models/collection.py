@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infra.persistence.postgres.base import Base
+
+
+_JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Collection(Base):
@@ -30,6 +35,19 @@ class Collection(Base):
     paper_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    discovery_ready: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    discovery_document_inputs: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    discovery_objective_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    discovery_study_dispositions: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    discovery_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 __all__ = ["Collection"]

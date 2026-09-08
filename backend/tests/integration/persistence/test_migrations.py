@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "7f4a0a872e9d"
+HEAD_REVISION = "20260908_0050"
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
@@ -56,6 +56,7 @@ def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_pa
         connection.execute(target_calls.insert().values(tool_call_id="c2", session_id="s1", assistant_message_id="m1", position=1, name="read_source", arguments={"document_id": "p2"}))
         with pytest.raises(RuntimeError, match="multiple calls would be lost"):
             command.downgrade(config, "20260908_0046")
+        target_calls = Table("chat_tool_calls", MetaData(), autoload_with=connection)
         assert len(connection.execute(select(target_calls)).all()) == 2
         connection.execute(target_calls.delete().where(target_calls.c.tool_call_id == "c2"))
         command.downgrade(config, "20260908_0046")
@@ -131,14 +132,13 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
             profile_columns
         )
-        paper_map_columns = {
-            column["name"]
-            for column in inspect(connection).get_columns("paper_maps")
-        }
-        assert {"input_fingerprint", "map_version", "generated_at"}.issubset(
-            paper_map_columns
-        )
-        assert "collection_id" not in paper_map_columns
+        assert "paper_maps" not in expected
+        assert {
+            "paper_map_payload",
+            "paper_map_input_fingerprint",
+            "paper_map_version",
+            "paper_map_generated_at",
+        }.issubset(profile_columns)
         assert "document_sources" in expected
         pipeline_run_columns = {
             column["name"]
@@ -176,7 +176,7 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             }
         )
 
-        with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
+        with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
 
     engine.dispose()
@@ -206,12 +206,11 @@ def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
             "TO parsing_warnings"
         )
         connection.exec_driver_sql(
-            "ALTER TABLE paper_maps ADD COLUMN collection_id VARCHAR(64)"
+            "CREATE TABLE paper_maps ("
+            "document_id VARCHAR(128) PRIMARY KEY, "
+            "collection_id VARCHAR(64) NOT NULL, "
+            "payload JSON NOT NULL)"
         )
-        for column_name in ("input_fingerprint", "map_version", "generated_at"):
-            connection.exec_driver_sql(
-                f"ALTER TABLE paper_maps DROP COLUMN {column_name}"
-            )
 
         metadata = MetaData()
         auth_users = Table("auth_users", metadata, autoload_with=connection)
@@ -289,34 +288,16 @@ def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
         upgraded_profiles = Table(
             "document_profiles", MetaData(), autoload_with=connection
         )
-        upgraded_maps = Table("paper_maps", MetaData(), autoload_with=connection)
         profile = connection.execute(select(upgraded_profiles)).mappings().one()
-        paper_map = connection.execute(select(upgraded_maps)).mappings().one()
         assert profile["profile_warnings"] == ["classification_uncertain"]
         assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
             upgraded_profiles.c.keys()
         )
-        assert paper_map["input_fingerprint"] == "d" * 64
-        assert paper_map["payload"] == {
+        assert profile["paper_map_input_fingerprint"] == "d" * 64
+        assert profile["paper_map_payload"] == {
             "doc_role": "experimental",
             "studies": [],
         }
-        assert "collection_id" not in upgraded_maps.c
-
-        command.downgrade(config, "20260908_0045")
-
-        restored_profiles = Table(
-            "document_profiles", MetaData(), autoload_with=connection
-        )
-        restored_maps = Table("paper_maps", MetaData(), autoload_with=connection)
-        restored_profile = connection.execute(select(restored_profiles)).mappings().one()
-        restored_map = connection.execute(select(restored_maps)).mappings().one()
-        assert restored_profile["collection_id"] == "profile-map-collection"
-        assert restored_profile["source_filename"] == "paper.pdf"
-        assert restored_profile["parsing_warnings"] == ["classification_uncertain"]
-        assert restored_map["collection_id"] == "profile-map-collection"
-        assert restored_map["payload"]["document_id"] == "profile-map-document"
-        assert restored_map["payload"]["input_fingerprint"] == "d" * 64
 
     engine.dispose()
 

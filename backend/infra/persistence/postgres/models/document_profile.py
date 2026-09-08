@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from typing import Any
+
 from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +35,16 @@ class DocumentProfileRow(Base):
     profile_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     profile_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paper_map_payload: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
+    paper_map_input_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    paper_map_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    paper_map_generated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

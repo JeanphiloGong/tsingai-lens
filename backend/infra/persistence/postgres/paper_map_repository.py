@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core import PaperResearchMap
 from infra.persistence.postgres.models.document import Document
-from infra.persistence.postgres.models.paper_map import PaperMapRow
+from infra.persistence.postgres.models.document_profile import DocumentProfileRow
 
 
 class PostgresPaperMapRepository:
@@ -23,10 +23,18 @@ class PostgresPaperMapRepository:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{paper_map.document_id}"
                 )
-            row = await session.get(PaperMapRow, paper_map.document_id)
+            row = await session.scalar(
+                select(DocumentProfileRow)
+                .join(Document, Document.document_id == DocumentProfileRow.document_id)
+                .where(
+                    DocumentProfileRow.document_id == paper_map.document_id,
+                    Document.collection_id == collection_id,
+                )
+            )
             if row is None:
-                session.add(_to_row(paper_map))
-                return
+                raise FileNotFoundError(
+                    f"document profile not found: {collection_id}/{paper_map.document_id}"
+                )
             _replace_row(row, paper_map)
 
     async def read(
@@ -36,10 +44,10 @@ class PostgresPaperMapRepository:
     ) -> PaperResearchMap | None:
         async with self.session_factory() as session:
             row = await session.scalar(
-                select(PaperMapRow)
-                .join(Document, Document.document_id == PaperMapRow.document_id)
+                select(DocumentProfileRow)
+                .join(Document, Document.document_id == DocumentProfileRow.document_id)
                 .where(
-                    PaperMapRow.document_id == document_id,
+                    DocumentProfileRow.document_id == document_id,
                     Document.collection_id == collection_id,
                 )
             )
@@ -54,14 +62,14 @@ class PostgresPaperMapRepository:
             return ()
         async with self.session_factory() as session:
             statement = (
-                select(PaperMapRow)
-                .join(Document, Document.document_id == PaperMapRow.document_id)
+                select(DocumentProfileRow)
+                .join(Document, Document.document_id == DocumentProfileRow.document_id)
                 .where(Document.collection_id == collection_id)
             )
             if document_ids is not None:
-                statement = statement.where(PaperMapRow.document_id.in_(document_ids))
-            rows = await session.scalars(statement.order_by(PaperMapRow.document_id))
-            return tuple(_from_row(row) for row in rows)
+                statement = statement.where(DocumentProfileRow.document_id.in_(document_ids))
+            rows = await session.scalars(statement.order_by(DocumentProfileRow.document_id))
+            return tuple(_from_row(row) for row in rows if row.paper_map_payload is not None)
 
 
 def _payload(paper_map: PaperResearchMap) -> dict[str, object]:
@@ -76,35 +84,27 @@ def _payload(paper_map: PaperResearchMap) -> dict[str, object]:
     return payload
 
 
-def _to_row(paper_map: PaperResearchMap) -> PaperMapRow:
-    return PaperMapRow(
-        document_id=paper_map.document_id,
-        input_fingerprint=paper_map.input_fingerprint,
-        map_version=paper_map.map_version,
-        generated_at=(
-            _datetime(paper_map.generated_at) if paper_map.generated_at else None
-        ),
-        payload=_payload(paper_map),
-    )
-
-
-def _replace_row(row: PaperMapRow, paper_map: PaperResearchMap) -> None:
-    row.input_fingerprint = paper_map.input_fingerprint
-    row.map_version = paper_map.map_version
-    row.generated_at = (
+def _replace_row(row: DocumentProfileRow, paper_map: PaperResearchMap) -> None:
+    row.paper_map_input_fingerprint = paper_map.input_fingerprint
+    row.paper_map_version = paper_map.map_version
+    row.paper_map_generated_at = (
         _datetime(paper_map.generated_at) if paper_map.generated_at else None
     )
-    row.payload = _payload(paper_map)
+    row.paper_map_payload = _payload(paper_map)
 
 
-def _from_row(row: PaperMapRow) -> PaperResearchMap:
+def _from_row(row: DocumentProfileRow) -> PaperResearchMap:
     return PaperResearchMap.from_mapping(
         {
-            **row.payload,
+            **(row.paper_map_payload or {}),
             "document_id": row.document_id,
-            "input_fingerprint": row.input_fingerprint,
-            "map_version": row.map_version,
-            "generated_at": row.generated_at.isoformat() if row.generated_at else None,
+            "input_fingerprint": row.paper_map_input_fingerprint,
+            "map_version": row.paper_map_version,
+            "generated_at": (
+                row.paper_map_generated_at.isoformat()
+                if row.paper_map_generated_at
+                else None
+            ),
         }
     )
 

@@ -22,7 +22,7 @@ from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
 )
 from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
-from infra.persistence.postgres.models.paper_map import PaperMapRow
+from infra.persistence.postgres.models.document_profile import DocumentProfileRow
 from infra.persistence.postgres.pipeline_run_repository import (
     PostgresPipelineRunRepository,
 )
@@ -90,15 +90,15 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
     )
     async with source_repository.session_factory() as session:
         stored_map = await session.scalar(
-            select(PaperMapRow).where(PaperMapRow.document_id == "doc_a")
+            select(DocumentProfileRow).where(DocumentProfileRow.document_id == "doc_a")
         )
-    assert stored_map.input_fingerprint == revised_map.input_fingerprint
-    assert stored_map.map_version == revised_map.map_version
-    assert stored_map.generated_at is not None
-    assert "document_id" not in stored_map.payload
-    assert "input_fingerprint" not in stored_map.payload
-    assert "map_version" not in stored_map.payload
-    assert "generated_at" not in stored_map.payload
+    assert stored_map.paper_map_input_fingerprint == revised_map.input_fingerprint
+    assert stored_map.paper_map_version == revised_map.map_version
+    assert stored_map.paper_map_generated_at is not None
+    assert "document_id" not in stored_map.paper_map_payload
+    assert "input_fingerprint" not in stored_map.paper_map_payload
+    assert "map_version" not in stored_map.paper_map_payload
+    assert "generated_at" not in stored_map.paper_map_payload
 
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(

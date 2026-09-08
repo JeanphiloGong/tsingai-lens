@@ -23,22 +23,25 @@ operation creates a short task-local `AsyncSession`.
   execution and nested node telemetry in one row.
 - `PostgresSourceArtifactRepository`: the current Source aggregate for each
   Document.
-- `PostgresDocumentProfileRepository`: one current profile per Document.
-- `PostgresPaperMapRepository`: one current bounded Paper Map per Document.
-- `PostgresObjectiveRepository`: current discovery selection, Objective records,
-  versioned analyses, contributions, Evidence, and Findings.
-- `PostgresChatRepository`: Agent sessions, messages, tool calls, results, and
-  approval decisions.
+- `PostgresDocumentProfileRepository`: one current profile per Document,
+  including its optional Paper Map cache.
+- `PostgresPaperMapRepository`: reads and writes the embedded Paper Map fields
+  on `document_profiles`.
+- `PostgresObjectiveRepository`: Collection discovery fields, Objective records,
+  versioned analyses (including private checkpoints and contributions), Evidence,
+  and Findings.
+- `PostgresChatRepository`: Agent sessions, messages, tool calls, embedded
+  results, and approval decisions.
 - `PostgresFindingReviewRepository`, `PostgresExperimentPlanRepository`, and
   `PostgresEvaluationRepository`: their named downstream records.
 
 ## Objective Aggregate
 
 ```text
-objective_discovery
+collections.discovery_*
 research_objectives
   -> objective_analyses
-     -> objective_paper_contributions
+     -> payload.paper_contributions / payload.document_evidence_checkpoints
      -> objective_evidence
      -> objective_findings
 ```

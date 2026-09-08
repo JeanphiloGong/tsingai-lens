@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260908_0045`. The identity and fingerprint rules are
+and the Alembic head `20260908_0050`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 29 application tables and 247 fields. A
+The current ORM metadata contains 24 application tables and 230 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -31,13 +31,13 @@ flowchart LR
     D --> PR[Preparation Pipeline Run]
     PR --> S[Current Source tree]
     S --> P[Document Profile]
-    P --> M[Lazy Paper Map]
+    P --> M[Paper Map fields in Profile]
     D -->|explicit ready selection| O[Objective discovery]
     M --> O
     O --> R[Research Objective]
     R --> A[Versioned Objective Analysis]
     S --> A
-    A --> E[Paper Contributions and Evidence]
+    A --> E[Evidence]
     E --> F[Published Findings]
     F --> V[Human feedback / curation]
     F --> X[Optional experiment plan]
@@ -86,9 +86,9 @@ class is in `infra/persistence/postgres/models`.
 | Create a collection and add papers | `application/source`, `controllers/source/collections.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
 | Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_runs.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
 | Parse and navigate a paper | `infra/source`, `application/source` | `document_sources` | One format-neutral parsed artifact containing the complete Source tree, text units, blocks, tables, figures, and references. |
-| Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `document_profiles`, `paper_maps`, `objective_discovery`, `research_objectives` | Current paper triage, bounded navigation maps, selected discovery inputs, and Objective candidates. |
-| Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses`, `objective_document_evidence_checkpoints`, `objective_paper_contributions`, `objective_evidence`, `objective_findings` | Frozen analysis versions, resumable per-document inspection, Source-backed evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
-| Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls`, `chat_tool_results` | Auditable conversation, capability calls, approval decisions, structured results, and selected Source context. |
+| Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `collections`, `document_profiles`, `research_objectives` | Collection-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
+| Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses`, `objective_evidence`, `objective_findings` | Versioned analysis payloads (including private checkpoints and paper contributions), Source-backed Evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
+| Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
 | Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_gold_items`, `evaluation_prediction_snapshots`, `evaluation_prediction_items`, `evaluation_runs`, `evaluation_scores`, `evaluation_failures` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. |
 
@@ -132,7 +132,7 @@ cascades to remove dependent rows.
 
 `PipelineRunService` records technical execution while
 `DocumentPreparationService` and Objective discovery write their scientific
-results to the owning Source, Profile, Map, and Objective tables.
+results to the owning Source, Profile, Collection, and Objective tables.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
@@ -170,16 +170,16 @@ deeper inspection. They are navigation inputs, not Evidence.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `document_profiles` | `document_id` | One current profile per Document, containing its selected title, document type, profile warnings, confidence in `[0, 1]`, and profile provenance. |
-| `paper_maps` | `document_id` | One optional lazy map per Document, with explicit cache provenance and a bounded JSON payload containing navigation signals and Source references. |
-| `objective_discovery` | `collection_id` | The current discovery result for the selected scope: readiness flag, ordered `document_inputs`, Objective IDs, study dispositions, and update time. |
+| `document_profiles` | `document_id` | One current profile per Document, containing triage fields plus the optional lazy Paper Map payload and its cache provenance. |
+| `collections` | `collection_id` | Current discovery state: readiness flag, ordered `document_inputs`, Objective IDs, study dispositions, and update time. |
 | `research_objectives` | `(collection_id, objective_id)` | Ranked current Objective payload, origin (`system_discovered` or `chat_assisted`), optional Chat tool-call provenance, and timestamps. |
 
 Discovery requires an explicit non-empty set of ready Document IDs. Each
 `document_inputs` item freezes the pair `{document_id,
 preparation_fingerprint}`. Replacing discovery changes the current candidates
 for that Collection; it does not create a Collection snapshot or duplicate the
-Source/Profile/PaperMap rows.
+Source/Profile rows. Paper Map data is a navigation cache inside the Profile row,
+not a second artifact identity.
 
 The Objective payload carries confirmation and published/active analysis
 version pointers. The composite identity keeps Objectives from different
@@ -196,10 +196,8 @@ results, and publish a reviewable Finding set.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `objective_analyses` | `(collection_id, objective_id, analysis_version)` | One versioned analysis attempt per positive version, status, analysis payload, and timestamps. It has a composite FK to `research_objectives`. |
-| `objective_document_evidence_checkpoints` | `(collection_id, objective_id, document_id, input_fingerprint)` | Private resumable inspection for one Objective/Document input. Status is `running`, `succeeded`, or `failed`; the payload stores the completed per-paper artifacts. Objective and Document ownership cascade. |
-| `objective_paper_contributions` | `(collection_id, objective_id, analysis_version, source_document_id)` | One paper's contribution to an analysis version and its payload. It cascades with the parent analysis. |
-| `objective_evidence` | `(collection_id, objective_id, analysis_version, evidence_id)` | Source-document-bound Evidence payload. Composite FKs require both the analysis and its paper contribution. |
+| `objective_analyses` | `(collection_id, objective_id, analysis_version)` | One versioned analysis attempt. Its payload also stores private per-document checkpoints and paper contributions because those states share the same analysis lifecycle and are not public query identities. |
+| `objective_evidence` | `(collection_id, objective_id, analysis_version, evidence_id)` | Source-document-bound Evidence payload. It is kept separate because Evidence is a public, independently traceable scientific artifact. |
 | `objective_findings` | `(collection_id, objective_id, analysis_version, finding_id)` | Display-ranked Finding payload. Relations, context, and the complete scientific statement remain inside the versioned payload. |
 
 Analysis identity always includes the selected preparation state. Before Source
@@ -229,8 +227,7 @@ create a parallel paper-fact model.
 | --- | --- | --- |
 | `chat_sessions` | `session_id` | Authenticated user and Collection ownership, creation/update timestamps, and monotonic timestamp check. |
 | `chat_messages` | `message_id` | Session ownership, non-negative ordered `position`, role (`user`, `assistant`, `tool`), content, optional tool metadata, and persisted selected `source_contexts`. `(session_id, position)` is unique. |
-| `chat_tool_calls` | `tool_call_id` | Session and assistant-message ownership, capability name/arguments, argument digest, risk (`unknown`, `read`, `draft`, `write`), approval/execution status, timing, and decision-user provenance. One call is allowed per assistant message. |
-| `chat_tool_results` | `tool_call_id` | One result per call with status (`succeeded`, `queued`, `failed`), structured data, resource references, warnings, and optional error details. |
+| `chat_tool_calls` | `tool_call_id` | Session and assistant-message ownership, capability name/arguments, argument digest, risk (`unknown`, `read`, `draft`, `write`), approval/execution status, timing, decision-user provenance, and the optional structured result. One call is allowed per assistant message. |
 
 Tool approval is an explicit state transition recorded with the exact argument
 digest and authenticated decision user. Source context on a message is a
@@ -304,18 +301,14 @@ erDiagram
     DOCUMENTS }o..o{ PIPELINE_RUNS : logical_scope
     DOCUMENTS ||--o| DOCUMENT_SOURCES : has_current
     DOCUMENTS ||--o| DOCUMENT_PROFILES : profiles
-    DOCUMENTS ||--o| PAPER_MAPS : maps
-    COLLECTIONS ||--o| OBJECTIVE_DISCOVERY : discovers
+    DOCUMENT_PROFILES ||--o| PAPER_MAP_CACHE : embeds
+    COLLECTIONS ||--o| DISCOVERY_STATE : embeds
     COLLECTIONS ||--o{ RESEARCH_OBJECTIVES : frames
     RESEARCH_OBJECTIVES ||--o{ OBJECTIVE_ANALYSES : versions
-    RESEARCH_OBJECTIVES ||--o{ OBJECTIVE_DOCUMENT_EVIDENCE_CHECKPOINTS : inspects
-    DOCUMENTS ||--o{ OBJECTIVE_DOCUMENT_EVIDENCE_CHECKPOINTS : supplies
-    OBJECTIVE_ANALYSES ||--o{ OBJECTIVE_PAPER_CONTRIBUTIONS : contains
-    OBJECTIVE_PAPER_CONTRIBUTIONS ||--o{ OBJECTIVE_EVIDENCE : grounds
+    OBJECTIVE_ANALYSES ||--o{ OBJECTIVE_EVIDENCE : grounds
     OBJECTIVE_ANALYSES ||--o{ OBJECTIVE_FINDINGS : publishes
     CHAT_SESSIONS ||--o{ CHAT_MESSAGES : contains
     CHAT_SESSIONS ||--o{ CHAT_TOOL_CALLS : executes
-    CHAT_TOOL_CALLS ||--o| CHAT_TOOL_RESULTS : returns
     RESEARCH_OBJECTIVES ||--o{ OBJECTIVE_EXPERIMENT_PLANS : plans
     OBJECTIVE_FINDINGS ||--o{ FINDING_FEEDBACK_RECORDS : reviews
     OBJECTIVE_FINDINGS ||--o{ FINDING_CURATION_RECORDS : curates
@@ -332,6 +325,12 @@ erDiagram
 The Source JSON envelope replaces the former normalized `source_*` tables. The
 tree projection is rebuilt from the same aggregate, so a locator is always
 resolved against the exact artifact row that produced it.
+
+The current model keeps lifecycle-local state together: Paper Map cache fields
+live on `document_profiles`, discovery state lives on `collections`, analysis
+checkpoints and paper contributions live in `objective_analyses.payload`, and
+capability results live on `chat_tool_calls`. These embedded values are not
+independent query identities.
 
 ## Fingerprints, Versions, and Reuse
 
@@ -368,8 +367,8 @@ The database therefore supports these observable outcomes:
 
 ## Deletion and Replacement Rules
 
-- Deleting a Collection cascades its Documents, current Source/Profile/Paper
-  Map rows, Pipeline Runs, Objectives, analyses, Findings, review records, Chat
+- Deleting a Collection cascades its Documents, current Source/Profile,
+  Pipeline Runs, Objectives, analyses, Findings, review records, Chat
   sessions, plans, and collection-owned evaluation inputs. Evaluation Runs
   protect their gold-set and prediction-snapshot inputs with `RESTRICT`, so a
   Collection deletion is blocked while those run dependencies exist. The same
@@ -378,8 +377,9 @@ The database therefore supports these observable outcomes:
 - Deleting an Auth User cascades sessions and Chat sessions but is restricted
   while the user still owns Collections or is recorded as a tool-call decision
   user. Plan author fields are nullable and use `SET NULL`.
-- Deleting a Document cascades its current Source, Profile, Paper Map, and
-  per-document Evidence checkpoints. A document-scoped Pipeline Run uses a
+- Deleting a Document cascades its current Source and Profile (including the
+  embedded Paper Map cache), and analysis payloads that reference it. A
+  document-scoped Pipeline Run uses a
   polymorphic logical `scope_id`, so its execution history remains until the
   owning Collection is deleted. Published
   Objective analysis rows are retained only while their parent Collection and
@@ -397,9 +397,10 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260908_0045`. Revision `0044` moves preparation provenance to Source/Profile
-artifacts; revision `0045` backfills historical Task rows into Pipeline Run
-snapshots and removes `tasks` and `task_stages`. The current ORM metadata and
+`20260908_0050`. Revisions `0044` and `0045` move preparation provenance and
+Task history into the current Source/Profile and Pipeline Run records.
+Revisions `0047`-`0050` merge Paper Maps, Chat results, Objective intermediate
+records, and discovery state into their lifecycle owners. The current ORM metadata and
 migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
 
@@ -425,9 +426,9 @@ identity used by the Evidence or Finding.
 | `PostgresPipelineRunRepository` | `pipeline_runs` |
 | `PostgresSourceArtifactRepository` | `document_sources` |
 | `PostgresDocumentProfileRepository` | `document_profiles` |
-| `PostgresPaperMapRepository` | `paper_maps` |
-| `PostgresObjectiveRepository` | `objective_discovery`, `research_objectives`, `objective_analyses`, `objective_document_evidence_checkpoints`, `objective_paper_contributions`, `objective_evidence`, `objective_findings` |
-| `PostgresChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls`, `chat_tool_results` |
+| `PostgresPaperMapRepository` | `document_profiles.paper_map_*` |
+| `PostgresObjectiveRepository` | `collections.discovery_*`, `research_objectives`, `objective_analyses` (including embedded checkpoints/contributions), `objective_evidence`, `objective_findings` |
+| `PostgresChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results) |
 | `PostgresExperimentPlanRepository` | `objective_experiment_plans` |
 | `PostgresFindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
 | `PostgresEvaluationRepository` | All `evaluation_*` tables |
@@ -457,7 +458,7 @@ they do not define production schema or behavior.
 ## Appendix: Complete Field Catalog
 
 The catalog below lists every field in the current ORM, grouped by the main
-logic flow (29 application tables and 247 fields).
+logic flow (24 application tables and 230 mapped fields).
 Field names, types, and nullability follow `backend/infra/persistence/postgres/models/*.py`;
 descriptions explain each field's business role in the Lens research chain. `JSONB` means the ORM uses
 `JSON().with_variant(JSONB(), "postgresql")`, so PostgreSQL stores the value as
@@ -528,6 +529,11 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 | `paper_count` | `INTEGER` | No | `>= 0` | Number of current Documents in the collection. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
+| `discovery_ready` | `BOOLEAN` | No | default `false` | Whether the current collection discovery result is ready for review or confirmation. |
+| `discovery_document_inputs` | `JSONB` | No | default `[]` | Ordered selected inputs, each containing a `document_id` and preparation fingerprint. |
+| `discovery_objective_ids` | `JSONB` | No | default `[]` | Ordered Objective IDs produced by the current discovery result. |
+| `discovery_study_dispositions` | `JSONB` | No | default `[]` | Per-document study role, inclusion/exclusion, and uncertainty. |
+| `discovery_updated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp of the latest discovery-state update. |
 
 #### `documents` — Current collection documents
 
@@ -654,6 +660,10 @@ Evidence and Findings produced after Objective analysis reads exact Source mater
 | `profile_version` | `VARCHAR(128)` | Yes | — | Profile extraction or analysis version that produced this result. |
 | `profile_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the profile result and its Source input. It is also the current preparation fingerprint used by Objective analysis. |
 | `generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which this profile result was generated. |
+| `paper_map_payload` | `JSONB` | Yes | — | Optional navigation-only Paper Map payload: paper role, studies, candidate relationships, unresolved signals, Source coverage, limitations, and review synthesis. |
+| `paper_map_input_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the prepared Document and Paper Map policy consumed by this cache. |
+| `paper_map_version` | `VARCHAR(128)` | Yes | — | Paper Map policy and prompt version that produced the cache. |
+| `paper_map_generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which the Paper Map cache was generated. |
 
 Parser and profile provenance belongs with the artifact that produced it:
 `document_sources` owns parser metadata and the Source fingerprint;
@@ -662,33 +672,15 @@ Parser and profile provenance belongs with the artifact that produced it:
 identity, and current preparation status. Profile queries join through
 `documents.document_id` when they need collection scoping.
 
-#### `paper_maps` — Lazy paper navigation maps
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `document_id` | `VARCHAR(128)` | No | PK; FK -> `documents.document_id`; `ON DELETE CASCADE` | Stable identifier of the current Document. |
-| `input_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the prepared Document and Paper Map policy consumed by this result. Legacy rows remain nullable and rebuild on their next use. |
-| `map_version` | `VARCHAR(128)` | Yes | — | Paper Map policy and prompt version that produced this result. Legacy rows remain nullable and rebuild on their next use. |
-| `generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which this map was generated. |
-| `payload` | `JSONB` | No | — | Navigation-only payload containing paper role, studies, candidate relationships, unresolved signals, Source coverage, limitations, and review synthesis. Row identity and provenance are not duplicated inside this JSON. |
-
 Paper Maps are built lazily when a ready Document is selected for Objective
-work. Collection-scoped queries join through `documents`; a stored map is
-rebuilt when either its `input_fingerprint` or `map_version` no longer matches
-the selected prepared Document and current map policy.
+work. They are stored in the same `document_profiles` row because they are
+derived navigation state for that current profile, not an independently
+addressable scientific artifact. The cache is rebuilt when its input
+fingerprint or map version is stale.
 
-#### `objective_discovery` — Current Objective discovery result
-
-This table stores the current discovery result per `collection_id`; replacing it does not create a collection snapshot.
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK | Identifier of the owning research collection. |
-| `research_objectives_ready` | `BOOLEAN` | No | — | Whether the discovery result is ready for user review or confirmation. |
-| `document_inputs` | `JSONB` | No | — | Exact selected inputs, including each `document_id` and `preparation_fingerprint`. |
-| `objective_ids` | `JSONB` | No | — | Ordered Objective IDs generated by discovery. |
-| `study_dispositions` | `JSONB` | No | — | Per-document study role, inclusion/exclusion, and uncertainty. |
-| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
+Discovery state is stored in the `collections.discovery_*` fields. Replacing
+that state changes the current candidates for the Collection; it does not
+create a Collection snapshot or duplicate Source/Profile rows.
 
 #### `research_objectives` — Research Objectives
 
@@ -717,45 +709,24 @@ The complete identity is `(collection_id, objective_id, analysis_version)` and l
 | `objective_id` | `VARCHAR(128)` | No | PK (composite); composite FK -> `research_objectives` | Stable identifier of the research Objective. |
 | `analysis_version` | `INTEGER` | No | PK (composite); positive integer | Positive analysis version; retries create a new version. |
 | `status` | `VARCHAR(16)` | No | `queued` / `running` / `succeeded` / `failed`; IDX | Lifecycle or execution status for the objective analyses record. |
-| `payload` | `JSONB` | No | — | Frozen document inputs, stage versions, statistics, source coverage, and analysis summary. |
+| `payload` | `JSONB` | No | — | Frozen document inputs, stage versions, statistics, source coverage, analysis summary, private per-document checkpoints, and paper contributions. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 
-#### `objective_document_evidence_checkpoints` — Per-document Evidence checkpoints
+The payload keeps checkpoint entries keyed by document and input fingerprint,
+plus paper-contribution entries keyed by source document. They are reusable
+analysis internals, not public rows that need independent joins or lifecycle
+management.
 
-A checkpoint is a private, reusable technical/scientific intermediate; it is not directly a child record of the public Evidence API.
-Its complete identity is `(collection_id, objective_id, document_id, input_fingerprint)`.
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK (composite); composite FK -> `research_objectives`; `ON DELETE CASCADE` | Identifier of the owning research collection. |
-| `objective_id` | `VARCHAR(128)` | No | PK (composite); composite FK -> `research_objectives` | Stable identifier of the research Objective. |
-| `document_id` | `VARCHAR(64)` | No | PK (composite); FK -> `documents.document_id`; `ON DELETE CASCADE` | Stable identifier of the current Document. |
-| `input_fingerprint` | `VARCHAR(64)` | No | PK (composite) | Combined fingerprint of Objective intent, preparation state, model identity, and analysis-stage versions. |
-| `status` | `VARCHAR(16)` | No | `running` / `succeeded` / `failed`; IDX | Lifecycle or execution status for the objective document evidence checkpoints record. |
-| `payload` | `JSONB` | No | — | Completed per-paper framing, Source routing, extraction, grounding, experiment reconstruction, and Evidence materialization. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
-
-#### `objective_paper_contributions` — Per-paper analysis contributions
+#### `objective_evidence` — Source-backed Objective Evidence
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `collection_id` | `VARCHAR(64)` | No | PK (composite); composite FK -> `objective_analyses`; `ON DELETE CASCADE` | Identifier of the owning research collection. |
 | `objective_id` | `VARCHAR(128)` | No | PK (composite); composite FK -> `objective_analyses` | Stable identifier of the research Objective. |
 | `analysis_version` | `INTEGER` | No | PK (composite); composite FK -> `objective_analyses` | Positive analysis version; retries create a new version. |
-| `source_document_id` | `VARCHAR(128)` | No | PK (composite) | Identifier of the current Source document. |
-| `payload` | `JSONB` | No | — | Per-paper inclusion/exclusion, experiment reconstruction, Evidence disposition, and Source references. |
-
-#### `objective_evidence` — Source-backed Objective Evidence
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK (composite); composite FK -> `objective_analyses`, `objective_paper_contributions`; `ON DELETE CASCADE` | Identifier of the owning research collection. |
-| `objective_id` | `VARCHAR(128)` | No | PK (composite); composite FK -> `objective_analyses`, `objective_paper_contributions` | Stable identifier of the research Objective. |
-| `analysis_version` | `INTEGER` | No | PK (composite); composite FK -> `objective_analyses`, `objective_paper_contributions` | Positive analysis version; retries create a new version. |
 | `evidence_id` | `VARCHAR(128)` | No | PK (composite) | Stable identifier of the Evidence item within the analysis version. |
-| `source_document_id` | `VARCHAR(128)` | No | FK -> `objective_paper_contributions.source_document_id` (composite association) | Source Document that produced the Evidence. |
+| `source_document_id` | `VARCHAR(128)` | No | — | Source Document that produced the Evidence. |
 | `payload` | `JSONB` | No | — | Variables, conditions, results, comparison relations, attribution scope, Evidence status, exact Source locator, and excerpt. |
 
 #### `objective_findings` — Cross-paper Findings
@@ -795,8 +766,6 @@ paper-fact model.
 | `role` | `VARCHAR(16)` | No | `user` / `assistant` / `tool` | Message role: user, assistant, or tool. |
 | `content` | `TEXT` | No | — | Human- or system-readable text content. |
 | `tool_call_id` | `VARCHAR(128)` | Yes | — | Stable identifier of the capability call. |
-| `tool_name` | `VARCHAR(128)` | Yes | — | Snapshot of the capability name requested by the assistant. |
-| `tool_arguments` | `JSONB` | Yes | — | Snapshot of the arguments requested by the assistant. |
 | `source_contexts` | `JSONB` | No | default `[]` | User-selected, Source-digest-bound navigation contexts attached to the message. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 
@@ -808,6 +777,7 @@ paper-fact model.
 | `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions.session_id`; IDX; `ON DELETE CASCADE` | Stable identifier of the Chat session. |
 | `assistant_message_id` | `VARCHAR(128)` | No | FK -> `chat_messages.message_id`; UQ; `ON DELETE CASCADE` | Assistant message that triggered this call; at most one call per assistant message. |
 | `name` | `VARCHAR(128)` | No | — | Capability name requested by the Agent. |
+| `position` | `INTEGER` | No | `>= 0`; UQ per assistant message | Order of this capability call within the assistant turn. |
 | `arguments` | `JSONB` | No | — | Schema-validated capability arguments. |
 | `arguments_digest` | `VARCHAR(64)` | No | — | Normalized argument digest used to verify exact approval. |
 | `risk` | `VARCHAR(16)` | No | `unknown` / `read` / `draft` / `write` | Capability risk classification. |
@@ -818,18 +788,16 @@ paper-fact model.
 | `decision_user_id` | `VARCHAR(64)` | Yes | FK -> `auth_users.user_id`; `ON DELETE RESTRICT` | Authenticated user who approved or rejected the call. |
 | `decision_arguments_digest` | `VARCHAR(64)` | Yes | — | Digest confirmed at approval; must match `arguments_digest`. |
 | `decided_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Decided timestamp. |
+| `result_status` | `VARCHAR(32)` | Yes | `succeeded` / `queued` / `failed` | Lifecycle status of the result returned by this call. |
+| `result_data` | `JSONB` | Yes | — | Structured data returned by the capability. |
+| `result_resource_refs` | `JSONB` | Yes | — | Navigable references to Objectives, Findings, Sources, or other result resources. |
+| `result_warnings` | `JSONB` | Yes | — | Structured list of non-blocking warnings. |
+| `result_error_code` | `VARCHAR(128)` | Yes | — | Machine-readable failure code returned by the capability. |
+| `result_error_message` | `TEXT` | Yes | — | Human-readable failure explanation returned by the capability. |
 
-#### `chat_tool_results` — Capability results
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `tool_call_id` | `VARCHAR(128)` | No | PK; FK -> `chat_tool_calls.tool_call_id`; `ON DELETE CASCADE` | Stable identifier of the capability call. |
-| `status` | `VARCHAR(32)` | No | `succeeded` / `queued` / `failed` | Lifecycle or execution status for the chat tool results record. |
-| `data` | `JSONB` | No | — | Structured data returned by the capability. |
-| `resource_refs` | `JSONB` | No | — | Navigable references to Objectives, Findings, Sources, or other result resources. |
-| `warnings` | `JSONB` | No | — | Structured list of non-blocking warnings. |
-| `error_code` | `VARCHAR(128)` | Yes | — | Machine-readable failure code returned by the capability. |
-| `error_message` | `TEXT` | Yes | — | Human-readable failure explanation returned by the capability. |
+The result is nullable because a call can be requested, approved, or running
+before execution completes. Keeping it on the call row makes the call and its
+single result one auditable lifecycle record.
 
 ### Experiment plans
 
@@ -998,4 +966,4 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0045`. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0050`. |

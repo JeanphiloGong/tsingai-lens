@@ -19,7 +19,6 @@ from infra.persistence.postgres.models.chat import (
     ChatMessageRow,
     ChatSessionRow,
     ChatToolCallRow,
-    ChatToolResultRow,
 )
 
 
@@ -55,29 +54,21 @@ class PostgresChatRepository:
                     .order_by(ChatMessageRow.position)
                 )
             )
-            result_ids = {
-                row.tool_call_id
-                for row in rows
-                if row.role == "tool" and row.tool_call_id is not None
-            }
-            results = {
-                row.tool_call_id: row
-                for row in await session.scalars(
-                    select(ChatToolResultRow).where(
-                        ChatToolResultRow.tool_call_id.in_(result_ids)
-                    )
+            call_rows = tuple(
+                await session.scalars(
+                    select(ChatToolCallRow)
+                    .where(ChatToolCallRow.session_id == session_id)
+                    .order_by(ChatToolCallRow.assistant_message_id, ChatToolCallRow.position)
                 )
-            } if result_ids else {}
+            )
+            calls_by_id = {row.tool_call_id: row for row in call_rows}
             requests: dict[str, list[ChatToolRequest]] = {}
-            for call_row in await session.scalars(
-                select(ChatToolCallRow).where(ChatToolCallRow.session_id == session_id)
-                .order_by(ChatToolCallRow.assistant_message_id, ChatToolCallRow.position)
-            ):
+            for call_row in call_rows:
                 requests.setdefault(call_row.assistant_message_id, []).append(_call_record(call_row).to_request())
             return tuple(
                 _message_record(
                     row,
-                    results.get(row.tool_call_id) if row.role == "tool" else None,
+                    calls_by_id.get(row.tool_call_id) if row.role == "tool" else None,
                     tuple(requests.get(row.message_id, ())),
                 )
                 for row in rows
@@ -190,24 +181,14 @@ class PostgresChatRepository:
                 )
                 if call_row is None or call_row.session_id != session.session_id:
                     raise ValueError("tool result belongs to an unknown call")
-                row = await database.get(
-                    ChatToolResultRow, result.tool_call_id
-                )
-                if row is None:
-                    row = ChatToolResultRow(
-                        tool_call_id=result.tool_call_id,
-                        status=result.status.value,
-                        data={},
-                        resource_refs=[],
-                        warnings=[],
-                    )
-                    database.add(row)
-                row.status = result.status.value
-                row.data = dict(result.data)
-                row.resource_refs = [item.to_record() for item in result.resource_refs]
-                row.warnings = list(result.warnings)
-                row.error_code = result.error_code
-                row.error_message = result.error_message
+                call_row.result_status = result.status.value
+                call_row.result_data = dict(result.data)
+                call_row.result_resource_refs = [
+                    item.to_record() for item in result.resource_refs
+                ]
+                call_row.result_warnings = list(result.warnings)
+                call_row.result_error_code = result.error_code
+                call_row.result_error_message = result.error_message
 
     async def decide_tool_call(
         self,
@@ -336,7 +317,7 @@ def _call_record(row: ChatToolCallRow) -> ChatToolCall:
 
 def _message_record(
     row: ChatMessageRow,
-    result: ChatToolResultRow | None,
+    result: ChatToolCallRow | None,
     requests: tuple[ChatToolRequest, ...],
 ) -> ChatMessage:
     return ChatMessage.from_mapping(
@@ -354,15 +335,15 @@ def _message_record(
     )
 
 
-def _result_record(row: ChatToolResultRow) -> dict:
+def _result_record(row: ChatToolCallRow) -> dict:
     return {
         "tool_call_id": row.tool_call_id,
-        "status": row.status,
-        "data": dict(row.data),
-        "resource_refs": list(row.resource_refs),
-        "warnings": list(row.warnings),
-        "error_code": row.error_code,
-        "error_message": row.error_message,
+        "status": row.result_status,
+        "data": dict(row.result_data or {}),
+        "resource_refs": list(row.result_resource_refs or []),
+        "warnings": list(row.result_warnings or []),
+        "error_code": row.result_error_code,
+        "error_message": row.result_error_message,
     }
 
 

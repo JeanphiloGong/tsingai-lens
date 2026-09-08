@@ -36,20 +36,21 @@ def upgrade() -> None:
                 if column_name in profile_columns:
                     batch_op.drop_column(column_name)
 
-    paper_map_columns = _columns("paper_maps")
-    for column_name, column in (
-        ("input_fingerprint", sa.Column("input_fingerprint", sa.String(64))),
-        ("map_version", sa.Column("map_version", sa.String(128))),
-        ("generated_at", sa.Column("generated_at", sa.DateTime(timezone=True))),
-    ):
-        if column_name not in paper_map_columns:
-            op.add_column("paper_maps", column)
+    if "paper_maps" in _tables():
+        paper_map_columns = _columns("paper_maps")
+        for column_name, column in (
+            ("input_fingerprint", sa.Column("input_fingerprint", sa.String(64))),
+            ("map_version", sa.Column("map_version", sa.String(128))),
+            ("generated_at", sa.Column("generated_at", sa.DateTime(timezone=True))),
+        ):
+            if column_name not in paper_map_columns:
+                op.add_column("paper_maps", column)
 
-    _normalize_paper_map_rows(op.get_bind())
+        _normalize_paper_map_rows(op.get_bind())
 
-    if "collection_id" in paper_map_columns:
-        with op.batch_alter_table("paper_maps") as batch_op:
-            batch_op.drop_column("collection_id")
+        if "collection_id" in paper_map_columns:
+            with op.batch_alter_table("paper_maps") as batch_op:
+                batch_op.drop_column("collection_id")
 
 
 def downgrade() -> None:
@@ -85,26 +86,27 @@ def downgrade() -> None:
             ["collection_id"],
         )
 
-    paper_map_columns = _columns("paper_maps")
-    if "collection_id" not in paper_map_columns:
-        op.add_column(
-            "paper_maps",
-            sa.Column("collection_id", sa.String(64), nullable=True),
-        )
-    _restore_paper_map_payloads(bind)
-    with op.batch_alter_table("paper_maps") as batch_op:
-        batch_op.alter_column("collection_id", nullable=False)
-        batch_op.create_foreign_key(
-            "fk_paper_maps_collection_id_collections",
-            "collections",
-            ["collection_id"],
-            ["collection_id"],
-            ondelete="CASCADE",
-        )
-        batch_op.create_index("ix_paper_maps_collection_id", ["collection_id"])
-        for column_name in ("input_fingerprint", "map_version", "generated_at"):
-            if column_name in paper_map_columns:
-                batch_op.drop_column(column_name)
+    if "paper_maps" in _tables():
+        paper_map_columns = _columns("paper_maps")
+        if "collection_id" not in paper_map_columns:
+            op.add_column(
+                "paper_maps",
+                sa.Column("collection_id", sa.String(64), nullable=True),
+            )
+        _restore_paper_map_payloads(bind)
+        with op.batch_alter_table("paper_maps") as batch_op:
+            batch_op.alter_column("collection_id", nullable=False)
+            batch_op.create_foreign_key(
+                "fk_paper_maps_collection_id_collections",
+                "collections",
+                ["collection_id"],
+                ["collection_id"],
+                ondelete="CASCADE",
+            )
+            batch_op.create_index("ix_paper_maps_collection_id", ["collection_id"])
+            for column_name in ("input_fingerprint", "map_version", "generated_at"):
+                if column_name in paper_map_columns:
+                    batch_op.drop_column(column_name)
 
 
 def _columns(table_name: str) -> set[str]:
@@ -112,6 +114,10 @@ def _columns(table_name: str) -> set[str]:
         str(column["name"])
         for column in sa.inspect(op.get_bind()).get_columns(table_name)
     }
+
+
+def _tables() -> set[str]:
+    return set(sa.inspect(op.get_bind()).get_table_names())
 
 
 def _normalize_paper_map_rows(bind: sa.Connection) -> None:

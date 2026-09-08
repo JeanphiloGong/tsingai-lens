@@ -50,6 +50,7 @@ _STEP_LIMIT_MESSAGE = (
     "Please narrow the question or continue in a new message."
 )
 _MODEL_RESPONSE_RETRY_LIMIT = 1
+_REQUIRED_ACTION_RETRY_LIMIT = 1
 _FINAL_ANSWER_INSTRUCTION = (
     "The bounded research-reading budget is now exhausted. Give the researcher "
     "the best useful final answer supported by the completed trajectory. State "
@@ -57,7 +58,9 @@ _FINAL_ANSWER_INSTRUCTION = (
     "uncertainty, and one practical next step. Do not request another tool and "
     "do not mention internal budgets, tool schemas, or hidden reasoning. A paper "
     "identity survey or a search match is not an exact Source read. Do not claim "
-    "that a paper was read unless the reading ledger below records an exact Source."
+    "that a paper was read unless the reading ledger below records an exact Source. "
+    "If the researcher requested more papers than the collection contains, state "
+    "the actual collection total and do not invent missing or unread papers."
 )
 
 _COLLECTION_READ_CAPABILITIES = {
@@ -149,12 +152,18 @@ _NO_WRITE_PHRASES = (
     "先不要保存",
     "不要直接修改",
     "不要修改",
+    "不要发布",
+    "不发布",
+    "先不要发布",
     "without saving",
     "do not save",
     "don't save",
     "without modifying",
     "do not modify",
     "don't modify",
+    "without publishing",
+    "do not publish",
+    "don't publish",
 )
 _PAPER_TERMS = (
     "论文",
@@ -174,6 +183,15 @@ _PAPER_TERMS = (
     "看看",
     "阅读",
     "读取",
+)
+_COMPARISON_TERMS = (
+    "比较",
+    "是否都支持",
+    "可比",
+    "compare",
+    "supports",
+    "support",
+    "comparable",
 )
 _SOURCE_DETAIL_TERMS = (
     "原文",
@@ -277,7 +295,16 @@ _PLAN_TERMS = (
 )
 _PROCESS_TERMS = (
     "进度",
-    "状态",
+    "论文处理状态",
+    "文档处理状态",
+    "任务处理状态",
+    "collection 处理状态",
+    "分析状态",
+    "研究状态",
+    "目标状态",
+    "任务状态",
+    "collection 状态",
+    "objective 状态",
     "处理到",
     "处理完",
     "为什么失败",
@@ -286,7 +313,12 @@ _PROCESS_TERMS = (
     "为什么慢",
     "哪里了",
     "progress",
-    "status",
+    "process status",
+    "processing status",
+    "analysis status",
+    "collection status",
+    "objective status",
+    "task status",
     "why failed",
     "analysis failed",
     "processing failed",
@@ -449,6 +481,8 @@ class ResearchAgentRunner:
     ) -> AgentRunResult:
         for step_index in range(1, self.max_model_steps + 1):
             response_retries = 0
+            required_action_retries = 0
+            required_action_instruction: ChatMessage | None = None
             while True:
                 try:
                     tool_specs = self._tool_specs_for_decision(
@@ -476,8 +510,37 @@ class ResearchAgentRunner:
                         schema_chars,
                         ",".join(tool_names) or "none",
                     )
+                    decision_messages = tuple(messages)
+                    stage_instruction: ChatMessage | None = None
+                    if required_action_instruction is not None:
+                        decision_messages = (*decision_messages, required_action_instruction)
+                    else:
+                        stage_instruction = self._stage_instruction(
+                            context,
+                            tool_names,
+                            calls,
+                            successful_results=self._successful_results_by_name(messages),
+                        )
+                        if stage_instruction is not None:
+                            decision_messages = (*decision_messages, stage_instruction)
+                    if (
+                        required_action_instruction is None
+                        and stage_instruction is None
+                        and not tool_specs
+                        and self._latest_structured_deliverable(results) is not None
+                    ):
+                        decision_messages = (
+                            *decision_messages,
+                            self._answer_instruction(
+                                context,
+                                messages,
+                                calls,
+                                results,
+                                budget_exhausted=False,
+                            ),
+                        )
                     model_arguments: dict[str, Any] = {
-                        "messages": self.context_builder.for_model(tuple(messages)),
+                        "messages": self.context_builder.for_model(decision_messages),
                         "tool_specs": tool_specs,
                     }
                     if text_delta_callback is not None:
@@ -555,6 +618,32 @@ class ResearchAgentRunner:
                         results,
                         "model_unavailable",
                     )
+                required_tool = self._required_tool_before_answer(
+                    tool_names,
+                    successful_results=self._successful_results_by_name(messages),
+                )
+                if (
+                    turn.tool_call is None
+                    and required_tool is not None
+                    and required_action_retries < _REQUIRED_ACTION_RETRY_LIMIT
+                ):
+                    required_action_retries += 1
+                    required_action_instruction = ChatMessage.user(
+                        message_id=self._message_id(),
+                        session_id=context.session_id,
+                        content=(
+                            "The active researcher explicitly requested a structured "
+                            "research deliverable. Do not answer yet. Use the prior "
+                            "research results and call the only available required "
+                            f"action, `{required_tool}`, now."
+                        ),
+                        created_at=_now_iso(),
+                    )
+                    logger.info(
+                        "Research Agent retrying premature answer required_tool=%s",
+                        required_tool,
+                    )
+                    continue
                 break
 
             if turn.tool_call is None:
@@ -651,17 +740,12 @@ class ResearchAgentRunner:
     ) -> bool:
         """Give the model one answer-only turn after tool decisions are spent."""
 
-        active_request = self._active_user_request(messages)
-        instruction = ChatMessage.user(
-            message_id=self._message_id(),
-            session_id=context.session_id,
-            content=(
-                f"{_FINAL_ANSWER_INSTRUCTION}\n\n"
-                "ACTIVE RESEARCH REQUEST (answer this request; do not restart "
-                f"onboarding):\n{active_request}\n\n"
-                f"READING LEDGER:\n{self._reading_ledger(calls, results)}"
-            ),
-            created_at=_now_iso(),
+        instruction = self._answer_instruction(
+            context,
+            messages,
+            calls,
+            results,
+            budget_exhausted=True,
         )
         model_arguments: dict[str, Any] = {
             "messages": self.context_builder.for_model(
@@ -694,6 +778,46 @@ class ResearchAgentRunner:
         messages.append(self._assistant(context, turn.content))
         await self._checkpoint(checkpoint, messages, calls, results)
         return True
+
+    def _answer_instruction(
+        self,
+        context: AgentContext,
+        messages: list[ChatMessage],
+        calls: list[ChatToolCall],
+        results: list[ChatToolResult],
+        *,
+        budget_exhausted: bool,
+    ) -> ChatMessage:
+        active_request = self._active_user_request(messages)
+        structured_deliverable = self._latest_structured_deliverable(results)
+        deliverable_section = (
+            "\n\nCOMPLETED STRUCTURED DELIVERABLE "
+            "(return this result; it is not an exact paper Source read):\n"
+            f"{structured_deliverable}"
+            if structured_deliverable is not None
+            else ""
+        )
+        lead = (
+            _FINAL_ANSWER_INSTRUCTION
+            if budget_exhausted
+            else (
+                "The requested structured research action is complete. Give the "
+                "researcher the useful final answer from the completed trajectory. "
+                "Do not request another tool and do not restart onboarding."
+            )
+        )
+        return ChatMessage.user(
+            message_id=self._message_id(),
+            session_id=context.session_id,
+            content=(
+                f"{lead}\n\n"
+                "ACTIVE RESEARCH REQUEST (answer this request; do not restart "
+                f"onboarding):\n{active_request}\n\n"
+                f"READING LEDGER:\n{self._reading_ledger(calls, results)}"
+                f"{deliverable_section}"
+            ),
+            created_at=_now_iso(),
+        )
 
     def _requested_call(
         self,
@@ -782,6 +906,64 @@ class ResearchAgentRunner:
             allowed_names.discard("browse_collection_papers")
             allowed_names.discard("get_collection_context")
 
+        # A source search is a navigation step. Once it returns matches, the
+        # next scientific action must read one of those exact Sources rather
+        # than broadening the search or inspecting arbitrary pages.
+        source_candidates = self._source_search_candidates(successful_results)
+        if source_candidates and not self._has_successful_exact_source_read(
+            successful_results
+        ):
+            allowed_names.intersection_update({"read_source", "inspect_table"})
+
+        # A cross-paper comparison or support claim needs source-backed facts,
+        # not only the paper map. Once the map is complete, require a focused
+        # Source search before allowing the model to answer or choose a broad
+        # inspection path.
+        comparison_intent = any(term in user_text for term in _COMPARISON_TERMS)
+        if (
+            comparison_intent
+            and successful_results.get("browse_collection_papers")
+            and not successful_results.get("search_sources")
+            and not self._has_successful_exact_source_read(successful_results)
+        ):
+            allowed_names.intersection_update({"search_sources"})
+
+        # Process status is only a paper-preparation view. If the collection
+        # has a confirmed Objective, its canonical analysis state is the next
+        # required read before the Agent reports progress to the researcher.
+        if (
+            successful_results.get("get_collection_context")
+            and any(term in user_text for term in _PROCESS_TERMS)
+            and not successful_results.get("inspect_research_process")
+        ):
+            allowed_names.intersection_update({"inspect_research_process"})
+        confirmed_objective_ids = self._confirmed_objective_ids(successful_results)
+        if (
+            successful_results.get("inspect_research_process")
+            and confirmed_objective_ids
+            and not successful_results.get("inspect_objective_analysis")
+        ):
+            allowed_names.intersection_update({"inspect_objective_analysis"})
+
+        # A published Finding summary is only a navigation result. Any
+        # collection-level conclusion review must inspect one exact Finding
+        # returned by that query before the model can judge its basis.
+        finding_candidates = self._published_finding_candidates(successful_results)
+        if (
+            successful_results.get("query_published_findings")
+            and finding_candidates
+            and not successful_results.get("inspect_published_finding")
+            and not any(term in user_text for term in _PLAN_TERMS)
+        ):
+            remaining_candidates = tuple(
+                candidate
+                for candidate in finding_candidates
+                if candidate not in self._failed_finding_candidates(calls)
+            )
+            allowed_names.intersection_update(
+                {"inspect_published_finding"} if remaining_candidates else set()
+            )
+
         inspected_finding = bool(
             successful_results.get("inspect_published_finding")
         )
@@ -789,10 +971,28 @@ class ResearchAgentRunner:
             phrase in user_text for phrase in _NO_WRITE_PHRASES
         )
         proposed_plan = bool(successful_results.get("propose_research_plan"))
-        if proposed_plan:
-            allowed_names = (
-                {"create_research_plan"} if persist_requested else set()
-            )
+        proposed_plan_this_turn = any(
+            call.name == "propose_research_plan"
+            and call.status is ToolCallStatus.SUCCEEDED
+            for call in calls
+        )
+        finding_draft_this_turn = any(
+            call.name == "create_finding_draft"
+            and call.status is ToolCallStatus.SUCCEEDED
+            for call in calls
+        )
+        # A completed plan proposal belongs to the request that asked for it.
+        # Do not let an older turn force its write capability onto a later,
+        # unrelated review or reading request in the same Chat trajectory.
+        if proposed_plan_this_turn:
+            if persist_requested:
+                allowed_names = {"create_research_plan"}
+            else:
+                allowed_names = set()
+        elif finding_draft_this_turn:
+            allowed_names = set()
+        elif proposed_plan and any(term in user_text for term in _PLAN_TERMS) and persist_requested:
+            allowed_names = {"create_research_plan"}
         elif inspected_finding and any(
             phrase in user_text
             for phrase in ("结论草案", "修订草案", "finding draft", "draft finding")
@@ -800,6 +1000,50 @@ class ResearchAgentRunner:
             allowed_names = {"create_finding_draft"}
         elif inspected_finding and any(term in user_text for term in _PLAN_TERMS):
             allowed_names = {"propose_research_plan"}
+        elif any(term in user_text for term in _PLAN_TERMS):
+            assessed_quality = bool(
+                successful_results.get("assess_objective_quality")
+            )
+            queried_findings = bool(
+                successful_results.get("query_published_findings")
+            )
+            finding_available = any(
+                objective.get("findings")
+                for result in successful_results.get(
+                    "query_published_findings", ()
+                )
+                for objective in result.get("objectives") or ()
+                if isinstance(objective, Mapping)
+            )
+            plan_prerequisites = {
+                "assess_objective_quality",
+                "query_published_findings",
+            }
+            if plan_prerequisites.issubset(registered_names):
+                allowed_names.discard("create_research_plan")
+                allowed_names.discard("propose_research_plan")
+                allowed_names.discard("inspect_published_finding")
+                if successful_results.get("get_collection_context"):
+                    allowed_names.discard("get_collection_context")
+                if assessed_quality:
+                    allowed_names.discard("assess_objective_quality")
+                if queried_findings:
+                    allowed_names.discard("query_published_findings")
+                if assessed_quality and queried_findings:
+                    finding_candidates = self._published_finding_candidates(
+                        successful_results
+                    )
+                    failed_finding_candidates = self._failed_finding_candidates(calls)
+                    remaining_candidates = tuple(
+                        candidate
+                        for candidate in finding_candidates
+                        if candidate not in failed_finding_candidates
+                    )
+                    allowed_names = (
+                        {"inspect_published_finding"}
+                        if remaining_candidates
+                        else set()
+                    )
 
         # Prevent an approved write from being repeated within this bounded
         # model continuation. A later user message starts a new decision turn
@@ -814,6 +1058,176 @@ class ResearchAgentRunner:
         completed_writes.update(inherited_completed_writes or ())
         allowed_names.difference_update(completed_writes)
         return tuple(spec for spec in specs if spec.name in allowed_names)
+
+    @staticmethod
+    def _required_tool_before_answer(
+        tool_names: tuple[str, ...],
+        *,
+        successful_results: Mapping[str, list[Mapping[str, Any]]] | None = None,
+    ) -> str | None:
+        if len(tool_names) != 1:
+            return None
+        required_tool = tool_names[0]
+        if required_tool in {
+            "inspect_research_process",
+            "inspect_objective_analysis",
+            "inspect_published_finding",
+            "create_finding_draft",
+            "propose_research_plan",
+        }:
+            if successful_results is not None and successful_results.get(required_tool):
+                return None
+            return required_tool
+        return None
+
+    @staticmethod
+    def _source_search_candidates(
+        successful_results: Mapping[str, list[Mapping[str, Any]]],
+    ) -> tuple[tuple[str, str, str], ...]:
+        candidates: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for result in successful_results.get("search_sources", ()):
+            for item in result.get("matches") or ():
+                if not isinstance(item, Mapping):
+                    continue
+                candidate = (
+                    str(item.get("document_id") or "").strip(),
+                    str(item.get("source_kind") or "").strip(),
+                    str(item.get("source_ref") or "").strip(),
+                )
+                if all(candidate) and candidate not in seen:
+                    seen.add(candidate)
+                    candidates.append(candidate)
+        return tuple(candidates[:12])
+
+    @staticmethod
+    def _has_successful_exact_source_read(
+        successful_results: Mapping[str, list[Mapping[str, Any]]],
+    ) -> bool:
+        if successful_results.get("read_source") or successful_results.get("inspect_table"):
+            return True
+        return any(
+            isinstance(item, Mapping)
+            and item.get("content_truncated") is False
+            and item.get("source_digest")
+            for result in successful_results.get("inspect_document_sources", ())
+            for item in result.get("sources") or ()
+        )
+
+    @staticmethod
+    def _confirmed_objective_ids(
+        successful_results: Mapping[str, list[Mapping[str, Any]]],
+    ) -> tuple[str, ...]:
+        ids: list[str] = []
+        for result in successful_results.get("get_collection_context", ()):
+            for item in result.get("objectives") or ():
+                if not isinstance(item, Mapping):
+                    continue
+                objective_id = str(item.get("objective_id") or "").strip()
+                if (
+                    objective_id
+                    and (
+                        str(item.get("confirmation_status") or "") == "confirmed"
+                        or item.get("published_analysis_version") is not None
+                    )
+                    and objective_id not in ids
+                ):
+                    ids.append(objective_id)
+        return tuple(ids[:12])
+
+    @staticmethod
+    def _published_finding_candidates(
+        successful_results: Mapping[str, list[Mapping[str, Any]]],
+    ) -> tuple[tuple[str, str], ...]:
+        candidates: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for result in successful_results.get("query_published_findings", ()):
+            for objective in result.get("objectives") or ():
+                if not isinstance(objective, Mapping):
+                    continue
+                objective_id = str(objective.get("objective_id") or "").strip()
+                for finding in objective.get("findings") or ():
+                    if not isinstance(finding, Mapping):
+                        continue
+                    finding_id = str(finding.get("finding_id") or "").strip()
+                    candidate = (objective_id, finding_id)
+                    if all(candidate) and candidate not in seen:
+                        seen.add(candidate)
+                        candidates.append(candidate)
+        return tuple(candidates[:24])
+
+    @staticmethod
+    def _failed_finding_candidates(
+        calls: list[ChatToolCall],
+    ) -> set[tuple[str, str]]:
+        failed: set[tuple[str, str]] = set()
+        for call in calls:
+            if call.name != "inspect_published_finding" or call.status is not ToolCallStatus.FAILED:
+                continue
+            objective_id = str(call.arguments.get("objective_id") or "").strip()
+            finding_id = str(call.arguments.get("finding_id") or "").strip()
+            if objective_id and finding_id:
+                failed.add((objective_id, finding_id))
+        return failed
+
+    def _stage_instruction(
+        self,
+        context: AgentContext,
+        tool_names: tuple[str, ...],
+        calls: list[ChatToolCall],
+        *,
+        successful_results: Mapping[str, list[Mapping[str, Any]]],
+    ) -> ChatMessage | None:
+        content: str | None = None
+        source_candidates = self._source_search_candidates(successful_results)
+        if (
+            source_candidates
+            and tool_names
+            and set(tool_names).issubset({"read_source", "inspect_table"})
+        ):
+            content = (
+                "The prior Source search returned the following exact reading "
+                "candidates. Read one of these records now; do not call a broad "
+                "page inspection and do not invent identifiers:\n"
+                + "\n".join(
+                    f"- document_id={document_id}, source_kind={source_kind}, "
+                    f"source_ref={source_ref}"
+                    for document_id, source_kind, source_ref in source_candidates
+                )
+            )
+        elif tool_names == ("inspect_objective_analysis",):
+            objective_ids = self._confirmed_objective_ids(successful_results)
+            if objective_ids:
+                content = (
+                    "The preparation status is already known. Read the canonical "
+                    "analysis state for one confirmed Objective before answering. "
+                    "Use exactly one of these Objective IDs:\n"
+                    + "\n".join(f"- objective_id={item}" for item in objective_ids)
+                )
+        elif tool_names == ("inspect_published_finding",):
+            candidates = tuple(
+                candidate
+                for candidate in self._published_finding_candidates(successful_results)
+                if candidate not in self._failed_finding_candidates(calls)
+            )
+            if candidates:
+                content = (
+                    "Inspect one exact published Finding returned by the prior "
+                    "query. Use only these allowed (objective_id, finding_id) pairs; "
+                    "do not invent Finding IDs:\n"
+                    + "\n".join(
+                        f"- objective_id={objective_id}, finding_id={finding_id}"
+                        for objective_id, finding_id in candidates
+                    )
+                )
+        if content is None:
+            return None
+        return ChatMessage.user(
+            message_id=self._message_id(),
+            session_id=context.session_id,
+            content=content,
+            created_at=_now_iso(),
+        )
 
     @staticmethod
     def _completed_write_names(messages: list[ChatMessage]) -> set[str]:
@@ -917,7 +1331,7 @@ class ResearchAgentRunner:
         )
         if persist_intent and objective_intent:
             allowed.add("create_objective_candidate")
-        if mentions(
+        confirm_requested = mentions(
             (
                 "确认目标",
                 "确认这个目标",
@@ -925,12 +1339,35 @@ class ResearchAgentRunner:
                 "confirm the reviewed question",
                 "confirm this question",
             )
-        ):
+        ) and not mentions(
+            (
+                "不要确认",
+                "不确认",
+                "先不要确认",
+                "without confirming",
+                "do not confirm",
+                "don't confirm",
+            )
+        )
+        if confirm_requested:
             allowed.add("confirm_objective")
-        if mentions(("开始分析", "启动分析", "分析这个目标", "start analysis")):
+        analysis_explicitly_deferred = mentions(
+            (
+                "不要启动分析",
+                "不启动分析",
+                "先不要启动分析",
+                "without starting analysis",
+                "do not start analysis",
+                "don't start analysis",
+            )
+        )
+        if (
+            mentions(("开始分析", "启动分析", "分析这个目标", "start analysis"))
+            and not analysis_explicitly_deferred
+        ):
             allowed.update(_PROCESS_CAPABILITIES)
             allowed.add("start_objective_analysis")
-        if mentions(
+        if not analysis_explicitly_deferred and mentions(
             (
                 "analyze this",
                 "分析这个研究问题",
@@ -1031,6 +1468,7 @@ class ResearchAgentRunner:
         results: list[ChatToolResult],
     ) -> str:
         names_by_call_id = {call.tool_call_id: call.name for call in calls}
+        collection_paper_totals: set[int] = set()
         screened_documents: set[str] = set()
         exact_sources: set[str] = set()
         failed_documents: set[str] = set()
@@ -1042,11 +1480,30 @@ class ResearchAgentRunner:
                     failed_documents.add(document_id)
                 continue
             if name == "browse_collection_papers":
+                paper_total = result.data.get("paper_total")
+                if isinstance(paper_total, int) and paper_total >= 0:
+                    collection_paper_totals.add(paper_total)
                 screened_documents.update(
                     str(item.get("document_id") or "").strip()
                     for item in result.data.get("papers") or ()
                     if isinstance(item, Mapping)
                 )
+            if name == "inspect_document_sources":
+                document = result.data.get("document")
+                document_id = str(
+                    document.get("document_id")
+                    if isinstance(document, Mapping)
+                    else ""
+                ).strip()
+                if document_id:
+                    exact_sources.update(
+                        f"{document_id}:{source_ref}"
+                        for item in result.data.get("sources") or ()
+                        if isinstance(item, Mapping)
+                        and item.get("content_truncated") is False
+                        and item.get("source_digest")
+                        and (source_ref := str(item.get("source_ref") or "").strip())
+                    )
             if name in {"read_source", "inspect_table"}:
                 document_id = str(result.data.get("document_id") or "").strip()
                 source_ref = str(
@@ -1060,11 +1517,54 @@ class ResearchAgentRunner:
         def display(values: set[str]) -> str:
             return ", ".join(sorted(value for value in values if value)[:30]) or "none"
 
-        return (
-            f"Paper identities screened: {display(screened_documents)}\n"
-            f"Exact paper Sources read: {display(exact_sources)}\n"
-            f"Papers with failed exact reads: {display(failed_documents)}"
+        paper_total = (
+            str(max(collection_paper_totals)) if collection_paper_totals else "unknown"
         )
+        return (
+            f"Collection paper total: {paper_total}\n"
+            f"Paper identities screened ({len(screened_documents)}): "
+            f"{display(screened_documents)}\n"
+            f"Exact paper Sources read ({len(exact_sources)}): "
+            f"{display(exact_sources)}\n"
+            f"Papers with failed exact reads ({len(failed_documents)}): "
+            f"{display(failed_documents)}"
+        )
+
+    @staticmethod
+    def _latest_structured_deliverable(
+        results: list[ChatToolResult],
+    ) -> str | None:
+        for result in reversed(results):
+            if result.status is not ToolResultStatus.SUCCEEDED:
+                continue
+            data = result.data
+            if not data.get("draft_id"):
+                continue
+            summary: dict[str, Any] = {}
+            for key in (
+                "draft_id",
+                "objective_id",
+                "title",
+                "draft_status",
+                "source_analysis_version",
+                "source_finding_ids",
+                "source_evidence_ids",
+                "persistence",
+            ):
+                value = data.get(key)
+                if value not in (None, "", [], (), {}):
+                    summary[key] = value
+            content = str(data.get("content") or "").strip()
+            if content:
+                summary["content"] = content[:6_000]
+            if result.warnings:
+                summary["warnings"] = list(result.warnings[:8])
+            return json.dumps(
+                summary,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        return None
 
     async def _validate_and_execute(
         self,
@@ -1085,6 +1585,21 @@ class ResearchAgentRunner:
                 "invalid_tool_arguments",
                 "The research capability arguments are invalid.",
             )
+        if call.name == "inspect_published_finding":
+            allowed_findings = self._published_finding_candidates(
+                self._successful_results_by_name(messages)
+            )
+            requested_finding = (
+                str(call.arguments.get("objective_id") or "").strip(),
+                str(call.arguments.get("finding_id") or "").strip(),
+            )
+            if allowed_findings and requested_finding not in allowed_findings:
+                return ResearchAgentRunner._failure(
+                    call,
+                    "finding_reference_not_in_query",
+                    "Inspect a Finding identifier returned by the preceding "
+                    "published-Finding query.",
+                )
         if call.status is not ToolCallStatus.RUNNING:
             call = call.start(_now_iso())
             calls[-1] = call

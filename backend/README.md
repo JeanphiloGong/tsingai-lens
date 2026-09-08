@@ -71,6 +71,8 @@ Objective discovery and analysis both require an explicit non-empty
   runtime flow.
 - [`docs/architecture/persistence-model.md`](docs/architecture/persistence-model.md):
   current identities and storage rules.
+- [`docs/architecture/database.md`](docs/architecture/database.md): schema
+  catalog grouped by logic flow and module ownership.
 - [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md): local operation.
 
 ## Local Development

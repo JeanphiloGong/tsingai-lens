@@ -11,7 +11,9 @@ not in a parallel plan-doc tree.
 2. [`specs/api.md`](specs/api.md) for browser and Agent contracts.
 3. [`architecture/persistence-model.md`](architecture/persistence-model.md) for
    identities, document ownership, and deletion behavior.
-4. [`runbooks/backend-ops.md`](runbooks/backend-ops.md) for local operation and
+4. [`architecture/database.md`](architecture/database.md) for the schema
+   catalog grouped by logic flow and module ownership.
+5. [`runbooks/backend-ops.md`](runbooks/backend-ops.md) for local operation and
    verification.
 
 ## Code-Owned Neighbors
@@ -22,6 +24,8 @@ not in a parallel plan-doc tree.
   Evidence, and Finding orchestration.
 - [`../application/core/objectives/README.md`](../application/core/objectives/README.md):
   detailed Objective analysis behavior.
+- [`../application/chat/README.md`](../application/chat/README.md):
+  Research Agent trajectory, capabilities, and approval boundary.
 - [`../infra/source/README.md`](../infra/source/README.md): parser boundary and
   Source artifacts.
 - [`../infra/persistence/README.md`](../infra/persistence/README.md): repository

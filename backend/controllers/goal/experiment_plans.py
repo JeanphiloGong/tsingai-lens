@@ -29,6 +29,10 @@ async def create_experiment_plan(
     request: Request,
 ) -> ExperimentPlanResponse:
     try:
+        await request.app.state.collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
         plan = await request.app.state.experiment_plan_service.create_plan(
             collection_id=collection_id,
             objective_id=objective_id,
@@ -56,6 +60,13 @@ async def list_experiment_plans(
     objective_id: str,
     request: Request,
 ) -> ExperimentPlanListResponse:
+    try:
+        await request.app.state.collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     plans = await request.app.state.experiment_plan_service.list_plans(
         collection_id,
         objective_id,
@@ -79,6 +90,10 @@ async def read_experiment_plan(
     request: Request,
 ) -> ExperimentPlanResponse:
     try:
+        await request.app.state.collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
         plan = await request.app.state.experiment_plan_service.read_plan(
             collection_id,
             objective_id,
@@ -102,6 +117,10 @@ async def update_experiment_plan(
     request: Request,
 ) -> ExperimentPlanResponse:
     try:
+        await request.app.state.collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
         plan = await request.app.state.experiment_plan_service.update_plan(
             collection_id=collection_id,
             objective_id=objective_id,

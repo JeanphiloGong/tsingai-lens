@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from pydantic import ValidationError
 import pytest
 
@@ -22,10 +23,27 @@ class _FindingFeedbackService:
         return "current", []
 
 
-def _request(service: ExperimentPlanService, user_id: str = "expert-a"):
+class _CollectionService:
+    async def get_collection_for_user(self, _collection_id: str, _user_id: str):
+        return {"collection_id": _collection_id}
+
+
+class _DenyCollectionService:
+    async def get_collection_for_user(self, _collection_id: str, _user_id: str):
+        raise FileNotFoundError("collection not found")
+
+
+def _request(
+    service: ExperimentPlanService,
+    user_id: str = "expert-a",
+    collection_service: object | None = None,
+):
     return SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(experiment_plan_service=service),
+            state=SimpleNamespace(
+                experiment_plan_service=service,
+                collection_service=collection_service or _CollectionService(),
+            ),
         ),
         state=SimpleNamespace(current_user={"user_id": user_id}),
     )
@@ -124,3 +142,20 @@ def test_experiment_plan_create_contract_rejects_chat_message_provenance() -> No
                 "source_message_id": "msg_chat",
             }
         )
+
+
+def test_experiment_plan_routes_hide_other_collection_from_non_owner() -> None:
+    service = ExperimentPlanService(
+        repository=InMemoryExperimentPlanRepository(),
+        finding_feedback_service=_FindingFeedbackService(),
+    )
+    request = _request(service, collection_service=_DenyCollectionService())
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            experiment_plans_controller.list_experiment_plans(
+                "private-col", "objective_1", request
+            )
+        )
+
+    assert exc_info.value.status_code == 404

@@ -1269,6 +1269,15 @@ class ResearchAgentRunner:
                 if plan_revision_requested
                 else "create_research_plan"
             }
+        elif (
+            plan_read_requested
+            and plan_revision_requested
+            and persist_requested
+            and not successful_results.get("inspect_research_plans")
+            and "inspect_research_plans" in registered_names
+            and any(term in user_text for term in _PLAN_TERMS)
+        ):
+            allowed_names = {"inspect_research_plans"}
         elif plan_revision_requested and persist_requested and any(
             term in user_text for term in _PLAN_TERMS
         ):
@@ -1372,6 +1381,7 @@ class ResearchAgentRunner:
             "inspect_research_process",
             "inspect_objective_analysis",
             "inspect_published_finding",
+            "inspect_research_plans",
             "create_finding_draft",
             "propose_research_plan",
         }:

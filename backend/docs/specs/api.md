@@ -48,6 +48,9 @@ login.
 
 A Collection groups current Documents. Each Document independently owns its
 preparation status, current Source structure, and current DocumentProfile. The
+collection-scoped preparation, Pipeline Run, and experiment-plan endpoints are
+restricted to the authenticated Collection owner and return `404` for other
+users.
 preparation command queues only the named Document; it does not prepare other
 Collection members or discover Objectives. Paper Map construction is a lazy
 Objective-core operation over an explicit ready-document selection. Collection

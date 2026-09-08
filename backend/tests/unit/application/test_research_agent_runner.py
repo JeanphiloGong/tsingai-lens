@@ -2172,6 +2172,77 @@ def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> 
     assert "create_research_plan" in names
 
 
+async def test_research_plan_read_request_requires_inspection_tool() -> None:
+    inspect = _Capability(
+        "inspect_research_plans",
+        ToolRisk.READ,
+        _ObjectiveArguments,
+        result_data={"objective_id": "objective-1", "plans": []},
+    )
+    model = _Model(
+        ModelTurn(content="已有方案如下。"),
+        ModelTurn(content="仍然可以直接回答。"),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((inspect,)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="查看已保存的研究方案",
+    )
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "required_research_action_not_completed"
+    assert inspect.executed_arguments == []
+
+
+async def test_research_plan_revision_reads_existing_plan_before_write() -> None:
+    inspect = _Capability(
+        "inspect_research_plans",
+        ToolRisk.READ,
+        _ObjectiveArguments,
+        result_data={
+            "objective_id": "objective-1",
+            "plans": [{"plan_id": "plan-1"}],
+        },
+    )
+    revise = _Capability("revise_research_plan", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name="inspect_research_plans",
+                    arguments={"objective_id": "objective-1"},
+                ),
+            )
+        ),
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(name="revise_research_plan", arguments={}),
+            )
+        ),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((inspect, revise)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="查看已保存的研究方案并修订后保存",
+    )
+
+    assert result.status is AgentRunStatus.APPROVAL_REQUIRED
+    assert model.tool_spec_names[:2] == [
+        ("inspect_research_plans",),
+        ("revise_research_plan",),
+    ]
+
+
 async def test_process_status_requires_canonical_objective_analysis_state() -> None:
     context = _Capability(
         "get_collection_context",

@@ -24,6 +24,10 @@ async def prepare_collection_document(
     request: Request,
 ) -> PipelineRunResponse:
     try:
+        await request.app.state.collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
         run = await request.app.state.document_preparation_service.queue_document_preparation(
             collection_id,
             document_id,
@@ -49,7 +53,10 @@ async def list_collection_pipeline_runs(
     offset: int = Query(default=0, ge=0, description="Result offset"),
 ) -> PipelineRunListResponse:
     try:
-        await request.app.state.collection_service.get_collection(collection_id)
+        await request.app.state.collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -26,11 +26,9 @@ describe('documents shared helpers', () => {
 			items: [
 				{
 					document_id: 'doc_1',
-					collection_id: 'col_123',
 					title: 'Paper A',
-					source_filename: 'paper-a.pdf',
 					doc_type: 'experimental',
-					parsing_warnings: [],
+					profile_warnings: [],
 					confidence: 0.9
 				}
 			]
@@ -44,6 +42,8 @@ describe('documents shared helpers', () => {
 			doc_type: 'experimental',
 			confidence: 0.9
 		});
+		expect(response.items[0]).not.toHaveProperty('collection_id');
+		expect(response.items[0]).not.toHaveProperty('source_filename');
 	});
 
 	it('sends bounded profile pagination and collection-wide search filters', async () => {

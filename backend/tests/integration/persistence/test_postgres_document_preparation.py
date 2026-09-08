@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from sqlalchemy import select
 
 from application.source.collection_service import CollectionService
 from application.source.document_preparation_service import (
@@ -21,6 +22,7 @@ from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
 )
 from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
+from infra.persistence.postgres.models.paper_map import PaperMapRow
 from infra.persistence.postgres.pipeline_run_repository import (
     PostgresPipelineRunRepository,
 )
@@ -34,11 +36,9 @@ def _profile(document_id: str, title: str) -> DocumentProfile:
     return DocumentProfile.from_mapping(
         {
             "document_id": document_id,
-            "collection_id": COLLECTION_ID,
             "title": title,
-            "source_filename": f"{document_id}.pdf",
             "doc_type": "experimental",
-            "parsing_warnings": [],
+            "profile_warnings": [],
             "confidence": 0.9,
         }
     )
@@ -55,6 +55,9 @@ def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
             "warnings": [],
             "map_status": "insufficient_map" if limitation else "sufficient",
             "map_limitations": [limitation] if limitation else [],
+            "input_fingerprint": f"input-{document_id}-{limitation or 'complete'}",
+            "map_version": "paper-map.v1",
+            "generated_at": "2026-09-08T09:00:00+00:00",
         }
     )
 
@@ -67,14 +70,14 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
     first_map = _paper_map("doc_a")
     second_map = _paper_map("doc_b")
 
-    await profiles.replace(first_profile)
-    await profiles.replace(second_profile)
+    await profiles.replace(COLLECTION_ID, first_profile)
+    await profiles.replace(COLLECTION_ID, second_profile)
     await paper_maps.replace(COLLECTION_ID, first_map)
     await paper_maps.replace(COLLECTION_ID, second_map)
 
     revised_profile = replace(first_profile, title="Paper A reparsed")
     revised_map = _paper_map("doc_a", "methods_scope_missing")
-    await profiles.replace(revised_profile)
+    await profiles.replace(COLLECTION_ID, revised_profile)
     await paper_maps.replace(COLLECTION_ID, revised_map)
 
     assert await profiles.list_collection(COLLECTION_ID) == (
@@ -85,6 +88,17 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
         revised_map,
         second_map,
     )
+    async with source_repository.session_factory() as session:
+        stored_map = await session.scalar(
+            select(PaperMapRow).where(PaperMapRow.document_id == "doc_a")
+        )
+    assert stored_map.input_fingerprint == revised_map.input_fingerprint
+    assert stored_map.map_version == revised_map.map_version
+    assert stored_map.generated_at is not None
+    assert "document_id" not in stored_map.payload
+    assert "input_fingerprint" not in stored_map.payload
+    assert "map_version" not in stored_map.payload
+    assert "generated_at" not in stored_map.payload
 
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(

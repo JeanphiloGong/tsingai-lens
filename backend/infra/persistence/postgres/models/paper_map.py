@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, JSON, String
+from sqlalchemy import DateTime, ForeignKey, JSON, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,11 +23,10 @@ class PaperMapRow(Base):
         ForeignKey("documents.document_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    collection_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+    input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    map_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 

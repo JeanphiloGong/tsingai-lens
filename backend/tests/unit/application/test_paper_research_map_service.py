@@ -2671,7 +2671,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
         profiles_by_document_id={
             "paper-1": SimpleNamespace(
                 doc_type="review",
-                parsing_warnings=(),
+                profile_warnings=(),
                 confidence=0.95,
             )
         },

@@ -122,14 +122,14 @@ class DocumentProfileService:
                 or normalized_query
                 in " ".join(
                     value
-                    for value in (profile.title, profile.source_filename)
+                    for value in (profile.title,)
                     if value
                 ).casefold()
             )
             and (not normalized_doc_type or profile.doc_type == normalized_doc_type)
             and (
                 has_warnings is None
-                or bool(profile.parsing_warnings) is has_warnings
+                or bool(profile.profile_warnings) is has_warnings
             )
         )
         items = [
@@ -200,13 +200,9 @@ class DocumentProfileService:
             ).strip()
 
         title = profile.title if profile else None
+        source_filename = self._resolve_source_filename(row, document_id, file_lookup)
         if title is None:
-            source_filename = self._resolve_source_filename(row, document_id, file_lookup)
             title = self._resolve_document_title(row, document_id, source_filename, file_lookup)
-        else:
-            source_filename = profile.source_filename
-        if source_filename is None:
-            source_filename = self._resolve_source_filename(row, document_id, file_lookup)
 
         warnings: list[str] = []
         if not full_text:
@@ -285,13 +281,13 @@ class DocumentProfileService:
             file_lookup=file_lookup,
         )
         profile = DocumentProfile.from_mapping(profiled)
-        await self.document_profile_repository.replace(profile)
+        await self.document_profile_repository.replace(collection_id, profile)
         logger.info(
             "Document profile build finished collection_id=%s document_id=%s doc_type=%s warning_count=%s",
             collection_id,
             document_id,
             profile.doc_type,
-            len(profile.parsing_warnings),
+            len(profile.profile_warnings),
         )
         return profile
 
@@ -369,11 +365,9 @@ class DocumentProfileService:
             return DocumentProfile.from_mapping(
                 {
                     "document_id": document_id,
-                    "collection_id": collection_id,
                     "title": title,
-                    "source_filename": source_filename,
                     "doc_type": DOC_TYPE_UNCERTAIN,
-                    "parsing_warnings": ["insufficient_content"],
+                    "profile_warnings": ["insufficient_content"],
                     "confidence": 0.0,
                 }
             ).to_record()
@@ -411,25 +405,21 @@ class DocumentProfileService:
             return DocumentProfile.from_mapping(
                 {
                     "document_id": document_id,
-                    "collection_id": collection_id,
                     "title": title,
-                    "source_filename": source_filename,
                     "doc_type": DOC_TYPE_UNCERTAIN,
-                    "parsing_warnings": ["document_profile_extraction_failed"],
+                    "profile_warnings": ["document_profile_extraction_failed"],
                     "confidence": 0.0,
                 }
             ).to_record()
-        parsing_warnings = list(extracted.parsing_warnings)
-        if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in parsing_warnings:
-            parsing_warnings.append("classification_uncertain")
+        profile_warnings = list(extracted.profile_warnings)
+        if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in profile_warnings:
+            profile_warnings.append("classification_uncertain")
         normalized = DocumentProfile.from_mapping(
             {
                 "document_id": document_id,
-                "collection_id": collection_id,
                 "title": title,
-                "source_filename": source_filename,
                 "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
-                "parsing_warnings": parsing_warnings,
+                "profile_warnings": profile_warnings,
                 "confidence": extracted.confidence,
             }
         )

@@ -84,10 +84,7 @@
 			documentTitles =
 				profilesResult.status === 'fulfilled'
 					? Object.fromEntries(
-							profilesResult.value.items.map((item) => [
-								item.document_id,
-								item.title || item.source_filename || ''
-							])
+							profilesResult.value.items.map((item) => [item.document_id, item.title || ''])
 						)
 					: {};
 			await loadFindings(preferredFindingId, updateFindingUrl);

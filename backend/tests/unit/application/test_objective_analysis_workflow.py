@@ -28,6 +28,7 @@ from application.core.objectives.analysis.source_screening import (
 )
 from application.core.objectives.research_objective_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
+    PAPER_RESEARCH_MAP_POLICY_VERSION,
     ObjectiveDocumentEvidenceArtifacts,
     ResearchObjectiveService,
     _paper_map_input_fingerprint,
@@ -785,6 +786,8 @@ def _paper_map(
             "input_fingerprint": _paper_map_input_fingerprint(
                 f"fingerprint-{document_id}"
             ),
+            "map_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
+            "generated_at": "2026-09-08T09:00:00+00:00",
         }
     )
 

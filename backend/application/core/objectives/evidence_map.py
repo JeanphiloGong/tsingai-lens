@@ -72,7 +72,7 @@ def build_objective_evidence_map(
                 "id": document_node_id,
                 "type": "document",
                 "label": (
-                    (profile.title or profile.source_filename)
+                    (profile.title or document_id)
                     if profile is not None
                     else document_id
                 ),

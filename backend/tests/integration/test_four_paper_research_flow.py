@@ -120,7 +120,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         title = str(payload.get("title") or payload.get("source_filename") or "")
         return StructuredDocumentProfile(
             doc_type="review" if "review" in title.casefold() else "experimental",
-            parsing_warnings=[],
+            profile_warnings=[],
             confidence=0.95,
         )
 

@@ -263,7 +263,11 @@ class SourceArtifactRepository(Protocol):
 
 
 class DocumentProfileRepository(Protocol):
-    async def replace(self, profile: DocumentProfile) -> None: ...
+    async def replace(
+        self,
+        collection_id: str,
+        profile: DocumentProfile,
+    ) -> None: ...
 
     async def read(
         self,

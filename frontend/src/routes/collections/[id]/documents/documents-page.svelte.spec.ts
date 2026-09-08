@@ -44,11 +44,9 @@ function jsonResponse(body: unknown) {
 function profile(index: number) {
 	return {
 		document_id: `doc-${index}`,
-		collection_id: 'col_123',
 		title: `Paper ${index}`,
-		source_filename: `paper-${index}.pdf`,
 		doc_type: 'experimental',
-		parsing_warnings: [],
+		profile_warnings: [],
 		confidence: 0.9,
 		page_count: 10
 	};
@@ -69,7 +67,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		fetchMock.mockReset();
 	});
 
-	it('keeps parsed-paper identity, warnings, and Source navigation visible', async () => {
+	it('keeps profile identity, warnings, and Source navigation visible', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				collection_id: 'col_123',
@@ -85,7 +83,6 @@ describe('collections/[id]/documents/+page.svelte', () => {
 						...profile(1),
 						document_id: 'doc_1',
 						title: 'Paper A',
-						source_filename: 'paper-a.pdf',
 						confidence: 0.91,
 						page_count: 12
 					},
@@ -93,9 +90,8 @@ describe('collections/[id]/documents/+page.svelte', () => {
 						...profile(2),
 						document_id: 'abcdef1234567890abcdef1234567890',
 						title: null,
-						source_filename: 'review.pdf',
 						doc_type: 'review',
-						parsing_warnings: ['Missing publication year'],
+						profile_warnings: ['Missing publication year'],
 						confidence: 0.7,
 						page_count: 8
 					}
@@ -107,7 +103,6 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('paper-a.pdf')).toBeInTheDocument();
 		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
 		await expect.element(browserPage.getByText('Missing publication year')).toBeInTheDocument();
 		await expect
@@ -241,7 +236,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 								...profile(91),
 								title: 'Review needing inspection',
 								doc_type: 'review',
-								parsing_warnings: ['insufficient_content']
+								profile_warnings: ['insufficient_content']
 							}
 						]
 					: [profile(1)]

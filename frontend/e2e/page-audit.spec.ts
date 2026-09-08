@@ -1077,7 +1077,7 @@ function documentProfile() {
 		title: 'Paper A',
 		source_filename: 'paper-a.txt',
 		doc_type: 'experimental',
-		parsing_warnings: [],
+		profile_warnings: [],
 		confidence: 0.9,
 		page_count: 3,
 		updated_at: now(),

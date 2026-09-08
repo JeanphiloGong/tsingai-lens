@@ -1433,7 +1433,7 @@ class PaperResearchMapService:
             "document_profile": (
                 {
                     "doc_type": profile.doc_type,
-                    "parsing_warnings": list(profile.parsing_warnings)[:2],
+                    "profile_warnings": list(profile.profile_warnings)[:2],
                     "confidence": profile.confidence,
                 }
                 if profile

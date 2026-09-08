@@ -144,11 +144,9 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         session.add(
             DocumentProfileRow(
                 document_id=document.document_id,
-                collection_id=collection.collection_id,
                 title="Paper",
-                source_filename=document.original_filename,
                 doc_type="uncertain",
-                parsing_warnings=[],
+                profile_warnings=[],
                 confidence=0.0,
                 source_fingerprint="a" * 64,
                 profile_version="document-profile.v1+paper-map.v1",

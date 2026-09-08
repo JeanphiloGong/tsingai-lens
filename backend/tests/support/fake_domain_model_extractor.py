@@ -316,7 +316,7 @@ class FakeDomainModelExtractor:
 
         return StructuredDocumentProfile(
             doc_type=doc_type,
-            parsing_warnings=sorted(set(warnings)),
+            profile_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 

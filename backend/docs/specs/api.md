@@ -814,9 +814,12 @@ parameters, not visible paper titles.
 
 The document-profile list accepts `offset`, `limit`, and optional `query`,
 `doc_type`, and `has_warnings` filters. `query` performs case-insensitive
-matching against the profile title and source filename. `doc_type` accepts
+matching against the profile title. `doc_type` accepts
 `experimental`, `review`, `mixed`, or `uncertain`; `has_warnings` filters by
-whether parsing warnings are present. All active criteria are combined before
+whether profile-classification warnings are present. Profile items contain
+`document_id`, `title`, `doc_type`, `profile_warnings`, and `confidence`;
+collection ownership and filenames remain on the collection's Document records.
+All active criteria are combined before
 pagination. `total` is the number of matching profiles, `count` is the current
 page size, and `summary.total_documents` remains the complete profiled
 collection size.

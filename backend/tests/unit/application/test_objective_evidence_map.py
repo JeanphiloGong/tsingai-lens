@@ -239,7 +239,6 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
         profiles=(
             DocumentProfile.from_mapping(
                 {
-                    "collection_id": "collection-1",
                     "document_id": "paper-1",
                     "title": "Heat treatment study A",
                     "doc_type": "experimental",
@@ -248,7 +247,6 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
             ),
             DocumentProfile.from_mapping(
                 {
-                    "collection_id": "collection-1",
                     "document_id": "paper-2",
                     "title": "Heat treatment study B",
                     "doc_type": "experimental",

@@ -238,10 +238,9 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     profile = DocumentProfile.from_mapping(
         {
             "document_id": document_id,
-            "collection_id": collection_id,
             "title": "Paper",
             "doc_type": "experimental",
-            "parsing_warnings": [],
+            "profile_warnings": [],
             "confidence": 0.9,
         }
     )
@@ -343,10 +342,9 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             return DocumentProfile.from_mapping(
                 {
                     "document_id": document_id,
-                    "collection_id": collection_id,
                     "title": "Paper",
                     "doc_type": "experimental",
-                    "parsing_warnings": [],
+                    "profile_warnings": [],
                     "confidence": 0.9,
                 }
             )

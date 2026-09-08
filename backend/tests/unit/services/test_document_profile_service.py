@@ -156,7 +156,7 @@ async def test_document_profile_service_builds_profiles_and_summary(tmp_path):
     assert len(stored) == 3
 
 
-async def test_document_profile_service_returns_source_filename_from_file_mapping(
+async def test_document_profile_service_does_not_duplicate_source_filename(
     tmp_path,
 ):
     collection_service, profile_service = _build_profile_service(tmp_path)
@@ -201,7 +201,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
     item = payload["items"][0]
     assert item["document_id"] == "doc-1"
     assert item["title"] is None
-    assert item["source_filename"] == "wang_2024_battery.txt"
+    assert "source_filename" not in item
     assert item["doc_type"] == "experimental"
 
 
@@ -213,37 +213,33 @@ async def test_document_profile_service_combines_filters_before_paginating(tmp_p
         {
             "document_id": "doc-1",
             "title": "Laser processing of Ti-6Al-4V",
-            "source_filename": "paper-one.pdf",
             "doc_type": "experimental",
-            "parsing_warnings": [],
+            "profile_warnings": [],
         },
         {
             "document_id": "doc-2",
-            "title": "Mechanical response of titanium",
-            "source_filename": "laser-fatigue.pdf",
+            "title": "Laser fatigue response of titanium",
             "doc_type": "review",
-            "parsing_warnings": ["classification_uncertain"],
+            "profile_warnings": ["classification_uncertain"],
         },
         {
             "document_id": "doc-3",
             "title": "Stainless steel review",
-            "source_filename": "review.pdf",
             "doc_type": "review",
-            "parsing_warnings": ["insufficient_content"],
+            "profile_warnings": ["insufficient_content"],
         },
         {
             "document_id": "doc-4",
             "title": "Laser review without warnings",
-            "source_filename": "clean-review.pdf",
             "doc_type": "review",
-            "parsing_warnings": [],
+            "profile_warnings": [],
         },
     ):
         await profile_service.document_profile_repository.replace(
+            collection_id,
             DocumentProfile.from_mapping(
                 {
                     **row,
-                    "collection_id": collection_id,
                     "confidence": 0.9,
                 }
             )
@@ -287,7 +283,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
 
     item = payload["items"][0]
     assert item["doc_type"] == "uncertain"
-    assert item["parsing_warnings"] == ["insufficient_content"]
+    assert item["profile_warnings"] == ["insufficient_content"]
 
 
 async def test_document_profile_service_continues_after_one_model_format_failure(
@@ -333,7 +329,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
                 )
             return StructuredDocumentProfile(
                 doc_type="experimental",
-                parsing_warnings=[],
+                profile_warnings=[],
                 confidence=0.9,
             )
 
@@ -373,7 +369,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     records = {profile.document_id: profile.to_record() for profile in profiles}
     assert records["paper-failed"]["doc_type"] == "uncertain"
     assert records["paper-failed"]["confidence"] == 0.0
-    assert records["paper-failed"]["parsing_warnings"] == [
+    assert records["paper-failed"]["profile_warnings"] == [
         "document_profile_extraction_failed"
     ]
     assert records["paper-success"]["doc_type"] == "experimental"
@@ -442,4 +438,4 @@ async def test_document_profile_service_round_trips_repository_storage_fields(tm
     await _build_profiles(profile_service, collection_id)
 
     restored = await profile_service.read_document_profiles(collection_id)
-    assert isinstance(restored[0].to_record()["parsing_warnings"], list)
+    assert isinstance(restored[0].to_record()["profile_warnings"], list)

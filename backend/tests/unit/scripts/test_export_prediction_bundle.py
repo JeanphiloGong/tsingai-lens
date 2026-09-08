@@ -124,14 +124,13 @@ async def test_export_prediction_bundle_uses_current_published_results(
     await source_repository.replace_document("col-test", source_document)
     profile_repository = MemoryDocumentProfileRepository()
     await profile_repository.replace(
+        "col-test",
         DocumentProfile.from_mapping(
             {
                 "document_id": "paper-1",
-                "collection_id": "col-test",
                 "title": "Prediction Paper",
-                "source_filename": "paper.pdf",
                 "doc_type": "experimental",
-                "parsing_warnings": [],
+                "profile_warnings": [],
                 "confidence": 0.9,
             }
         )

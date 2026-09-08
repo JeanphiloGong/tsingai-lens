@@ -799,6 +799,8 @@ class PaperResearchMap:
     map_limitations: tuple[str, ...] = ()
     review_synthesis: ReviewSynthesisMap = field(default_factory=ReviewSynthesisMap)
     input_fingerprint: str | None = None
+    map_version: str | None = None
+    generated_at: str | None = None
 
     def __post_init__(self) -> None:
         if not self.document_id.strip():
@@ -881,6 +883,8 @@ class PaperResearchMap:
                 else None
             ),
             input_fingerprint=_text(payload.get("input_fingerprint")) or None,
+            map_version=_text(payload.get("map_version")) or None,
+            generated_at=_text(payload.get("generated_at")) or None,
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -901,6 +905,8 @@ class PaperResearchMap:
             "map_limitations": list(self.map_limitations),
             "review_synthesis": self.review_synthesis.to_record(),
             "input_fingerprint": self.input_fingerprint,
+            "map_version": self.map_version,
+            "generated_at": self.generated_at,
         }
 
 

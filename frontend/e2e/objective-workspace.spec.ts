@@ -300,7 +300,7 @@ async function mockApis(page: Page) {
 							title: 'LPBF 316L tensile study',
 							source_filename: 'paper-1.pdf',
 							doc_type: 'experimental',
-							parsing_warnings: [],
+							profile_warnings: [],
 							confidence: 0.95
 						}
 					],

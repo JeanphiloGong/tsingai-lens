@@ -20,11 +20,9 @@ class DocumentProfileItemResponse(BaseModel):
     """Single document profile item."""
 
     document_id: str
-    collection_id: str
     title: str | None = None
-    source_filename: str | None = None
     doc_type: DocumentType
-    parsing_warnings: list[str] = Field(default_factory=list)
+    profile_warnings: list[str] = Field(default_factory=list)
     confidence: float
 
 

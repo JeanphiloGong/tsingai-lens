@@ -146,23 +146,21 @@ async def seed_document_profiles(
         )
     profiles: list[DocumentProfile] = []
     for document in documents:
-        metadata = dict(document.metadata)
         title = document.title
         profiles.append(
             DocumentProfile.from_mapping(
                 {
                     "document_id": document.document_id,
-                    "collection_id": collection_id,
                     "title": title,
-                    "source_filename": metadata.get("source_filename"),
                     "doc_type": "review" if "Review" in title else "experimental",
-                    "parsing_warnings": [],
+                    "profile_warnings": [],
                     "confidence": 0.9,
                 }
             )
         )
     for profile in profiles:
         await service.document_profile_service.document_profile_repository.replace(
+            collection_id,
             profile
         )
 

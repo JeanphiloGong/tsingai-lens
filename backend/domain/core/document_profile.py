@@ -15,11 +15,9 @@ from domain.shared.enums import (
 @dataclass(frozen=True)
 class DocumentProfile:
     document_id: str
-    collection_id: str
     title: str | None
-    source_filename: str | None
     doc_type: str
-    parsing_warnings: tuple[str, ...]
+    profile_warnings: tuple[str, ...]
     confidence: float
     source_fingerprint: str | None = None
     profile_version: str | None = None
@@ -28,15 +26,13 @@ class DocumentProfile:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "DocumentProfile":
-        warnings = _normalize_string_tuple(payload.get("parsing_warnings"))
+        warnings = _normalize_string_tuple(payload.get("profile_warnings"))
         doc_type = _normalize_doc_type(payload.get("doc_type"))
         return cls(
             document_id=str(payload.get("document_id") or ""),
-            collection_id=str(payload.get("collection_id") or ""),
             title=_normalize_optional_text(payload.get("title")),
-            source_filename=_normalize_optional_text(payload.get("source_filename")),
             doc_type=doc_type,
-            parsing_warnings=warnings,
+            profile_warnings=warnings,
             confidence=round(float(payload.get("confidence") or 0.0), 2),
             source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
             profile_version=_normalize_optional_text(payload.get("profile_version")),
@@ -49,11 +45,9 @@ class DocumentProfile:
     def to_record(self) -> dict[str, Any]:
         return {
             "document_id": self.document_id,
-            "collection_id": self.collection_id,
             "title": self.title,
-            "source_filename": self.source_filename,
             "doc_type": self.doc_type,
-            "parsing_warnings": list(self.parsing_warnings),
+            "profile_warnings": list(self.profile_warnings),
             "confidence": round(float(self.confidence), 2),
             "source_fingerprint": self.source_fingerprint,
             "profile_version": self.profile_version,

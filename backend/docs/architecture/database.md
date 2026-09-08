@@ -170,8 +170,8 @@ deeper inspection. They are navigation inputs, not Evidence.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `document_profiles` | `document_id` | One current profile per Document, with collection ownership, title/source filename, document type, parser warnings, and confidence in `[0, 1]`. |
-| `paper_maps` | `document_id` | One optional lazy map per Document, collection ownership, and a bounded JSON payload containing navigation signals and Source references. |
+| `document_profiles` | `document_id` | One current profile per Document, containing its selected title, document type, profile warnings, confidence in `[0, 1]`, and profile provenance. |
+| `paper_maps` | `document_id` | One optional lazy map per Document, with explicit cache provenance and a bounded JSON payload containing navigation signals and Source references. |
 | `objective_discovery` | `collection_id` | The current discovery result for the selected scope: readiness flag, ordered `document_inputs`, Objective IDs, study dispositions, and update time. |
 | `research_objectives` | `(collection_id, objective_id)` | Ranked current Objective payload, origin (`system_discovered` or `chat_assisted`), optional Chat tool-call provenance, and timestamps. |
 
@@ -646,11 +646,9 @@ Evidence and Findings produced after Objective analysis reads exact Source mater
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `document_id` | `VARCHAR(128)` | No | PK; FK -> `documents.document_id`; `ON DELETE CASCADE` | Stable identifier of the current Document. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research collection. |
 | `title` | `TEXT` | Yes | — | Parsed or user-facing title. |
-| `source_filename` | `TEXT` | Yes | — | Filename presented to the profile stage as Source input. |
-| `doc_type` | `VARCHAR(32)` | No | — | Classified document type, such as `experimental`, `review`, `modeling`, or `mixed`. |
-| `parsing_warnings` | `JSONB` | No | — | Parser warnings that a researcher should inspect. |
+| `doc_type` | `VARCHAR(32)` | No | — | Classified document type: `experimental`, `review`, `mixed`, or `uncertain`. |
+| `profile_warnings` | `JSONB` | No | — | Classification or profile-generation warnings that a researcher should inspect. Parser warnings belong to `document_sources`. |
 | `confidence` | `FLOAT` | No | `0 <= confidence <= 1` | Confidence score in the range [0, 1]. |
 | `source_fingerprint` | `VARCHAR(64)` | Yes | — | Source fingerprint consumed by this profile result. |
 | `profile_version` | `VARCHAR(128)` | Yes | — | Profile extraction or analysis version that produced this result. |
@@ -660,15 +658,24 @@ Evidence and Findings produced after Objective analysis reads exact Source mater
 Parser and profile provenance belongs with the artifact that produced it:
 `document_sources` owns parser metadata and the Source fingerprint;
 `document_profiles` owns profile metadata and the profile fingerprint.
-`documents` remains file identity and current preparation status only.
+`documents` remains the authority for collection ownership, filenames, file
+identity, and current preparation status. Profile queries join through
+`documents.document_id` when they need collection scoping.
 
 #### `paper_maps` — Lazy paper navigation maps
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `document_id` | `VARCHAR(128)` | No | PK; FK -> `documents.document_id`; `ON DELETE CASCADE` | Stable identifier of the current Document. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research collection. |
-| `payload` | `JSONB` | No | — | Structured domain payload for the paper maps record. |
+| `input_fingerprint` | `VARCHAR(64)` | Yes | — | Fingerprint of the prepared Document and Paper Map policy consumed by this result. Legacy rows remain nullable and rebuild on their next use. |
+| `map_version` | `VARCHAR(128)` | Yes | — | Paper Map policy and prompt version that produced this result. Legacy rows remain nullable and rebuild on their next use. |
+| `generated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp at which this map was generated. |
+| `payload` | `JSONB` | No | — | Navigation-only payload containing paper role, studies, candidate relationships, unresolved signals, Source coverage, limitations, and review synthesis. Row identity and provenance are not duplicated inside this JSON. |
+
+Paper Maps are built lazily when a ready Document is selected for Objective
+work. Collection-scoped queries join through `documents`; a stored map is
+rebuilt when either its `input_fingerprint` or `map_version` no longer matches
+the selected prepared Document and current map policy.
 
 #### `objective_discovery` — Current Objective discovery result
 

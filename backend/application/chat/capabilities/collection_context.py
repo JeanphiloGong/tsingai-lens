@@ -292,7 +292,6 @@ class BrowseCollectionPapersCapability:
             record.get("original_filename"),
             record.get("stored_filename"),
             getattr(profile, "title", None),
-            getattr(profile, "source_filename", None),
         ]
         haystack = " ".join(str(value or "") for value in values).casefold()
         return query in haystack
@@ -335,7 +334,6 @@ class BrowseCollectionPapersCapability:
             "document_id": document_id,
             "filename": str(
                 record.get("original_filename")
-                or getattr(profile, "source_filename", None)
                 or record.get("stored_filename")
                 or document_id
             )[:500],

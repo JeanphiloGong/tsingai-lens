@@ -85,11 +85,7 @@
 	}
 
 	function displayTitle(profile: DocumentProfile, index: number) {
-		return (
-			profile.title?.trim() ||
-			profile.source_filename?.trim() ||
-			$t('research.documents.untitledPaper', { number: index + 1 })
-		);
+		return profile.title?.trim() || $t('research.documents.untitledPaper', { number: index + 1 });
 	}
 
 	function documentTypeLabel(profile: DocumentProfile) {
@@ -194,9 +190,6 @@
 					<div class="paper-row__identity">
 						<span class="paper-type">{documentTypeLabel(profile)}</span>
 						<h3>{displayTitle(profile, offset + index)}</h3>
-						{#if profile.source_filename && profile.source_filename !== profile.title}
-							<p>{profile.source_filename}</p>
-						{/if}
 					</div>
 
 					<div class="paper-row__metadata">
@@ -224,9 +217,9 @@
 						</a>
 					</div>
 
-					{#if profile.parsing_warnings.length}
+					{#if profile.profile_warnings.length}
 						<ul class="paper-warnings">
-							{#each profile.parsing_warnings as warning (warning)}
+							{#each profile.profile_warnings as warning (warning)}
 								<li>{warning}</li>
 							{/each}
 						</ul>
@@ -276,7 +269,6 @@
 	.papers-header h2,
 	.papers-header p,
 	.paper-row h3,
-	.paper-row p,
 	.page-state h3,
 	.page-state p {
 		margin: 0;
@@ -391,7 +383,6 @@
 		line-height: 20px;
 	}
 
-	.paper-row p,
 	.paper-row__metadata {
 		color: var(--text-secondary);
 		font-size: 12px;

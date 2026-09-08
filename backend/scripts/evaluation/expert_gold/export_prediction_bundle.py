@@ -224,8 +224,7 @@ def _convert_papers(
                 "paper_id": document_id,
                 "title": profile.get("title") or document.get("title") or "",
                 "doi": metadata.get("doi"),
-                "source_filename": profile.get("source_filename")
-                or metadata.get("source_filename"),
+                "source_filename": metadata.get("source_filename"),
                 "document_type": profile.get("doc_type"),
                 "source": {"artifact": "documents", "row": row_number},
             }

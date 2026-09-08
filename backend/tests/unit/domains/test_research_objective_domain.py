@@ -114,6 +114,9 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
             "document_id": "review-paper",
             "doc_role": "review",
             "review_synthesis": ReviewSynthesisMap(disputes=(item,)).to_record(),
+            "input_fingerprint": "map-input-v1",
+            "map_version": "paper-map.v1",
+            "generated_at": "2026-09-08T09:00:00+00:00",
         }
     )
 
@@ -122,6 +125,9 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
     assert restored == skim
     assert restored.review_synthesis.disputes == (item,)
     assert restored.review_synthesis.citation_leads == ()
+    assert restored.input_fingerprint == "map-input-v1"
+    assert restored.map_version == "paper-map.v1"
+    assert restored.generated_at == "2026-09-08T09:00:00+00:00"
 
 
 def test_non_review_paper_rejects_review_synthesis_map() -> None:

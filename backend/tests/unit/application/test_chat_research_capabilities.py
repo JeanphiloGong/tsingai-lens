@@ -289,22 +289,18 @@ class _DocumentProfileRepository:
             DocumentProfile.from_mapping(
                 {
                     "document_id": "paper-1",
-                    "collection_id": "col-1",
                     "title": "Energy input and tensile response",
-                    "source_filename": "energy-input-tensile.pdf",
                     "doc_type": "experimental",
-                    "parsing_warnings": [],
+                    "profile_warnings": [],
                     "confidence": 0.94,
                 }
             ),
             DocumentProfile.from_mapping(
                 {
                     "document_id": "paper-2",
-                    "collection_id": "col-1",
                     "title": "Residual stress in additive manufacturing",
-                    "source_filename": "residual-stress-review.pdf",
                     "doc_type": "review",
-                    "parsing_warnings": ["Abstract heading was not preserved."],
+                    "profile_warnings": ["Abstract heading was not preserved."],
                     "confidence": 0.72,
                 }
             ),

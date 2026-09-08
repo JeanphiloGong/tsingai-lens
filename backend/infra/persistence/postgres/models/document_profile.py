@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -26,16 +25,9 @@ class DocumentProfileRow(Base):
         ForeignKey("documents.document_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    collection_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     doc_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    parsing_warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    profile_warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     profile_version: Mapped[str | None] = mapped_column(String(128), nullable=True)

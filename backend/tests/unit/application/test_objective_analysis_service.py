@@ -497,7 +497,6 @@ class FakeResearchObjectiveService:
             return (
                 DocumentProfile.from_mapping(
                     {
-                        "collection_id": collection_id,
                         "document_id": "paper-1",
                         "title": "Heat treatment paper",
                         "doc_type": "experimental",

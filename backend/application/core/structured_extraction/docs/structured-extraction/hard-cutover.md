@@ -204,7 +204,7 @@ Input:
 Output:
 
 - `doc_type`
-- `parsing_warnings`
+- `profile_warnings`
 - confidence and contamination markers
 
 ### Slice 2: Text-Window Fact Extraction

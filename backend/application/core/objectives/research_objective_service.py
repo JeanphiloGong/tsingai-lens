@@ -1510,6 +1510,8 @@ class ResearchObjectiveService:
             paper_map = replace(
                 paper_map,
                 input_fingerprint=map_input_fingerprints[document_id],
+                map_version=PAPER_RESEARCH_MAP_POLICY_VERSION,
+                generated_at=datetime.now(timezone.utc).isoformat(),
             )
             await self.paper_map_repository.replace(collection_id, paper_map)
             maps_by_document_id[document_id] = paper_map
@@ -1532,6 +1534,8 @@ class ResearchObjectiveService:
             if maps_by_document_id.get(document_id) is None
             or maps_by_document_id[document_id].input_fingerprint
             != map_input_fingerprints[document_id]
+            or maps_by_document_id[document_id].map_version
+            != PAPER_RESEARCH_MAP_POLICY_VERSION
         )
         await gather(*(build_map(document_id) for document_id in stale_document_ids))
         return tuple(maps_by_document_id[document_id] for document_id in document_ids)

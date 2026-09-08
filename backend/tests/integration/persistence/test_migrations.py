@@ -27,7 +27,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260908_0045"
+HEAD_REVISION = "20260908_0046"
 
 
 def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
@@ -85,6 +85,22 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
                 for column in inspect(connection).get_columns("document_profiles")
             }
         )
+        profile_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("document_profiles")
+        }
+        assert "profile_warnings" in profile_columns
+        assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
+            profile_columns
+        )
+        paper_map_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("paper_maps")
+        }
+        assert {"input_fingerprint", "map_version", "generated_at"}.issubset(
+            paper_map_columns
+        )
+        assert "collection_id" not in paper_map_columns
         assert "document_sources" in expected
         pipeline_run_columns = {
             column["name"]
@@ -124,6 +140,145 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
         with pytest.raises(RuntimeError, match="irreversible destructive cutover"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "migration-profile-map.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    now = datetime(2026, 9, 8, 9, tzinfo=timezone.utc)
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260908_0045")
+        connection.exec_driver_sql(
+            "ALTER TABLE document_profiles ADD COLUMN collection_id VARCHAR(64)"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE document_profiles ADD COLUMN source_filename TEXT"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE document_profiles RENAME COLUMN profile_warnings "
+            "TO parsing_warnings"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE paper_maps ADD COLUMN collection_id VARCHAR(64)"
+        )
+        for column_name in ("input_fingerprint", "map_version", "generated_at"):
+            connection.exec_driver_sql(
+                f"ALTER TABLE paper_maps DROP COLUMN {column_name}"
+            )
+
+        metadata = MetaData()
+        auth_users = Table("auth_users", metadata, autoload_with=connection)
+        collections = Table("collections", metadata, autoload_with=connection)
+        documents = Table("documents", metadata, autoload_with=connection)
+        profiles = Table("document_profiles", metadata, autoload_with=connection)
+        paper_maps = Table("paper_maps", metadata, autoload_with=connection)
+        connection.execute(
+            auth_users.insert().values(
+                user_id="profile-map-user",
+                email="profile-map@example.com",
+                display_name=None,
+                password_hash="synthetic-password-hash",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            collections.insert().values(
+                collection_id="profile-map-collection",
+                owner_user_id="profile-map-user",
+                name="Profile map migration",
+                description=None,
+                status="idle",
+                paper_count=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        connection.execute(
+            documents.insert().values(
+                document_id="profile-map-document",
+                collection_id="profile-map-collection",
+                original_filename="paper.pdf",
+                stored_filename="stored-paper.pdf",
+                storage_key="profile-map-collection/inputs/paper.pdf",
+                sha256="a" * 64,
+                media_type="application/pdf",
+                status="ready",
+                size_bytes=42,
+                document_order=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        connection.execute(
+            profiles.insert().values(
+                document_id="profile-map-document",
+                collection_id="profile-map-collection",
+                title="Profile Map Paper",
+                source_filename="paper.pdf",
+                doc_type="experimental",
+                parsing_warnings=["classification_uncertain"],
+                confidence=0.75,
+                source_fingerprint="b" * 64,
+                profile_version="profile.v1",
+                profile_fingerprint="c" * 64,
+                generated_at=now,
+            )
+        )
+        connection.execute(
+            paper_maps.insert().values(
+                document_id="profile-map-document",
+                collection_id="profile-map-collection",
+                payload={
+                    "document_id": "profile-map-document",
+                    "doc_role": "experimental",
+                    "studies": [],
+                    "input_fingerprint": "d" * 64,
+                },
+            )
+        )
+
+        command.upgrade(config, "head")
+
+        upgraded_profiles = Table(
+            "document_profiles", MetaData(), autoload_with=connection
+        )
+        upgraded_maps = Table("paper_maps", MetaData(), autoload_with=connection)
+        profile = connection.execute(select(upgraded_profiles)).mappings().one()
+        paper_map = connection.execute(select(upgraded_maps)).mappings().one()
+        assert profile["profile_warnings"] == ["classification_uncertain"]
+        assert {"collection_id", "source_filename", "parsing_warnings"}.isdisjoint(
+            upgraded_profiles.c.keys()
+        )
+        assert paper_map["input_fingerprint"] == "d" * 64
+        assert paper_map["payload"] == {
+            "doc_role": "experimental",
+            "studies": [],
+        }
+        assert "collection_id" not in upgraded_maps.c
+
+        command.downgrade(config, "20260908_0045")
+
+        restored_profiles = Table(
+            "document_profiles", MetaData(), autoload_with=connection
+        )
+        restored_maps = Table("paper_maps", MetaData(), autoload_with=connection)
+        restored_profile = connection.execute(select(restored_profiles)).mappings().one()
+        restored_map = connection.execute(select(restored_maps)).mappings().one()
+        assert restored_profile["collection_id"] == "profile-map-collection"
+        assert restored_profile["source_filename"] == "paper.pdf"
+        assert restored_profile["parsing_warnings"] == ["classification_uncertain"]
+        assert restored_map["collection_id"] == "profile-map-collection"
+        assert restored_map["payload"]["document_id"] == "profile-map-document"
+        assert restored_map["payload"]["input_fingerprint"] == "d" * 64
 
     engine.dispose()
 

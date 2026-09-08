@@ -1,4 +1,4 @@
-import { requestJson } from './api';
+import { getApiErrorDetail, requestJson } from './api';
 
 export type CollectionDocument = {
 	document_id: string;
@@ -85,6 +85,10 @@ export async function uploadCollectionDocument(collectionId: string, file: File)
 		throw new Error('Document upload response is missing document_id.');
 	}
 	return uploaded;
+}
+
+export function isDuplicateCollectionDocumentError(error: unknown) {
+	return getApiErrorDetail(error) === 'document content already exists in collection';
 }
 
 export async function uploadCollectionDocuments(collectionId: string, files: File[]) {

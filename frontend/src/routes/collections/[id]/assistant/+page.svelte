@@ -18,7 +18,10 @@
 		type ChatToolCall,
 		type ChatTurn
 	} from '../../../_shared/chatSessions';
-	import { uploadCollectionDocument } from '../../../_shared/collectionDocuments';
+	import {
+		isDuplicateCollectionDocumentError,
+		uploadCollectionDocument
+	} from '../../../_shared/collectionDocuments';
 	import { t } from '../../../_shared/i18n';
 	import { prepareCollectionDocument } from '../../../_shared/pipelineRuns';
 	import {
@@ -53,6 +56,7 @@
 		| 'uploading'
 		| 'preparing'
 		| 'queued'
+		| 'already_uploaded'
 		| 'upload_failed'
 		| 'preparation_failed';
 
@@ -294,11 +298,15 @@
 				documentId = uploaded.document_id;
 				updateUploadItem(item.key, { status: 'preparing', documentId, error: '' });
 			} catch (err) {
+				if (isDuplicateCollectionDocumentError(err)) {
+					updateUploadItem(item.key, { status: 'already_uploaded', error: '' });
+					return 'already_uploaded';
+				}
 				updateUploadItem(item.key, {
 					status: 'upload_failed',
 					error: errorMessage(err)
 				});
-				return false;
+				return 'failed';
 			}
 		} else {
 			updateUploadItem(item.key, { status: 'preparing', error: '' });
@@ -307,14 +315,14 @@
 		try {
 			await prepareCollectionDocument(collectionId, documentId);
 			updateUploadItem(item.key, { status: 'queued', documentId, error: '' });
-			return true;
+			return 'queued';
 		} catch (err) {
 			updateUploadItem(item.key, {
 				status: 'preparation_failed',
 				documentId,
 				error: errorMessage(err)
 			});
-			return false;
+			return 'failed';
 		}
 	}
 
@@ -325,13 +333,21 @@
 		uploadError = '';
 		uploadNotice = '';
 		let queuedCount = 0;
+		let alreadyUploadedCount = 0;
+		let failedCount = 0;
 		for (const item of candidates) {
-			if (await uploadAndPrepareItem(item)) queuedCount += 1;
+			const result = await uploadAndPrepareItem(item);
+			if (result === 'queued') queuedCount += 1;
+			if (result === 'already_uploaded') alreadyUploadedCount += 1;
+			if (result === 'failed') failedCount += 1;
 		}
-		const failedCount = candidates.length - queuedCount;
-		if (queuedCount) {
-			uploadNotice = $t('researchAgent.upload.queuedSummary', { count: queuedCount });
-		}
+		const notices = [];
+		if (queuedCount) notices.push($t('researchAgent.upload.queuedSummary', { count: queuedCount }));
+		if (alreadyUploadedCount)
+			notices.push(
+				$t('researchAgent.upload.alreadyUploadedSummary', { count: alreadyUploadedCount })
+			);
+		uploadNotice = notices.join(' ');
 		if (failedCount) {
 			uploadError = $t('researchAgent.upload.failedSummary', { count: failedCount });
 		}

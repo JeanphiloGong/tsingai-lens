@@ -381,6 +381,28 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeEnabled();
 	});
 
+	it('marks a paper already in the collection without presenting it as a retryable failure', async () => {
+		installApi({
+			uploadDocument: () =>
+				jsonResponse({ detail: 'document content already exists in collection' }, 400)
+		});
+		await renderReady();
+
+		const file = new File(['%PDF-1.7'], 'already-uploaded.pdf', { type: 'application/pdf' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 1 paper' }).click();
+
+		await expect
+			.element(browserPage.getByText('Already in this collection', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry failed paper' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('document content already exists in collection'))
+			.not.toBeInTheDocument();
+	});
+
 	it('retries preparation without uploading the paper a second time', async () => {
 		let uploadCalls = 0;
 		let preparationCalls = 0;

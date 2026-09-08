@@ -249,12 +249,15 @@ const translations: Record<Language, Translations> = {
 				openProgress: 'Open collection progress',
 				unsupportedFile: 'Only PDF papers can be uploaded here.',
 				queuedSummary: '{count} paper preparation run(s) queued.',
+				alreadyUploadedSummary:
+					'{count} paper(s) were already in this collection and were not uploaded again.',
 				failedSummary: '{count} paper(s) need attention before preparation can continue.',
 				status: {
 					selected: 'Ready to upload',
 					uploading: 'Uploading',
 					preparing: 'Starting paper preparation',
 					queued: 'Preparation queued',
+					already_uploaded: 'Already in this collection',
 					upload_failed: 'Upload failed',
 					preparation_failed: 'Uploaded, but preparation could not be queued'
 				}
@@ -2804,12 +2807,14 @@ const translations: Record<Language, Translations> = {
 				openProgress: '打开集合进度',
 				unsupportedFile: '此处仅支持上传 PDF 论文。',
 				queuedSummary: '已启动 {count} 个论文准备运行。',
+				alreadyUploadedSummary: '已有 {count} 篇论文在当前集合中，未重复上传。',
 				failedSummary: '有 {count} 篇论文需要处理后才能继续准备。',
 				status: {
 					selected: '等待上传',
 					uploading: '正在上传',
 					preparing: '正在启动论文准备',
 					queued: '已进入准备队列',
+					already_uploaded: '当前集合中已存在',
 					upload_failed: '上传失败',
 					preparation_failed: '已上传，但未能进入准备队列'
 				}

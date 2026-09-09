@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
+	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { ChatSourceContext } from '../../../_shared/chatSessions';
 	import type { PaperUploadItem } from './messageComposer';
 
@@ -16,11 +17,37 @@
 	let uploadInput: HTMLInputElement | null = null;
 
 	function handleComposerKeydown(event: KeyboardEvent) {
-		if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+		if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229)
+			return;
 		event.preventDefault();
 		onSend();
 	}
 
+	function fitInput(node: HTMLTextAreaElement, value: string) {
+		const resize = () => {
+			node.style.height = 'auto';
+			node.style.height = `${Math.min(180, node.scrollHeight)}px`;
+		};
+		let width = 0;
+		const observer = new ResizeObserver(([entry]) => {
+			if (entry.contentRect.width !== width) {
+				width = entry.contentRect.width;
+				resize();
+			}
+		});
+		observer.observe(node);
+		node.value = value;
+		resize();
+		return {
+			update(nextValue: string) {
+				node.value = nextValue;
+				resize();
+			},
+			destroy() {
+				observer.disconnect();
+			}
+		};
+	}
 	import {
 		isDuplicateCollectionDocumentError,
 		uploadCollectionDocument
@@ -284,35 +311,32 @@
 	{/if}
 	<div class="composer-row">
 		<div class="composer-shell">
-			<button
-				class="add-papers"
-				type="button"
-				aria-label={$t('researchAgent.upload.add')}
-				title={$t('researchAgent.upload.add')}
+			<IconButton
+				className="add-papers"
+				label={$t('researchAgent.upload.add')}
+				tooltipAlign="start"
 				disabled={uploadBusy}
-				on:click={() => uploadInput?.click()}
+				onClick={() => uploadInput?.click()}>+</IconButton
 			>
-				<span aria-hidden="true">+</span>
-			</button>
 			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
 			<textarea
 				id="research-agent-message"
 				rows="1"
 				value={input}
+				use:fitInput={input}
 				placeholder={$t('researchAgent.messagePlaceholder')}
 				{disabled}
 				on:input={(event) => onInput((event.currentTarget as HTMLTextAreaElement).value)}
 				on:keydown={handleComposerKeydown}
 			></textarea>
-			<button
-				class="send-message"
+			<IconButton
+				className="send-message"
 				type="submit"
-				aria-label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-				title={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-				disabled={disabled || !input.trim()}
+				variant="primary"
+				tooltipAlign="end"
+				label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+				disabled={disabled || !input.trim()}>&uarr;</IconButton
 			>
-				<span aria-hidden="true">↑</span>
-			</button>
 		</div>
 	</div>
 </form>
@@ -372,66 +396,6 @@
 	button:disabled {
 		cursor: not-allowed;
 		opacity: 0.55;
-	}
-
-	.send-message,
-	.add-papers {
-		display: grid;
-		place-items: center;
-		width: 36px;
-		height: 36px;
-		min-width: 36px;
-		min-height: 36px;
-		padding: 0;
-		border-radius: 50%;
-		font-weight: 700;
-		line-height: 1;
-		cursor: pointer;
-		transition:
-			background-color 140ms ease,
-			border-color 140ms ease,
-			color 140ms ease,
-			transform 140ms ease;
-	}
-
-	.add-papers {
-		border: 0;
-		background: transparent;
-		color: var(--text-secondary);
-	}
-
-	.add-papers:hover:not(:disabled) {
-		background: var(--bg-subtle);
-		color: var(--text-primary);
-	}
-
-	.add-papers > span {
-		font-size: 22px;
-		font-weight: 400;
-		line-height: 1;
-	}
-
-	.send-message {
-		border: 1px solid var(--brand-primary);
-		background: var(--brand-primary);
-		color: #fff;
-	}
-
-	.send-message > span {
-		font-size: 20px;
-		line-height: 1;
-		transform: translateY(-1px);
-	}
-
-	.send-message:disabled {
-		border-color: var(--border-default);
-		background: var(--bg-subtle);
-		color: var(--text-tertiary);
-	}
-
-	.send-message:hover:not(:disabled) {
-		border-color: var(--brand-primary-hover);
-		background: var(--brand-primary-hover);
 	}
 
 	.upload-panel {

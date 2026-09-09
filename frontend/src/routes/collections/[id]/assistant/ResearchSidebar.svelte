@@ -46,6 +46,7 @@
 			class="mobile-history-toggle"
 			type="button"
 			aria-expanded={mobileHistoryOpen}
+			aria-controls="assistant-history assistant-collection-context"
 			on:click={() => (mobileHistoryOpen = !mobileHistoryOpen)}
 		>
 			<span aria-hidden="true">☰</span>
@@ -56,6 +57,7 @@
 	</div>
 
 	<section
+		id="assistant-history"
 		class="history"
 		class:mobile-open={mobileHistoryOpen}
 		aria-label={$t('researchAgent.historyTitle')}
@@ -68,7 +70,10 @@
 					class:active={item.session_id === activeSessionId}
 					type="button"
 					disabled={loading || sending || deciding}
-					on:click={() => onSwitchSession(item.session_id)}
+					on:click={() => {
+						mobileHistoryOpen = false;
+						onSwitchSession(item.session_id);
+					}}
 				>
 					<span class="history-title">{item.title}</span>
 					<time>{formatHistoryTime(item.updated_at)}</time>
@@ -79,7 +84,11 @@
 		</div>
 	</section>
 
-	<div class="collection-context" class:mobile-open={mobileHistoryOpen}>
+	<div
+		id="assistant-collection-context"
+		class="collection-context"
+		class:mobile-open={mobileHistoryOpen}
+	>
 		<span>
 			<small>{$t('researchAgent.currentCollection')}</small>
 			<strong>{collectionId}</strong>
@@ -317,6 +326,8 @@
 	@media (max-width: 820px) {
 		.sidebar {
 			display: grid;
+			max-height: 50dvh;
+			overflow-y: auto;
 			grid-template-columns: minmax(0, 1fr) auto;
 			grid-template-rows: auto auto;
 			align-items: center;
@@ -371,6 +382,7 @@
 
 		.history.mobile-open {
 			display: flex;
+			max-height: min(26dvh, 180px);
 			grid-row: 3;
 			margin-top: 4px;
 			padding-top: 12px;

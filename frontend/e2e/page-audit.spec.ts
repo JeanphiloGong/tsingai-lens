@@ -333,6 +333,19 @@ test.describe('page interaction audit', () => {
 		});
 
 		await page.setViewportSize({ width: 390, height: 844 });
+		await page.addInitScript(() =>
+			localStorage.setItem(
+				'lens.chatSessionHistory.col_123',
+				JSON.stringify(
+					Array.from({ length: 12 }, (_, index) => ({
+						session_id: `past_${index}`,
+						title: `Prior alloy comparison ${index}`,
+						created_at: '2026-09-09T08:00:00Z',
+						updated_at: '2026-09-09T08:00:00Z'
+					}))
+				)
+			)
+		);
 		await page.goto(`/collections/${collectionId}/assistant`);
 
 		const composer = page.locator('.composer');
@@ -378,6 +391,15 @@ test.describe('page interaction audit', () => {
 		expect(mobileLayout!.buttonColor).not.toBe('rgba(0, 0, 0, 0)');
 
 		await input.fill('First question');
+		await input.press('Shift+Enter');
+		await input.press('Shift+Enter');
+		await expect(input).toHaveValue('First question\n\n');
+		expect(
+			await input.evaluate((element) => element.getBoundingClientRect().height)
+		).toBeGreaterThan(60);
+		await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
+		await input.dispatchEvent('keydown', { key: 'Enter', keyCode: 229 });
+		expect(messageRequests).toHaveLength(0);
 		await input.press('Enter');
 		await expect(page.getByText('Mobile reply 1')).toBeVisible();
 		await input.fill('Follow-up question');
@@ -389,6 +411,10 @@ test.describe('page interaction audit', () => {
 		]);
 
 		await page.setViewportSize({ width: 390, height: 520 });
+		await page.getByRole('button', { name: 'Show history' }).click();
+		await expect(page.locator('.history-item')).toHaveCount(12);
+		await expect(sendButton).toBeInViewport();
+		await page.getByRole('button', { name: 'Hide history' }).click();
 		await input.focus();
 		await expect(sendButton).toBeInViewport();
 

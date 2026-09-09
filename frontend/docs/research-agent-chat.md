@@ -149,11 +149,11 @@ keeping Lens-specific research boundaries explicit:
   history belong to the corresponding Assistant response; the header does
   not duplicate them with a Ready/Working badge.
 - `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
-  collection-bound upload state and orchestration. It sends on Enter and preserves
-  Shift+Enter and IME composition. An upload already started finishes its
-  upload/preparation chain against the original collection. Navigation drops its
-  UI updates and stops the remaining batch from starting; it does not move papers
-  to the newly selected collection.
+  collection-bound upload state and orchestration. It sends on Enter, preserves
+  Shift+Enter and IME composition, and grows the textarea up to a bounded height.
+  An upload already started finishes its upload/preparation chain against the
+  original collection. Navigation drops its UI updates and stops the remaining
+  batch from starting; it does not move papers to the newly selected collection.
 - `MessageTimeline.svelte` owns history rendering and scroll position. It starts
   with the latest 20 presentation items and exposes earlier items in batches of
   20 while preserving the reading position. New turns follow the latest response;
@@ -167,7 +167,7 @@ keeping Lens-specific research boundaries explicit:
   presentation helpers use the already-associated tool name instead of searching
   the conversation on every render.
 - `_shared/IconButton.svelte` owns icon command sizing, disabled and focus states,
-  and hover/focus labels for the return-to-latest action.
+  and hover/focus labels for upload, send, and return-to-latest actions.
 - `conversationPresentation.ts` converts the durable trajectory into ordered
   message, activity, and artifact items. This keeps grouping and display
   policy out of the transport callbacks. Streamed text is separate from the

@@ -398,47 +398,63 @@ test.describe('page interaction audit', () => {
 	});
 
 	test('anchors live research progress to the assistant response', async ({ page }) => {
+		let completeTurn!: () => void;
+		const turnCompletion = new Promise<void>((resolve) => {
+			completeTurn = resolve;
+		});
 		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
 			if (route.request().method() === 'POST') {
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				return route.fulfill(
-					json({
-						status: 'completed',
-						completion_reason: 'model_answer',
-						warnings: [],
-						messages: [
-							agentMessage('msg_progress_user', 'user', 'Track this'),
-							agentMessage('msg_progress_assistant', 'assistant', 'Research complete')
-						],
-						pending_approval: null,
-						error_code: null
-					})
-				);
+				await turnCompletion;
+				const turn = {
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						agentMessage('msg_progress_user', 'user', 'Track this'),
+						agentMessage('msg_progress_assistant', 'assistant', 'Research complete')
+					],
+					pending_approval: null,
+					error_code: null
+				};
+				return route.fulfill(sseTurn(turn));
 			}
 			return route.fulfill(json({ items: [], pending_approval: null }));
 		});
 
-		await page.goto(`/collections/${collectionId}/assistant`);
-		await sendAgentMessage(page, 'Track this');
-		await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
-		await expect(page.locator('.conversation-header .session-state')).toHaveText(/Working/);
-		await expect(page.locator('.conversation > .status-progress')).toHaveCount(0);
-		if (screenshotDir) {
-			await page.screenshot({
-				path: join(screenshotDir, 'research-agent-inline-progress-desktop.png'),
-				fullPage: true
-			});
+		try {
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByLabel('Message')).toBeEnabled();
+			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
+			await sendAgentMessage(page, 'Track this');
+			await expect(page.getByTestId('research-progress')).toHaveCount(1);
+			await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
+			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
+			await expect(page.locator('.conversation > .status-progress')).toHaveCount(0);
+			if (screenshotDir) {
+				await page.screenshot({
+					path: join(screenshotDir, 'research-agent-inline-progress-desktop.png'),
+					fullPage: true,
+					animations: 'disabled'
+				});
+			}
+
+			await page.setViewportSize({ width: 390, height: 844 });
+			await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
+			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
+			if (screenshotDir) {
+				await page.screenshot({
+					path: join(screenshotDir, 'research-agent-inline-progress-mobile.png'),
+					fullPage: true,
+					animations: 'disabled'
+				});
+			}
+		} finally {
+			completeTurn();
 		}
 
-		await page.setViewportSize({ width: 390, height: 844 });
-		await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
-		await expect(page.locator('.conversation-header .session-state')).toHaveText(/Working/);
-		if (screenshotDir) {
-			await page.screenshot({
-				path: join(screenshotDir, 'research-agent-inline-progress-mobile.png'),
-				fullPage: true
-			});
-		}
+		await expect(page.getByText('Research complete', { exact: true })).toBeVisible();
+		await expect(page.getByTestId('research-progress')).toHaveCount(0);
+		await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
 	});
 
 	test('mobile app chrome keeps controls inside the viewport', async ({ page }) => {

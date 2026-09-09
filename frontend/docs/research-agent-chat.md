@@ -140,9 +140,10 @@ keeping Lens-specific research boundaries explicit:
   and callbacks from the route; it does not load or persist sessions. On small
   screens the history rail is collapsed behind an explicit toggle so session
   switching remains available without consuming the conversation viewport.
-- `ConversationHeader.svelte` owns the current collection/session status and
-  optional Objective link. This keeps responsive header layout and status
-  animation local to the header instead of coupling it to the message stream.
+- `ConversationHeader.svelte` owns the conversation title, current collection,
+  and optional Objective link. Runtime status, elapsed time, and progress
+  history belong to the corresponding Assistant response; the header does
+  not duplicate them with a Ready/Working badge.
 - `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
   keyboard interaction. The route retains upload and message orchestration,
   while the composer sends on Enter and preserves Shift+Enter for a newline.

@@ -204,8 +204,6 @@ const translations: Record<Language, Translations> = {
 		},
 		researchAgent: {
 			title: 'Research Agent',
-			ready: 'Ready',
-			working: 'Working',
 			launcher: {
 				eyebrow: 'Research Agent',
 				title: 'Choose a research workspace',
@@ -2786,8 +2784,6 @@ const translations: Record<Language, Translations> = {
 		},
 		researchAgent: {
 			title: '研究 Agent',
-			ready: '已就绪',
-			working: '处理中',
 			launcher: {
 				eyebrow: '研究 Agent',
 				title: '选择研究工作区',

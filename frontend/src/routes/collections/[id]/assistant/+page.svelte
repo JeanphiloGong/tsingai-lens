@@ -1322,11 +1322,7 @@
 	/>
 
 	<main class="conversation">
-		<ConversationHeader
-			{collectionId}
-			objectiveId={queryObjectiveId}
-			working={sending || deciding}
-		/>
+		<ConversationHeader {collectionId} objectiveId={queryObjectiveId} />
 
 		{#if error}
 			<div class="status status-error" role="alert">{error}</div>
@@ -2266,18 +2262,6 @@
 		to {
 			opacity: 1;
 			transform: translateY(0);
-		}
-	}
-
-	@keyframes state-pulse {
-		0%,
-		100% {
-			opacity: 0.45;
-			transform: scale(0.85);
-		}
-		50% {
-			opacity: 1;
-			transform: scale(1);
 		}
 	}
 

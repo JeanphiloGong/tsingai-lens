@@ -409,7 +409,7 @@ test.describe('page interaction audit', () => {
 
 		await page.goto(`/collections/${collectionId}/assistant`);
 		await sendAgentMessage(page, 'Track this');
-		await expect(page.locator('.assistant-message .status-progress')).toBeVisible();
+		await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
 		await expect(page.locator('.conversation > .status-progress')).toHaveCount(0);
 		if (screenshotDir) {
 			await page.screenshot({
@@ -419,7 +419,7 @@ test.describe('page interaction audit', () => {
 		}
 
 		await page.setViewportSize({ width: 390, height: 844 });
-		await expect(page.locator('.assistant-message .status-progress')).toBeVisible();
+		await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
 		if (screenshotDir) {
 			await page.screenshot({
 				path: join(screenshotDir, 'research-agent-inline-progress-mobile.png'),

@@ -9,6 +9,7 @@
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
+		appendChatProgress,
 		formatChatElapsed,
 		getChatProgressActions,
 		readPendingChatSourceContext,
@@ -85,6 +86,8 @@
 	let loading = false;
 	let sending = false;
 	let progress: ChatProgress | null = null;
+	let progressHistory: ChatProgress[] = [];
+	let progressHistoryExpanded = false;
 	let progressActions: ReturnType<typeof getChatProgressActions> = null;
 	let deciding = false;
 	let error = '';
@@ -423,6 +426,8 @@
 		input = '';
 		sending = true;
 		progress = { phase: 'starting', cycle_index: 0, elapsed_ms: 0 };
+		progressHistory = [progress];
+		progressHistoryExpanded = false;
 		error = '';
 		notice = '';
 		try {
@@ -439,6 +444,7 @@
 				sourceContexts,
 				(nextProgress) => {
 					progress = nextProgress;
+					progressHistory = appendChatProgress(progressHistory, nextProgress);
 				}
 			);
 			applyTurn(turn, [optimisticId, streamingId]);
@@ -468,6 +474,8 @@
 		} finally {
 			sending = false;
 			progress = null;
+			progressHistory = [];
+			progressHistoryExpanded = false;
 		}
 	}
 
@@ -645,7 +653,8 @@
 	function resultToolName(message: ChatMessage) {
 		if (!message.tool_call_id) return null;
 		return (
-			messages.flatMap((candidate) => candidate.tool_calls)
+			messages
+				.flatMap((candidate) => candidate.tool_calls)
 				.find((request) => request.tool_call_id === message.tool_call_id)?.name ?? null
 		);
 	}
@@ -1437,40 +1446,69 @@
 								<div class="assistant-mark" aria-hidden="true">AI</div>
 								<div class="assistant-content">
 									{#if item.message.message_id.startsWith('local-stream-') && sending && progress}
-										<div
-											class="status status-progress"
-											role="status"
-											data-testid="research-progress"
-										>
-											<div class="progress-main">
-												<span class="progress-dot" aria-hidden="true"></span>
-												<strong>{progressLabel(progress)}</strong>
-											</div>
-											<div
-												class="progress-metrics"
-												aria-label={$t('researchAgent.progress.detailsLabel')}
+										<div class="assistant-progress" role="status" data-testid="research-progress">
+											<button
+												class="progress-current"
+												type="button"
+												aria-expanded={progressHistoryExpanded}
+												aria-label={$t('researchAgent.progress.toggleHistory')}
+												on:click={() => (progressHistoryExpanded = !progressHistoryExpanded)}
 											>
-												{#if progress.cycle_index && progress.cycle_index > 0}
-													<span class="progress-metric"
-														>{$t('researchAgent.progress.cycle', {
-															cycle: progress.cycle_index
-														})}</span
-													>
+												<div class="progress-main">
+													<span class="progress-dot" aria-hidden="true"></span>
+													<strong>{progressLabel(progress)}</strong>
+												</div>
+												<div
+													class="progress-metrics"
+													aria-label={$t('researchAgent.progress.detailsLabel')}
+												>
+													{#if progress.cycle_index && progress.cycle_index > 0}
+														<span class="progress-metric"
+															>{$t('researchAgent.progress.cycle', {
+																cycle: progress.cycle_index
+															})}</span
+														>
+													{/if}
+													{#if progressActions}
+														<span class="progress-metric">
+															{$t('researchAgent.progress.actions', {
+																completed: progressActions.completed,
+																total: progressActions.total
+															})}
+														</span>
+													{/if}
+													{#if progress.elapsed_ms !== undefined}
+														<span class="progress-metric progress-time"
+															>{formatChatElapsed(progress.elapsed_ms)}</span
+														>
+													{/if}
+												</div>
+												{#if progressHistory.length > 1}
+													<span class="progress-chevron" aria-hidden="true"></span>
 												{/if}
-												{#if progressActions}
-													<span class="progress-metric">
-														{$t('researchAgent.progress.actions', {
-															completed: progressActions.completed,
-															total: progressActions.total
-														})}
-													</span>
-												{/if}
-												{#if progress.elapsed_ms !== undefined}
-													<span class="progress-metric progress-time"
-														>{formatChatElapsed(progress.elapsed_ms)}</span
-													>
-												{/if}
-											</div>
+											</button>
+											{#if progressHistoryExpanded && progressHistory.length > 1}
+												<ol
+													class="progress-trail"
+													aria-label={$t('researchAgent.progress.historyLabel')}
+												>
+													{#each progressHistory.slice(0, -1) as entry (entry.phase + (entry.elapsed_ms ?? 0))}
+														{@const entryActions = getChatProgressActions(entry)}
+														<li>
+															<span class="progress-history-mark" aria-hidden="true">✓</span>
+															<span>{progressLabel(entry)}</span>
+															{#if entryActions}
+																<small
+																	>{$t('researchAgent.progress.actions', {
+																		completed: entryActions.completed,
+																		total: entryActions.total
+																	})}</small
+																>
+															{/if}
+														</li>
+													{/each}
+												</ol>
+											{/if}
 										</div>
 									{/if}
 									<time>{formatTime(item.message.created_at)}</time>
@@ -2185,14 +2223,32 @@
 		color: var(--warning-text);
 	}
 
-	.status-progress {
+	.assistant-progress {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0;
+		margin-bottom: 8px;
+		color: var(--text-secondary);
+	}
+
+	.progress-current {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		border: 1px solid var(--border-default);
-		background: var(--surface-card);
-		color: var(--text-secondary);
+		width: 100%;
+		padding: 4px 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.progress-current:focus-visible {
+		outline: 2px solid var(--brand-border);
+		outline-offset: 3px;
 	}
 
 	.progress-main {
@@ -2233,6 +2289,47 @@
 		text-align: right;
 		color: var(--text-tertiary);
 		font-variant-numeric: tabular-nums;
+	}
+
+	.progress-chevron {
+		width: 7px;
+		height: 7px;
+		flex: 0 0 auto;
+		border-right: 1px solid var(--text-tertiary);
+		border-bottom: 1px solid var(--text-tertiary);
+		transform: rotate(45deg) translateY(-2px);
+		transition: transform 120ms ease;
+	}
+
+	.progress-current[aria-expanded='true'] .progress-chevron {
+		transform: rotate(225deg) translate(-1px, -1px);
+	}
+
+	.progress-trail {
+		display: grid;
+		gap: 4px;
+		margin: 2px 0 0 3px;
+		padding: 5px 0 1px 16px;
+		border-left: 1px solid var(--border-default);
+		color: var(--text-tertiary);
+		font-size: 12px;
+		list-style: none;
+	}
+
+	.progress-trail li {
+		display: flex;
+		align-items: baseline;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.progress-trail small {
+		color: var(--text-tertiary);
+	}
+
+	.progress-history-mark {
+		color: var(--brand-primary);
+		font-size: 11px;
 	}
 
 	.progress-dot {
@@ -2405,15 +2502,12 @@
 		min-width: 0;
 	}
 
-	.assistant-content > .status-progress {
+	.assistant-content > .assistant-progress {
 		margin: 0 0 8px;
 	}
 
 	.assistant-copy {
-		padding: 14px 16px;
-		border: 1px solid var(--border-default);
-		border-radius: 8px;
-		background: var(--surface-card);
+		padding: 2px 0 0;
 		font-size: 14px;
 		line-height: 23px;
 		overflow-wrap: anywhere;
@@ -3347,10 +3441,14 @@
 	}
 
 	@media (max-width: 560px) {
-		.status-progress {
+		.progress-current {
 			align-items: flex-start;
-			flex-direction: column;
-			gap: 8px;
+			flex-wrap: wrap;
+			gap: 6px;
+		}
+
+		.progress-main {
+			flex: 1 1 calc(100% - 18px);
 		}
 
 		.progress-metrics {

@@ -137,10 +137,12 @@ is rendered incrementally as a normal assistant message with no fake capability
 activity. A stable response cursor occupies the assistant row before the first
 text delta; it does not create a stored partial message.
 
-While a turn is running, the status strip names the current research phase and
-shows available progress signals such as cycle, completed/requested research
-actions, and elapsed time. These are bounded user-facing measures; hidden model
-reasoning, provider calls, and internal budgets remain undisclosed.
+While a turn is running, the Assistant response owns an inline status history.
+It names the current research phase and shows available progress signals such
+as cycle, completed/requested research actions, and elapsed time. Earlier
+observable stages can be expanded from the current status line. These are
+bounded user-facing measures; hidden model reasoning, provider calls, and
+internal budgets remain undisclosed.
 
 ### Document Source handoff
 

@@ -244,7 +244,9 @@ const translations: Record<Language, Translations> = {
 				terminal: 'Finishing research...',
 				detailsLabel: 'Research progress details',
 				cycle: 'Cycle {cycle}',
-				actions: '{completed} / {total} research actions'
+				actions: '{completed} / {total} research actions',
+				toggleHistory: 'Toggle research progress history',
+				historyLabel: 'Completed research stages'
 			},
 			upload: {
 				add: 'Add papers',
@@ -2818,7 +2820,9 @@ const translations: Record<Language, Translations> = {
 				terminal: '正在完成研究...',
 				detailsLabel: '研究进度详情',
 				cycle: '第 {cycle} 轮',
-				actions: '已完成 {completed} / {total} 个研究动作'
+				actions: '已完成 {completed} / {total} 个研究动作',
+				toggleHistory: '展开或收起研究进度历史',
+				historyLabel: '已完成的研究阶段'
 			},
 			upload: {
 				add: '添加论文',

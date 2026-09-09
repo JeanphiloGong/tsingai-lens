@@ -129,6 +129,22 @@ export function getChatProgressActions(progress: ChatProgress) {
 	return { completed: Math.min(completed, total), total };
 }
 
+export function appendChatProgress(history: ChatProgress[], next: ChatProgress) {
+	const previous = history.at(-1);
+	if (
+		previous &&
+		previous.phase === next.phase &&
+		previous.cycle_index === next.cycle_index &&
+		previous.requested_tool_count === next.requested_tool_count &&
+		previous.executed_tool_count === next.executed_tool_count &&
+		previous.remaining_tool_budget === next.remaining_tool_budget &&
+		previous.remaining_token_budget === next.remaining_token_budget
+	) {
+		return history;
+	}
+	return [...history, next];
+}
+
 function chatSessionPath(sessionId = '') {
 	return `/chat-sessions${sessionId ? `/${encodeURIComponent(sessionId)}` : ''}`;
 }

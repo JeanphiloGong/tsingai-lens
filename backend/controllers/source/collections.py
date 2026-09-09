@@ -134,6 +134,7 @@ async def upload_collection_document(
     collection_id: str,
     request: Request,
     file: UploadFile = File(...),
+    reuse_existing: bool = False,
 ) -> CollectionDocumentResponse:
     collection_service = request.app.state.collection_service
     try:
@@ -146,6 +147,7 @@ async def upload_collection_document(
             filename=file.filename or "upload.bin",
             content=content,
             media_type=file.content_type,
+            reuse_existing=reuse_existing,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

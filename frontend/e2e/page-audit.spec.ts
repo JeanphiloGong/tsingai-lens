@@ -37,6 +37,50 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	test('recovers a lost PDF upload on a plain HTTP installation', async ({ page }) => {
+		let uploads = 0;
+		let preparations = 0;
+		await page.route('http://review.lens.test/**', async (route) => {
+			const url = new URL(route.request().url());
+			if (url.pathname.startsWith('/api/')) return route.fallback();
+			const response = await route.fetch({
+				url: `http://localhost:4173${url.pathname}${url.search}`
+			});
+			return route.fulfill({ response });
+		});
+		await page.route('**/api/v1/collections/col_123/documents*', async (route) => {
+			if (route.request().method() !== 'POST') return route.fallback();
+			uploads += 1;
+			if (uploads === 1) return route.abort('failed');
+			expect(new URL(route.request().url()).searchParams.get('reuse_existing')).toBe('true');
+			return route.fulfill(json(uploadedFile('uploaded')));
+		});
+		await page.route('**/api/v1/collections/col_123/documents/doc_1/preparation', (route) => {
+			preparations += 1;
+			return route.fulfill(
+				json({ run_id: 'run_1', collection_id: collectionId, status: 'queued' })
+			);
+		});
+		await page.goto('http://review.lens.test/collections/col_123/assistant');
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+		expect(
+			await page.evaluate(() => ({ secure: isSecureContext, subtle: typeof crypto.subtle }))
+		).toEqual({ secure: false, subtle: 'undefined' });
+		await page
+			.getByLabel('Choose PDF papers')
+			.setInputFiles({
+				name: 'LPBF-study.pdf',
+				mimeType: 'application/pdf',
+				buffer: Buffer.from('%PDF-1.7')
+			});
+		await page.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true }).click();
+		await page.getByRole('button', { name: 'Retry failed paper', exact: true }).click();
+		await expect(page.getByText('Preparation queued', { exact: true })).toBeVisible();
+		expect(preparations).toBe(1);
+		if (screenshotDir)
+			await page.screenshot({ path: join(screenshotDir, 'http-upload-recovered.png') });
+	});
+
 	for (const width of [320, 768, 1024, 1440]) {
 		test(`saves, edits and withdraws answer feedback at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });

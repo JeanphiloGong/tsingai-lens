@@ -103,6 +103,33 @@ def _import_service(collection_service: CollectionService) -> SourceImportServic
     )
 
 
+async def test_upload_retry_reuses_content_identity_and_preserves_preparation(tmp_path) -> None:
+    service = build_test_collection_service(tmp_path / "collections")
+    collection_id = (await service.create_collection("LPBF papers"))["collection_id"]
+    importer = _import_service(service)
+    content = _valid_pdf_bytes("LPBF heat treatment")
+    original = await importer.add_document(collection_id, "study.pdf", content, "application/pdf")
+    await service.update_document_preparation(
+        collection_id, original["document_id"], status="ready",
+        preparation_fingerprint="prepared", parser_version="parser-1",
+        document_analysis_version="profile-1",
+    )
+    prepared = (await service.get_collection(collection_id))["documents"][0]
+
+    recovered = await importer.add_document(
+        collection_id, "renamed.pdf", content, "application/pdf", reuse_existing=True,
+    )
+    assert recovered == prepared
+    with pytest.raises(ValueError, match="document content already exists"):
+        await importer.add_document(collection_id, "again.pdf", content, "application/pdf")
+    different = await importer.add_document(
+        collection_id, "study.pdf", _valid_pdf_bytes("Different experiment"),
+        "application/pdf", reuse_existing=True,
+    )
+    assert different["document_id"] != original["document_id"]
+    assert len((await service.get_collection(collection_id))["documents"]) == 2
+
+
 async def test_collection_update_preserves_documents(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Before")

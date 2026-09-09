@@ -43,6 +43,8 @@ class SourceImportService:
         filename: str,
         content: bytes,
         media_type: str | None = None,
+        *,
+        reuse_existing: bool = False,
     ) -> dict:
         await self._get_collection(collection_id)
         batch = await asyncio.to_thread(
@@ -51,7 +53,25 @@ class SourceImportService:
             content=content,
             media_type=media_type,
         )
-        imported = await self.import_normalized_batch(collection_id, batch)
+        try:
+            imported = await self.import_normalized_batch(collection_id, batch)
+        except ValueError as exc:
+            if (
+                not reuse_existing
+                or str(exc) != "document content already exists in collection"
+                or len(batch.documents) != 1
+            ):
+                raise
+            document = batch.documents[0]
+            payload = self._build_import_payload(
+                document, document.source_document_id, self._group_text_units(batch),
+            )
+            digest = sha256(payload).hexdigest()
+            collection = await self._get_collection(collection_id)
+            for existing in collection["documents"]:
+                if existing["sha256"] == digest:
+                    return existing
+            raise
         if not imported:
             raise ValueError("normalized upload produced no importable documents")
         return imported[0]

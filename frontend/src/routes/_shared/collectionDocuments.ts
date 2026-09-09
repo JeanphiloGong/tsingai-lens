@@ -81,13 +81,21 @@ export async function listCollectionDocuments(
 	return { count: items.length, items };
 }
 
-export async function uploadCollectionDocument(collectionId: string, file: File) {
+export async function uploadCollectionDocument(
+	collectionId: string,
+	file: File,
+	reuseExisting = false
+) {
 	const formData = new FormData();
 	formData.append('file', file);
-	const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/documents`, {
-		method: 'POST',
-		body: formData
-	});
+	const query = reuseExisting ? '?reuse_existing=true' : '';
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/documents${query}`,
+		{
+			method: 'POST',
+			body: formData
+		}
+	);
 
 	const uploaded = normalizeCollectionDocument(data);
 	if (!uploaded) {

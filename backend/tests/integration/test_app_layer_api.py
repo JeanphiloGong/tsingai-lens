@@ -134,6 +134,45 @@ def test_request_id_is_generated_and_echoed(app_client) -> None:
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
+def test_lost_upload_response_can_be_retried_then_prepared_once(app_client) -> None:
+    collection_id = _create_collection(app_client)
+    original = _upload(app_client, collection_id, "paper.txt", b"Methods\nLPBF treatment")
+    path = f"{API_V1_PREFIX}/collections/{collection_id}/documents"
+    recovered = app_client.post(
+        path, params={"reuse_existing": "true"},
+        files={"file": ("renamed.txt", b"Methods\nLPBF treatment", "text/plain")},
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["document_id"] == original["document_id"]
+    preparation_path = f"{path}/{original['document_id']}/preparation"
+    prepared = app_client.post(preparation_path)
+    assert prepared.status_code == 200
+    repeated = app_client.post(preparation_path)
+    assert repeated.status_code == 200
+    assert repeated.json()["run_id"] == prepared.json()["run_id"]
+    documents = app_client.get(path).json()["items"]
+    assert len(documents) == 1
+    assert documents[0]["status"] == "ready"
+
+
+def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> None:
+    collection_id = _create_collection(app_client)
+    _upload(app_client, collection_id, "private.txt", b"Private LPBF treatment")
+    asyncio.run(app_client.app.state.auth_session_service.create_user(
+        email="other@example.test", password="other-test-password",
+    ))
+    app_client.cookies.clear()
+    assert app_client.post(f"{API_V1_PREFIX}/auth/login", json={
+        "email": "other@example.test", "password": "other-test-password",
+    }).status_code == 200
+    response = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
+        params={"reuse_existing": "true"},
+        files={"file": ("private.txt", b"Private LPBF treatment", "text/plain")},
+    )
+    assert response.status_code == 404
+
+
 def test_collection_list_returns_compact_document_rows(app_client) -> None:
     collection_id = _create_collection(app_client)
     uploaded = _upload(app_client, collection_id, "paper-a.txt", b"Methods\nPaper A")

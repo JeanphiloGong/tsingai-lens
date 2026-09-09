@@ -99,6 +99,14 @@ queued, upload-failed, or preparation-failed state. A preparation retry reuses
 the stored document ID, while the Collection workspace remains the canonical
 view for long-running Pipeline Run progress.
 
+If an upload response is lost, retrying can find the file already stored. The
+composer retries the upload with `reuse_existing=true`. The import service
+matches the normalized bytes by SHA-256 inside the owned Collection and returns
+the existing Document, preserving its preparation state. The composer then
+prepares that exact document ID. This works on ordinary HTTP installations
+without browser hashing or filename-based matching. If recovery fails, the
+paper keeps an explicit failure and retry action instead of being marked complete.
+
 Message submission uses `Accept: text/event-stream` on the existing `POST
 /messages` endpoint. The browser appends `text_delta` events to one temporary
 assistant message, then replaces the temporary user/assistant pair with the

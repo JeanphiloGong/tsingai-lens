@@ -130,23 +130,22 @@
 		if (!documentId) {
 			update({ status: 'uploading', error: '' });
 			try {
-				const uploaded = await uploadCollectionDocument(ownerCollectionId, item.file);
+				const uploaded = await uploadCollectionDocument(
+					ownerCollectionId,
+					item.file,
+					item.status === 'upload_failed'
+				);
 				documentId = uploaded.document_id;
-				update({ status: 'preparing', documentId, error: '' });
 			} catch (err) {
-				if (isDuplicateCollectionDocumentError(err)) {
+				if (isDuplicateCollectionDocumentError(err) && item.status !== 'upload_failed') {
 					update({ status: 'already_uploaded', error: '' });
 					return 'already_uploaded';
 				}
-				update({
-					status: 'upload_failed',
-					error: errorMessage(err)
-				});
+				update({ status: 'upload_failed', error: errorMessage(err) });
 				return 'failed';
 			}
-		} else {
-			update({ status: 'preparing', error: '' });
 		}
+		update({ status: 'preparing', documentId, error: '' });
 
 		if (!ownerUserId || $authState.user?.user_id !== ownerUserId) return 'failed';
 		try {

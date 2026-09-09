@@ -51,7 +51,17 @@ preparation status, current Source structure, and current DocumentProfile. The
 collection-scoped preparation, Pipeline Run, and experiment-plan endpoints are
 restricted to the authenticated Collection owner and return `404` for other
 users.
-preparation command queues only the named Document; it does not prepare other
+Document upload accepts the optional query parameter `reuse_existing=true` for
+retrying an uncertain upload outcome. If the normalized content already exists
+in this Collection, the server returns that Document with `200`, preserving its
+identity, filename, and preparation state. Content matching uses server-side
+SHA-256; a matching filename alone never selects an existing Document. The
+default remains `false`, with duplicate content returning `400`. Neither mode
+starts preparation automatically; the caller uses the returned Document ID with
+the existing preparation command. Ownership and upload validation apply before
+recovery just as they do before an ordinary upload.
+
+The preparation command queues only the named Document; it does not prepare other
 Collection members or discover Objectives. Paper Map construction is a lazy
 Objective-core operation over an explicit ready-document selection. Collection
 Pipeline Run history returns compact rows with run identity,

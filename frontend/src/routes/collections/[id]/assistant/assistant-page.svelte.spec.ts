@@ -290,6 +290,52 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockReset();
 	});
 
+	it.each([true, false])(
+		'recovers a lost upload through the server, recovery available: %s',
+		async (available) => {
+			const file = new File(['%PDF-1.7'], 'LPBF-study.pdf', { type: 'application/pdf' });
+			let stored = false;
+			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 202));
+			installApi({
+				uploadDocument: () => {
+					if (!stored) {
+						stored = true;
+						return Promise.reject(new TypeError('Failed to fetch'));
+					}
+					return available
+						? jsonResponse(uploadedDocument(file, 'doc_saved'))
+						: jsonResponse({ detail: 'Upload recovery unavailable' }, 503);
+				},
+				prepareDocument: preparation
+			});
+			await renderReady();
+			await browserPage.getByLabelText('Choose PDF papers').upload(file);
+			await browserPage
+				.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true })
+				.click();
+			await browserPage.getByRole('button', { name: 'Retry failed paper', exact: true }).click();
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					String(input).endsWith('/documents?reuse_existing=true')
+				)
+			).toBe(true);
+			if (available) {
+				await expect
+					.element(browserPage.getByText('Preparation queued', { exact: true }))
+					.toBeInTheDocument();
+				expect(preparation.mock.calls).toEqual([['doc_saved']]);
+			} else {
+				await expect
+					.element(browserPage.getByRole('button', { name: 'Retry failed paper', exact: true }))
+					.toBeEnabled();
+				expect(preparation).not.toHaveBeenCalled();
+				await expect
+					.element(browserPage.getByText('Already in this collection', { exact: true }))
+					.not.toBeInTheDocument();
+			}
+		}
+	);
+
 	it.each(['collection', 'account'])(
 		'aborts pending feedback and ignores its response after changing %s',
 		async (scope) => {

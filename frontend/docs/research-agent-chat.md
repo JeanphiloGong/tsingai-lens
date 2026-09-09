@@ -207,7 +207,7 @@ local retry message. Busy controls prevent duplicate in-flight submissions.
 Icon controls have labels, tooltips, and pressed state; the editor focuses its
 comment input and respects reduced motion and narrow viewports.
 
-`+page.svelte` owns the message-keyed saved state, errors, and pending requests.
+`ResearchConversation.svelte` owns the message-keyed saved state, errors, and pending requests.
 It restores feedback from the trajectory's separate `feedback` array and
 aborts/ignores stale responses after session, collection, or account changes.
 `MessageFeedback.svelte` owns the per-answer editor. No feedback is stored in
@@ -226,8 +226,8 @@ the actual authenticated API, concurrent upserts, cascades, and migration.
 The route follows the same message-first composition used by Open WebUI while
 keeping Lens-specific research boundaries explicit:
 
-- `+page.svelte` owns session orchestration, streaming, approval state, and
-  the route shell. It does not create a second browser API or persistence
+- `+page.svelte` is the standalone route entry. `ResearchConversation.svelte`
+  owns session orchestration, streaming, approval state, and the conversation shell. It does not create a second browser API or persistence
   model. Each session load has a request generation and abort signal; collection
   changes, account changes, and unmounting invalidate pending reads, streams, and approval
   responses before they can update the current conversation or local history.

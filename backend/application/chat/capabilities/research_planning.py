@@ -420,7 +420,7 @@ class ProposeResearchPlanCapability:
                 "title": arguments.title,
                 "content": content,
                 "structured_plan": arguments.model_dump(
-                    exclude={"objective_id", "title", "finding_ids", "evidence_ids"}
+                    include=set(ResearchPlanStructure.model_fields)
                 ),
                 "draft_status": draft_status,
                 "source_analysis_version": source_analysis_version,

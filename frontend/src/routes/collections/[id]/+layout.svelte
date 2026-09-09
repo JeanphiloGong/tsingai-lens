@@ -24,6 +24,7 @@
 	$: processingDocumentCount =
 		collection?.documents.filter((document) => document.status === 'processing').length ?? 0;
 	$: currentPath = $page.url.pathname;
+	$: isFindingRoute = Boolean($page.params.objective_id);
 	$: statusTone = processingDocumentCount ? 'processing' : readyDocumentCount ? 'ready' : 'pending';
 	$: statusLabel = processingDocumentCount
 		? $t('overview.currentModel.status.processing')
@@ -74,39 +75,55 @@
 	}
 </script>
 
-<section class="collection-header">
-	<div class="collection-header__main">
-		<p class="collection-eyebrow">{$t('collection.eyebrow')}</p>
-		<div class="collection-title-row">
-			<h1>{collectionName || $t('collection.unknownName')}</h1>
-		</div>
-		<p class="collection-subtitle">
-			{collection?.description || $t('collection.defaultSubtitle')}
-		</p>
-		<div class="collection-meta-row">
-			<span>{$t('collection.metaDocuments', { count: documentCount })}</span>
-			<span class={`status-badge status-badge--${statusTone}`}>{statusLabel}</span>
-			<span>{$t('collection.metaUpdated', { time: formatDate(updatedAt) })}</span>
-		</div>
-	</div>
-	<div class="collection-actions" aria-label={$t('collection.actionsLabel')}>
-		<a class="btn btn--ghost" href={resolve('/')}>{$t('collection.backToCollections')}</a>
-		<button
-			class="btn btn--danger"
-			type="button"
-			disabled={deleteLoading}
-			on:click={removeCurrentCollection}
+{#if isFindingRoute}
+	<div class="collection-context-bar">
+		<a
+			href={resolve('/collections/[id]', { id: collectionId })}
+			title={collectionName || $t('collection.unknownName')}
 		>
-			{deleteLoading ? $t('collection.deleting') : $t('collection.delete')}
-		</button>
+			{collectionName || $t('collection.unknownName')}
+		</a>
+		<span>{$t('collection.metaDocuments', { count: documentCount })}</span>
 	</div>
-</section>
+{:else}
+	<section class="collection-header">
+		<div class="collection-header__main">
+			<p class="collection-eyebrow">{$t('collection.eyebrow')}</p>
+			<div class="collection-title-row">
+				<h1>{collectionName || $t('collection.unknownName')}</h1>
+			</div>
+			<p class="collection-subtitle">
+				{collection?.description || $t('collection.defaultSubtitle')}
+			</p>
+			<div class="collection-meta-row">
+				<span>{$t('collection.metaDocuments', { count: documentCount })}</span>
+				<span class={`status-badge status-badge--${statusTone}`}>{statusLabel}</span>
+				<span>{$t('collection.metaUpdated', { time: formatDate(updatedAt) })}</span>
+			</div>
+		</div>
+		<div class="collection-actions" aria-label={$t('collection.actionsLabel')}>
+			<a class="btn btn--ghost" href={resolve('/')}>{$t('collection.backToCollections')}</a>
+			<button
+				class="btn btn--danger"
+				type="button"
+				disabled={deleteLoading}
+				on:click={removeCurrentCollection}
+			>
+				{deleteLoading ? $t('collection.deleting') : $t('collection.delete')}
+			</button>
+		</div>
+	</section>
+{/if}
 
 {#if deleteError}
 	<div class="status status--error" role="alert">{deleteError}</div>
 {/if}
 
-<nav class="collection-tabs" aria-label={$t('collection.tabsLabel')}>
+<nav
+	class="collection-tabs"
+	class:collection-tabs--compact={isFindingRoute}
+	aria-label={$t('collection.tabsLabel')}
+>
 	<a
 		href={resolve('/collections/[id]', { id: collectionId })}
 		class:active={$page.url.pathname === `/collections/${collectionId}`}
@@ -148,3 +165,35 @@
 <div class="collection-panel">
 	<slot />
 </div>
+
+<style>
+	.collection-context-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+		font-size: 13px;
+		line-height: 24px;
+	}
+	.collection-context-bar a {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text-primary);
+		font-weight: 600;
+	}
+	.collection-context-bar span {
+		flex-shrink: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+	.collection-tabs--compact {
+		flex-wrap: nowrap;
+		min-width: 0;
+		overflow-x: auto;
+		border-radius: 6px;
+		box-shadow: none;
+	}
+</style>

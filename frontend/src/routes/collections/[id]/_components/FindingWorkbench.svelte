@@ -1397,6 +1397,18 @@
 		font-size: 13px;
 	}
 	@media (max-width: 820px) {
+		.finding-detail > header {
+			flex-direction: column;
+		}
+		.finding-detail > header > div {
+			min-width: 0;
+			width: 100%;
+		}
+		h2 {
+			font-size: 20px;
+			line-height: 1.4;
+			overflow-wrap: anywhere;
+		}
 		.result-line {
 			grid-template-columns: 1fr;
 			gap: 12px;

@@ -168,6 +168,16 @@ without model metadata are labeled explicitly instead of guessing a model.
 The Finding list returns the complete display shape. Selection reuses that item
 and loads only its paginated Evidence with the published `analysis_version`;
 stale rapid-selection responses are discarded.
+The Finding route uses a compact Collection link and single-row navigation in
+place of the Collection overview header. Published results appear directly
+beneath the Objective question. Evidence
+coverage is a compact, initially collapsed sidebar disclosure with record and
+review-gap counts; expanding it preserves gap reasons, excerpts, status counts,
+and exact Source links. Research scope and export controls are also collapsed
+instead of introducing the results with explanatory panels. On narrow screens,
+multiple Findings use a select control so the full list does not precede the
+selected result. No-Finding outcomes remain explicit, and active or failed
+analysis states remain visible alongside any previously published results.
 The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
 `source_excerpt` once, shows baseline/target/result fields structurally, uses

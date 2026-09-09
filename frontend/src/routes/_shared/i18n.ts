@@ -513,6 +513,21 @@ const translations: Record<Language, Translations> = {
 		},
 		research: {
 			emptyValue: '--',
+			findingReview: {
+				coverage: 'Evidence coverage',
+				coverageCount: '{count} records',
+				gapCount: '{count} to review',
+				coverageTotal: '{count} source records · {results} results',
+				gapsTitle: 'Records needing review',
+				untitledPaper: 'Untitled paper',
+				outcome: 'Outcome: {outcome}',
+				openSource: 'Open source',
+				omittedGaps:
+					'{count} additional records are not shown. Review their sources and Evidence for details.',
+				scope: 'Research scope',
+				export: 'Export results',
+				selectFinding: 'Select Finding'
+			},
 			warnings: 'Warnings',
 			warningPaperCount: '{message} ({count} papers)',
 			warningOccurrenceCount: '{message} ({count} occurrences)',
@@ -3105,6 +3120,20 @@ const translations: Record<Language, Translations> = {
 		},
 		research: {
 			emptyValue: '--',
+			findingReview: {
+				coverage: '证据覆盖',
+				coverageCount: '{count} 条',
+				gapCount: '{count} 条待核查',
+				coverageTotal: '{count} 条原文记录 · {results} 条结果',
+				gapsTitle: '需要研究者判断的记录',
+				untitledPaper: '未命名文献',
+				outcome: '结果轴：{outcome}',
+				openSource: '查看原文',
+				omittedGaps: '还有 {count} 条记录未展开，请从原文和 Evidence 列表继续审阅。',
+				scope: '研究范围',
+				export: '导出研究结果',
+				selectFinding: '选择 Finding'
+			},
 			warnings: '警告',
 			warningPaperCount: '{message}（{count} 篇文献）',
 			warningOccurrenceCount: '{message}（{count} 次）',

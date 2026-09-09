@@ -47,6 +47,10 @@ This node owns the Collection route family.
   Secondary Objective Evidence Map. It selects one published Objective and
   shows deterministic Finding, Evidence, exact Source, paper, and coverage
   relationships without restoring the retired collection-wide Graph contract.
+  A Finding filter restricts the displayed chain to its related records; a
+  separate unlinked-Evidence filter retains inspected facts outside Findings.
+  Objective-level coverage stays visible in either filter. Source return links
+  retain the Objective and Finding selection.
 - `collections/[id]/documents/*`
   Parsed-paper reading and exact Source verification. Papers can be selected
   across list pages, and up to 12 stable Source blocks can be selected for a

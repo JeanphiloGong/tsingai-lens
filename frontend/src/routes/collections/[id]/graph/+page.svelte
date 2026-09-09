@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
 	import { t } from '../../../_shared/i18n';
@@ -13,6 +14,8 @@
 
 	let publishedObjectives: ObjectiveSummary[] = [];
 	let selectedObjectiveId = '';
+	let selectedFindingId = '';
+	let unlinkedOnly = false;
 	let evidenceMap: ObjectiveEvidenceMap | null = null;
 	let loading = false;
 	let error = '';
@@ -20,6 +23,8 @@
 	let requestSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
+	$: findings = evidenceMap?.nodes.filter((node) => node.type === 'finding') ?? [];
+	$: if (evidenceMap) restoreSelection($page.url, evidenceMap);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		void loadObjectives();
@@ -30,6 +35,7 @@
 		loading = true;
 		error = '';
 		evidenceMap = null;
+		publishedObjectives = [];
 		try {
 			const result = await fetchCollectionObjectives(collectionId);
 			if (sequence !== requestSequence) return;
@@ -43,7 +49,8 @@
 				? requestedObjectiveId
 				: (publishedObjectives[0]?.objective_id ?? '');
 			if (selectedObjectiveId) {
-				evidenceMap = await fetchObjectiveEvidenceMap(collectionId, selectedObjectiveId);
+				const result = await fetchObjectiveEvidenceMap(collectionId, selectedObjectiveId);
+				if (sequence === requestSequence) evidenceMap = result;
 			}
 		} catch (err) {
 			if (sequence === requestSequence) error = errorMessage(err);
@@ -57,13 +64,51 @@
 		loading = true;
 		error = '';
 		evidenceMap = null;
+		selectedFindingId = '';
+		unlinkedOnly = false;
 		try {
-			evidenceMap = await fetchObjectiveEvidenceMap(collectionId, selectedObjectiveId);
+			await updateSelectionUrl();
+			const result = await fetchObjectiveEvidenceMap(collectionId, selectedObjectiveId);
+			if (sequence === requestSequence) evidenceMap = result;
 		} catch (err) {
 			if (sequence === requestSequence) error = errorMessage(err);
 		} finally {
 			if (sequence === requestSequence) loading = false;
 		}
+	}
+
+	function restoreSelection(url: URL, map: ObjectiveEvidenceMap) {
+		const requested = url.searchParams.get('finding_id') ?? '';
+		const sameObjective =
+			!url.searchParams.get('objective_id') ||
+			url.searchParams.get('objective_id') === map.objective_id;
+		selectedFindingId =
+			sameObjective &&
+			map.nodes.some((node) => node.type === 'finding' && node.finding_id === requested)
+				? requested
+				: '';
+		unlinkedOnly =
+			sameObjective && !selectedFindingId && url.searchParams.get('evidence') === 'unlinked';
+	}
+
+	function selectFinding(id: string, unlinked = false) {
+		selectedFindingId = id;
+		unlinkedOnly = unlinked;
+		void updateSelectionUrl();
+	}
+
+	async function updateSelectionUrl() {
+		const url = new URL($page.url);
+		url.searchParams.set('objective_id', selectedObjectiveId);
+		if (selectedFindingId) url.searchParams.set('finding_id', selectedFindingId);
+		else url.searchParams.delete('finding_id');
+		if (unlinkedOnly) url.searchParams.set('evidence', 'unlinked');
+		else url.searchParams.delete('evidence');
+		await goto(`${resolve('/collections/[id]/graph', { id: collectionId })}${url.search}`, {
+			replaceState: true,
+			noScroll: true,
+			keepFocus: true
+		});
 	}
 </script>
 
@@ -113,7 +158,40 @@
 			</a>
 		</section>
 	{:else if evidenceMap}
-		<EvidenceMapFlow map={evidenceMap} {collectionId} />
+		<div class="finding-filter">
+			<label>
+				<span>{$t('research.evidenceMap.findingFilter')}</span>
+				<select
+					value={selectedFindingId}
+					on:change={(event) => selectFinding(event.currentTarget.value)}
+				>
+					<option value="">{$t('research.evidenceMap.allFindings')}</option>
+					{#each findings as finding, index (finding.id)}
+						<option value={finding.finding_id}
+							>{index + 1}. {finding.statement ?? finding.label}</option
+						>
+					{/each}
+				</select>
+			</label>
+			{#if evidenceMap.coverage.unlinked_evidence_count > 0}
+				<button
+					class="btn btn--ghost btn--small"
+					aria-pressed={unlinkedOnly}
+					on:click={() => selectFinding('', !unlinkedOnly)}
+				>
+					{$t('research.evidenceMap.unlinkedFilter', {
+						count: evidenceMap.coverage.unlinked_evidence_count
+					})}
+				</button>
+			{/if}
+		</div>
+		<EvidenceMapFlow
+			map={evidenceMap}
+			{collectionId}
+			{selectedFindingId}
+			{unlinkedOnly}
+			onSelectFinding={selectFinding}
+		/>
 	{/if}
 </section>
 
@@ -132,6 +210,13 @@
 		gap: 24px;
 		padding-bottom: 16px;
 		border-bottom: 1px solid var(--border-default);
+	}
+
+	.finding-filter {
+		display: flex;
+		align-items: end;
+		flex-wrap: wrap;
+		gap: 12px;
 	}
 
 	h2,

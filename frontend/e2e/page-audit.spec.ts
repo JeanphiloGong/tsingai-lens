@@ -1271,6 +1271,8 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByText('Contradicts')).toBeVisible();
 		await expect(page.getByText('1 failed paper')).toBeVisible();
 		await expect(page.getByText('Paper C extraction gap')).toBeVisible();
+		await expect(page.getByText('Conflict', { exact: true })).toBeVisible();
+		await expect(page.getByText('research.findings.synthesis', { exact: false })).toHaveCount(0);
 
 		const sourceLink = page.getByRole('link', { name: 'Table · table-7' });
 		await expect(sourceLink).toHaveAttribute(

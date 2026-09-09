@@ -580,6 +580,9 @@ const translations: Record<Language, Translations> = {
 				nextPage: 'Next'
 			},
 			evidenceMap: {
+				findingFilter: 'Finding',
+				allFindings: 'All findings',
+				unlinkedFilter: 'Unlinked evidence ({count})',
 				pageTitle: 'Objective evidence map',
 				subtitle:
 					'Trace each published Finding through its evidence and exact Source back to the paper.',
@@ -3227,6 +3230,9 @@ const translations: Record<Language, Translations> = {
 			},
 			evidenceMap: {
 				pageTitle: '研究目标证据关系图',
+				findingFilter: '研究发现',
+				allFindings: '全部结论',
+				unlinkedFilter: '未关联证据（{count}）',
 				subtitle: '从已发布 Finding 沿证据和精确 Source 回溯到原始论文。',
 				objectiveLabel: '已发布研究目标',
 				loading: '正在加载已发布证据关系...',

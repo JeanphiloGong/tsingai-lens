@@ -1511,7 +1511,10 @@ class PaperResearchMapService:
                     attempt=attempt,
                     full_failure_kind=failure_kind,
                 )
-            if len(source_units) > 1:
+            # Splitting is useful only when the provider returned a known
+            # density-shaped structured failure.  A programming or semantic
+            # error must not fan out into repeated calls for every Source.
+            if len(source_units) > 1 and failure_kind is not None:
                 logger.warning(
                     "Paper map batch failed; splitting retry "
                     "collection_id=%s document_id=%s window_id=%s attempt=%s "
@@ -1885,6 +1888,8 @@ class PaperResearchMapService:
             return "empty_response"
         if "no json object" in message:
             return "no_json_object"
+        if "extraction unavailable" in message:
+            return "provider_unavailable"
         return None
 
     @classmethod

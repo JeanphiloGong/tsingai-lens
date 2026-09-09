@@ -35,7 +35,7 @@ class ChatContextBuilder:
         self,
         *,
         max_messages: int = 40,
-        max_chars: int = 32_000,
+        max_chars: int = 128_000,
         max_summary_chars: int | None = None,
     ) -> None:
         if max_messages < 2:

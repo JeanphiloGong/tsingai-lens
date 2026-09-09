@@ -31,6 +31,7 @@ from domain.ports import ChatRepository, SourceArtifactRepository
 
 
 logger = logging.getLogger(__name__)
+_HEARTBEAT_INTERVAL_SECONDS = 15
 
 
 def _now_iso() -> str:
@@ -165,8 +166,11 @@ class ChatSessionService:
             queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
             loop = asyncio.get_running_loop()
             started_at = asyncio.get_running_loop().time()
+            last_progress: dict[str, Any] = {"phase": "waiting", "cycle_index": 0, "elapsed_ms": 0}
 
             def emit_progress(payload: dict[str, Any]) -> None:
+                nonlocal last_progress
+                last_progress = dict(payload)
                 queue.put_nowait({"type": "progress", "progress": payload})
 
             def emit_text_delta(content: str) -> None:
@@ -215,15 +219,16 @@ class ChatSessionService:
             async def heartbeat() -> None:
                 try:
                     while True:
-                        await asyncio.sleep(15)
+                        await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
                         emit_progress({
+                            **last_progress,
                             "phase": "waiting",
-                            "cycle_index": 0,
                             "elapsed_ms": round((loop.time() - started_at) * 1000),
                         })
                 except asyncio.CancelledError:
                     return
 
+            emit_progress(last_progress)
             task = asyncio.create_task(run_turn())
             heartbeat_task = asyncio.create_task(heartbeat())
             self._active_stream_tasks.add(task)

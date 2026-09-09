@@ -39,6 +39,9 @@ export LENS_AGENT_MAX_MODEL_TOKENS=160000
 export LENS_AGENT_NO_PROGRESS_LIMIT=2
 export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
 export LENS_AGENT_MAX_PARALLEL_READS=4
+export LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS=16384
+export LENS_AGENT_MAX_FINALIZATION_SECONDS=300
+export LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS=8192
 export LLM_REQUEST_TIMEOUT_SECONDS=180
 export LLM_MAX_RETRIES=2
 ```
@@ -50,10 +53,11 @@ different Documents prepare concurrently in one backend process. The database
 still admits only one active preparation Pipeline Run for the same Document.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
-`LLM_REASONING_EFFORT` is optional. Set it to a value supported by the model
+`LLM_REASONING_EFFORT` is optional and applies to both Core extraction and Chat,
+including streamed Chat responses. Set it to a value supported by the model
 provider, such as `none`, when a reasoning model must reserve its bounded
-completion budget for structured JSON output. When unset, the provider default
-is used.
+completion budget for structured output. When unset, the provider default is
+used. A Chat request must not silently ignore this operator setting.
 `LLM_MODEL` selects the model used by Core extraction and Research Agent Chat.
 It must match one of the model ids returned by the configured OpenAI-compatible
 endpoint, for example:
@@ -68,22 +72,58 @@ If the provider returns an empty, reasoning-only, or structurally invalid
 streamed response, the runner retries once when no user-visible text was
 received. A second invalid response returns `model_response_invalid`; this is
 distinct from provider connectivity or availability failure.
-The six `LENS_AGENT_*` variables above are optional; the shown values are their
+The nine `LENS_AGENT_*` variables above are optional; the shown values are their
 defaults. Time must be finite and positive; counts must be positive integers.
 Invalid values are logged and use their defaults. These limits protect one
 technical turn and do not measure scientific completeness. A new Source can
-continue beyond six decisions. Repeated identical calls and observations count
-toward the no-progress limit. Only explicitly parallel-safe reads share the
+continue beyond six decisions. A batch with only previously seen observations
+counts once toward the no-progress limit. Rewording a query that returns the
+same successful Source observations is not progress. Different empty queries
+and failures retain their requested scope; changed Source content, versions,
+and pages remain new observations. This is a repetition guard, not a scientific
+completeness judgment. Only explicitly parallel-safe reads share the
 parallel-read allowance; writes always require exact approval.
 
-Elapsed time, executed tools, and provider-reported tokens bound normal work;
-the model-cycle ceiling is an emergency fuse. Providers without usage reports
-remain bounded by time, tools, and cycles. A reached limit permits exactly one
-answer-only finalization, outside the normal resource allowance. Successful
-finalization returns `completed` with a completion reason and scope warnings;
-provider or finalization failures remain technical failures. Structured cycle
-logs contain IDs, counts, usage, and termination reasons, never full arguments,
-paper bodies, credentials, or hidden reasoning.
+Model calls, read/draft calls, and answer-only finalization share the turn
+deadline. Finalization may use up to `LENS_AGENT_MAX_FINALIZATION_SECONDS`, but
+only within the remaining turn time. It never starts after that deadline.
+An awaited model timeout returns `failed` with `provider_timeout`, preserving
+completed observations without issuing a second model request. If a read uses
+the remaining time, its completed peers remain visible and the unavailable
+final answer is reported as `final_answer_unavailable`. Approved writes retain
+their existing completion and exact-approval rules; they are not forcibly
+cancelled mid-mutation. Durable checkpoint I/O can also outlive the model/read
+deadline.
+
+`LENS_AGENT_MAX_MODEL_TOKENS` is an admission threshold for cumulative
+provider-reported input plus output usage, not an exact billing ceiling. Usage
+is known after a response, so the last admitted prompt can cross the threshold.
+An already returned answer is preserved with `resource_budget` and scope
+warnings when the threshold is reached, without an extra rewrite request.
+Normal output is capped at the smaller of the remaining reported-token
+allowance and `LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS`. One answer-only request may
+use its separate `LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS` allowance after
+normal tool/token/cycle work stops, provided time remains. These generated-token
+limits include reasoning tokens. A provider `length` finish reason is a
+truncated response, not a completed answer or executable tool request.
+
+Chat uses cancellable async model I/O and closes response streams on success,
+error, and cancellation. There is no detached synchronous provider thread.
+Closing local I/O does not guarantee immediate remote cancellation or zero
+billing for an in-flight request. Chat disables hidden SDK retries;
+`LLM_MAX_RETRIES` remains applicable to other model clients. The Runner owns
+its one invalid-response retry and records usage from invalid responses when
+available. Missing usage is counted explicitly; time, per-request output,
+tools, and the emergency cycle ceiling still bound execution.
+
+Successful finalization returns `completed` with a completion reason and scope
+warnings; provider or finalization failures remain technical failures.
+Structured cycle logs contain IDs, counts, usage, and termination reasons,
+never full arguments, paper bodies, credentials, or hidden reasoning.
+
+Streaming Chat sends an initial waiting event and a heartbeat every 15 seconds.
+Heartbeats advance elapsed time while retaining the latest cycle and completed
+tool counts. They indicate a live wait, not a new scientific observation.
 
 ## Initialize Or Upgrade The Schema
 
@@ -97,6 +137,20 @@ alembic current --check-heads
 
 For a fresh development database, run the same commands. Historical SQLite or
 JSON data is not imported by startup or by these migrations.
+
+Check the schema revision of an existing replay database before starting a
+real-model run. A missing `document_preparations` table with code at revision
+`20260908_0055` indicates an incomplete upgrade, not unavailable scientific
+evidence. Upgrade a disposable copy of the old database and compare Source,
+Profile, Paper Map, Evidence, and Finding records before using it for replay.
+Do not manually add columns or stamp the revision to bypass a failed migration.
+
+The `0050`-`0055` aggregate migrations preserve existing PostgreSQL references
+using native table alterations. Pre-merge Evidence and Finding child tables
+are authoritative over stale analysis-summary copies. For a database already
+upgraded with an older defective migration, editing that migration will not
+rerun it: compare with a pre-upgrade backup before any recovery. Dropped child
+records cannot safely be reconstructed from an empty summary.
 
 ## Start the Backend
 
@@ -116,12 +170,12 @@ pytest -q
 python3 ../scripts/check_docs_governance.py
 ```
 
-Run the PostgreSQL migration lifecycle test only against a disposable database
-whose name ends in `_test`; the test intentionally downgrades it:
+Run the PostgreSQL migration tests only against a disposable database whose
+name ends in `_test`; their fixtures reset its schema:
 
 ```bash
 export LENS_TEST_DATABASE_URL='postgresql+psycopg://lens:<password>@localhost:5432/lens_test'
-pytest -q tests/integration/persistence/test_migrations.py
+pytest -q tests/integration/persistence/test_migrations.py tests/integration/persistence/test_legacy_aggregate_migrations.py
 LENS_DATABASE_URL="$LENS_TEST_DATABASE_URL" alembic upgrade head
 LENS_DATABASE_URL="$LENS_TEST_DATABASE_URL" alembic current --check-heads
 ```

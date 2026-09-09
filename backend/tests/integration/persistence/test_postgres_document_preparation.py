@@ -26,7 +26,7 @@ from infra.persistence.postgres.models.document_preparation import DocumentPrepa
 from infra.persistence.postgres.pipeline_run_repository import (
     PostgresPipelineRunRepository,
 )
-from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
+from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID, _source
 
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
@@ -98,6 +98,42 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
     assert stored_map.paper_map_payload["map_version"] == revised_map.map_version
     assert stored_map.paper_map_payload["generated_at"] is not None
     assert stored_map.paper_map_payload["document_id"] == revised_map.document_id
+
+
+async def test_profile_replacement_does_not_relabel_current_source(source_repository) -> None:
+    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    source = _source("doc_a", title="Current source")
+    await source_repository.replace_document(COLLECTION_ID, source)
+    async with source_repository.session_factory() as session:
+        row = await session.get(DocumentPreparationRow, "doc_a")
+        current_fingerprint = row.source_fingerprint
+    stale_profile = replace(_profile("doc_a", "Previous profile"), source_fingerprint="old-source")
+    await profiles.replace(COLLECTION_ID, stale_profile)
+    collection_repository = PostgresCollectionRepository(source_repository.session_factory)
+    collection = await collection_repository.read_collection(COLLECTION_ID)
+    await collection_repository.update_document(replace(collection.documents[0], status="processing"))
+    async with source_repository.session_factory() as session:
+        row = await session.get(DocumentPreparationRow, "doc_a")
+        assert row.source_fingerprint == current_fingerprint
+        assert row.profile_json["source_fingerprint"] == "old-source"
+    assert await profiles.read(COLLECTION_ID, "doc_a") == stale_profile
+    unknown_profile = _profile("doc_a", "Unversioned profile")
+    await profiles.replace(COLLECTION_ID, unknown_profile)
+    assert await profiles.read(COLLECTION_ID, "doc_a") == unknown_profile
+
+
+async def test_profile_only_preparation_is_not_a_source(source_repository) -> None:
+    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    await profiles.replace(COLLECTION_ID, _profile("doc_a", "Imported profile"))
+    assert await source_repository.read_document(COLLECTION_ID, "doc_a") is None
+    assert await source_repository.read_collection_documents(COLLECTION_ID) == ()
+
+
+async def test_paper_map_requires_a_profile_in_the_shared_row(source_repository) -> None:
+    await source_repository.replace_document(COLLECTION_ID, _source("doc_a", title="Source only"))
+    paper_maps = PostgresPaperMapRepository(source_repository.session_factory)
+    with pytest.raises(FileNotFoundError, match="document profile not found"):
+        await paper_maps.replace(COLLECTION_ID, _paper_map("doc_a"))
 
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(

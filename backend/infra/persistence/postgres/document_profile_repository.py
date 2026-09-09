@@ -37,8 +37,6 @@ class PostgresDocumentProfileRepository:
                 )
                 return
             row.profile_json = _profile_payload(profile)
-            if profile.source_fingerprint is not None:
-                row.source_fingerprint = profile.source_fingerprint
             row.updated_at = datetime.now(timezone.utc)
 
     async def read(
@@ -93,14 +91,7 @@ def _profile_payload(profile: DocumentProfile) -> dict[str, object]:
 def _from_row(row: DocumentPreparationRow) -> DocumentProfile:
     payload = dict(row.profile_json or {})
     payload.setdefault("document_id", row.document_id)
-    if payload.get("source_fingerprint") is None:
-        payload["source_fingerprint"] = row.source_fingerprint
     return DocumentProfile.from_mapping(payload)
-
-
-def _datetime(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 __all__ = ["PostgresDocumentProfileRepository"]

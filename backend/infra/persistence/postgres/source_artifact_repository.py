@@ -129,7 +129,7 @@ class PostgresSourceArtifactRepository:
                     DocumentPreparationRow.document_id.in_(document_ids)
                 )
             rows = tuple(await session.scalars(statement))
-        return tuple(_document_from_row(row) for row in rows)
+        return tuple(_document_from_row(row) for row in rows if row.artifact_json)
 
     async def read_document_tree(
         self,
@@ -259,10 +259,9 @@ class PostgresSourceArtifactRepository:
         self._validate_references(document_id, references)
         async with self.session_factory.begin() as session:
             row = await session.get(DocumentPreparationRow, document_id)
-            if row is None:
+            if row is None or not row.artifact_json:
                 raise FileNotFoundError(f"source document not found: {document_id}")
             artifact = dict(row.artifact_json or {})
-            document = _document_from_artifact(artifact)
             artifact["references"] = _references_payload(references)
             row.artifact_json = artifact
             row.updated_at = datetime.now(timezone.utc)

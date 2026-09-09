@@ -164,29 +164,6 @@ class PostgresCollectionRepository:
             row.status = record.status
             row.size_bytes = record.size_bytes
             row.updated_at = _datetime(record.updated_at or record.created_at)
-            preparation_row = await session.scalar(
-                select(DocumentPreparationRow).where(
-                    DocumentPreparationRow.document_id == record.document_id,
-                )
-            )
-            if preparation_row is not None:
-                if record.parser_version is not None:
-                    preparation_row.parser_version = record.parser_version
-                if record.source_fingerprint is not None:
-                    preparation_row.source_fingerprint = record.source_fingerprint
-                profile_payload = dict(preparation_row.profile_json or {})
-                if record.source_fingerprint is not None:
-                    profile_payload["source_fingerprint"] = record.source_fingerprint
-                if record.document_analysis_version is not None:
-                    profile_payload["profile_version"] = record.document_analysis_version
-                if record.profile_fingerprint is not None:
-                    profile_payload["profile_fingerprint"] = record.profile_fingerprint
-                if profile_payload:
-                    profile_payload["generated_at"] = _iso(
-                        _datetime(record.updated_at or record.created_at)
-                    )
-                    preparation_row.profile_json = profile_payload
-                preparation_row.updated_at = _datetime(record.updated_at or record.created_at)
             return True
 
     async def delete_collection(self, collection_id: str) -> bool:

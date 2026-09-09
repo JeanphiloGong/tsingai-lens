@@ -77,9 +77,9 @@ def _remove_collection_count(bind: sa.Connection) -> None:
         for constraint in check_constraints
         if constraint.get("name") and "paper_count" in str(constraint.get("sqltext"))
     ]
-    with op.batch_alter_table("collections", recreate="always") as batch:
+    with op.batch_alter_table("collections") as batch:
         for constraint_name in count_constraints:
-            batch.drop_constraint(constraint_name, type_="check")
+            batch.drop_constraint(op.f(constraint_name), type_="check")
         batch.drop_column("paper_count")
 
 

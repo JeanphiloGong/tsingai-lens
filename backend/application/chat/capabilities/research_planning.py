@@ -27,8 +27,18 @@ class ProposeResearchPlanArguments(ResearchPlanStructure):
 
     objective_id: str = Field(min_length=1, max_length=240)
     title: str = Field(min_length=1, max_length=400)
-    finding_ids: list[str] = Field(min_length=1, max_length=8)
-    evidence_ids: list[str] = Field(min_length=1, max_length=32)
+    finding_ids: list[str] = Field(
+        min_length=1, max_length=8,
+        description="Exact published Findings whose inspected evidence supports this plan.",
+    )
+    evidence_ids: list[str] = Field(
+        min_length=1, max_length=32,
+        description=(
+            "Use only Evidence returned by inspecting one of the selected finding_ids. "
+            "Evidence from the collection overview may belong to other Findings and "
+            "cannot be attached to this plan without inspecting and selecting its parent."
+        ),
+    )
 
     @field_validator(
         "finding_ids",
@@ -275,7 +285,8 @@ class ProposeResearchPlanCapability:
                 warnings.append("Some selected Findings are not in the current dataset.")
             if missing_evidence_ids:
                 warnings.append(
-                    "Some selected Evidence is not linked to the selected current Findings."
+                    "Some selected Evidence is not linked to the selected current Findings. "
+                    "Correct the selection using available_evidence_ids before proposing again."
                 )
             if rejected_finding_ids:
                 warnings.append("Rejected Findings cannot support a research plan draft.")
@@ -296,6 +307,7 @@ class ProposeResearchPlanCapability:
                     "abstention_reason": "source_basis_not_current",
                     "missing_finding_ids": missing_finding_ids,
                     "missing_evidence_ids": missing_evidence_ids,
+                    "available_evidence_ids": sorted(evidence),
                     "rejected_finding_ids": rejected_finding_ids,
                     "failed_evidence_ids": failed_evidence_ids,
                     "persistence": "transient_chat_result",

@@ -1436,6 +1436,32 @@ def test_semantic_single_source_failure_does_not_trigger_content_splitting():
     ]
 
 
+def test_nonrecoverable_batch_failure_does_not_split_source_units():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("invalid-result-a", "A" * 200, 2, "Results"),
+            _paragraph("invalid-result-b", "B" * 200, 3, "Results"),
+        ]
+    )
+
+    class NonrecoverableBatchExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+            self.payloads.append(payload)
+            raise ValueError("paper research map references unknown Source-unit ids")
+
+    extractor = NonrecoverableBatchExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(skim.source_unit_coverage) == 2
+    assert all(
+        item.status.value == "extraction_failed"
+        for item in skim.source_unit_coverage
+    )
+
+
 @pytest.mark.parametrize(
     ("error", "expected_kind"),
     [

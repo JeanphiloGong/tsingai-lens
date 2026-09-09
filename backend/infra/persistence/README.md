@@ -22,11 +22,11 @@ operation creates a short task-local `AsyncSession`.
 - `PostgresPipelineRunRepository`: observable Collection- or Document-scoped
   execution and nested node telemetry in one row.
 - `PostgresSourceArtifactRepository`: the current Source aggregate for each
-  Document.
+  Document, stored in the Source section of `document_preparations`.
 - `PostgresDocumentProfileRepository`: one current profile per Document,
-  including its optional Paper Map cache.
+  stored in `document_preparations.profile_json` with its own input fingerprint.
 - `PostgresPaperMapRepository`: reads and writes the embedded Paper Map fields
-  on `document_profiles`.
+  on `document_preparations`, after a profile exists.
 - `PostgresObjectiveRepository`: Collection discovery fields, Objective records,
   versioned analyses (including private checkpoints and contributions), Evidence,
   and Findings.
@@ -42,14 +42,19 @@ collections.discovery_*
 research_objectives
   -> objective_analyses
      -> payload.paper_contributions / payload.document_evidence_checkpoints
-     -> objective_evidence
-     -> objective_findings
+     -> payload.evidence_records
+     -> payload.findings
 ```
 
 Discovery and each analysis store exact `document_inputs`, where every item is
 `document_id + preparation_fingerprint`. Retry allocates a new analysis version.
 Only a complete succeeded version advances the published pointer; failure never
 hides the prior published version.
+
+Each preparation producer owns its section. Updating a Profile cannot relabel
+the current Source fingerprint, and Collection status updates cannot rewrite
+artifact provenance. A profile without a known input fingerprint remains
+unversioned; a preparation row without a Source artifact is not a parsed Source.
 
 SQLAlchemy models own storage shape, domain records own scientific invariants,
 and Pydantic models own HTTP payloads. Do not add a generic repository, storage

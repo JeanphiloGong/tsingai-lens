@@ -109,8 +109,6 @@ def _backfill(bind: sa.Connection) -> None:
             }
             if "paper_map_payload" in profile_columns:
                 record["paper_map_payload"] = row.get("paper_map_payload")
-            if row.get("source_fingerprint") is not None:
-                record["source_fingerprint"] = row["source_fingerprint"]
             if row.get("generated_at") is not None:
                 record["updated_at"] = row["generated_at"]
 

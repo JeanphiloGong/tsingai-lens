@@ -62,7 +62,7 @@ def _embed_paper_map_metadata(bind: sa.Connection) -> None:
             .values(paper_map_payload=payload)
         )
 
-    with op.batch_alter_table("document_profiles", recreate="always") as batch:
+    with op.batch_alter_table("document_profiles") as batch:
         for name in metadata_columns:
             if name in columns:
                 batch.drop_column(name)
@@ -89,7 +89,7 @@ def _add_objective_collection_fk(bind: sa.Connection) -> None:
             "cannot add research_objectives collection FK; orphan objective "
             f"{orphan[0]}/{orphan[1]} exists"
         )
-    with op.batch_alter_table("research_objectives", recreate="always") as batch:
+    with op.batch_alter_table("research_objectives") as batch:
         batch.create_foreign_key(
             "fk_research_objectives_collection",
             "collections",

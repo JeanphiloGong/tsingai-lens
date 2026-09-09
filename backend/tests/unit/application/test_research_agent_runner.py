@@ -2432,6 +2432,48 @@ def test_explanation_does_not_enable_research_plan_capabilities() -> None:
     }.intersection(names)
 
 
+def test_generic_method_question_does_not_enable_source_reading() -> None:
+    names = ResearchAgentRunner._capability_names_for_intent(
+        "Please explain this method.",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert not {
+        "browse_collection_papers",
+        "search_sources",
+        "read_source",
+        "inspect_document_sources",
+        "inspect_table",
+    }.intersection(names)
+
+
+def test_paper_method_question_still_enables_source_reading() -> None:
+    names = ResearchAgentRunner._capability_names_for_intent(
+        "Read the paper's methods and results.",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert "read_source" in names
+
+
+def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
+    names = ResearchAgentRunner._capability_names_for_intent(
+        "What is your plan?",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert not {
+        "query_published_findings",
+        "assess_objective_quality",
+        "inspect_research_plans",
+        "propose_research_plan",
+        "create_research_plan",
+    }.intersection(names)
+
+
 def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None:
     names = ResearchAgentRunner._capability_names_for_intent(
         "不要修改旧 Finding，请创建一个新版本。",

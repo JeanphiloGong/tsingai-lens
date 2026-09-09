@@ -2119,6 +2119,9 @@ async def test_agent_starts_research_process_only_after_exact_user_approval() ->
         "objective_discovery_started": False,
         "objective_analysis_started": False,
     }
+    assert completed.tool_results[0].warnings == (
+        "No document scope was supplied; all 2 paper(s) in the collection were queued for preparation.",
+    )
     assert completed.tool_results[0].resource_refs[0].resource_type == (
         "pipeline_run"
     )

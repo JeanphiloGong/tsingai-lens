@@ -6377,10 +6377,10 @@ def test_adaptive_context_stops_when_new_sources_repeat_same_context_without_clo
     )
 
 
-def test_adaptive_context_stops_after_bounded_progress_rounds(
+def test_adaptive_context_stops_after_available_source_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Small context gains cannot turn one confirmed question into a full-paper read."""
+    """Adaptive review can continue until the paper's available Sources are read."""
 
     objective = _research_objective(
         {
@@ -6496,14 +6496,20 @@ def test_adaptive_context_stops_after_bounded_progress_rounds(
             document_trees_by_document_id={},
         )
 
-    assert context_route_calls == 2
-    assert extractor.calls == ["result-strength", "context-1", "context-2"]
+    assert context_route_calls == 4
+    assert extractor.calls == [
+        "result-strength",
+        "context-1",
+        "context-2",
+        "context-3",
+        "context-4",
+    ]
     result = next(draft for draft in drafts if draft.reported_result is not None)
     assert "Scope gap:" in (result.selection_reason or "")
     assert any(
         record["trace_type"] == "objective_context_scope_gap"
-        and record["context_round"] == 2
-        and "bounded" in str(record["reason"]).casefold()
+        and record["context_round"] == 4
+        and "available same-paper source scope" in str(record["reason"]).casefold()
         for record in diagnostics.records
     )
 

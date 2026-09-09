@@ -5165,6 +5165,10 @@ def test_synthesis_recovers_backend_result_set_after_empty_model_response(caplog
     assert findings[0].assertion_strength == "descriptive"
     assert findings[0].context_evidence_ids == ()
     assert findings[0].mechanisms == ()
+    assert any(
+        "failed technically" in warning
+        for warning in findings[0].warnings
+    )
     assert "conservative recovery" in caplog.text
 
 
@@ -5243,6 +5247,10 @@ def test_synthesis_recovers_conservatively_after_unsuccessful_semantic_repair(
     assert findings[0].context_evidence_ids == ()
     assert len(extractor.payloads) == 2
     assert "semantic_repair_attempted=True" in caplog.text
+    assert any(
+        "invalid after repair" in warning
+        for warning in findings[0].warnings
+    )
     recovery_trace = dict(diagnostics.records[-1])
     assert recovery_trace.pop("result_set_id").startswith("result_set_")
     assert recovery_trace == {

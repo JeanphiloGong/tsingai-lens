@@ -681,6 +681,61 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(new Headers(post?.[1]?.headers).get('Accept')).toBe('text/event-stream');
 	});
 
+	it('updates elapsed time during a live wait and removes progress when the answer finishes', async () => {
+		installApi();
+		const composer = await renderReady();
+		const encoder = new TextEncoder();
+		let output!: ReadableStreamDefaultController<Uint8Array>;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				output = controller;
+			}
+		});
+		fetchMock.mockResolvedValueOnce(
+			new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
+		);
+		await composer.fill('Check the heat-treatment evidence');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+		const progress = browserPage.getByTestId('research-progress');
+		try {
+			for (const elapsed of [15000, 30000]) {
+				output.enqueue(
+					encoder.encode(
+						`event: progress\ndata: ${JSON.stringify({
+							phase: 'waiting',
+							cycle_index: 2,
+							executed_tool_count: 5,
+							elapsed_ms: elapsed
+						})}\n\n`
+					)
+				);
+				await expect.element(progress).toHaveTextContent('Waiting for the research model');
+				await expect.element(progress).toHaveTextContent(`${elapsed / 1000}s`);
+			}
+			const turn: ChatTurn = {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				messages: [
+					message(
+						'msg_wait_answer',
+						'assistant',
+						'The evidence needs separate HT and HIP comparisons.'
+					)
+				],
+				pending_approval: null,
+				error_code: null
+			};
+			output.enqueue(encoder.encode(`event: turn\ndata: ${JSON.stringify(turn)}\n\n`));
+		} finally {
+			output.close();
+		}
+		await expect.element(progress).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The evidence needs separate HT and HIP comparisons.'))
+			.toBeInTheDocument();
+	});
+
 	it('preserves a researcher-expanded activity while the next answer streams', async () => {
 		installApi({
 			trajectory: {

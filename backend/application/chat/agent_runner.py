@@ -339,7 +339,6 @@ _PLAN_TERMS = (
     "experimental plan",
     "follow-up experiment",
     "follow up experiment",
-    "plan",
 )
 _PLAN_READ_TERMS = (
     "查看",
@@ -1703,8 +1702,40 @@ class ResearchAgentRunner:
             return _mentions_terms(user_text, terms)
 
         allowed: set[str] = set()
-        paper_intent = mentions(_PAPER_TERMS)
-        source_intent = mentions(_SOURCE_DETAIL_TERMS)
+        # Generic English words such as "method" or "result" also occur in
+        # ordinary technical conversation. They only indicate Source reading
+        # when the request carries a research anchor (or an attached Source).
+        research_anchor = mentions(
+            (
+                "论文",
+                "文献",
+                "collection",
+                "paper",
+                "papers",
+                "摘要",
+                "标题",
+                "article",
+                "literature",
+                "source",
+                "原文",
+                "来源",
+                "表格",
+                "table",
+                "figure",
+                "evidence",
+                "实验",
+                "research",
+            )
+        )
+        generic_source_detail = mentions(
+            ("method", "methods", "result", "results", "read", "inspect", "check")
+        )
+        paper_intent = mentions(_PAPER_TERMS) and (
+            has_source_context or research_anchor
+        )
+        source_intent = mentions(_SOURCE_DETAIL_TERMS) and (
+            has_source_context or research_anchor or not generic_source_detail
+        )
         objective_intent = mentions(_OBJECTIVE_TERMS) or "整理" in user_text
         finding_intent = mentions(_FINDING_TERMS)
         finding_record_intent = mentions(_FINDING_RECORD_TERMS)

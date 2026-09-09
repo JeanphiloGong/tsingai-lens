@@ -354,6 +354,16 @@ class _WriteModel:
         self.turns = deque(
             (
                 ModelTurn(
+                    content="I will read the reviewed table before preparing Evidence.",
+                    tool_calls=(ModelToolCall(
+                        name="inspect_table",
+                        arguments={
+                            "document_id": "doc_ef59d1f3a006",
+                            "table_ref": "tbl_doc_ef59d1f3a006_2_table_2",
+                        },
+                    ),),
+                ),
+                ModelTurn(
                     content="I prepared the source-grounded Evidence for approval.",
                     tool_calls=(ModelToolCall(
                         name="create_evidence_version",
@@ -368,7 +378,9 @@ class _WriteModel:
         messages = context.messages
         assert messages
         assert {item.name for item in tool_specs} == (
-            {"create_evidence_version"} if len(self.turns) == 2 else set()
+            {"inspect_table", "create_evidence_version"}
+            if len(self.turns) in {2, 3}
+            else {"inspect_table"}
         )
         return self.turns.popleft()
 
@@ -434,13 +446,21 @@ async def test_p002_evidence_write_stays_approval_gated() -> None:
     )
     runner = ResearchAgentRunner(
         model=_WriteModel(arguments),
-        capabilities=CapabilityRegistry((capability,)),
+        capabilities=CapabilityRegistry(
+            (
+                capability,
+                InspectTableCapability(
+                    collection_service=_P002CollectionService(),
+                    source_artifact_repository=_P002SourceRepository(),
+                ),
+            )
+        ),
     )
     context = AgentContext("session-p002", "researcher-1", "collection-p002")
     pending = await runner.run_turn(
         context=context,
         previous_messages=(),
-        user_message="Save the reviewed P002 elongation Evidence.",
+        user_message="Read the reviewed P002 table and save the Evidence.",
     )
     assert pending.status.value == "approval_required"
     assert calls == []

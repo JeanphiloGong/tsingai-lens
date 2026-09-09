@@ -184,6 +184,13 @@ remains beside the Source artifact and is copied into the dependent Profile
 result. The Source section is not a scientific conclusion: it is the exact
 material that later Objective analysis may inspect.
 
+The top-level `source_fingerprint` belongs only to the Source producer.
+`profile_json.source_fingerprint` records the Source actually used to generate
+that Profile; the two can differ while a new Source awaits profile regeneration.
+Profile writes and Collection status changes preserve that difference. A row
+containing only a Profile must not be returned as an empty parsed Source, and
+a Source-only row does not yet satisfy the Paper Map's Profile prerequisite.
+
 ### 5. Document Triage and Objective Discovery
 
 The core application uses profiles and maps to decide which papers deserve

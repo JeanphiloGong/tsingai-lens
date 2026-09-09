@@ -229,3 +229,37 @@ def test_complete_batch_is_indivisible_under_message_budget() -> None:
     assert view.messages == (active,)
     assert "paper-2" in view.rollover_summary
     assert ChatContextBuilder(max_messages=4).for_model(messages).messages == messages
+
+
+def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() -> None:
+    user = _user("active", "Compare the evidence gaps and draft a plan: power <= 300 W, at most 4 samples per group.")
+    requests = []
+    results = []
+    for index in range(8):
+        call_id = f"finding-call-{index}"
+        requests.append(ChatToolRequest(call_id, "inspect_published_finding", {
+            "objective_id": "elongation", "finding_id": f"finding-{index}"
+        }, index))
+        results.append(ChatMessage.from_tool_result(
+            message_id=f"result-{index}", session_id="chat-1",
+            result=ChatToolResult(tool_call_id=call_id, status="succeeded", data={
+                "finding": {"finding_id": f"finding-{index}", "statement": "Annealing changes elongation; process conditions limit transferability."},
+                "evidence": [{
+                    "evidence_id": f"evidence-{index}-{page}",
+                    "document_id": "lpbf-tc4",
+                    "source_ref": f"results-{page}",
+                    "source_excerpt": (
+                        "The annealed Ti-6Al-4V specimen showed improved elongation with reduced strength. "
+                        "Specimen orientation and test temperature were held fixed; no independent laser-power effect was measured. "
+                    ) * 4,
+                } for page in range(8)],
+            }), created_at="2026-09-09T00:00:00+00:00",
+        ))
+    call = ChatMessage.assistant_tool_calls(
+        message_id="finding-batch", session_id="chat-1", content="",
+        tool_calls=tuple(requests), created_at="2026-09-09T00:00:00+00:00",
+    )
+    messages = (user, call, *results)
+    view = ChatContextBuilder().for_model(messages)
+    assert view.messages == messages
+    assert not view.rollover_summary

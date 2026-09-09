@@ -32,7 +32,7 @@ class PostgresPaperMapRepository:
                     Document.collection_id == collection_id,
                 )
             )
-            if row is None:
+            if row is None or not row.profile_json:
                 raise FileNotFoundError(
                     f"document profile not found: {collection_id}/{paper_map.document_id}"
                 )

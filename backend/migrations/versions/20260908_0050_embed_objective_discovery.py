@@ -20,7 +20,7 @@ def upgrade() -> None:
         return
     columns = _columns("collections")
     additions = (
-        ("discovery_ready", sa.Column("discovery_ready", sa.Boolean(), nullable=False, server_default=sa.text("0"))),
+        ("discovery_ready", sa.Column("discovery_ready", sa.Boolean(), nullable=False, server_default=sa.false())),
         ("discovery_document_inputs", sa.Column("discovery_document_inputs", sa.JSON(), nullable=False, server_default=sa.text("'[]'"))),
         ("discovery_objective_ids", sa.Column("discovery_objective_ids", sa.JSON(), nullable=False, server_default=sa.text("'[]'"))),
         ("discovery_study_dispositions", sa.Column("discovery_study_dispositions", sa.JSON(), nullable=False, server_default=sa.text("'[]'"))),

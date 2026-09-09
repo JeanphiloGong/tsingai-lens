@@ -53,8 +53,16 @@ def upgrade() -> None:
         key = (str(row["collection_id"]), str(row["objective_id"]), int(row["analysis_version"]))
         payload = dict(row.get("payload") or {})
         values = grouped.get(key, {"evidence_records": [], "findings": []})
-        payload.setdefault("evidence_records", values["evidence_records"])
-        payload.setdefault("findings", values["findings"])
+        # Child tables owned these records before the merge; summary payloads
+        # can contain stale or empty copies from an earlier analysis checkpoint.
+        if evidence is not None:
+            payload["evidence_records"] = values["evidence_records"]
+        else:
+            payload.setdefault("evidence_records", [])
+        if findings is not None:
+            payload["findings"] = values["findings"]
+        else:
+            payload.setdefault("findings", [])
         bind.execute(
             analyses.update()
             .where(
@@ -90,9 +98,9 @@ def _drop_finding_foreign_keys(bind: sa.Connection) -> None:
         ]
         if not names:
             continue
-        with op.batch_alter_table(table_name, recreate="always") as batch:
+        with op.batch_alter_table(table_name) as batch:
             for name in names:
-                batch.drop_constraint(name, type_="foreignkey")
+                batch.drop_constraint(op.f(name), type_="foreignkey")
 
 
 def _tables(bind: sa.Connection) -> set[str]:

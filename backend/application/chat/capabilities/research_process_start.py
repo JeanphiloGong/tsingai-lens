@@ -48,7 +48,7 @@ class StartResearchProcessCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        _arguments: StartResearchProcessArguments,
+        arguments: StartResearchProcessArguments,
     ) -> ChatToolResult:
         collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -67,13 +67,14 @@ class StartResearchProcessCapability:
         available_ids = {
             str(document.get("document_id") or "") for document in documents
         }
-        selected_ids = tuple(
+        requested_ids = tuple(
             dict.fromkeys(
                 str(document_id).strip()
-                for document_id in _arguments.document_ids
+                for document_id in arguments.document_ids
                 if str(document_id).strip()
             )
-        ) or tuple(
+        )
+        selected_ids = requested_ids or tuple(
             str(document.get("document_id") or "") for document in documents
         )
         missing_ids = [
@@ -100,6 +101,7 @@ class StartResearchProcessCapability:
                 )
             )
         runs = tuple(queued_runs)
+        scope_is_collection = not requested_ids
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="queued",
@@ -119,6 +121,12 @@ class StartResearchProcessCapability:
                 )
                 for run in runs
             ),
+            warnings=(
+                f"No document scope was supplied; all {len(selected_ids)} paper(s) "
+                "in the collection were queued for preparation.",
+            )
+            if scope_is_collection
+            else (),
         )
 
 

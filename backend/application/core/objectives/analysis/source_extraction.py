@@ -78,7 +78,6 @@ _OBJECTIVE_CONTEXT_BUNDLE_MAX_CHARS = 40_000
 # entire paper after every partial result. Two rounds are enough for the normal
 # Results -> Methods -> linked-label chain while leaving unresolved scope
 # explicit when the paper requires a broader review.
-_OBJECTIVE_ADAPTIVE_CONTEXT_MAX_ROUNDS = 2
 _TABLE_MATRIX_REPAIR_PROMPT_TOKEN_LIMIT = 12_000
 _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
     "standard deviation",
@@ -2235,6 +2234,27 @@ def extract_and_validate_source_facts(
         # joins newly grounded context without repeating scientific extraction.
         known_routes = list(objective_evidence_routes)
         context_round = 0
+        initial_route_keys = {
+            (route.document_id, route.source_kind, route.source_ref)
+            for route in objective_evidence_routes
+        }
+        available_source_count = sum(
+            len((blocks_by_document_id or {}).get(document_id, ()))
+            + len((tables_by_document_id or {}).get(document_id, ()))
+            + len((figures_by_document_id or {}).get(document_id, ()))
+            for document_id in {
+                route.document_id for route in objective_evidence_routes
+            }
+        )
+        # A paper can be reviewed as far as its concrete Source inventory,
+        # but never beyond it. This replaces an arbitrary round count while
+        # keeping adaptive expansion finite even when a route selector is
+        # imperfect or a provider repeats a candidate.
+        adaptive_source_budget = max(
+            available_source_count - len(initial_route_keys),
+            0,
+        )
+        adaptive_source_count = 0
         while True:
             context_round += 1
             context_state_before = _objective_context_progress_state(
@@ -2253,6 +2273,7 @@ def extract_and_validate_source_facts(
             )
             if adaptive_context_routes:
                 known_routes.extend(adaptive_context_routes)
+                adaptive_source_count += len(adaptive_context_routes)
                 record_analysis_diagnostic(
                     {
                         "trace_type": "objective_context_expansion",
@@ -2308,14 +2329,14 @@ def extract_and_validate_source_facts(
                 break
             if not adaptive_context_routes:
                 break
-            if context_round >= _OBJECTIVE_ADAPTIVE_CONTEXT_MAX_ROUNDS:
+            if adaptive_source_count >= adaptive_source_budget:
                 _record_objective_context_scope_gap(
                     collection_id=collection_id,
                     context_round=context_round,
                     units=units,
                     objectives=objectives,
                     reason=(
-                        "The bounded same-paper review scope was reached "
+                        "The available same-paper Source scope was exhausted "
                         "before all comparison context was source-grounded."
                     ),
                 )

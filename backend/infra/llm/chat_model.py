@@ -39,6 +39,7 @@ class OpenAIChatModel:
             or "gpt-4o-mini"
         ).strip()
         self.request_timeout = _env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0)
+        self.reasoning_effort = os.getenv("LLM_REASONING_EFFORT", "").strip() or None
         if client is not None:
             self.client = client.with_options(max_retries=0)
         else:
@@ -67,6 +68,8 @@ class OpenAIChatModel:
                 {"role": "system", "content": RESEARCH_AGENT_SYSTEM_PROMPT},
             ],
         }
+        if self.reasoning_effort is not None:
+            request["reasoning_effort"] = self.reasoning_effort
         if context.rollover_summary:
             request["messages"].append({"role": "system", "content": (
                 "[DURABLE TRAJECTORY ROLLOVER]\n"

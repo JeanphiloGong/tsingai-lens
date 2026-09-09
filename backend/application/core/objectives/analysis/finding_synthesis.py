@@ -1050,6 +1050,10 @@ class FindingSynthesisService:
                             contributions=contributions,
                             evidence_by_id=evidence_by_id,
                             display_rank=len(findings),
+                            warnings=(
+                                "Finding assertion judgment failed technically; "
+                                "this descriptive result was retained conservatively.",
+                            ),
                         )
                         findings.append(finding)
                         break
@@ -1123,6 +1127,10 @@ class FindingSynthesisService:
                         contributions=contributions,
                         evidence_by_id=evidence_by_id,
                         display_rank=len(findings),
+                        warnings=(
+                            "Finding assertion judgment returned no candidate; "
+                            "this descriptive result was retained conservatively.",
+                        ),
                     )
                     findings.append(finding)
                     break
@@ -1189,6 +1197,10 @@ class FindingSynthesisService:
                         contributions=contributions,
                         evidence_by_id=evidence_by_id,
                         display_rank=len(findings),
+                        warnings=(
+                            "Finding assertion judgment was invalid after repair; "
+                            "this descriptive result was retained conservatively.",
+                        ),
                     )
                 findings.append(finding)
                 break
@@ -3003,6 +3015,7 @@ class FindingSynthesisService:
         contributions: tuple[PaperContribution, ...],
         evidence_by_id: Mapping[str, ObjectiveEvidence],
         display_rank: int,
+        warnings: tuple[str, ...] = (),
     ) -> Finding:
         result_ids = tuple(
             evidence_id
@@ -3209,6 +3222,7 @@ class FindingSynthesisService:
                     "paper_contributions": [
                         item.to_record() for item in paper_bindings
                     ],
+                    "warnings": list(warnings),
                 }
             )
             finding.validate_sources(tuple(evidence_by_id.values()), contributions)

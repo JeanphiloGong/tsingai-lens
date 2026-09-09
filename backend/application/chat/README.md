@@ -31,10 +31,30 @@ approval, and execute only that approved call once. Rejection, provider
 failure, malformed model output, and resource limits remain technical trajectory
 outcomes; they are not scientific conclusions.
 
+Capability selection treats generic words such as "method" or "result" as
+ordinary conversation unless the request also identifies a paper, collection,
+Source, or another explicit research object. An attached canonical Source
+always counts as that context.
+
 If an approved write fails, its continuation explains that failure without
 starting more capability work. A fresh user decision can inspect changed
 Sources or propose a new exact approval; the failed action is not retried
 implicitly.
+
+A plan proposal with unlinked Evidence remains an abstention, not a completed
+draft. The Agent may correct that selection once using the available Evidence
+IDs returned for its selected Findings. Rejected Findings, extraction failures,
+and absent current Findings do not qualify for that correction. If that
+correction has invalid argument structure, one further attempt can address
+the reported field names and error types; argument values are not echoed in
+validation errors. An answer-only response must deliver the requested result
+or explain a concrete evidence gap, rather than announce another inspection.
+
+Research-plan proposals distinguish condition-dependent trends from conflicting
+measurements under comparable conditions. Small-sample uncertainty can leave a
+hypothesis unresolved; the researcher's sample cap is neither a standards
+requirement nor proof of sufficient statistical power. Drafts retain the
+review status of their supporting Findings and unverified feasibility checks.
 
 ## Responsibilities
 
@@ -56,14 +76,20 @@ implicitly.
 - `agent_runner.py`: runs the bounded model, capability, and continuation loop
   and reports `completed`, `approval_required`, or `failed`. Completion records
   why work stopped: a model answer, resource budget, repeated observations, or
-  the emergency cycle ceiling. Technical limits permit one answer-only
-  finalization with scope warnings; a failed finalization remains a failure.
+  the emergency cycle ceiling. One private request path enforces model
+  deadlines and output allowances for both decisions and answer-only
+  finalization. Technical limits permit finalization with scope warnings only
+  while turn time remains; a failed finalization remains a failure.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
-  together. Omitted history contributes deterministic lineage, not paper text
+  together. The default 128,000-character allowance accommodates a batch of
+  eight detailed published Findings and their Evidence for a research-plan
+  decision. Omitted history contributes deterministic lineage, not paper text
   or scientific claims, to a transient rollover summary.
-- `model.py`: defines the provider-neutral model contract and the Research
-  Agent instructions.
+- `model.py`: defines the asynchronous provider-neutral model contract,
+  request timeout/output limits, reported usage (including invalid responses),
+  and the Research Agent instructions. Implementations must propagate
+  cancellation and close in-flight streams without background thread work.
 - `authorization.py`: maps capability risk to automatic execution or exact
   user approval.
 - `capabilities/`: contains the explicit typed capability registry and handlers
@@ -93,6 +119,8 @@ end-to-end scenario that preserves Source traceability.
   contracts, including the approval lifecycle.
 - [`../../docs/architecture/overview.md`](../../docs/architecture/overview.md):
   backend ownership and runtime boundaries.
+- [`../../docs/runbooks/backend-ops.md`](../../docs/runbooks/backend-ops.md):
+  budget settings, cancellation, and finalization limits.
 - [`../../../docs/decisions/rfc-collection-bound-research-agent.md`](../../../docs/decisions/rfc-collection-bound-research-agent.md):
   accepted Research Agent design and real-world scenario mapping.
 - [`../core/README.md`](../core/README.md): scientific Objective, Evidence, and

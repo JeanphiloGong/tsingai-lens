@@ -106,10 +106,30 @@ def _message() -> ChatMessage:
     )
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("effort", [None, "", " none ", "low"])
+async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream, effort):
+    if effort is None:
+        monkeypatch.delenv("LLM_REASONING_EFFORT", raising=False)
+    else:
+        monkeypatch.setenv("LLM_REASONING_EFFORT", effort)
+    client, completions = _client(
+        [_stream_chunk(content="The plan is ready for review.")]
+        if stream else _completion(content="The plan is ready for review.")
+    )
+    model = OpenAIChatModel(client=client, model="test-model")
+    await model.respond(context=ChatModelContext((_message(),)), tool_specs=(),
+                        text_delta_callback=(lambda text: None) if stream else None)
+    if effort and effort.strip():
+        assert completions.calls[0]["reasoning_effort"] == effort.strip()
+    else:
+        assert "reasoning_effort" not in completions.calls[0]
+
+
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v14.0"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v14.3"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT

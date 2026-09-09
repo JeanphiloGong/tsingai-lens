@@ -24,3 +24,13 @@ HTTP and persistence implementations.
 classification. `profile_status=extraction_failed` describes a technical model
 failure; it must remain visible as a retryable warning and must not be treated
 as evidence that the document itself is scientifically uncertain.
+
+Single-paper content and Profile reads query the selected document directly.
+An empty Source collection remains a not-ready response; a missing document in
+a collection with prepared Sources remains not-found. The existence check does
+not load other papers' artifacts.
+
+Classification consumes `SourceDocument` directly and returns `DocumentProfile`.
+Metadata aliases are resolved from the normalized Source metadata; this layer
+does not parse metadata strings or rebuild generic document rows. Text-unit,
+block, title, and filename fallbacks remain part of the reader contract.

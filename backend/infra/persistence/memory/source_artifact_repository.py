@@ -49,6 +49,9 @@ class MemorySourceArtifactRepository:
             if owner_collection_id == collection_id
         )
 
+    async def has_documents(self, collection_id: str) -> bool:
+        return any(owner == collection_id for owner, _ in self._documents)
+
     async def read_documents(
         self,
         collection_id: str,

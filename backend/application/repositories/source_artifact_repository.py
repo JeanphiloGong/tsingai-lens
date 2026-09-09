@@ -30,6 +30,8 @@ class SourceArtifactRepository(Protocol):
         document_id: str,
     ) -> SourceDocument | None: ...
 
+    async def has_documents(self, collection_id: str) -> bool: ...
+
     async def read_collection_documents(
         self,
         collection_id: str,

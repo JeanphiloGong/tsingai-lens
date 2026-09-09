@@ -91,6 +91,24 @@ class PostgresSourceArtifactRepository:
     ) -> tuple[SourceDocument, ...]:
         return await self._read_documents(collection_id)
 
+    async def has_documents(self, collection_id: str) -> bool:
+        async with self.session_factory() as session:
+            document_id = await session.scalar(
+                select(DocumentPreparationRow.document_id)
+                .join(
+                    DocumentRow,
+                    DocumentRow.document_id == DocumentPreparationRow.document_id,
+                )
+                .where(
+                    DocumentRow.collection_id == collection_id,
+                    DocumentPreparationRow.artifact_json["document"]["document_id"]
+                    .as_string()
+                    .is_not(None),
+                )
+                .limit(1)
+            )
+        return document_id is not None
+
     async def read_documents(
         self,
         collection_id: str,

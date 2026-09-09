@@ -152,8 +152,6 @@ class DocumentPreparationService:
         self,
         collection_id: str,
         document_id: str,
-        *,
-        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Queue or reuse preparation of one collection document."""
 
@@ -174,7 +172,6 @@ class DocumentPreparationService:
                     run["run_id"],
                     collection_id,
                     document_id,
-                    request_id=request_id,
                 )
             )
             self._active_workers.add(background)
@@ -187,10 +184,7 @@ class DocumentPreparationService:
         run_id: str,
         collection_id: str,
         document_id: str,
-        *,
-        request_id: str | None = None,
     ) -> dict[str, Any]:
-        del request_id
         async with self._semaphore:
             document = await self.collection_service.get_document(
                 collection_id,
@@ -240,7 +234,7 @@ class DocumentPreparationService:
                             document_id,
                             references,
                         )
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001
                         warning = "Source reference extraction failed; Source remains available."
                         preparation_warnings.append(warning)
                         logger.warning(

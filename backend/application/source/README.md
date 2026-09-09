@@ -13,9 +13,9 @@ one-Document preparation orchestration.
 - Read prepared Source: `ArtifactInputService`
 
 The preparation input is one stored Document. The output is the current
-`SourceDocument`, its `DocumentProfile`, and a `ready` Document status. Source
-parsing and profile classification may call the model, but Collection and
-Document membership do not. This package owns Pipeline Run progress for this
+`SourceDocument`, its `DocumentProfile`, and a `ready` Document status. PDF
+parsing uses Docling; Profile classification calls the configured LLM. Collection
+and Document membership do not call the LLM. This package owns Pipeline Run progress for this
 flow; it does not form Objectives or create Evidence.
 
 ## Boundary Checklist
@@ -36,7 +36,7 @@ the storage keys, fingerprints, task states, and controller response shapes.
 
 ```text
 upload Document
-  -> status=uploaded
+  -> status=stored
   -> queue one document_preparation Pipeline Run
   -> parse Source
   -> build DocumentProfile
@@ -73,3 +73,31 @@ fingerprint still match.
 
 The parser implementation lives in [`../../infra/source/README.md`](../../infra/source/README.md).
 Scientific Objective analysis lives in [`../core/objectives/README.md`](../core/objectives/README.md).
+
+## Changing This Module
+
+For upload or external import behavior, start with `SourceImportService`.
+For reproduction downloads, start with `SourceArchiveService`. For readiness,
+retry, or stage reuse, start with `DocumentPreparationService`; its fingerprints
+decide which existing artifacts can be reused. Do not put these responsibilities
+back into `CollectionService` or reproduce them in an Agent capability.
+
+The HTTP handler checks the authenticated user's Collection ownership. A
+background preparation task inherits the existing request trace context, even
+after the request returns; it does not accept a separate unused request ID.
+Preparation failure leaves that Document retryable and does not imply a paper
+lacks scientific evidence. Success only makes it eligible for later selected
+Objective work; preparation does not start discovery automatically.
+
+## Tests
+
+From `backend/`, run:
+
+```bash
+.venv/bin/python -m pytest -q tests/unit/services/test_collection_service.py tests/unit/services/test_document_preparation_service.py tests/integration/test_app_layer_api.py
+```
+
+These cases cover upload and adapter import, original-byte archive retrieval,
+partial preparation failure, stage reuse, and HTTP responses. Parser-specific
+tests live under `tests/unit/infra/source/`; fixture and database setup are
+described in [`../../tests/README.md`](../../tests/README.md).

@@ -31,7 +31,6 @@ async def prepare_collection_document(
         run = await request.app.state.document_preparation_service.queue_document_preparation(
             collection_id,
             document_id,
-            request_id=getattr(request.state, "request_id", None),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -37,10 +37,7 @@ class _ImmediateDocumentPreparationService:
         self,
         collection_id: str,
         document_id: str,
-        *,
-        request_id: str | None,
     ) -> dict:
-        del request_id
         document = await self.collection_service.get_document(
             collection_id,
             document_id,

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -17,6 +18,7 @@ from infra.persistence.memory import (
 )
 from application.pipeline import PipelineRunService
 from application.source.reference_extraction_service import SourceReferenceExtractionService
+from utils.logger import bind_request_id, clear_request_id, get_request_id
 
 
 pytestmark = pytest.mark.anyio
@@ -63,6 +65,56 @@ def test_document_preparation_fingerprints_invalidate_only_dependent_stages():
 
 def test_document_preparation_version_covers_only_profile_triage() -> None:
     assert DOCUMENT_ANALYSIS_VERSION == DOCUMENT_PROFILE_PROMPT_VERSION
+
+
+async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(
+    monkeypatch,
+) -> None:
+    document = Document(
+        document_id="doc_trace",
+        original_filename="paper.pdf",
+        stored_filename="paper.pdf",
+        storage_key="col_trace/input/paper.pdf",
+        sha256="a" * 64,
+        media_type="application/pdf",
+        status="stored",
+        size_bytes=100,
+        created_at="2026-09-09T00:00:00+00:00",
+    )
+
+    class CollectionService:
+        async def get_document(self, collection_id, document_id):
+            assert (collection_id, document_id) == ("col_trace", "doc_trace")
+            return document
+
+    service = DocumentPreparationService(
+        collection_service=CollectionService(),
+        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        document_profile_service=object(),
+        max_concurrency=1,
+    )
+    request_finished = asyncio.Event()
+    observed_request_ids = []
+
+    async def run_preparation(run_id, collection_id, document_id):
+        await request_finished.wait()
+        observed_request_ids.append(get_request_id())
+        observed_request_ids.append(await asyncio.to_thread(get_request_id))
+        return {"run_id": run_id, "status": "completed"}
+
+    monkeypatch.setattr(service, "run_document_preparation", run_preparation)
+    token = bind_request_id("req_preparation_trace")
+    try:
+        run = await service.queue_document_preparation("col_trace", "doc_trace")
+        workers = tuple(service._active_workers)
+    finally:
+        clear_request_id(token)
+        request_finished.set()
+
+    await asyncio.gather(*workers)
+    assert run["status"] == "queued"
+    assert observed_request_ids == ["req_preparation_trace", "req_preparation_trace"]
 
 
 async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts() -> None:

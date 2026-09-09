@@ -829,6 +829,7 @@ class ResearchAgentRunner:
         read_documents: set[str] = set()
         exact_sources: set[str] = set()
         failed_documents: set[str] = set()
+        successful_reads: dict[str, list[Mapping[str, Any]]] = {}
         for result in results:
             call = calls_by_id.get(result.tool_call_id)
             name = call.name if call else None
@@ -838,6 +839,10 @@ class ResearchAgentRunner:
                 if document_id and result.error_code not in {"resource_budget", "invalid_tool_batch", "capability_unavailable_for_turn"}:
                     failed_documents.add(document_id)
                 continue
+            if result.status is not ToolResultStatus.SUCCEEDED:
+                continue
+            if name in {"read_source", "inspect_table", "inspect_document_sources"}:
+                successful_reads.setdefault(name, []).append(result.data)
             if name == "browse_collection_papers":
                 paper_total = result.data.get("paper_total")
                 if isinstance(paper_total, int) and paper_total >= 0:
@@ -847,35 +852,9 @@ class ResearchAgentRunner:
                     for item in result.data.get("papers") or ()
                     if isinstance(item, Mapping)
                 )
-            if name == "inspect_document_sources":
-                document = result.data.get("document")
-                document_id = str(
-                    document.get("document_id")
-                    if isinstance(document, Mapping)
-                    else ""
-                ).strip()
-                if document_id:
-                    inspected = {
-                        f"{document_id}:{source_ref}"
-                        for item in result.data.get("sources") or ()
-                        if isinstance(item, Mapping)
-                        and item.get("content_truncated") is False
-                        and item.get("source_digest")
-                        and (source_ref := str(item.get("source_ref") or "").strip())
-                    }
-                    exact_sources.update(inspected)
-                    if inspected:
-                        read_documents.add(document_id)
-            if name in {"read_source", "inspect_table"}:
-                document_id = str(result.data.get("document_id") or "").strip()
-                source_ref = str(
-                    result.data.get("source_ref")
-                    or result.data.get("table_ref")
-                    or ""
-                ).strip()
-                if document_id and source_ref and result.data.get("source_digest"):
-                    exact_sources.add(f"{document_id}:{source_ref}")
-                    read_documents.add(document_id)
+        for document_id, _kind, source_ref, _digest in capability_policy.complete_source_reads(successful_reads):
+            exact_sources.add(f"{document_id}:{source_ref}")
+            read_documents.add(document_id)
 
         def display(values: set[str]) -> str:
             return ", ".join(sorted(value for value in values if value)[:30]) or "none"

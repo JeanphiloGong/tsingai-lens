@@ -85,6 +85,23 @@ authoring authority. Successful navigation restores the exact-read requirement
 for located Sources; an earlier failed reference cannot waive that requirement.
 Source handlers still validate Collection ownership.
 
+Only the latest successful search batch supplies pending reading candidates.
+Each independent query in that batch needs one matching complete Source; its
+matches remain alternatives, not a requirement to read every search hit. A
+previous Methods read cannot satisfy a later search for an unread results
+table. A complete read of the same Source and digest can be reused in the
+active request. The candidate display is bounded, but matching checks all
+returned candidates.
+
+Complete reading includes contiguous `read_source` character pages or intact
+`inspect_table` row windows from offset zero through the canonical length or
+row count. Pages must agree on document, Source kind/reference, digest, and
+length; character offsets and row offsets never mix. Missing pages, oversized
+row previews, other versions, and earlier user requests cannot fill a gap.
+Reading only the final table window is not a complete read. Evidence requests
+must match the digest that was actually read. The final reading ledger uses
+this same check, so a partial read is not reported as a complete Source.
+
 Discovery excludes writes. Explicit write selection, exact argument validation,
 and authenticated approval remain separate. Revising a saved plan additionally
 requires its exact Objective and parent plan ID in this request's successful
@@ -204,6 +221,9 @@ From `backend/`, run:
 ```
 
 Capability tests are under `tests/unit/application/test_chat_research_*.py`.
+`tests/unit/application/test_chat_source_read_policy.py` exercises P002 Methods
+and Table 2 navigation, paginated Evidence drafts, incomplete reads, version
+changes, and the request boundary through the production Source capabilities.
 The real-Source and PostgreSQL research-cycle case is
 `tests/integration/test_deep_path_research_flow.py`; its prerequisites and
 scientific assertions are described in

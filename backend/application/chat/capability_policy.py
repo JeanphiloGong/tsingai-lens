@@ -118,6 +118,7 @@ def validate_batch(
         if not has_successful_exact_source_read(
             successful_results,
             (source_identity,),
+            source_digest=str(call.arguments.get("source_digest") or ""),
         ):
             return (
                 (
@@ -227,10 +228,8 @@ def select_tool_specs(
     # A source search is a navigation step. Once it returns matches, the
     # next scientific action must read one of those exact Sources rather
     # than broadening the search or inspecting arbitrary pages.
-    source_candidates = _source_search_candidates(successful_results)
-    has_exact_source_read = has_successful_exact_source_read(
-        successful_results, source_candidates
-    )
+    source_candidates = _pending_source_search_candidates(successful_results)
+    has_exact_source_read = not source_candidates and has_successful_exact_source_read(successful_results)
     # Recovery applies only until navigation succeeds again. An older failed
     # reference must not waive inspection of newly located Sources.
     last_source_navigation = max(
@@ -478,9 +477,10 @@ def required_tool_before_answer(
             or (successful_results is not None and successful_results.get("search_sources"))
         )
     ):
-        if successful_results is not None and has_successful_exact_source_read(
-            successful_results,
-            _source_search_candidates(successful_results),
+        if (
+            successful_results is not None
+            and not _pending_source_search_candidates(successful_results)
+            and has_successful_exact_source_read(successful_results)
         ):
             return None
         return next((name for name in tool_names if name in source_reader_names), None)
@@ -510,12 +510,15 @@ def required_tool_before_answer(
     return None
 
 
-def _source_search_candidates(
+def _pending_source_search_candidates(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
 ) -> tuple[tuple[str, str, str], ...]:
-    candidates: list[tuple[str, str, str]] = []
-    seen: set[tuple[str, str, str]] = set()
+    # Each query in the latest navigation batch needs one exact read. Search
+    # matches remain alternatives, not a requirement to read every result.
     for result in successful_results.get("search_sources", ()):
+        candidates: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+        inspected = False
         for item in result.get("matches") or ():
             if not isinstance(item, Mapping):
                 continue
@@ -527,42 +530,93 @@ def _source_search_candidates(
             if all(candidate) and candidate not in seen:
                 seen.add(candidate)
                 candidates.append(candidate)
-    return tuple(candidates[:12])
+                inspected = inspected or has_successful_exact_source_read(
+                    successful_results, (candidate,), source_digest=item.get("source_digest"),
+                )
+        if candidates and not inspected:
+            return tuple(candidates)
+    return ()
 
 
 def has_successful_exact_source_read(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
     candidates: tuple[tuple[str, str, str], ...] = (),
+    *,
+    source_digest: str | None = None,
 ) -> bool:
     candidate_set = set(candidates)
+    return any(
+        (not candidate_set or (document_id, kind, ref) in candidate_set)
+        and (source_digest is None or digest == source_digest)
+        for document_id, kind, ref, digest in complete_source_reads(successful_results)
+    )
 
-    def matches(
+
+def complete_source_reads(
+    successful_results: Mapping[str, list[Mapping[str, Any]]],
+) -> set[tuple[str, str, str, str]]:
+    """Collect whole Sources, including same-version text pages or table rows."""
+    completed: set[tuple[str, str, str, str]] = set()
+    pages: dict[tuple[str, str, str, str, str, int], list[tuple[int, int]]] = {}
+
+    def collect(
         item: Mapping[str, Any], *, table: bool = False, parent_document_id: str = "",
-    ) -> bool:
+        paginated: bool = False,
+    ) -> None:
         document_id = str(parent_document_id or item.get("document_id") or "").strip()
         source_ref = str(item.get("source_ref") or item.get("table_ref") or "").strip()
         source_kind = str(item.get("source_kind") or ("table" if table else "")).strip()
         identity = (document_id, source_kind, source_ref)
-        return (
-            bool(document_id and source_ref and item.get("source_digest"))
-            and item.get("content_truncated") is False
-            and (not candidate_set or identity in candidate_set)
-        )
+        digest = str(item.get("source_digest") or "")
+        if not document_id or not source_ref or not digest:
+            return
+        if paginated and "content_offset" in item:
+            offset = item.get("content_offset")
+            total = item.get("canonical_length")
+            content = item.get("content")
+            if (
+                type(offset) is int and type(total) is int and isinstance(content, str)
+                and 0 <= offset <= offset + len(content) <= total
+            ):
+                pages.setdefault((*identity, digest, "characters", total), []).append((offset, offset + len(content)))
+        elif table and item.get("complete_table") is False:
+            offset = item.get("row_offset")
+            total = item.get("data_row_count")
+            count = item.get("returned_row_count")
+            # The handler counts only intact rows. An oversized row preview
+            # has count zero and cannot fill a gap in the reading record.
+            if (
+                type(offset) is int and type(total) is int and type(count) is int
+                and count > 0 and 0 <= offset < offset + count <= total
+            ):
+                pages.setdefault((*identity, digest, "rows", total), []).append((offset, offset + count))
+        elif (
+            item.get("content_truncated") is False
+            and (not table or (item.get("complete_table") is not False and item.get("row_offset", 0) == 0))
+        ):
+            completed.add((*identity, digest))
 
-    if any(matches(item) for item in successful_results.get("read_source", ())):
-        return True
-    if any(matches(item, table=True) for item in successful_results.get("inspect_table", ())):
-        return True
+    for item in successful_results.get("read_source", ()):
+        collect(item, paginated=True)
+    for item in successful_results.get("inspect_table", ()):
+        collect(item, table=True)
     for result in successful_results.get("inspect_document_sources", ()):
         document = result.get("document")
         if not isinstance(document, Mapping):
             continue
-        if any(
-            matches(item, parent_document_id=str(document.get("document_id") or ""))
-            for item in result.get("sources") or () if isinstance(item, Mapping)
-        ):
-            return True
-    return False
+        for item in result.get("sources") or ():
+            if isinstance(item, Mapping):
+                collect(item, parent_document_id=str(document.get("document_id") or ""))
+    for (document_id, source_kind, source_ref, digest, _unit, total), intervals in pages.items():
+        covered = 0
+        for start, end in sorted(intervals):
+            if start > covered:
+                break
+            covered = max(covered, end)
+            if covered == total:
+                completed.add((document_id, source_kind, source_ref, digest))
+                break
+    return completed
 
 
 def _confirmed_objective_ids(
@@ -628,7 +682,7 @@ def stage_instruction(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
 ) -> str | None:
     content: str | None = None
-    source_candidates = _source_search_candidates(successful_results)
+    source_candidates = _pending_source_search_candidates(successful_results)
     if (
         source_candidates
         and tool_names
@@ -641,7 +695,7 @@ def stage_instruction(
             + "\n".join(
                 f"- document_id={document_id}, source_kind={source_kind}, "
                 f"source_ref={source_ref}"
-                for document_id, source_kind, source_ref in source_candidates
+                for document_id, source_kind, source_ref in source_candidates[:12]
             )
         )
     elif tool_names == ("inspect_objective_analysis",):
@@ -706,6 +760,12 @@ def _successful_results_by_name(
         for message in messages
         for request in message.tool_calls
     }
+    batches_by_call_id = {
+        request.tool_call_id: message.message_id
+        for message in messages
+        for request in message.tool_calls
+    }
+    latest_search_batch = None
     results: dict[str, list[Mapping[str, Any]]] = {}
     for message in messages:
         if (
@@ -717,6 +777,13 @@ def _successful_results_by_name(
             continue
         name = names_by_call_id.get(message.tool_call_id)
         if name:
+            if name == "search_sources":
+                batch = batches_by_call_id[message.tool_call_id]
+                if batch != latest_search_batch:
+                    # New successful navigation replaces the previous query's
+                    # candidates; retain all independent searches in this batch.
+                    results[name] = []
+                    latest_search_batch = batch
             results.setdefault(name, []).append(message.tool_result.data)
     return results
 
@@ -724,7 +791,7 @@ def _successful_results_by_name(
 def active_successful_results_by_name(
     messages: list[ChatMessage],
 ) -> dict[str, list[Mapping[str, Any]]]:
-    """Return successful reads belonging to the latest user request."""
+    """Return this request's reads, with searches scoped to their latest batch."""
     last_user_index = max(
         (
             index

@@ -41,11 +41,25 @@ function readDetailCode(detail: unknown) {
 }
 
 export function errorMessage(error: unknown) {
+	if (error instanceof ApiError && error.status === 413) {
+		const detail = getApiErrorDetail(error);
+		if (typeof detail === 'string' && detail.includes('uploaded file exceeds')) {
+			return translateKey(get(language), 'error.uploadTooLarge');
+		}
+	}
 	const detailCode = getApiErrorCode(error);
 	if (detailCode) {
 		const key = ERROR_CODE_TRANSLATIONS[detailCode as keyof typeof ERROR_CODE_TRANSLATIONS];
 		if (key) {
 			return translateKey(get(language), key);
+		}
+	}
+	if (error instanceof ApiError) {
+		const detail = getApiErrorDetail(error);
+		if (typeof detail === 'string' && detail.trim()) return detail;
+		if (detail && typeof detail === 'object' && 'message' in detail) {
+			const message = (detail as { message?: unknown }).message;
+			if (typeof message === 'string' && message.trim()) return message;
 		}
 	}
 

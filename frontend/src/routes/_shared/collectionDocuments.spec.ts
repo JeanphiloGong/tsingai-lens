@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestJson } from './api';
-import { listCollectionDocuments } from './collectionDocuments';
+import { listCollectionDocuments, uploadCollectionDocuments } from './collectionDocuments';
 
-vi.mock('./api', () => ({ requestJson: vi.fn() }));
+vi.mock('./api', async (importActual) => ({
+	...(await importActual<typeof import('./api')>()),
+	requestJson: vi.fn()
+}));
 const request = vi.mocked(requestJson);
 
 describe('collection document API', () => {
@@ -44,5 +47,13 @@ describe('collection document API', () => {
 			profile_fingerprint: 'profile-fingerprint-doc-1',
 			preparation_fingerprint: 'fingerprint-doc-1'
 		});
+	});
+
+	it('identifies the file when one upload in a batch fails', async () => {
+		request.mockRejectedValueOnce(new Error('Upload failed.'));
+
+		await expect(
+			uploadCollectionDocuments('col_1', [new File(['pdf'], 'damaged.pdf')])
+		).rejects.toThrow('damaged.pdf: Upload failed.');
 	});
 });

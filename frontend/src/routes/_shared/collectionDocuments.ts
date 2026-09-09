@@ -1,4 +1,4 @@
-import { getApiErrorDetail, requestJson } from './api';
+import { errorMessage, getApiErrorDetail, requestJson } from './api';
 
 export type CollectionDocument = {
 	document_id: string;
@@ -94,7 +94,11 @@ export function isDuplicateCollectionDocumentError(error: unknown) {
 export async function uploadCollectionDocuments(collectionId: string, files: File[]) {
 	const items: CollectionDocument[] = [];
 	for (const file of files) {
-		items.push(await uploadCollectionDocument(collectionId, file));
+		try {
+			items.push(await uploadCollectionDocument(collectionId, file));
+		} catch (error) {
+			throw new Error(`${file.name}: ${errorMessage(error)}`, { cause: error });
+		}
 	}
 
 	return { count: items.length, items } satisfies CollectionDocumentsResponse;

@@ -2580,7 +2580,8 @@ const translations: Record<Language, Translations> = {
 			collectionNotFound: 'This collection does not exist.',
 			graphNotReady:
 				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
-			communityNotFound: 'The requested community filter could not be found for this collection.'
+			communityNotFound: 'The requested community filter could not be found for this collection.',
+			uploadTooLarge: 'This file is larger than the 256 MiB upload limit.'
 		}
 	},
 	zh: {
@@ -5040,7 +5041,8 @@ const translations: Record<Language, Translations> = {
 			unexpected: '发生未知错误。',
 			collectionNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
-			communityNotFound: '当前集合中找不到指定的社区过滤条件。'
+			communityNotFound: '当前集合中找不到指定的社区过滤条件。',
+			uploadTooLarge: '文件超过 256 MiB 上传限制。'
 		}
 	}
 };

@@ -25,6 +25,18 @@ describe('api shared error handling', () => {
 		}
 	);
 
+	it.each([
+		['en', 'This file is larger than the 256 MiB upload limit.'],
+		['zh', '文件超过 256 MiB 上传限制。']
+	] as const)('formats oversized uploads for %s', (lang, expected) => {
+		language.set(lang);
+		const error = new ApiError(413, 'Request Entity Too Large', {
+			detail: 'uploaded file exceeds the 256 MiB limit'
+		});
+
+		expect(errorMessage(error)).toBe(expected);
+	});
+
 	it('redirects to login when an authenticated request loses its session', async () => {
 		const replace = vi.fn();
 		vi.stubGlobal('window', {

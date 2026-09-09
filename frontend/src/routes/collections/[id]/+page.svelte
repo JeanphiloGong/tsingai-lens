@@ -352,6 +352,7 @@
 				bind:this={fileInput}
 				type="file"
 				multiple
+				accept="application/pdf,.pdf"
 				aria-label={$t('overview.actions.uploadDocuments')}
 				on:change={(event) =>
 					(selectedFiles = Array.from((event.currentTarget as HTMLInputElement).files ?? []))}

@@ -154,7 +154,10 @@ keeping Lens-specific research boundaries explicit:
   upload/preparation chain against the original collection. Navigation drops its
   UI updates and stops the remaining batch from starting; it does not move papers
   to the newly selected collection.
-- `MessageTimeline.svelte` owns history rendering and the conversation viewport.
+- `MessageTimeline.svelte` owns history rendering and scroll position. It starts
+  with the latest 20 presentation items and exposes earlier items in batches of
+  20 while preserving the reading position. New turns follow the latest response;
+  scrolling up suspends following until the researcher returns to the bottom.
 - `UserMessage.svelte` and `AssistantMessage.svelte` own role presentation.
   `MessageContent.svelte` owns escaped text formatting and the transient cursor;
   `ResearchProgress.svelte` owns the response-local progress disclosure.
@@ -163,6 +166,8 @@ keeping Lens-specific research boundaries explicit:
   Shared result links and warnings retain one rendering path; the capability
   presentation helpers use the already-associated tool name instead of searching
   the conversation on every render.
+- `_shared/IconButton.svelte` owns icon command sizing, disabled and focus states,
+  and hover/focus labels for the return-to-latest action.
 - `conversationPresentation.ts` converts the durable trajectory into ordered
   message, activity, and artifact items. This keeps grouping and display
   policy out of the transport callbacks. Streamed text is separate from the

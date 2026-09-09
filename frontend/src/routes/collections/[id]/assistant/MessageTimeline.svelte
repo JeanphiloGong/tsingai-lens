@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onMount, tick } from 'svelte';
+	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import { buildChatPresentation } from './conversationPresentation';
 	import type { ChatMessage, ChatToolCall, ChatProgress } from '../../../_shared/chatSessions';
@@ -8,6 +10,7 @@
 	import ResearchArtifact from './ResearchArtifact.svelte';
 	import ApprovalPanel from './ApprovalPanel.svelte';
 	export let messages: ChatMessage[] = [];
+	export let sessionId = '';
 	export let streamingText = '';
 	export let pendingApproval: ChatToolCall | null = null;
 	export let progress: ChatProgress | null = null;
@@ -25,6 +28,84 @@
 		'researchAgent.suggestions.objectives'
 	];
 	$: conversationItems = buildChatPresentation(messages, pendingApproval?.tool_call_id ?? null);
+	let scrollElement: HTMLDivElement;
+	let contentElement: HTMLDivElement;
+	let following = true;
+	let visibleCount = 20;
+	let loadingEarlier = false;
+	let scrollFrame = 0;
+	let observedSessionId = '';
+	let wasSending = false;
+	let previousItemCount = 0;
+	let mounted = false;
+	let visibleItems: ReturnType<typeof buildChatPresentation> = [];
+	$: followNewTurn(sending);
+	$: {
+		resetSession(sessionId);
+		preserveReadingWindow(conversationItems.length);
+		visibleItems = conversationItems.slice(-visibleCount);
+	}
+
+	function preserveReadingWindow(count: number) {
+		if (!following) visibleCount = Math.max(20, visibleCount + count - previousItemCount);
+		previousItemCount = count;
+	}
+
+	function resetSession(id: string) {
+		if (id === observedSessionId) return;
+		observedSessionId = id;
+		previousItemCount = 0;
+		visibleCount = 20;
+		following = true;
+		scheduleScroll();
+	}
+
+	function followNewTurn(active: boolean) {
+		if (active && !wasSending) {
+			following = true;
+			scheduleScroll();
+		}
+		wasSending = active;
+	}
+
+	function scheduleScroll() {
+		if (!mounted || scrollFrame) return;
+		scrollFrame = requestAnimationFrame(() => {
+			scrollFrame = 0;
+			if (following && scrollElement) scrollElement.scrollTop = scrollElement.scrollHeight;
+		});
+	}
+
+	async function loadEarlier() {
+		if (loadingEarlier) return;
+		const owner = sessionId;
+		const previousHeight = scrollElement.scrollHeight;
+		const previousTop = scrollElement.scrollTop;
+		following = false;
+		loadingEarlier = true;
+		visibleCount += 20;
+		await tick();
+		if (owner === sessionId)
+			scrollElement.scrollTop = previousTop + scrollElement.scrollHeight - previousHeight;
+		loadingEarlier = false;
+	}
+
+	function scrollToLatest() {
+		following = true;
+		scheduleScroll();
+	}
+
+	onMount(() => {
+		mounted = true;
+		const observer = new ResizeObserver(scheduleScroll);
+		observer.observe(contentElement);
+		observer.observe(scrollElement);
+		return () => {
+			mounted = false;
+			observer.disconnect();
+			cancelAnimationFrame(scrollFrame);
+		};
+	});
 	function askSuggestion(key: string) {
 		onSend($t(key));
 	}
@@ -33,12 +114,17 @@
 <div class="timeline">
 	<div
 		class="message-scroll"
+		bind:this={scrollElement}
 		role="log"
 		aria-label={$t('researchAgent.chatLabel')}
 		aria-live="polite"
 		aria-busy={loading || sending || deciding}
+		on:scroll={() => {
+			following =
+				scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight < 64;
+		}}
 	>
-		<div class="message-list">
+		<div class="message-list" bind:this={contentElement}>
 			{#if loading}
 				<div class="empty-state" role="status">
 					<h3>{$t('researchAgent.loading')}</h3>
@@ -62,7 +148,15 @@
 					</div>
 				</div>
 			{:else}
-				{#each conversationItems as item (item.id)}
+				{#if conversationItems.length > visibleCount}
+					<button
+						class="earlier-messages"
+						type="button"
+						disabled={loadingEarlier}
+						on:click={loadEarlier}>{$t('researchAgent.earlierMessages')}</button
+					>
+				{/if}
+				{#each visibleItems as item (item.id)}
 					{#if item.kind === 'message'}
 						{#if item.message.role === 'user'}<UserMessage
 								message={item.message}
@@ -85,6 +179,13 @@
 			{/if}
 		</div>
 	</div>
+	{#if !following && messages.length}
+		<div class="jump-to-latest">
+			<IconButton label={$t('researchAgent.latestMessage')} onClick={scrollToLatest}
+				>&darr;</IconButton
+			>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -94,6 +195,31 @@
 		flex: 1;
 		min-height: 0;
 		min-width: 0;
+	}
+	.jump-to-latest {
+		position: absolute;
+		bottom: 12px;
+		left: 50%;
+		transform: translateX(-50%);
+		border: 1px solid var(--border-default);
+		border-radius: 50%;
+		background: var(--surface-card);
+		box-shadow: var(--shadow-sm);
+	}
+	.earlier-messages {
+		display: block;
+		margin: 0 auto 24px;
+		padding: 8px 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.earlier-messages:hover:not(:disabled) {
+		color: var(--brand-primary);
+		border-color: var(--brand-border);
 	}
 	button:disabled {
 		cursor: not-allowed;
@@ -106,6 +232,7 @@
 		overflow-y: auto;
 		padding: 36px 32px 44px;
 		scroll-behavior: auto;
+		overflow-anchor: none;
 	}
 
 	.message-list {

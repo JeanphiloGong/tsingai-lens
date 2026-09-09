@@ -229,7 +229,7 @@ test.describe('page interaction audit', () => {
 
 		await sendAgentMessage(page, 'Create that objective');
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
-		await expect(page.getByLabel('Message')).toBeDisabled();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
 		await page.getByRole('button', { name: 'Reject' }).click();
 		await expect(page.getByText('The proposed write was rejected.')).toBeVisible();
 
@@ -238,7 +238,7 @@ test.describe('page interaction audit', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.reload();
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
-		await expect(page.getByLabel('Message')).toBeDisabled();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
 		expect(await visibleElementsFitViewport(page, '.approval')).toBe(true);
 		await page.getByRole('button', { name: 'Approve and create' }).click();
 
@@ -299,7 +299,7 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/assistant?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { level: 1, name: 'Research Agent' })).toBeVisible();
-		await expect(page.getByLabel('Message')).toBeEnabled();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 		await expect(page.getByRole('heading', { name: 'Processing required' })).toHaveCount(0);
 		expect(consoleErrors).toEqual([]);
 	});
@@ -336,7 +336,7 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/assistant`);
 
 		const composer = page.locator('.composer');
-		const input = page.getByLabel('Message');
+		const input = page.getByRole('textbox', { name: 'Message', exact: true });
 		const sendButton = page.getByRole('button', { name: 'Send' });
 		await expect(composer).toBeVisible();
 		await expect(sendButton).toBeVisible();
@@ -397,6 +397,114 @@ test.describe('page interaction audit', () => {
 		await expectNoHorizontalOverflow(page);
 	});
 
+	for (const width of [1440, 390]) {
+		test(`research agent preserves long conversation reading at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 844 });
+			await page.addInitScript(() => localStorage.setItem('lens.chatSession.col_123', 'chat_1'));
+			const history = Array.from({ length: 60 }, (_, index) =>
+				agentMessage(
+					`history_${index}`,
+					index % 2 ? 'assistant' : 'user',
+					index % 2
+						? `Study ${index}: The reported grain size must be compared under the same heat treatment and measurement conditions.`
+						: `Compare the LPBF process conditions in study ${index}.`
+				)
+			);
+			let finish!: () => void;
+			const pending = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: history, pending_approval: null }));
+				await pending;
+				return route.fulfill(
+					sseTurn({
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						messages: [
+							agentMessage('new_user', 'user', 'Compare the remaining studies'),
+							agentMessage('new_tool_request', 'assistant', '', {
+								tool_calls: [
+									{
+										tool_call_id: 'inspect_1',
+										name: 'get_collection_context',
+										arguments: {},
+										position: 0
+									}
+								]
+							}),
+							agentMessage('new_tool_result', 'tool', '', {
+								tool_call_id: 'inspect_1',
+								tool_result: {
+									tool_call_id: 'inspect_1',
+									status: 'succeeded',
+									data: { collection: { paper_count: 30 } },
+									resource_refs: [],
+									warnings: [],
+									error_code: null,
+									error_message: null
+								}
+							}),
+							agentMessage(
+								'new_answer',
+								'assistant',
+								'The remaining studies require matching heat treatments before comparing grain size.'
+							)
+						],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			});
+			try {
+				await page.goto(`/collections/${collectionId}/assistant`);
+				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+				await expect(page.getByTestId('user-message')).toHaveCount(10);
+				await expect(
+					page.getByText(history[59].content as string, { exact: true })
+				).toBeInViewport();
+				const earlier = page.getByRole('button', { name: 'Earlier messages' });
+				await earlier.scrollIntoViewIfNeeded();
+				const anchor = page.getByText(history[40].content as string, { exact: true });
+				const before = (await anchor.boundingBox())!.y;
+				await earlier.click();
+				await expect(page.getByTestId('user-message')).toHaveCount(20);
+				await expect
+					.poll(async () => Math.abs((await anchor.boundingBox())!.y - before))
+					.toBeLessThan(3);
+				await sendAgentMessage(page, 'Compare the remaining studies');
+				await expect(page.getByTestId('research-progress')).toBeInViewport();
+				const scroll = page.locator('.message-scroll');
+				await scroll.hover();
+				await page.mouse.wheel(0, -100000);
+				await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+				await expect(page.getByRole('button', { name: 'Latest message' })).toBeVisible();
+				const firstVisibleUser = await page.getByTestId('user-message').first().textContent();
+				finish();
+				await expect(page.getByTestId('research-progress')).toHaveCount(0);
+				await expect(page.getByTestId('user-message').first()).toHaveText(firstVisibleUser!);
+				await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+				await page.getByRole('button', { name: 'Latest message' }).click();
+				await expect(
+					page.getByText(
+						'The remaining studies require matching heat treatments before comparing grain size.',
+						{ exact: true }
+					)
+				).toBeInViewport();
+				await expectNoHorizontalOverflow(page);
+				if (screenshotDir)
+					await page.screenshot({
+						path: join(screenshotDir, `research-agent-long-conversation-${width}.png`),
+						fullPage: true
+					});
+			} finally {
+				finish();
+			}
+		});
+	}
+
 	test('anchors live research progress to the assistant response', async ({ page }) => {
 		let completeTurn!: () => void;
 		const turnCompletion = new Promise<void>((resolve) => {
@@ -423,7 +531,7 @@ test.describe('page interaction audit', () => {
 
 		try {
 			await page.goto(`/collections/${collectionId}/assistant`);
-			await expect(page.getByLabel('Message')).toBeEnabled();
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
 			await sendAgentMessage(page, 'Track this');
 			await expect(page.getByTestId('research-progress')).toHaveCount(1);
@@ -813,7 +921,7 @@ function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
 }
 
 async function sendAgentMessage(page: Page, text: string) {
-	await page.getByLabel('Message').fill(text);
+	await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
 	await page.getByRole('button', { name: 'Send' }).click();
 }
 

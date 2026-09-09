@@ -453,6 +453,7 @@
 			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
 		<MessageTimeline
+			sessionId={activeSessionId}
 			{messages}
 			{streamingText}
 			{pendingApproval}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
@@ -1620,11 +1622,22 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     service.finding_synthesis_service = _FindingSynthesisRecorder()
     extraction_calls: list[str] = []
     paper_2_failures_remaining = 1
+    first_inspection_started = Barrier(2)
 
     def extract_document(**payload):
         nonlocal paper_2_failures_remaining
         document_id = payload["objective_inputs"]["documents"][0].document_id
         extraction_calls.append(document_id)
+        payload["progress_callback"](
+            {
+                "phase": "objective_paper_framing_started",
+                "unit": "documents",
+                "current": 1,
+                "total": 1,
+            }
+        )
+        if payload["analysis"].analysis_version == 1:
+            first_inspection_started.wait(timeout=5)
         if document_id == "paper-2" and paper_2_failures_remaining:
             paper_2_failures_remaining -= 1
             raise RuntimeError("provider unavailable")
@@ -1664,6 +1677,24 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         objective_input_service=service.objective_input_service,
         document_profile_service=service.objective_input_service.document_profile_service,
     )
+    progress_updates: list[dict[str, Any]] = []
+    update_progress = service.objective_repository.update_analysis_progress
+
+    async def record_progress(collection_id, objective_id, version, **progress):
+        await asyncio.sleep(0)
+        await update_progress(collection_id, objective_id, version, **progress)
+        if progress["phase"] == "objective_document_evidence_completed":
+            checkpoint = next(
+                item
+                for item in service.objective_repository._document_evidence.values()
+                if item.document_id == progress["current_document_id"]
+            )
+            assert checkpoint.status in {"succeeded", "failed"}
+        progress_updates.append({"analysis_version": version, **progress})
+
+    monkeypatch.setattr(
+        service.objective_repository, "update_analysis_progress", record_progress
+    )
     first_queued = await analysis_service.queue_analysis(
         collection_id,
         objective.objective_id,
@@ -1678,7 +1709,17 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
 
     assert first["analysis"].status == "succeeded"
     assert first["objective"].objective.published_analysis_version == 1
-    assert extraction_calls == ["paper-1", "paper-2"]
+    assert sorted(extraction_calls) == ["paper-1", "paper-2"]
+    assert [
+        update["processed_document_count"]
+        for update in progress_updates
+        if update["phase"] == "objective_paper_framing_started"
+    ] == [0, 0]
+    assert [
+        update["processed_document_count"]
+        for update in progress_updates
+        if update["phase"] == "objective_document_evidence_completed"
+    ] == [1, 2]
     assert [item.analysis_status for item in first["paper_contributions"]] == [
         "analyzed",
         "failed",
@@ -1721,7 +1762,14 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
 
     assert second["analysis"].status == "succeeded"
     assert second["objective"].objective.published_analysis_version == 2
-    assert extraction_calls == ["paper-1", "paper-2", "paper-2"]
+    assert sorted(extraction_calls) == ["paper-1", "paper-2", "paper-2"]
+    assert [
+        update["processed_document_count"]
+        for update in progress_updates
+        if update["phase"] == "objective_document_evidence_completed"
+        and update["analysis_version"] == 2
+    ] == [1, 2]
+    assert all(update["total_document_count"] == 2 for update in progress_updates)
     assert all(
         item.analysis_status == "analyzed"
         for item in second["paper_contributions"]

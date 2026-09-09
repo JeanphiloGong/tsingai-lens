@@ -195,9 +195,25 @@ class ObjectiveEvidenceAnalysisService:
 
         extraction_limit = Semaphore(_OBJECTIVE_DOCUMENT_MAX_CONCURRENCY)
         document_count = len(analysis.document_inputs)
+        completed_document_count = 0
+
+        async def report_document_completed(document_id: str) -> None:
+            nonlocal completed_document_count
+            completed_document_count += 1
+            if progress_callback is not None:
+                await to_thread(
+                    progress_callback,
+                    {
+                        "phase": "objective_document_evidence_completed",
+                        "unit": "documents",
+                        "current": completed_document_count,
+                        "total": document_count,
+                        "active_document_id": document_id,
+                        "message": "Finished inspecting one selected paper.",
+                    },
+                )
 
         async def inspect_document(
-            position: int,
             document_input: PreparedDocumentInput,
         ) -> ObjectiveDocumentEvidenceArtifacts:
             input_fingerprint = self._document_evidence_input_fingerprint(
@@ -213,12 +229,14 @@ class ObjectiveEvidenceAnalysisService:
                 input_fingerprint,
             )
             if checkpoint is not None and checkpoint.status == "succeeded":
-                return self._rebind_document_evidence(
+                artifacts = self._rebind_document_evidence(
                     checkpoint,
                     analysis,
                     objective=active_objective,
                     objective_inputs=objective_inputs,
                 )
+                await report_document_completed(document_input.document_id)
+                return artifacts
 
             running = ObjectiveDocumentEvidence.start(
                 collection_id=collection_id,
@@ -244,7 +262,7 @@ class ObjectiveEvidenceAnalysisService:
                     progress_callback(
                         {
                             **detail,
-                            "current": position,
+                            "current": completed_document_count,
                             "total": document_count,
                             "active_document_id": document_input.document_id,
                         }
@@ -295,20 +313,19 @@ class ObjectiveEvidenceAnalysisService:
                     completed_at=datetime.now(timezone.utc),
                 )
             await self.objective_repository.write_document_evidence(checkpoint)
-            return self._rebind_document_evidence(
+            artifacts = self._rebind_document_evidence(
                 checkpoint,
                 analysis,
                 objective=active_objective,
                 objective_inputs=document_objective_inputs,
             )
+            await report_document_completed(document_input.document_id)
+            return artifacts
 
         document_artifacts = await gather(
             *(
-                inspect_document(position, document_input)
-                for position, document_input in enumerate(
-                    analysis.document_inputs,
-                    start=1,
-                )
+                inspect_document(document_input)
+                for document_input in analysis.document_inputs
             )
         )
         contributions = tuple(item.contribution for item in document_artifacts)

@@ -188,6 +188,14 @@ POST objectives/{objective_id}/analysis {document_ids}
 At most one version is queued or running for an Objective. Retry allocates the
 next version. A failed retry never hides an earlier published version.
 
+`processed_document_count` counts selected papers with completed Evidence
+inspections, including reusable successful checkpoints and persisted failures.
+Framing, routing, and individual Source reads do not increment it. A failed
+inspection is finished work, not successful scientific evidence; its failure
+remains visible in the contribution. Counts are unique and progress writes are
+serialized across concurrent papers. Finding synthesis can still be running
+after all selected paper inspections have finished.
+
 `analysis_errors.py` owns user-facing wording for existing failure codes.
 Analysis writes use those messages, and failed-analysis reads also apply them
 to historical records without rewriting storage. HTTP and Agent consumers see

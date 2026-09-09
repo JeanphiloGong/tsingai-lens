@@ -972,8 +972,53 @@ async def test_route_progress_does_not_replace_candidate_paper_count() -> None:
     )
 
     progressed = await repository.read_analysis("collection-1", "objective-1", 1)
-    assert progressed.processed_document_count == 2
+    assert progressed.processed_document_count == 0
     assert progressed.total_document_count == 6
+
+
+async def test_concurrent_progress_counts_only_unique_completed_papers() -> None:
+    service, repository, _analyzer = _service(
+        repository=FakeObjectiveRepository(candidate_document_count=4)
+    )
+    await service.queue_analysis(
+        "collection-1", "objective-1", tuple(f"paper-{i}" for i in range(1, 5))
+    )
+    running = await repository.claim_analysis("collection-1", "objective-1", 1)
+    progress = service._build_progress_callback(running)
+
+    await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                progress,
+                {
+                    "phase": "objective_paper_framing_started",
+                    "current": position,
+                    "total": 4,
+                    "unit": "documents",
+                    "active_document_id": f"paper-{position}",
+                },
+            )
+            for position in range(1, 5)
+        )
+    )
+    started = await repository.read_analysis("collection-1", "objective-1", 1)
+    assert started.processed_document_count == 0
+
+    counts = []
+    for document_id in ("paper-4", "paper-1", "paper-4", "paper-2", "paper-3"):
+        await asyncio.to_thread(
+            progress,
+            {
+                "phase": "objective_document_evidence_completed",
+                "unit": "documents",
+                "active_document_id": document_id,
+            },
+        )
+        updated = await repository.read_analysis("collection-1", "objective-1", 1)
+        counts.append(updated.processed_document_count)
+        assert updated.total_document_count == 4
+
+    assert counts == [1, 2, 2, 3, 4]
 
 
 async def test_empty_finding_output_publishes_scientific_abstention() -> None:

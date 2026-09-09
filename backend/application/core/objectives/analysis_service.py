@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from asyncio import (
     CancelledError,
+    Lock,
     Semaphore,
     Task,
     create_task,
@@ -833,61 +834,40 @@ class ObjectiveAnalysisService:
         analysis: ObjectiveAnalysis,
     ) -> Callable[[dict[str, Any]], None]:
         loop = get_running_loop()
-        seen_document_ids: set[str] = set()
-        processed_document_count = analysis.processed_document_count
-        total_document_count = analysis.total_document_count
+        completed_document_ids: set[str] = set()
+        progress_lock = Lock()
 
-        def update(progress: dict[str, Any]) -> None:
-            nonlocal processed_document_count
-            active_document_id = (
-                str(progress.get("active_document_id"))
-                if progress.get("active_document_id")
-                else None
-            )
-            if active_document_id:
-                seen_document_ids.add(active_document_id)
-            if progress.get("unit") in {"documents", "frames"}:
-                current = self._safe_int(progress.get("current"))
-                processed_document_count = max(
-                    processed_document_count,
-                    current or 0,
-                )
-            else:
-                processed_document_count = max(
-                    processed_document_count,
-                    len(seen_document_ids),
-                )
-            processed_document_count = min(
-                processed_document_count,
-                total_document_count,
-            )
-            update_future = run_coroutine_threadsafe(
-                self.objective_repository.update_analysis_progress(
+        async def persist_progress(progress: dict[str, Any]) -> None:
+            # Worker events can overlap; count and persist them in the same order.
+            async with progress_lock:
+                active_document_id = progress.get("active_document_id")
+                if (
+                    progress.get("phase") == "objective_document_evidence_completed"
+                    and active_document_id
+                ):
+                    completed_document_ids.add(active_document_id)
+                await self.objective_repository.update_analysis_progress(
                     analysis.collection_id,
                     analysis.objective_id,
                     analysis.analysis_version,
-                    phase=str(progress.get("phase") or "running"),
-                    processed_document_count=processed_document_count,
-                    total_document_count=total_document_count,
-                    current_document_id=active_document_id,
-                    progress_message=(
-                        str(progress.get("message"))
-                        if progress.get("message")
-                        else None
+                    phase=progress.get("phase") or "running",
+                    processed_document_count=max(
+                        analysis.processed_document_count,
+                        len(completed_document_ids),
                     ),
-                ),
+                    total_document_count=analysis.total_document_count,
+                    current_document_id=active_document_id,
+                    progress_message=progress.get("message"),
+                )
+
+        def update(progress: dict[str, Any]) -> None:
+            update_future = run_coroutine_threadsafe(
+                persist_progress(progress),
                 loop,
             )
             update_future.result()
 
         return update
-
-    @staticmethod
-    def _safe_int(value: Any) -> int | None:
-        try:
-            return int(value) if value is not None else None
-        except (TypeError, ValueError):
-            return None
 
     @staticmethod
     def _error_code(exc: Exception) -> str:

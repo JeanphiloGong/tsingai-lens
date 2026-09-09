@@ -161,7 +161,7 @@ class DocumentPreparationService:
             collection_id,
             document_id,
         )
-        fingerprint = self.fingerprint_for(document)
+        fingerprint = self.preparation_fingerprint_for(document)
         run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
@@ -329,7 +329,7 @@ class DocumentPreparationService:
                 raise
 
     @staticmethod
-    def fingerprint_for(document: Document) -> str:
+    def preparation_fingerprint_for(document: Document) -> str:
         return DocumentPreparationService.fingerprints_for(document)[1]
 
     @staticmethod

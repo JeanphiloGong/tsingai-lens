@@ -637,6 +637,37 @@ class FindingListResponse(BaseModel):
     total: int
 
 
+class FindingSummaryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    analysis_version: int = Field(ge=1)
+    language: Literal["en", "zh"] = "en"
+
+
+class FindingSummaryReferenceResponse(BaseModel):
+    id: str
+    kind: Literal["finding", "evidence"]
+    label: str
+    document_id: str | None = None
+    source_ref: str | None = None
+    source_kind: str | None = None
+    page_numbers: list[int] = Field(default_factory=list)
+    source_excerpt: str | None = None
+
+
+class FindingSummaryResponse(BaseModel):
+    collection_id: str
+    objective_id: str
+    finding_id: str
+    analysis_version: int
+    language: Literal["en", "zh"]
+    text: str
+    citation_ids: list[str]
+    references: list[FindingSummaryReferenceResponse]
+    model: str
+    prompt_version: str
+    generated_at: str
+
+
 class FindingDetailResponse(BaseModel):
     collection_id: str
     objective_id: str

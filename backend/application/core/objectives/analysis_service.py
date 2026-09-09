@@ -8,6 +8,7 @@ from asyncio import (
     create_task,
     get_running_loop,
     run_coroutine_threadsafe,
+    to_thread,
 )
 from collections.abc import Coroutine
 from dataclasses import replace
@@ -22,6 +23,11 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
+from application.core.objectives.finding_summary import (
+    MAX_SUMMARY_EVIDENCE,
+    FindingSummaryUnavailable,
+    summarize_finding_evidence,
+)
 from application.core.objectives.objective_analysis_service import (
     ObjectiveAnalysisArtifacts,
     ObjectiveEvidenceAnalysisService,
@@ -416,6 +422,37 @@ class ObjectiveAnalysisService:
             "analysis_version": version,
             "finding": finding.to_record(),
         }
+
+    async def summarize_finding(
+        self,
+        collection_id: str,
+        objective_id: str,
+        finding_id: str,
+        *,
+        analysis_version: int,
+        language: str,
+    ) -> dict[str, Any]:
+        detail = await self.get_finding(
+            collection_id, objective_id, finding_id, analysis_version=analysis_version
+        )
+        records, total = await self.objective_repository.list_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=0,
+            limit=MAX_SUMMARY_EVIDENCE,
+        )
+        if total > MAX_SUMMARY_EVIDENCE:
+            raise FindingSummaryUnavailable("summary_input_too_large")
+        result = await to_thread(
+            summarize_finding_evidence,
+            finding=detail["finding"],
+            evidence=[item.to_record() for item in records],
+            language=language,
+        )
+        await self._published_version(collection_id, objective_id, analysis_version)
+        return result
 
     async def list_evidence(
         self,

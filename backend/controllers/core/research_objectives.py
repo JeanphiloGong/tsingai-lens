@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from application.repositories.objective_repository import StoredObjective
+from application.core.objectives.finding_summary import FindingSummaryUnavailable
 
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
@@ -13,6 +14,8 @@ from application.core.objectives.objective_analysis_service import (
 
 from controllers.schemas.core.research_objectives import (
     FindingDetailResponse,
+    FindingSummaryRequest,
+    FindingSummaryResponse,
     FindingListResponse,
     DocumentSelectionRequest,
     ObjectiveAnalysisResponse,
@@ -248,6 +251,49 @@ async def get_objective_finding(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return FindingDetailResponse(**payload)
+
+
+@router.post(
+    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary",
+    response_model=FindingSummaryResponse,
+    summary="Generate a cited reading summary of a published Finding",
+)
+async def summarize_objective_finding(
+    collection_id: str,
+    objective_id: str,
+    finding_id: str,
+    body: FindingSummaryRequest,
+    request: Request,
+) -> FindingSummaryResponse:
+    try:
+        payload = await request.app.state.objective_analysis_service.summarize_finding(
+            collection_id,
+            objective_id,
+            finding_id,
+            analysis_version=body.analysis_version,
+            language=body.language,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Published Finding not found."
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "summary_stale_analysis",
+                "message": "The published analysis has changed. Reload before generating a summary.",
+            },
+        ) from exc
+    except FindingSummaryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": str(exc),
+                "message": "The evidence summary is unavailable. Original evidence remains accessible.",
+            },
+        ) from exc
+    return FindingSummaryResponse(**payload)
 
 
 @router.get(

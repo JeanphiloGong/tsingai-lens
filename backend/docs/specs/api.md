@@ -781,6 +781,26 @@ records from which it was produced. `complete` is true when every included paper
 reached a non-technical analysis outcome. A scientifically valid empty result is
 complete; any paper with `analysis_status=failed` makes it false.
 
+An optional reading summary is available through
+`POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary`.
+The authenticated Collection owner supplies `analysis_version` (positive integer)
+and `language` (`en` or `zh`, default `en`), not browser-provided evidence.
+The service reads the published Finding and all its linked Evidence, then asks
+the configured model for one short paragraph. The response contains `text`,
+`citation_ids`, exact Source `references`, scoped identity, language, model,
+prompt version, and generation time. It has no section arrays or record counts.
+The summary is transient: it creates no analysis version and changes no Finding,
+Evidence, or review. Known citation IDs are checked, not the scientific truth of
+every generated sentence. Original records remain authoritative.
+
+Missing Findings return `404`; a changed or absent published version returns
+`409` with `summary_stale_analysis`, including if it changed during generation.
+Unavailable summaries return `503` with a safe `summary_*` reason code. Missing
+linked Evidence or input exceeding 200 records or the 24,000-token prompt budget
+is rejected explicitly, never silently truncated. Summary failure does not fail
+or replace the published analysis. Clients discard responses after changing the
+Collection, Objective, Finding, version, or language.
+
 A Finding contains:
 
 - `finding_id`, statement, one complete `factors` tuple, one `outcome`, and

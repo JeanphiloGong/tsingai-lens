@@ -63,6 +63,7 @@ the scientific engine to discover those dependencies.
 | Map merging, reconciliation, or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
 | One paper's scientific Evidence flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
+| Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.py` | `test_finding_summary.py` |
 
 For a scientific stage, continue to [`analysis/README.md`](analysis/README.md).
 For cross-module verification, use the commands in

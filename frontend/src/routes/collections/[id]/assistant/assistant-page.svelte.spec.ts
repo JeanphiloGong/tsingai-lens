@@ -2212,7 +2212,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await send('Inspect this table and draft evidence');
 
 		await expect.element(browserPage.getByText('Complete Source table')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('P150 | 82 | %')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('cell', { name: 'P150', exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('cell', { name: '82', exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Complete Source content')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('The P150 condition reached 82% elongation.'))

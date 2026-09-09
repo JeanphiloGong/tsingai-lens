@@ -114,6 +114,123 @@ test.describe('page interaction audit', () => {
 		});
 	}
 
+	for (const width of [320, 768, 1024, 1440]) {
+		for (const theme of ['light', 'dark']) {
+			test(`renders research tables and equations at ${width}px in ${theme} theme`, async ({
+				page
+			}) => {
+				await page.setViewportSize({ width, height: 1000 });
+				await page.addInitScript((theme) => {
+					localStorage.setItem('retrieval.theme', theme);
+					localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1');
+				}, theme);
+				const errors: string[] = [];
+				page.on('pageerror', (error) => errors.push(error.message));
+				const prompt =
+					'Compare the reported LPBF 316L tensile results and explain the energy calculation.';
+				const answer = [
+					'## LPBF 316L comparison',
+					'',
+					String.raw`The reported $\sigma_\mathrm{UTS}$ values require comparable material states and test directions.`,
+					'',
+					'| Paper | Material state | Power (W) | Speed (mm/s) | Energy (J/mm3) | UTS (MPa) | Test direction |',
+					'| :--- | :--- | ---: | ---: | ---: | ---: | :--- |',
+					'| Paper A | As built | 200 | 800 | 62.5 | **610** | Vertical |',
+					'| Paper B | Stress relieved | 200 | 1000 | 50.0 | **580** | Horizontal |',
+					'',
+					'### Energy calculation',
+					'',
+					String.raw`With hatch spacing \(h = 0.10\,\mathrm{mm}\) and layer thickness \(t = 0.04\,\mathrm{mm}\):`,
+					'',
+					'$$',
+					String.raw`E_v = \frac{P}{vht} = \frac{200}{800\times0.10\times0.04} = 62.5\,\mathrm{J/mm^3}`,
+					'$$',
+					'',
+					'> Different post-processing and test directions prevent attributing the strength difference to energy density alone.',
+					'',
+					'1. Match material state and test direction.',
+					'2. Verify the reported measurements against the [paper Source](/collections/col_123/documents/doc_1?view=parsed-paper).',
+					'',
+					'```python',
+					'energy_density = power / (scan_speed * hatch_spacing * layer_thickness)',
+					'```'
+				].join('\n');
+				const messages = [
+					agentMessage('md_user', 'user', prompt),
+					agentMessage('md_answer', 'assistant', answer)
+				];
+				let saved = false;
+				await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) => {
+					if (route.request().method() === 'GET')
+						return route.fulfill(
+							json({
+								items: saved ? messages : [],
+								feedback: [],
+								pending_approval: null
+							})
+						);
+					saved = true;
+					const turn = {
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						pending_approval: null,
+						error_code: null
+					};
+					return route.fulfill(sseTurn(turn));
+				});
+				await page.goto('/collections/col_123/assistant');
+				await sendAgentMessage(page, prompt);
+				const reply = page.getByTestId('assistant-message').last();
+				await expect(reply.getByRole('cell', { name: '610', exact: true })).toBeVisible();
+				await expect(reply.locator('math')).toHaveCount(4);
+				await expect(reply.locator('.katex-error')).toHaveCount(0);
+				await expect(reply.locator('ol > li')).toHaveCount(2);
+				await expect(reply.locator('pre code')).toContainText('energy_density = power');
+				await page.evaluate(() => document.fonts.ready);
+				expect(
+					await page.evaluate(() =>
+						[...document.fonts].some(
+							(font) => font.family.startsWith('KaTeX') && font.status === 'loaded'
+						)
+					)
+				).toBe(true);
+				const bounds = await reply.getByTestId('message-content').evaluate((element) => ({
+					width: element.getBoundingClientRect().width,
+					parent: element.parentElement!.getBoundingClientRect().width,
+					document: document.documentElement.scrollWidth,
+					viewport: window.innerWidth
+				}));
+				expect(bounds.width).toBeLessThanOrEqual(bounds.parent + 1);
+				expect(bounds.document).toBeLessThanOrEqual(bounds.viewport + 1);
+				const table = reply.getByRole('region', { name: 'Response table' });
+				if (width <= 768) {
+					const widths = await table.evaluate((element) => ({
+						inner: element.scrollWidth,
+						outer: element.clientWidth
+					}));
+					expect(widths.inner).toBeGreaterThan(widths.outer);
+					await table.focus();
+					await page.keyboard.press('ArrowRight');
+					await expect
+						.poll(() => table.evaluate((element) => element.scrollLeft))
+						.toBeGreaterThan(0);
+				}
+				await page.reload();
+				await expect(reply.getByRole('table')).toBeVisible();
+				await expect(reply.locator('math')).toHaveCount(4);
+				await reply.getByRole('heading', { name: 'LPBF 316L comparison' }).scrollIntoViewIfNeeded();
+				await page.evaluate(() => document.fonts.ready);
+				if (screenshotDir)
+					await page.screenshot({
+						path: join(screenshotDir, `research-markdown-${width}-${theme}.png`)
+					});
+				expect(errors).toEqual([]);
+			});
+		}
+	}
+
 	test('waits for a delayed logout before completing a new sign-in', async ({ page }) => {
 		let finish!: () => void;
 		const completion = new Promise<void>((resolve) => {

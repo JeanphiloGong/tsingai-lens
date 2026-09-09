@@ -171,6 +171,27 @@ title, location, link, quote, and full-Source digest metadata. The browser does
 not establish Source authenticity itself, and a verified context is still not
 Evidence until the Evidence authoring contract is completed.
 
+## Reply Content
+
+Assistant replies use MarkdownIt for paragraphs, headings, ordered and nested
+lists, quotations, links, fenced code, and comparison tables. KaTeX renders
+inline `$...$` and `\(...\)` expressions and display `$$...$$` and `\[...\]`
+equations, including formulas inside table cells. The same renderer formats
+inspected Source tables without changing their values or canonical Source links.
+Rendered prose and tables remain presentation, not newly verified Evidence.
+
+Tables, code blocks, and display equations scroll within the reply on narrow
+screens. KaTeX fonts are bundled locally, with MathML retained for assistive
+technology. Streaming reuses the same renderer: an unfinished display formula
+remains readable text until its delimiter closes, and invalid completed math
+retains its source text instead of breaking the rest of the answer.
+
+Raw HTML is escaped, unsafe Markdown links are rejected, and model-authored
+images remain captions without starting external requests. Inspectable images
+continue to belong to Source artifacts. KaTeX runs with `trust: false`, bounded
+macro expansion and size, and fresh macro definitions for each render. This
+prevents formulas from enabling external resources or affecting later replies.
+
 ## Answer Feedback
 
 Each saved Assistant text answer has Helpful and Not helpful icon toggles
@@ -243,7 +264,7 @@ keeping Lens-specific research boundaries explicit:
   20 while preserving the reading position. New turns follow the latest response;
   scrolling up suspends following until the researcher returns to the bottom.
 - `UserMessage.svelte` and `AssistantMessage.svelte` own role presentation.
-  `MessageContent.svelte` owns escaped text formatting and the transient cursor;
+  `MessageContent.svelte` owns safe Markdown/math formatting and the transient cursor;
   `ResearchProgress.svelte` owns the response-local progress disclosure.
 - `ResearchActivity.svelte`, `ResearchArtifact.svelte`, and `ApprovalPanel.svelte`
   own capability activity, reviewable research outputs, and exact write decisions.

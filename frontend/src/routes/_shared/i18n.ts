@@ -208,6 +208,7 @@ const translations: Record<Language, Translations> = {
 			awaitingResult: 'Awaiting the saved research result',
 			checkingResult: 'Checking the saved research result...',
 			checkResult: 'Check result',
+			responseTable: 'Response table',
 			launcher: {
 				eyebrow: 'Research Agent',
 				title: 'Choose a research workspace',
@@ -2814,6 +2815,7 @@ const translations: Record<Language, Translations> = {
 			awaitingResult: '研究结果尚未确认',
 			checkingResult: '正在确认研究结果...',
 			checkResult: '检查结果',
+			responseTable: '回复表格',
 			launcher: {
 				eyebrow: '研究 Agent',
 				title: '选择研究工作区',

@@ -11,6 +11,7 @@
 	} from './capabilityPresentation';
 	import ResultResources from './ResultResources.svelte';
 	import ResultWarnings from './ResultWarnings.svelte';
+	import MessageContent from './MessageContent.svelte';
 	type ResearchProcessStep = { step_id: string; status: string };
 	export let artifact: ToolActivityOperation;
 	function findingStatement(message: ChatMessage) {
@@ -338,7 +339,7 @@
 		{#if resultTableMarkdown(artifact.resultMessage)}
 			<div class="table-preview">
 				<strong>{$t('researchAgent.capability.tablePreview')}</strong>
-				<pre>{resultTableMarkdown(artifact.resultMessage)}</pre>
+				<MessageContent content={resultTableMarkdown(artifact.resultMessage)} />
 			</div>
 		{/if}
 
@@ -589,8 +590,13 @@
 		font-size: 12px;
 	}
 
-	.plan-preview pre,
-	.table-preview pre {
+	.table-preview :global(.assistant-copy) {
+		margin-top: 8px;
+		max-height: 320px;
+		overflow-y: auto;
+	}
+
+	.plan-preview pre {
 		max-height: 260px;
 		margin: 8px 0 0;
 		padding: 10px;

@@ -85,6 +85,7 @@ POST /api/v1/chat-sessions
 GET  /api/v1/chat-sessions/{session_id}
 GET  /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/messages
+POST /api/v1/chat-sessions/{session_id}/branches
 PUT  /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 ```
@@ -220,6 +221,40 @@ test temperatures and Source links, retries a failed save, refreshes to recover
 the details, changes the rating, and withdraws it. Browser tests cover this
 sequence at 320, 768, 1024, and 1440 pixels; PostgreSQL integration tests cover
 the actual authenticated API, concurrent upserts, cascades, and migration.
+
+## Message Revisions
+
+A researcher comparing LPBF tensile results may revise an earlier question to
+restrict the comparison to specimens tested at the same temperature, or retry
+an answer that failed. The sent user message owns its edit action; the final
+assistant answer owns its regenerate action. A question with no final answer
+also exposes retry beside the user message. Editing supports cancel, Escape,
+Enter to submit, and Shift+Enter for a newline; IME composition never submits.
+
+Both operations create a durable conversation branch before the selected user
+turn. The original question, answers, approvals, and research artifacts remain
+available. Earlier complete turns retain their Source and result references.
+Version arrows beside the question switch between alternatives, including
+after a reload. Later edits form their own version group.
+
+The branch stores its intended question before generation. A lost branch
+creation response can be retried with the same request UUID, and an unsent
+revision remains available after reload. Sending that revision is accepted at
+most once. Its Source contexts are restored and validated by the backend from
+the original saved question. Unrelated composer text, selected papers, and
+pending Source handoffs are not consumed by editing or regeneration.
+
+While loading, generating, recovering, or awaiting approval, revision actions
+are disabled. The backend also serializes turns and branch creation across
+workers. A disconnected browser can poll the persisted trajectory and its
+`running` flag, including when no tool request has been produced yet.
+Completed writes remain historical observations. A newly proposed write always
+requires a fresh exact-argument approval and cannot reuse a historical call.
+
+`ResearchConversation.svelte` owns requests, branch recovery, and version
+selection. `UserMessage.svelte` owns the local edit draft and keyboard/focus
+behavior; `MessageTimeline.svelte` associates each answer with its user turn.
+No second runtime or client-side conversation store is introduced.
 
 ## Presentation Architecture
 

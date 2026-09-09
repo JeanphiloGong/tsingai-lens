@@ -55,6 +55,17 @@ export type ChatSession = {
 	collection_id: string;
 	created_at: string;
 	updated_at: string;
+	root_session_id?: string | null;
+	parent_session_id?: string | null;
+	fork_message_id?: string | null;
+	fork_position?: number | null;
+	fork_content?: string | null;
+};
+
+export type ChatBranchOptions = {
+	message_id: string;
+	session_ids: string[];
+	active_session_id: string;
 };
 
 export type ChatToolCall = {
@@ -100,6 +111,9 @@ export type ChatTrajectory = {
 	items: ChatMessage[];
 	pending_approval: ChatToolCall | null;
 	feedback: ChatMessageFeedback[];
+	branches: ChatBranchOptions[];
+	branch_draft: ChatMessage | null;
+	running: boolean;
 };
 
 export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
@@ -189,6 +203,20 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
 	})) as ChatSession;
 }
 
+export async function branchChatMessage(
+	sessionId: string,
+	messageId: string,
+	requestId: string,
+	message?: string,
+	signal?: AbortSignal
+) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/branches`, {
+		signal,
+		method: 'POST',
+		body: JSON.stringify({ message_id: messageId, request_id: requestId, message })
+	})) as ChatSession;
+}
+
 export async function fetchChatTrajectory(sessionId: string, signal?: AbortSignal) {
 	return (await requestJson(`${chatSessionPath(sessionId)}/messages`, {
 		signal,
@@ -214,7 +242,8 @@ export async function streamChatMessage(
 	onTextDelta: (content: string) => void,
 	sourceContexts: ChatSourceContext[] = [],
 	onProgress?: (progress: ChatProgress) => void,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	branchRevision = false
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		signal,
@@ -226,6 +255,7 @@ export async function streamChatMessage(
 		},
 		body: JSON.stringify({
 			message,
+			...(branchRevision ? { branch_revision: true } : {}),
 			...(sourceContexts.length ? { source_contexts: sourceContexts } : {})
 		})
 	});

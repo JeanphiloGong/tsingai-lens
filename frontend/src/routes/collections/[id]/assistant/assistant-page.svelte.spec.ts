@@ -171,7 +171,7 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: ChatTrajectory;
+	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval'>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -265,7 +265,7 @@ function queuedPreparation(documentId = 'doc_upload_1') {
 
 async function renderReady() {
 	render(Page);
-	const composer = browserPage.getByLabelText('Message');
+	const composer = browserPage.getByLabelText('Message', { exact: true });
 	await expect.element(composer).toBeEnabled();
 	return composer;
 }
@@ -396,14 +396,14 @@ describe('collections/[id]/assistant Research Agent', () => {
 			await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
 			await browserPage.getByRole('button', { name: 'Retry conversation', exact: true }).click();
 			await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
-			await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 			if (mode === 'read failure') {
 				readFails = true;
 				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
 				await expect
 					.element(browserPage.getByText('Recovery connection lost', { exact: true }))
 					.toBeVisible();
-				await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 				readFails = false;
 			}
 			completed = true;
@@ -415,7 +415,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				)
 				.toBeVisible();
 			await expect.element(browserPage.getByTestId('research-recovery')).not.toBeInTheDocument();
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(decisions).toBe(1);
 		}
 	);
@@ -527,7 +527,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					browserPage.getByText('The approved research question was created.', { exact: true })
 				)
 				.toBeInTheDocument();
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
 			expect(decisions).toBe(unavailable ? 2 : 1);
 		}
@@ -755,7 +755,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		);
 		await expect.element(helpful).toHaveAttribute('aria-pressed', 'true');
 		finishRecovery(jsonResponse({ items: [answer], pending_approval: null, feedback: [] }));
-		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		await expect.element(helpful).toHaveAttribute('aria-pressed', 'true');
 	});
 
@@ -805,7 +805,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					status: 'authenticated',
 					user: { user_id: 'researcher_2', email: 'other@example.test' }
 				});
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(signal?.aborted).toBe(true);
 			finish(jsonResponse({ detail: 'Previous feedback failed' }, 503));
 			await new Promise(requestAnimationFrame);
@@ -862,7 +862,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			await expect
 				.element(browserPage.getByText('Original conversation recovered'))
 				.toBeInTheDocument();
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		}
 	);
 
@@ -919,11 +919,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await renderReady();
 		await expect.element(browserPage.getByTestId('user-message')).toHaveTextContent(privateTitle);
 		await logout();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBeNull();
 		await expect.element(browserPage.getByTestId('user-message')).not.toBeInTheDocument();
 		await login('second@example.test', 'test-only');
-		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		await expect.element(browserPage.getByText(privateTitle)).not.toBeInTheDocument();
 		expect(localStorage.getItem('lens.chatSession.researcher_2:col_123')).toBe('chat_2');
 	});
@@ -1055,7 +1055,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				params: { id: 'col_456' },
 				url: new URL('http://localhost/collections/col_456/assistant')
 			});
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			finish(
 				stage === 'creation'
 					? jsonResponse(session)
@@ -1075,7 +1075,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					.session_id
 			).toBe('chat_2');
 			await expect.element(browserPage.getByText('Old collection answer')).not.toBeInTheDocument();
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		}
 	);
 
@@ -1105,8 +1105,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 			});
 			render(Page);
 			if (operation === 'message') {
-				await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
-				await send('Compare grain morphology', browserPage.getByLabelText('Message'));
+				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+				await send(
+					'Compare grain morphology',
+					browserPage.getByLabelText('Message', { exact: true })
+				);
 			} else {
 				await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
 			}
@@ -1117,7 +1120,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				params: { id: 'col_456' },
 				url: new URL('http://localhost/collections/col_456/assistant')
 			});
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(request?.[1]?.signal.aborted).toBe(true);
 			const turn: ChatTurn = {
 				status: 'completed',
@@ -1131,7 +1134,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			await new Promise(requestAnimationFrame);
 			await new Promise(requestAnimationFrame);
 			await expect.element(browserPage.getByText('Old collection answer')).not.toBeInTheDocument();
-			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(localStorage.getItem('lens.chatSession.researcher_1:col_456')).toBe('chat_2');
 		}
 	);
@@ -1167,7 +1170,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			params: { id: 'col_456' },
 			url: new URL('http://localhost/collections/col_456/assistant')
 		});
-		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		finish(jsonResponse(uploadedDocument(file), 201));
 		await vi.waitFor(() =>
 			expect(
@@ -1207,7 +1210,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true })
 			.click();
 		await logout();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		finish(jsonResponse(uploadedDocument(file), 201));
 		await new Promise(requestAnimationFrame);
 		await new Promise(requestAnimationFrame);
@@ -1563,7 +1566,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const composer = await renderReady();
 		await send('First question', composer);
 		await expect.element(browserPage.getByText('First answer')).toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		await send('Follow-up question', composer);
 		await expect.element(browserPage.getByText('First answer')).toBeInTheDocument();
 		expect(
@@ -1820,7 +1823,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 		render(Page);
 		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 
 		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
 		await expect
@@ -2331,7 +2334,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('energy input', { exact: true }))
 			.toBeInTheDocument();
 		expect(document.querySelectorAll('[data-testid="research-activity"]')).toHaveLength(0);
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and create' }))
@@ -2506,7 +2509,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and publish Finding' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
 	it('shows Source-grounded Evidence authoring as a distinct approved action', async () => {
@@ -2662,7 +2665,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and publish analysis' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
 	it('presents evidence abstention without implying that a Finding will be created', async () => {
@@ -3112,7 +3115,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Approval required' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		expect(
 			fetchMock.mock.calls.some(
 				([input, init]) =>

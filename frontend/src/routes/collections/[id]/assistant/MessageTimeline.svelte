@@ -4,13 +4,58 @@
 	import { t } from '../../../_shared/i18n';
 	import { buildChatPresentation } from './conversationPresentation';
 	import type { ChatMessage, ChatToolCall, ChatProgress } from '../../../_shared/chatSessions';
-	import type { ChatFeedbackInput, ChatFeedbackState } from '../../../_shared/chatSessions';
+	import type {
+		ChatFeedbackInput,
+		ChatFeedbackState,
+		ChatBranchOptions
+	} from '../../../_shared/chatSessions';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import ResearchActivity from './ResearchActivity.svelte';
 	import ResearchArtifact from './ResearchArtifact.svelte';
 	import ApprovalPanel from './ApprovalPanel.svelte';
 	export let messages: ChatMessage[] = [];
+	export let branches: ChatBranchOptions[] = [];
+	export let revisionDisabled = false;
+	export let onRevise: (message: ChatMessage, content?: string) => Promise<boolean> = async () =>
+		false;
+	export let onSwitchVersion: (sessionId: string) => void = () => {};
+	export let running = false;
+	$: actionsDisabled =
+		revisionDisabled ||
+		loading ||
+		sending ||
+		deciding ||
+		running ||
+		Boolean(pendingApproval) ||
+		Boolean(recoveringCallId);
+	$: questionsByAnswer = (() => {
+		let question: ChatMessage | undefined;
+		const questions = new Map<string, ChatMessage>();
+		for (const message of messages) {
+			if (message.role === 'user') question = message;
+			else if (message.role === 'assistant' && question)
+				questions.set(message.message_id, question);
+		}
+		return questions;
+	})();
+	$: unansweredQuestions = (() => {
+		const ids = new Set<string>();
+		let questionId = '';
+		for (const message of messages) {
+			if (message.role === 'user') {
+				questionId = message.message_id;
+				ids.add(questionId);
+			} else if (
+				message.role === 'assistant' &&
+				message.content.trim() &&
+				!message.tool_calls.length
+			) {
+				ids.delete(questionId);
+			}
+		}
+		return ids;
+	})();
 	export let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let sessionId = '';
@@ -167,8 +212,17 @@
 					{#if item.kind === 'message'}
 						{#if item.message.role === 'user'}<UserMessage
 								message={item.message}
+								disabled={actionsDisabled}
+								versions={branches.find((branch) => branch.message_id === item.message.message_id)}
+								retryAvailable={unansweredQuestions.has(item.message.message_id)}
+								{onRevise}
+								{onSwitchVersion}
 							/>{:else if item.message.role === 'assistant'}<AssistantMessage
 								message={item.message}
+								disabled={actionsDisabled}
+								onRegenerate={questionsByAnswer.has(item.message.message_id)
+									? () => void onRevise(questionsByAnswer.get(item.message.message_id)!)
+									: undefined}
 								streaming={item.message.message_id.startsWith('local-stream-') && sending}
 								feedbackState={feedbackByMessage[item.message.message_id]}
 								{onFeedback}
@@ -205,6 +259,17 @@
 
 			{#if pendingApproval}
 				<ApprovalPanel call={pendingApproval} {deciding} onDecide={decide} />
+			{/if}
+			{#if running && !sending && !recoveringCallId}
+				<div class="recovery-status" role="status" data-testid="research-recovery">
+					<span>{$t('researchAgent.awaitingResult')}</span>
+					<IconButton
+						label={$t('researchAgent.checkResult')}
+						disabled={recoveryLoading}
+						onClick={onRefreshRecovery}>&#8635;</IconButton
+					>
+				</div>
+				{#if recoveryError}<p class="recovery-error" role="alert">{recoveryError}</p>{/if}
 			{/if}
 		</div>
 	</div>

@@ -37,6 +37,105 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	for (const width of [320, 1440]) {
+		test(`edits and regenerates saved messages with versions at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const state = await mockMessageBranches(page);
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+			await expect(page.getByTestId('user-message')).toContainText(state.question);
+			await composer.fill('Keep this follow-up draft');
+			await page.getByRole('button', { name: 'Edit message', exact: true }).click();
+			const editor = page.getByRole('textbox', { name: 'Edit message', exact: true });
+			await expect(editor).toBeFocused();
+			await editor.fill('Temporary change');
+			await editor.press('Escape');
+			await expect(editor).toHaveCount(0);
+			expect(state.sent).toHaveLength(0);
+			await page.getByRole('button', { name: 'Edit message', exact: true }).click();
+			await editor.fill('Compare only specimens tested at 293 K.');
+			await editor.press('Shift+Enter');
+			await editor.press('End');
+			await editor.press('KeyA');
+			await expect(editor).toHaveValue('Compare only specimens tested at 293 K.\na');
+			await editor.fill('Compare only specimens tested at 293 K.');
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `chat-edit-${width}.png`) });
+			await editor.press('Enter');
+			await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+			await expect(composer).toHaveValue('Keep this follow-up draft');
+			await expect(page.getByLabel('Version 2 of 2', { exact: true })).toBeVisible();
+			expect(state.sent[0]).toMatchObject({
+				message: 'Compare only specimens tested at 293 K.',
+				branch_revision: true,
+				source_contexts: [state.source]
+			});
+			await page.getByRole('button', { name: 'Previous version', exact: true }).click();
+			await expect(page.getByTestId('user-message')).toContainText(state.question);
+			await expect(page.getByTestId('assistant-message')).toContainText('Original comparison');
+			await expect(composer).toHaveValue('Keep this follow-up draft');
+			await page.getByRole('button', { name: 'Next version', exact: true }).click();
+			await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+			await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 2');
+			await expect(page.getByLabel('Version 3 of 3', { exact: true })).toBeVisible();
+			expect(state.sent[1].message).toBe(state.sent[0].message);
+			expect(state.sent[1].source_contexts).toEqual([state.source]);
+			await page.reload();
+			await expect(page.getByLabel('Version 3 of 3', { exact: true })).toBeVisible();
+			await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 2');
+			expect(state.original[0].content).toBe(state.question);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+				true
+			);
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `chat-versions-${width}.png`) });
+			expect(errors).toEqual([]);
+		});
+	}
+
+	test('recovers a failed branch request and retries a question without an answer', async ({
+		page
+	}) => {
+		const state = await mockMessageBranches(page, { unanswered: true, failCreateOnce: true });
+		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+		await expect(page.getByRole('alert')).toBeVisible();
+		expect(state.sent).toHaveLength(0);
+		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+		await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+		expect(state.requestIds[0]).toBe(state.requestIds[1]);
+		expect(state.sent).toHaveLength(1);
+	});
+
+	test('restores an unsent revision after reload with its Source context', async ({ page }) => {
+		const state = await mockMessageBranches(page, { failCreateOnce: true });
+		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+		await expect(page.getByRole('alert')).toBeVisible();
+		await page.reload();
+		await page.getByRole('button', { name: 'Next version', exact: true }).click();
+		await expect(page.getByText('Unsent revision', { exact: true })).toBeVisible();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
+		await page.getByRole('button', { name: 'Send revision', exact: true }).click();
+		await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+		expect(state.sent).toHaveLength(1);
+		expect(state.sent[0].source_contexts).toEqual([state.source]);
+	});
+
+	for (const condition of ['running', 'approval'] as const) {
+		test(`disables saved message changes during ${condition}`, async ({ page }) => {
+			await mockMessageBranches(page, { condition });
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('button', { name: 'Edit message', exact: true })).toBeDisabled();
+			await expect(
+				page.getByRole('button', { name: 'Regenerate response', exact: true })
+			).toBeDisabled();
+		});
+	}
+
 	for (const width of [320, 768, 1024, 1440]) {
 		test(`asks across selected papers in a persistent split workspace at ${width}px`, async ({
 			page
@@ -1642,6 +1741,150 @@ async function expectVisibleInteractionsHaveNames(page: Page) {
 			.map((element) => element.outerHTML.slice(0, 160));
 	});
 	expect(unnamed).toEqual([]);
+}
+
+async function mockMessageBranches(
+	page: Page,
+	options: {
+		unanswered?: boolean;
+		failCreateOnce?: boolean;
+		condition?: 'running' | 'approval';
+	} = {}
+) {
+	const question = 'Compare the tensile strengths reported for these LPBF specimens.';
+	const source = {
+		resource_ref: {
+			resource_type: 'source',
+			resource_id: 'doc_1:methods',
+			href: `/collections/${collectionId}/documents/${documentId}?source_ref=methods`
+		},
+		collection_id: collectionId,
+		document_id: documentId,
+		document_title: 'LPBF tensile study',
+		source_kind: 'text_window',
+		source_ref: 'methods',
+		page: 3,
+		quote: 'The specimens were tensile tested at 293 K.',
+		heading_path: 'Methods',
+		quote_truncated: false
+	};
+	const original = [
+		agentMessage('question', 'user', question, { source_contexts: [source] }),
+		...(options.unanswered ? [] : [agentMessage('answer', 'assistant', 'Original comparison')])
+	];
+	const base = {
+		session_id: sessionId,
+		user_id: 'user_1',
+		collection_id: collectionId,
+		created_at: now(),
+		updated_at: now()
+	};
+	const sessions = new Map<string, Record<string, unknown>>([[sessionId, base]]);
+	const trajectories = new Map<string, ReturnType<typeof agentMessage>[]>([[sessionId, original]]);
+	const requestIds: string[] = [];
+	const requests = new Map<string, string>();
+	const sent: Record<string, unknown>[] = [];
+	await page.addInitScript(() =>
+		localStorage.setItem(
+			'lens.chatSession.user_1:col_123',
+			localStorage.getItem('lens.chatSession.user_1:col_123') || 'chat_1'
+		)
+	);
+	await page.route('**/api/v1/chat-sessions**', async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		const method = route.request().method();
+		const parts = path.split('/');
+		const id = parts[4] || sessionId;
+		if (parts[5] === 'branches') {
+			const body = route.request().postDataJSON();
+			requestIds.push(body.request_id);
+			let branchId = requests.get(body.request_id);
+			if (!branchId) {
+				branchId = `branch_${requests.size + 1}`;
+				const originalMessage = trajectories
+					.get(id)!
+					.find((message) => message.message_id === body.message_id)!;
+				sessions.set(branchId, {
+					...base,
+					session_id: branchId,
+					root_session_id: sessionId,
+					parent_session_id: sessionId,
+					fork_message_id: 'question',
+					fork_position: 0,
+					fork_content: body.message ?? originalMessage.content
+				});
+				trajectories.set(branchId, []);
+				requests.set(body.request_id, branchId);
+			}
+			if (options.failCreateOnce && requestIds.length === 1) return route.abort('failed');
+			return route.fulfill(json(sessions.get(branchId)));
+		}
+		if (parts[5] === 'messages') {
+			if (method === 'POST') {
+				const body = route.request().postDataJSON();
+				sent.push(body);
+				const messages = [
+					agentMessage(`${id}-question`, 'user', body.message, {
+						session_id: id,
+						source_contexts: body.source_contexts ?? []
+					}),
+					agentMessage(`${id}-answer`, 'assistant', `Revised comparison ${sent.length}`, {
+						session_id: id
+					})
+				];
+				trajectories.set(id, messages);
+				return route.fulfill(
+					sseTurn({
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						pending_approval: null,
+						error_code: null,
+						warnings: []
+					} as Parameters<typeof sseTurn>[0])
+				);
+			}
+			const messages = trajectories.get(id)!;
+			const pending =
+				options.condition === 'approval'
+					? {
+							tool_call_id: 'pending',
+							session_id: id,
+							assistant_message_id: 'request',
+							position: 0,
+							name: 'create_objective_candidate',
+							arguments: { question: 'Compare tensile conditions' },
+							arguments_digest: 'a'.repeat(64),
+							risk: 'write',
+							status: 'approval_required'
+						}
+					: null;
+			return route.fulfill(
+				json({
+					items: messages,
+					feedback: [],
+					pending_approval: pending,
+					running: options.condition === 'running',
+					branches:
+						messages.length && sessions.size > 1
+							? [
+									{
+										message_id: messages[0].message_id,
+										session_ids: [...sessions.keys()],
+										active_session_id: id
+									}
+								]
+							: [],
+					branch_draft:
+						!messages.length && id !== sessionId
+							? { ...original[0], content: sessions.get(id)!.fork_content }
+							: null
+				})
+			);
+		}
+		return route.fulfill(json(sessions.get(id) ?? base));
+	});
+	return { question, original, source, sent, requestIds };
 }
 
 async function mockApis(page: Page) {

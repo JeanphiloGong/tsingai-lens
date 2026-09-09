@@ -7,6 +7,7 @@
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
+		branchChatMessage,
 		clearPendingChatSourceContexts,
 		decideChatToolCall,
 		fetchChatSession,
@@ -17,6 +18,7 @@
 		streamChatMessage,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
+		type ChatBranchOptions,
 		type ChatFeedbackState,
 		type ChatMessageFeedback,
 		type ChatMessage,
@@ -53,6 +55,11 @@
 
 	let session: ChatSession | null = null;
 	let messages: ChatMessage[] = [];
+	let branches: ChatBranchOptions[] = [];
+	let branchDraft: ChatMessage | null = null;
+	let running = false;
+	let revising = false;
+	let revisionRequest: { key: string; id: string } | null = null;
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
 	let history: StoredChatSession[] = [];
@@ -205,6 +212,11 @@
 		session = null;
 		messages = [];
 		feedbackByMessage = {};
+		branches = [];
+		branchDraft = null;
+		running = false;
+		revising = false;
+		revisionRequest = null;
 		input = '';
 		sending = false;
 		streamingText = '';
@@ -253,6 +265,9 @@
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = trajectory.items;
+				branches = trajectory.branches ?? [];
+				branchDraft = trajectory.branch_draft ?? null;
+				running = trajectory.running ?? false;
 				loadFeedback(trajectory.feedback);
 				pendingApproval = trajectory.pending_approval;
 				pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId, {
@@ -287,13 +302,13 @@
 					(call) =>
 						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
-		if (recoveringCallId && !destroyed) {
+		if ((recoveringCallId || running) && !destroyed) {
 			recoveryTimer = setTimeout(() => void refreshRecovery(), 3000);
 		}
 	}
 
 	async function refreshRecovery() {
-		if (!session || !recoveringCallId || recoveryLoading) return;
+		if (!session || (!recoveringCallId && !running) || recoveryLoading) return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		const activeSession = session;
@@ -306,6 +321,9 @@
 			);
 			if (!isCurrentSession(generation, ownerCollectionId)) return;
 			messages = trajectory.items;
+			branches = trajectory.branches ?? [];
+			branchDraft = trajectory.branch_draft ?? null;
+			running = trajectory.running ?? false;
 			loadFeedback(trajectory.feedback);
 			pendingApproval = trajectory.pending_approval;
 			recoveryError = '';
@@ -374,7 +392,7 @@
 	}
 
 	async function startNewSession() {
-		if (loading || sending || deciding) return;
+		if (loading || sending || deciding || revising) return;
 		clearStoredSessionId();
 		session = null;
 		messages = [];
@@ -383,34 +401,104 @@
 		await loadSession();
 	}
 
-	async function switchSession(sessionId: string) {
-		if (sessionId === activeSessionId || loading || sending || deciding) return;
+	async function switchSession(sessionId: string, preserveDraft = false) {
+		if (sessionId === activeSessionId || loading || sending || deciding || revising) return;
+		const draft = input;
+		const owner = userId;
 		session = null;
 		messages = [];
 		pendingApproval = null;
 		await loadSession(sessionId);
+		if (preserveDraft && userId === owner && activeSessionId === sessionId) input = draft;
 	}
 
-	async function sendMessage(nextText = input.trim()) {
+	async function reviseMessage(message: ChatMessage, content?: string): Promise<boolean> {
+		if (
+			!session ||
+			loading ||
+			sending ||
+			deciding ||
+			revising ||
+			running ||
+			pendingApproval ||
+			recoveringCallId
+		)
+			return false;
+		const ownerCollectionId = collectionId;
+		let generation = sessionGeneration;
+		const key = JSON.stringify([session.session_id, message.message_id, content]);
+		if (revisionRequest?.key !== key) {
+			const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+				byte.toString(16).padStart(2, '0')
+			).join('');
+			revisionRequest = { key, id };
+		}
+		revising = true;
+		error = '';
+		try {
+			const branch = await branchChatMessage(
+				session.session_id,
+				message.message_id,
+				revisionRequest.id,
+				content,
+				sessionController?.signal
+			);
+			if (!isCurrentSession(generation, ownerCollectionId)) return false;
+			const trajectory = await fetchChatTrajectory(branch.session_id, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId)) return false;
+			clearTimeout(recoveryTimer);
+			sessionController?.abort();
+			sessionController = new AbortController();
+			generation = ++sessionGeneration;
+			session = branch;
+			messages = trajectory.items;
+			feedbackByMessage = {};
+			loadFeedback(trajectory.feedback);
+			branches = trajectory.branches ?? [];
+			branchDraft = trajectory.branch_draft ?? null;
+			running = trajectory.running ?? false;
+			pendingApproval = trajectory.pending_approval;
+			storeSessionId(branch.session_id);
+			upsertHistory(branch, content ?? message.content);
+			revising = false;
+			revisionRequest = null;
+			scheduleRecovery();
+			// A repeated create request may find a branch whose question already ran.
+			if (branchDraft && !running)
+				await sendMessage(branchDraft.content, branchDraft.source_contexts);
+			return true;
+		} catch (err) {
+			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
+			return false;
+		} finally {
+			if (isCurrentSession(generation, ownerCollectionId)) revising = false;
+		}
+	}
+
+	async function sendMessage(nextText = input.trim(), revisionSources?: ChatSourceContext[]) {
 		const draft = nextText.trim();
+		if (branchDraft && revisionSources === undefined) return;
 		if (
 			!session ||
 			!draft ||
 			loading ||
+			revising ||
 			sending ||
 			deciding ||
+			running ||
 			pendingApproval ||
 			recoveringCallId
 		)
 			return;
-		const paperLinks = selectedPapers.map((paper) => {
+		const isRevision = revisionSources !== undefined;
+		const paperLinks = (isRevision ? [] : selectedPapers).map((paper) => {
 			const title = (paper.title || $t('collection.unknownName')).replace(/[\\[\]`*_\n\r]/g, ' ');
 			return `- [${title}](/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(paper.document_id)})`;
 		});
 		let text = paperLinks.length
 			? `${draft}\n\n${$t('researchAgent.paperScope.messageLabel')}\n${paperLinks.join('\n')}`
 			: draft;
-		if (pendingSourceContexts.length && inspectRelated)
+		if (!isRevision && pendingSourceContexts.length && inspectRelated)
 			text += `\n\n${$t('researchAgent.paperScope.relatedRequest')}`;
 		if (text.length > 12000) {
 			error = $t('researchAgent.paperScope.tooLong');
@@ -437,8 +525,8 @@
 		const optimisticId = `local-${Date.now()}`;
 		const streamingId = `local-stream-${Date.now()}`;
 		const createdAt = new Date().toISOString();
-		const sourceContexts = [...pendingSourceContexts];
-		if (sourceContexts.length) {
+		const sourceContexts = revisionSources ?? [...pendingSourceContexts];
+		if (!isRevision && sourceContexts.length) {
 			storePendingChatSourceContexts(userId, activeCollectionId, sourceContexts, {
 				session_id: activeSession.session_id,
 				content: text,
@@ -464,7 +552,7 @@
 		};
 		messages = [...messages, optimisticMessage, streamingMessage];
 		streamingText = '';
-		input = '';
+		if (!isRevision) input = '';
 		sending = true;
 		progress = { phase: 'starting', cycle_index: 0, elapsed_ms: 0 };
 		progressHistory = [progress];
@@ -486,13 +574,15 @@
 					progress = nextProgress;
 					progressHistory = appendChatProgress(progressHistory, nextProgress);
 				},
-				signal
+				signal,
+				isRevision
 			);
 			if (!isCurrentSession(generation, activeCollectionId)) return;
 			cancelTextFrame();
 			flushText();
 			applyTurn(turn, [optimisticId, streamingId]);
-			if (sourceContexts.length) {
+			branchDraft = null;
+			if (!isRevision && sourceContexts.length) {
 				clearPendingChatSourceContexts(userId, activeCollectionId);
 				pendingSourceContexts = [];
 				onSourcesChanged();
@@ -503,11 +593,14 @@
 				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = trajectory.items;
+				branches = trajectory.branches ?? [];
+				branchDraft = trajectory.branch_draft ?? null;
+				running = trajectory.running ?? false;
 				pendingApproval = trajectory.pending_approval;
 				const persistedMessage = messages
 					.slice(previousMessageCount)
 					.find((message) => message.role === 'user' && message.content === text);
-				if (!persistedMessage) {
+				if (!persistedMessage && !isRevision) {
 					input = draft;
 				}
 				pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId, {
@@ -521,7 +614,7 @@
 				messages = messages.filter(
 					(message) => ![optimisticId, streamingId].includes(message.message_id)
 				);
-				input = draft;
+				if (!isRevision) input = draft;
 			}
 			error = errorMessage(err);
 		} finally {
@@ -531,7 +624,18 @@
 				sending = false;
 				progress = null;
 				progressHistory = [];
-
+				if (isRevision) {
+					try {
+						const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
+						if (!isCurrentSession(generation, activeCollectionId)) return;
+						branches = trajectory.branches ?? [];
+						branchDraft = trajectory.branch_draft ?? null;
+						running = trajectory.running ?? false;
+						scheduleRecovery();
+					} catch (err) {
+						if (isCurrentSession(generation, activeCollectionId)) error = errorMessage(err);
+					}
+				}
 			}
 		}
 	}
@@ -720,6 +824,11 @@
 		<MessageTimeline
 			sessionId={activeSessionId}
 			{messages}
+			{branches}
+			{running}
+			revisionDisabled={revising}
+			onRevise={reviseMessage}
+			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
 			onFeedback={saveFeedback}
 			{streamingText}
@@ -733,10 +842,30 @@
 			{loading}
 			{sending}
 			{deciding}
-			ready={Boolean(session)}
+			ready={Boolean(session) && !branchDraft}
 			onSend={sendMessage}
 			{decide}
 		/>
+		{#if branchDraft && !sending}
+			<div class="revision-draft" role="status">
+				<div>
+					<strong>{$t('researchAgent.revision.draft')}</strong>
+					<p>{branchDraft.content}</p>
+				</div>
+				<button
+					type="button"
+					disabled={loading ||
+						revising ||
+						running ||
+						deciding ||
+						Boolean(pendingApproval) ||
+						Boolean(recoveringCallId)}
+					on:click={() =>
+						branchDraft && sendMessage(branchDraft.content, branchDraft.source_contexts)}
+					>{$t('researchAgent.revision.resume')}</button
+				>
+			</div>
+		{/if}
 
 		{#key userId}
 			<MessageComposer
@@ -745,6 +874,9 @@
 				{sending}
 				disabled={!session ||
 					loading ||
+					revising ||
+					running ||
+					Boolean(branchDraft) ||
 					sending ||
 					deciding ||
 					Boolean(pendingApproval) ||
@@ -792,6 +924,38 @@
 </section>
 
 <style>
+	.revision-draft {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		width: min(900px, calc(100% - 32px));
+		margin: 8px auto;
+	}
+	.revision-draft > div {
+		min-width: 0;
+		flex: 1;
+	}
+	.revision-draft strong {
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.revision-draft p {
+		margin: 4px 0;
+		font-size: 13px;
+		max-height: 90px;
+		overflow: auto;
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+	.revision-draft button {
+		flex-shrink: 0;
+		border: 1px solid var(--border-default);
+		background: var(--surface-card);
+		color: var(--text-primary);
+		border-radius: 6px;
+		padding: 8px 12px;
+		cursor: pointer;
+	}
 	:global(.app-shell:has(.research-agent.standalone)) {
 		padding: 0;
 		overflow: hidden;

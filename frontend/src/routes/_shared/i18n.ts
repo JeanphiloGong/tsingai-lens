@@ -259,6 +259,18 @@ const translations: Record<Language, Translations> = {
 			messageLabel: 'Message',
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
+			revision: {
+				edit: 'Edit message',
+				regenerate: 'Regenerate response',
+				save: 'Save and send',
+				cancel: 'Cancel',
+				previous: 'Previous version',
+				next: 'Next version',
+				version: 'Version {current} of {total}',
+				failed: 'Could not revise this message. Please try again.',
+				draft: 'Unsent revision',
+				resume: 'Send revision'
+			},
 			feedback: {
 				helpful: 'Helpful',
 				notHelpful: 'Not helpful',
@@ -2894,6 +2906,18 @@ const translations: Record<Language, Translations> = {
 			messageLabel: '消息',
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
+			revision: {
+				edit: '编辑消息',
+				regenerate: '重新生成回复',
+				save: '保存并发送',
+				cancel: '取消',
+				previous: '上一个版本',
+				next: '下一个版本',
+				version: '第 {current} 个版本，共 {total} 个',
+				failed: '修改消息失败，请重试。',
+				draft: '尚未发送的修改',
+				resume: '发送修改'
+			},
 			feedback: {
 				helpful: '有帮助',
 				notHelpful: '没有帮助',

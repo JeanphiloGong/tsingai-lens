@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { RotateCcw } from '@lucide/svelte';
+	import IconButton from '../../../_shared/IconButton.svelte';
+	import { t } from '../../../_shared/i18n';
 	import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
 	import type { ChatFeedbackInput, ChatFeedbackState } from '../../../_shared/chatSessions';
 	import MessageFeedback from './MessageFeedback.svelte';
@@ -6,6 +9,8 @@
 	import MessageContent from './MessageContent.svelte';
 	import { formatTime } from './conversationPresentation';
 	export let message: ChatMessage;
+	export let disabled = false;
+	export let onRegenerate: (() => void) | undefined = undefined;
 	export let feedbackState: ChatFeedbackState | undefined = undefined;
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let streaming = false;
@@ -23,16 +28,35 @@
 		<time>{formatTime(message.created_at)}</time>
 		<MessageContent content={streaming ? streamingText : message.content} {streaming} />
 		{#if !streaming && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}
-			<MessageFeedback
-				messageId={message.message_id}
-				state={feedbackState}
-				onSave={(input) => onFeedback(message.message_id, input)}
-			/>
+			<div class="answer-actions">
+				{#if onRegenerate}
+					<IconButton
+						label={$t('researchAgent.revision.regenerate')}
+						{disabled}
+						onClick={onRegenerate}><RotateCcw size={16} /></IconButton
+					>
+				{/if}
+				<MessageFeedback
+					messageId={message.message_id}
+					state={feedbackState}
+					onSave={(input) => onFeedback(message.message_id, input)}
+				/>
+			</div>
 		{/if}
 	</div>
 </article>
 
 <style>
+	.answer-actions {
+		display: flex;
+		align-items: flex-start;
+		gap: 4px;
+		margin-top: 6px;
+	}
+	.answer-actions :global(.message-feedback) {
+		margin-top: 0;
+		min-width: 0;
+	}
 	.assistant-mark {
 		display: grid;
 		place-items: center;

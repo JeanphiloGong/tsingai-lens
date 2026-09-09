@@ -5,7 +5,7 @@ from application.chat.agent_runner import (
     AgentRunStatus,
     ResearchAgentRunner,
 )
-from application.chat.authorization import AuthorizationDecision, evaluate_authorization
+from application.chat.capability_policy import AuthorizationDecision, evaluate_authorization
 from application.chat.capabilities import (
     AgentContext,
     CapabilityExecutionContext,

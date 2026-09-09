@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel, ConfigDict
 
+from application.chat import capability_policy, intent_policy
 from application.chat import (
     AgentContext,
     AgentCompletionReason,
@@ -729,7 +730,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
         ("read_source",),
     ]
 
-    explicit_search = ResearchAgentRunner._capability_names_for_intent(
+    explicit_search = intent_policy.capability_names_for_intent(
         "请搜索相关论文然后谈谈判断。",
         has_source_context=False,
         prior_tool_names=set(),
@@ -811,7 +812,7 @@ async def test_evidence_write_requires_a_complete_matching_source_read() -> None
 
 
 async def test_continuation_does_not_restore_finding_draft_capabilities() -> None:
-    allowed = ResearchAgentRunner._capability_names_for_intent(
+    allowed = intent_policy.capability_names_for_intent(
         "继续看一下",
         has_source_context=False,
         prior_tool_names={"query_published_findings"},
@@ -825,7 +826,7 @@ async def test_continuation_does_not_restore_finding_draft_capabilities() -> Non
 
 
 async def test_standalone_status_query_does_not_expose_paper_browsing() -> None:
-    allowed = ResearchAgentRunner._capability_names_for_intent(
+    allowed = intent_policy.capability_names_for_intent(
         "查看当前状态",
         has_source_context=False,
         prior_tool_names=set(),
@@ -1851,10 +1852,10 @@ def test_exact_inspection_uses_the_parent_document_identity() -> None:
                      "source_digest": "a" * 64, "content_truncated": False}],
     }]}
 
-    assert ResearchAgentRunner._has_successful_exact_source_read(
+    assert capability_policy.has_successful_exact_source_read(
         results, (("paper-1", "text_window", "methods-1"),),
     )
-    assert not ResearchAgentRunner._has_successful_exact_source_read(
+    assert not capability_policy.has_successful_exact_source_read(
         results, (("paper-2", "text_window", "methods-1"),),
     )
 
@@ -2448,7 +2449,7 @@ async def test_source_read_proof_does_not_cross_user_request_boundary() -> None:
 
 
 def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> None:
-    names = ResearchAgentRunner._capability_names_for_intent(
+    names = intent_policy.capability_names_for_intent(
         "查看已保存的研究方案并修订后保存",
         has_source_context=False,
         prior_tool_names=set(),
@@ -2460,7 +2461,7 @@ def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> 
 
 
 def test_explanation_does_not_enable_research_plan_capabilities() -> None:
-    names = ResearchAgentRunner._capability_names_for_intent(
+    names = intent_policy.capability_names_for_intent(
         "Please provide an explanation of this system.",
         has_source_context=False,
         prior_tool_names=set(),
@@ -2475,7 +2476,7 @@ def test_explanation_does_not_enable_research_plan_capabilities() -> None:
 
 
 def test_generic_method_question_does_not_enable_source_reading() -> None:
-    names = ResearchAgentRunner._capability_names_for_intent(
+    names = intent_policy.capability_names_for_intent(
         "Please explain this method.",
         has_source_context=False,
         prior_tool_names=set(),
@@ -2491,7 +2492,7 @@ def test_generic_method_question_does_not_enable_source_reading() -> None:
 
 
 def test_paper_method_question_still_enables_source_reading() -> None:
-    names = ResearchAgentRunner._capability_names_for_intent(
+    names = intent_policy.capability_names_for_intent(
         "Read the paper's methods and results.",
         has_source_context=False,
         prior_tool_names=set(),
@@ -2501,7 +2502,7 @@ def test_paper_method_question_still_enables_source_reading() -> None:
 
 
 def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
-    names = ResearchAgentRunner._capability_names_for_intent(
+    names = intent_policy.capability_names_for_intent(
         "What is your plan?",
         has_source_context=False,
         prior_tool_names=set(),
@@ -2517,7 +2518,7 @@ def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
 
 
 def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None:
-    names = ResearchAgentRunner._capability_names_for_intent(
+    names = intent_policy.capability_names_for_intent(
         "不要修改旧 Finding，请创建一个新版本。",
         has_source_context=False,
         prior_tool_names=set(),
@@ -2547,7 +2548,7 @@ def test_attached_source_context_does_not_force_collection_browse() -> None:
 
     names = {
         spec.name
-        for spec in runner._tool_specs_for_decision([message], [])
+        for spec in capability_policy.select_tool_specs(runner.capabilities, [message], [])
     }
 
     assert "browse_collection_papers" not in names

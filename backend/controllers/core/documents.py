@@ -12,7 +12,7 @@ from application.core.document_profiles.service import (
     DocumentNotFoundError,
     DocumentProfilesNotReadyError,
 )
-from application.source.collection_service import (
+from application.source.source_archive_service import (
     DocumentSourceUnavailableError,
 )
 from application.source.document_markdown_service import (
@@ -272,7 +272,7 @@ async def get_collection_document_source(
     request: Request,
 ) -> Response:
     try:
-        payload = await request.app.state.collection_service.resolve_document_source_file(
+        payload = await request.app.state.source_archive_service.resolve_document_source_file(
             collection_id,
             document_id,
             source_filename=None,

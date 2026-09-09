@@ -24,7 +24,7 @@ flow; it does not form Objectives or create Evidence.
 | Source/Profile preparation | `document_preparation_service.py` | Source artifact, Profile, run |
 | Display Markdown | `document_markdown_service.py` | none |
 | References | `reference_extraction_service.py` | Source references |
-| Original-file archive | `collection_service.py` | temporary download only |
+| Original-file archive | `source_archive_service.py` | temporary download only |
 
 When changing this package, begin with the single-document flow and preserve
 the storage keys, fingerprints, task states, and controller response shapes.
@@ -56,7 +56,9 @@ fingerprint still match.
 ## Files
 
 - `collection_service.py`: Collection and current Document lifecycle, upload,
-  source archive, and preparation-state updates.
+  import, Figure assets, and preparation-state updates.
+- `source_archive_service.py`: Original-file lookup and bounded reproduction
+  archives. It verifies stored bytes but does not change Collection state.
 - `document_preparation_service.py`: Source/Profile preparation sequence,
   concurrency, fingerprinting, and failure handling.
 - `artifact_input_service.py`: current Source loading for downstream consumers.

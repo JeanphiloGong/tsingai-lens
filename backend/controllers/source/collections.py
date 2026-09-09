@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-from application.source.collection_service import CollectionSourceArchiveError
+from application.source.source_archive_service import CollectionSourceArchiveError
 
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.collection import (
@@ -209,12 +209,13 @@ async def create_collection_source_archive(
     request: Request,
 ) -> StreamingResponse:
     collection_service = request.app.state.collection_service
+    source_archive_service = request.app.state.source_archive_service
     try:
         await collection_service.get_collection_for_user(
             collection_id,
             await current_user_id(request),
         )
-        result = await collection_service.build_source_archive(
+        result = await source_archive_service.build_source_archive(
             collection_id,
             payload.document_ids,
         )

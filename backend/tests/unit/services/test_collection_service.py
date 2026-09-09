@@ -10,10 +10,11 @@ from pypdf import PdfWriter
 import pytest
 
 import application.source.collection_service as collection_service_module
-from application.source.collection_service import (
-    CollectionService,
+from application.source.collection_service import CollectionService
+from application.source.source_archive_service import (
     CollectionSourceArchiveError,
     DocumentSourceUnavailableError,
+    SourceArchiveService,
 )
 from domain.source import Document
 from infra.persistence.memory import MemoryCollectionRepository
@@ -51,6 +52,13 @@ async def test_collection_service_requires_explicit_dependencies() -> None:
         CollectionService(repository=MemoryCollectionRepository())
 
 
+def test_source_archive_operations_have_a_direct_owner() -> None:
+    assert "build_source_archive" not in CollectionService.__dict__
+    assert "resolve_document_source_file" not in CollectionService.__dict__
+    assert "build_source_archive" in SourceArchiveService.__dict__
+    assert "resolve_document_source_file" in SourceArchiveService.__dict__
+
+
 async def test_collection_contains_its_uploaded_documents(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Current papers")
@@ -72,6 +80,13 @@ async def test_collection_contains_its_uploaded_documents(tmp_path) -> None:
     assert current["documents"] == [first, second]
     assert current["paper_count"] == 2
     assert current["status"] == "uploaded"
+
+
+def _archive_service(collection_service: CollectionService) -> SourceArchiveService:
+    return SourceArchiveService(
+        repository=collection_service.repository,
+        object_store=collection_service.object_store,
+    )
 
 
 async def test_collection_update_preserves_documents(tmp_path) -> None:
@@ -216,7 +231,7 @@ async def test_source_archive_uses_document_ids(tmp_path) -> None:
         collection["collection_id"], "second.pdf", second_payload, "application/pdf"
     )
 
-    result = await service.build_source_archive(
+    result = await _archive_service(service).build_source_archive(
         collection["collection_id"],
         [second["document_id"], first["document_id"]],
     )
@@ -238,7 +253,9 @@ async def test_source_archive_rejects_unknown_document(tmp_path) -> None:
     collection = await service.create_collection("Reproduction sources")
 
     with pytest.raises(CollectionSourceArchiveError) as exc_info:
-        await service.build_source_archive(collection["collection_id"], ["doc_missing"])
+        await _archive_service(service).build_source_archive(
+            collection["collection_id"], ["doc_missing"]
+        )
 
     assert exc_info.value.code == "collection_source_document_not_found"
     assert exc_info.value.document_id == "doc_missing"
@@ -261,12 +278,12 @@ async def test_source_resolution_reads_only_current_collection_documents(tmp_pat
         "application/pdf",
     )
 
-    source = await service.resolve_document_source_file(
+    source = await _archive_service(service).resolve_document_source_file(
         first_collection["collection_id"], first["document_id"]
     )
     assert source["filename"] == "first.pdf"
     with pytest.raises(FileNotFoundError, match="document not found"):
-        await service.resolve_document_source_file(
+        await _archive_service(service).resolve_document_source_file(
             first_collection["collection_id"], second["document_id"]
         )
 
@@ -292,7 +309,7 @@ async def test_source_resolution_rejects_invalid_storage_key(tmp_path) -> None:
     )
 
     with pytest.raises(DocumentSourceUnavailableError) as exc_info:
-        await service.resolve_document_source_file(
+        await _archive_service(service).resolve_document_source_file(
             collection["collection_id"], document.document_id
         )
     assert exc_info.value.code == "document_source_path_invalid"

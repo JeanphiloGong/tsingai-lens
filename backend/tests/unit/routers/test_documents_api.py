@@ -16,6 +16,7 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
+from application.source.source_archive_service import SourceArchiveService
 from controllers.core import documents as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
@@ -89,6 +90,10 @@ def _document_request(document_services):
         app=SimpleNamespace(
             state=SimpleNamespace(
                 collection_service=collection_service,
+                source_archive_service=SourceArchiveService(
+                    repository=collection_service.repository,
+                    object_store=collection_service.object_store,
+                ),
                 document_profile_service=document_profile_service,
                 document_markdown_service=document_markdown_service,
             )

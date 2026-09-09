@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 import pytest
 
-import application.source.collection_service as collection_service_module
+import application.source.source_archive_service as source_archive_service_module
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
@@ -554,7 +554,7 @@ def test_collection_source_archive_returns_413_for_oversized_selection(
     auth_session_service,
     collection_service,
 ):
-    monkeypatch.setattr(collection_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 3)
+    monkeypatch.setattr(source_archive_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 3)
     with _build_client(
         monkeypatch,
         tmp_path,

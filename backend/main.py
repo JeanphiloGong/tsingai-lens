@@ -81,6 +81,7 @@ from application.source.collection_service import CollectionService
 from application.source.document_preparation_service import DocumentPreparationService
 from application.source.document_markdown_service import DocumentMarkdownService
 from application.source.reference_workflow_service import SourceReferenceWorkflowService
+from application.source.source_archive_service import SourceArchiveService
 from config import DATA_DIR
 from controllers import auth
 from controllers.chat import sessions as chat_sessions
@@ -230,6 +231,7 @@ class ApplicationRuntime:
     database_engine: AsyncEngine | None
     auth_session_service: AuthSessionService
     collection_service: CollectionService
+    source_archive_service: SourceArchiveService
     pipeline_run_service: PipelineRunService
     document_profile_repository: DocumentProfileRepository
     paper_map_repository: PaperMapRepository
@@ -277,6 +279,10 @@ async def build_application_runtime(
         collection_service = overrides.collection_service or CollectionService(
             repository=PostgresCollectionRepository(session_factory),
             workspace=FileCollectionWorkspace(),
+        )
+        source_archive_service = SourceArchiveService(
+            repository=collection_service.repository,
+            object_store=collection_service.object_store,
         )
         pipeline_run_service = overrides.pipeline_run_service or PipelineRunService(
             PostgresPipelineRunRepository(session_factory)
@@ -512,6 +518,7 @@ async def build_application_runtime(
             database_engine=database_engine,
             auth_session_service=auth_session_service,
             collection_service=collection_service,
+            source_archive_service=source_archive_service,
             pipeline_run_service=pipeline_run_service,
             document_profile_repository=document_profile_repository,
             paper_map_repository=paper_map_repository,
@@ -544,6 +551,7 @@ def install_application_runtime(
 
     application.state.auth_session_service = runtime.auth_session_service
     application.state.collection_service = runtime.collection_service
+    application.state.source_archive_service = runtime.source_archive_service
     application.state.pipeline_run_service = runtime.pipeline_run_service
     application.state.document_profile_repository = runtime.document_profile_repository
     application.state.paper_map_repository = runtime.paper_map_repository

@@ -4,6 +4,11 @@ This package owns the collection-bound Research Agent conversation. It turns
 an authenticated user's message into resource-bounded model decisions, ordered
 typed capability calls, and a durable, reviewable trajectory.
 
+The prompt frames conversation as professional research collaboration: explain
+the research question, supporting observations, limits, progress, and next
+researcher decision. Ordinary replies translate tool and status identifiers
+into that research meaning, including when explaining pending approval.
+
 ## Start Here
 
 - HTTP entry: `controllers/chat/sessions.py`

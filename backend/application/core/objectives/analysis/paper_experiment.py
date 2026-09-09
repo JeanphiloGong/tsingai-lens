@@ -3464,6 +3464,7 @@ def _build_objective_pairwise_comparison_units(
 
     generated: list[ExtractedEvidenceDraft] = []
     generated_by_scope: dict[tuple[str, str], int] = {}
+    budget_omitted_by_scope: dict[tuple[str, str], int] = {}
     for scope, measurements in results_by_scope.items():
         objective = objectives_by_id.get(scope[0])
         selected_pair_ids = _objective_series_pair_ids(
@@ -3478,6 +3479,14 @@ def _build_objective_pairwise_comparison_units(
                     continue
                 scope_key = (target.objective_id, target.document_id)
                 if generated_by_scope.get(scope_key, 0) >= _OBJECTIVE_PAIRWISE_SCOPE_LIMIT:
+                    budget_omitted_by_scope[scope_key] = (
+                        budget_omitted_by_scope.get(scope_key, 0)
+                        + sum(
+                            tuple(sorted((baseline.evidence_id, remaining.evidence_id)))
+                            in selected_pair_ids
+                            for remaining in measurements[baseline_index + 1 :]
+                        )
+                    )
                     break
                 baseline_process = {
                     item.name.casefold(): item
@@ -3823,6 +3832,21 @@ def _build_objective_pairwise_comparison_units(
                 generated_by_scope[scope_key] = (
                     generated_by_scope.get(scope_key, 0) + 1
                 )
+    for (objective_id, document_id), omitted_count in budget_omitted_by_scope.items():
+        if omitted_count <= 0:
+            continue
+        record_analysis_diagnostic(
+            {
+                "trace_type": "objective_pairwise_scope_budget",
+                "objective_id": objective_id,
+                "document_id": document_id,
+                "generated_count": generated_by_scope.get(
+                    (objective_id, document_id), 0
+                ),
+                "budget_limit": _OBJECTIVE_PAIRWISE_SCOPE_LIMIT,
+                "budget_omitted_candidate_pair_count": omitted_count,
+            }
+        )
     return tuple(generated)
 
 

@@ -14,6 +14,9 @@ from application.core.objectives.analysis import (
     source_validation,
     source_extraction,
 )
+from application.core.objectives.analysis.diagnostics import (
+    capture_analysis_diagnostics,
+)
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
@@ -3472,12 +3475,21 @@ def test_pairwise_comparison_is_bounded_per_objective_document():
         for index in range(100)
     )
 
-    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
-        measurements,
-        objectives=(),
-    )
+    with capture_analysis_diagnostics() as diagnostics:
+        comparisons = paper_experiment._build_objective_pairwise_comparison_units(
+            measurements,
+            objectives=(),
+        )
 
     assert len(comparisons) == 48
+    budget_trace = next(
+        record
+        for record in diagnostics.records
+        if record["trace_type"] == "objective_pairwise_scope_budget"
+    )
+    assert budget_trace["budget_limit"] == 48
+    assert budget_trace["generated_count"] == 48
+    assert budget_trace["budget_omitted_candidate_pair_count"] > 0
 
 
 def test_result_table_builds_adjacent_controlled_series_instead_of_all_pairs():

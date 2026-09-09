@@ -594,10 +594,10 @@ async def _approved_plan_draft(
     context: CapabilityExecutionContext,
     arguments: CreateResearchPlanArguments | ReviseResearchPlanArguments,
 ) -> tuple[ChatToolResult, list[dict[str, Any]], ChatToolResult | None]:
-    proposal_arguments = ProposeResearchPlanArguments.model_validate(
-        arguments.model_dump(exclude={"source_snapshots", "parent_plan_id"})
-    )
-    current = await draft_capability.execute(context, proposal_arguments)
+    # Create/Revise arguments inherit the complete proposal contract. Pass the
+    # already validated subtype through directly instead of serializing and
+    # validating the same fields a second time.
+    current = await draft_capability.execute(context, arguments)
     current_snapshots = list(current.data.get("source_snapshots") or ())
     if current.data.get("draft_status") == "abstained":
         return current, current_snapshots, ChatToolResult(

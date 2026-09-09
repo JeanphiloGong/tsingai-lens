@@ -5,7 +5,7 @@ from domain.chat import ChatToolRequest
 from collections import deque
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -52,6 +52,17 @@ class _QuestionArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str
+
+
+class _CountingArguments(BaseModel):
+    validation_count: ClassVar[int] = 0
+
+    question: str
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):  # noqa: ANN001
+        cls.validation_count += 1
+        return super().model_validate(obj, **kwargs)
 
 
 class _FindingArguments(BaseModel):
@@ -179,6 +190,37 @@ async def test_greeting_completes_without_calling_a_tool() -> None:
     assert result.tool_calls == ()
     assert capability.executed_arguments == []
     assert model.tool_spec_names == [()]
+
+
+async def test_validated_tool_arguments_are_reused_for_execution() -> None:
+    _CountingArguments.validation_count = 0
+    capability = _Capability(
+        "custom_read",
+        ToolRisk.READ,
+        _CountingArguments,
+    )
+    result = await ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name="custom_read",
+                        arguments={"question": "read this Source"},
+                    ),
+                ),
+            ),
+            ModelTurn(content="The Source was inspected."),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Read this Source.",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert _CountingArguments.validation_count == 1
+    assert capability.executed_arguments == [{"question": "read this Source"}]
 
 
 async def test_new_sources_may_continue_beyond_six_model_decisions() -> None:

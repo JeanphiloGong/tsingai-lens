@@ -16,7 +16,7 @@ from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from application.chat.capabilities import (
     AgentContext,
@@ -657,12 +657,19 @@ class ResearchAgentRunner:
                 "The approved research capability is not available.",
             )
         else:
-            error = self._batch_error(((claimed_call, handler),), messages)
+            error, validated_arguments = self._batch_error(
+                ((claimed_call, handler),), messages
+            )
             if not error:
                 progress.executed_tool_calls += 1
             call, result = (
                 self._failure(claimed_call, *error) if error
-                else await self._execute_one(context, claimed_call, handler)
+                else await self._execute_one(
+                    context,
+                    claimed_call,
+                    handler,
+                    arguments=validated_arguments.get(claimed_call.tool_call_id),
+                )
             )
         calls[-1] = call
         results.append(result)
@@ -921,9 +928,11 @@ class ResearchAgentRunner:
             stop_reason = progress.stop_before_model()
             if progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls:
                 stop_reason = AgentCompletionReason.RESOURCE_BUDGET
-            error = self._batch_error(requested, messages)
             if stop_reason:
                 error = ("resource_budget", "These Sources or actions remain uninspected or unexecuted in this turn.")
+                validated_arguments = {}
+            else:
+                error, validated_arguments = self._batch_error(requested, messages)
             if error:
                 completed = tuple(self._failure(call, *error) for call, _ in requested)
             elif len(requested) == 1 and requested[0][0].risk is ToolRisk.WRITE:
@@ -941,7 +950,12 @@ class ResearchAgentRunner:
                 calls[batch_start:] = [call for call, _ in requested]
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.executed_tool_calls += len(requested)
-                completed = await self._execute_read_batch(context, requested, progress)
+                completed = await self._execute_read_batch(
+                    context,
+                    requested,
+                    progress,
+                    validated_arguments=validated_arguments,
+                )
             old_observation_count = len(progress.seen_observations)
             old_resource_count = len(progress.resource_refs)
             prior_no_progress = progress.consecutive_no_progress
@@ -1126,29 +1140,57 @@ class ResearchAgentRunner:
         )
         return tuple(requested)
 
-    def _batch_error(self, requested, messages) -> tuple[str, str] | None:
+    def _batch_error(
+        self,
+        requested,
+        messages,
+    ) -> tuple[tuple[str, str] | None, dict[str, BaseModel]]:
         successful_results = self._active_successful_results_by_name(messages)
+        validated_arguments: dict[str, BaseModel] = {}
         for call, handler in requested:
             if handler is None:
                 code = "capability_unavailable_for_turn" if self.capabilities.get(call.name) else "unknown_capability"
-                return code, "The requested research capability is not available."
+                return (
+                    (code, "The requested research capability is not available."),
+                    validated_arguments,
+                )
             if call.risk is ToolRisk.UNKNOWN:
-                return "capability_not_authorized", "The research capability is not authorized."
+                return (
+                    ("capability_not_authorized", "The research capability is not authorized."),
+                    validated_arguments,
+                )
             try:
-                handler.spec.input_model.model_validate(call.arguments)
+                validated_arguments[call.tool_call_id] = (
+                    handler.spec.input_model.model_validate(call.arguments)
+                )
             except ValidationError as exc:
                 details = "; ".join(
                     f"{'.'.join(str(part) for part in error['loc']) or 'arguments'} ({error['type']})"
                     for error in exc.errors(include_input=False, include_url=False)[:8]
                 )
-                return "invalid_tool_arguments", f"Invalid research capability arguments: {details}."
+                return (
+                    (
+                        "invalid_tool_arguments",
+                        f"Invalid research capability arguments: {details}.",
+                    ),
+                    validated_arguments,
+                )
             if call.name == "inspect_published_finding":
                 allowed = self._published_finding_candidates(successful_results)
                 finding = (str(call.arguments.get("objective_id") or "").strip(), str(call.arguments.get("finding_id") or "").strip())
                 if allowed and finding not in allowed:
-                    return "finding_reference_not_in_query", "Inspect a Finding identifier returned by the preceding query."
+                    return (
+                        (
+                            "finding_reference_not_in_query",
+                            "Inspect a Finding identifier returned by the preceding query.",
+                        ),
+                        validated_arguments,
+                    )
         if len(requested) > 1 and any(call.risk is not ToolRisk.READ for call, _ in requested):
-            return "invalid_tool_batch", "Draft and write actions must be requested individually."
+            return (
+                ("invalid_tool_batch", "Draft and write actions must be requested individually."),
+                validated_arguments,
+            )
         for call, _handler in requested:
             if call.name not in {"create_evidence_draft", "create_evidence_version"}:
                 continue
@@ -1162,18 +1204,36 @@ class ResearchAgentRunner:
                 (source_identity,),
             ):
                 return (
-                    "source_read_incomplete",
-                    "Read the complete canonical Source before recording Evidence.",
+                    (
+                        "source_read_incomplete",
+                        "Read the complete canonical Source before recording Evidence.",
+                    ),
+                    validated_arguments,
                 )
-        return None
+        return None, validated_arguments
 
-    async def _execute_read_batch(self, context, requested, progress):
+    async def _execute_read_batch(
+        self,
+        context,
+        requested,
+        progress,
+        *,
+        validated_arguments: Mapping[str, BaseModel],
+    ):
         semaphore = Semaphore(self.limits.max_parallel_reads)
 
         async def bounded(call, handler):
             async with semaphore:
                 try:
-                    return await wait_for(self._execute_one(context, call, handler), timeout=progress.remaining_seconds())
+                    return await wait_for(
+                        self._execute_one(
+                            context,
+                            call,
+                            handler,
+                            arguments=validated_arguments.get(call.tool_call_id),
+                        ),
+                        timeout=progress.remaining_seconds(),
+                    )
                 except TimeoutError:
                     return self._failure(call, "capability_timeout", "The Source or action could not be completed in this turn.")
 
@@ -1250,9 +1310,10 @@ class ResearchAgentRunner:
         # next scientific action must read one of those exact Sources rather
         # than broadening the search or inspecting arbitrary pages.
         source_candidates = self._source_search_candidates(successful_results)
-        if source_candidates and not self._has_successful_exact_source_read(
+        has_exact_source_read = self._has_successful_exact_source_read(
             successful_results, source_candidates
-        ):
+        )
+        if source_candidates and not has_exact_source_read:
             allowed_names.intersection_update(
                 {"read_source", "inspect_table", "inspect_document_sources"}
             )
@@ -1266,9 +1327,7 @@ class ResearchAgentRunner:
             (comparison_intent or source_grounded_intent)
             and successful_results.get("browse_collection_papers")
             and not successful_results.get("search_sources")
-            and not self._has_successful_exact_source_read(
-                successful_results, source_candidates
-            )
+            and not has_exact_source_read
         ):
             allowed_names.intersection_update({"search_sources"})
 
@@ -2071,15 +2130,18 @@ class ResearchAgentRunner:
         context: AgentContext,
         call: ChatToolCall,
         handler: Any,
+        *,
+        arguments: BaseModel | None = None,
     ) -> tuple[ChatToolCall, ChatToolResult]:
-        try:
-            arguments = handler.spec.input_model.model_validate(call.arguments)
-        except ValidationError:
-            return ResearchAgentRunner._failure(
-                call,
-                "invalid_tool_arguments",
-                "The research capability arguments are invalid.",
-            )
+        if arguments is None:
+            try:
+                arguments = handler.spec.input_model.model_validate(call.arguments)
+            except ValidationError:
+                return ResearchAgentRunner._failure(
+                    call,
+                    "invalid_tool_arguments",
+                    "The research capability arguments are invalid.",
+                )
         try:
             execution_context = CapabilityExecutionContext.for_call(
                 context,

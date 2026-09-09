@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -68,10 +68,12 @@ class CurateFindingArguments(BaseModel):
         )
     )
     note: str | None = Field(default=None, max_length=2_000)
+    _parsed_finding: Finding | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _validate_complete_finding(self) -> "CurateFindingArguments":
         candidate = Finding.from_mapping(self.curated_finding)
+        self._parsed_finding = candidate
         if candidate.to_record() != self.curated_finding:
             raise ValueError(
                 "curated_finding must use the complete canonical Finding contract"
@@ -165,7 +167,9 @@ class CurateFindingCapability:
             context.collection_id,
             context.user_id,
         )
-        candidate = Finding.from_mapping(arguments.curated_finding)
+        candidate = arguments._parsed_finding
+        if candidate is None:  # pragma: no cover - Pydantic runs the validator.
+            raise ValueError("curated Finding was not validated")
         if candidate.collection_id != context.collection_id:
             raise ValueError("curated Finding belongs to another collection")
         curation = await self.finding_feedback_service.record_curation(

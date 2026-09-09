@@ -918,24 +918,36 @@ class AgentObjectiveAnalysisService:
             if identity in identities:
                 raise ValueError(f"duplicate inspected Source: {source_kind}/{source_ref}")
             identities.add(identity)
-            canonical = resolve_canonical_objective_source(
-                source_document,
-                source_kind=source_kind,
-                source_ref=source_ref,
-            )
-            expected_digest = sha256(canonical.content.encode("utf-8")).hexdigest()
             supplied_digest = str(item.get("source_digest") or "").strip().lower()
-            effective_digest = supplied_digest or verified_source_digests.get(
-                identity, ""
-            )
+            verified_digest = verified_source_digests.get(identity, "")
+            if verified_digest:
+                # Evidence validation already resolved this exact Source and
+                # matched its digest. Reuse that attestation instead of
+                # resolving the same Source a second time for the summary.
+                if supplied_digest and supplied_digest != verified_digest:
+                    raise ValueError(
+                        f"inspected Source digest does not match the verified "
+                        f"Evidence Source: {source_ref}"
+                    )
+                effective_digest = verified_digest
+            else:
+                canonical = resolve_canonical_objective_source(
+                    source_document,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                )
+                expected_digest = sha256(
+                    canonical.content.encode("utf-8")
+                ).hexdigest()
+                effective_digest = supplied_digest
+                if effective_digest and effective_digest != expected_digest:
+                    raise ValueError(
+                        f"inspected Source digest does not match the canonical "
+                        f"Source: {source_ref}"
+                    )
             if not effective_digest and inspection_outcome != "extraction_failed":
                 raise ValueError(
                     "inspected Source digest is required for a scientific outcome"
-                )
-            if effective_digest and effective_digest != expected_digest:
-                raise ValueError(
-                    f"inspected Source digest does not match the canonical Source: "
-                    f"{source_ref}"
                 )
 
     @classmethod

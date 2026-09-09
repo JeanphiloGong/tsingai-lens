@@ -7,6 +7,10 @@ import re
 from uuid import uuid4
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis_records import (
+    list_all_evidence,
+    list_all_findings,
+)
 from domain.core import (
     FINDING_ASSERTION_STRENGTHS,
     Finding,
@@ -19,7 +23,6 @@ from domain.ports import ObjectiveRepository
 from application.source.collection_service import CollectionService
 
 
-_PAGE_SIZE = 500
 _NUMBER_PATTERN = re.compile(
     r"(?<![A-Za-z0-9])[-+]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][-+]?\d+)?"
 )
@@ -536,20 +539,13 @@ class FindingAuthoringService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Finding, ...]:
-        records: list[Finding] = []
-        while True:
-            page, total = await self.objective_repository.list_findings(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=len(records),
-                limit=_PAGE_SIZE,
-            )
-            records.extend(page)
-            if len(records) >= total:
-                return tuple(records)
-            if not page:
-                raise RuntimeError("Finding pagination ended before total")
+        return await list_all_findings(
+            self.objective_repository,
+            collection_id,
+            objective_id,
+            analysis_version,
+            error_message="Finding pagination ended before total",
+        )
 
     async def _all_evidence(
         self,
@@ -557,20 +553,13 @@ class FindingAuthoringService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[ObjectiveEvidence, ...]:
-        records: list[ObjectiveEvidence] = []
-        while True:
-            page, total = await self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=len(records),
-                limit=_PAGE_SIZE,
-            )
-            records.extend(page)
-            if len(records) >= total:
-                return tuple(records)
-            if not page:
-                raise RuntimeError("Evidence pagination ended before total")
+        return await list_all_evidence(
+            self.objective_repository,
+            collection_id,
+            objective_id,
+            analysis_version,
+            error_message="Evidence pagination ended before total",
+        )
 
     @staticmethod
     def _for_document(

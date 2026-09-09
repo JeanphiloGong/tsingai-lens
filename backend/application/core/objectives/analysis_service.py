@@ -17,9 +17,9 @@ from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
 )
 from application.core.objectives.evidence_map import build_objective_evidence_map
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveAnalysisArtifacts,
-    ResearchObjectiveService,
+    ObjectiveEvidenceAnalysisService,
 )
 from domain.core import ObjectiveAnalysis, ResearchObjective
 from domain.ports import ObjectiveRepository
@@ -176,14 +176,14 @@ class ObjectiveAnalysisService:
         self,
         *,
         objective_repository: ObjectiveRepository,
-        research_objective_service: ResearchObjectiveService,
+        evidence_analysis_service: ObjectiveEvidenceAnalysisService,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
         task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("objective analysis concurrency must be positive")
         self.objective_repository = objective_repository
-        self.research_objective_service = research_objective_service
+        self.evidence_analysis_service = evidence_analysis_service
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
@@ -254,7 +254,7 @@ class ObjectiveAnalysisService:
         document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         document_inputs = (
-            await self.research_objective_service.resolve_prepared_document_inputs(
+            await self.evidence_analysis_service.objective_input_service.resolve_prepared_document_inputs(
                 collection_id,
                 document_ids,
             )
@@ -465,11 +465,9 @@ class ObjectiveAnalysisService:
             objective_id,
             version,
         )
-        profiles = await (
-            self.research_objective_service.document_profile_service.read_document_profiles(
-                collection_id,
-                tuple(item.document_id for item in analysis.document_inputs),
-            )
+        profiles = await self.evidence_analysis_service.objective_input_service.document_profile_service.read_document_profiles(
+            collection_id,
+            tuple(item.document_id for item in analysis.document_inputs),
         )
         return build_objective_evidence_map(
             objective=objective,
@@ -550,7 +548,7 @@ class ObjectiveAnalysisService:
                 artifacts: ObjectiveAnalysisArtifacts | None = None
                 try:
                     artifacts = (
-                        await self.research_objective_service.generate_objective_analysis_artifacts(
+                        await self.evidence_analysis_service.generate_objective_analysis_artifacts(
                             collection_id,
                             claimed,
                             progress_callback=progress_callback,

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
     ResearchObjectiveNotFoundError,
 )
@@ -491,7 +491,9 @@ def _client(
     app = FastAPI()
     app.state.objective_repository = repository or _Repository()
     app.state.objective_analysis_service = service or _Service()
-    app.state.research_objective_service = discovery_service or _DiscoveryService()
+    scope_and_discovery = discovery_service or _DiscoveryService()
+    app.state.objective_discovery_service = scope_and_discovery
+    app.state.evidence_analysis_service = scope_and_discovery
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 

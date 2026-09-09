@@ -5,10 +5,13 @@ import pytest
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.paper_research_map_service import PaperResearchMapService
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.objective_discovery_service import (
+    ObjectiveDiscoveryService,
 )
+from application.core.objectives.objective_input_service import (
+    ObjectiveInputService,
+)
+from application.core.objectives.paper_research_map_service import PaperResearchMapService
 from application.pipeline import PipelineRunService
 from domain.core import ObjectiveFactSet, PreparedDocumentInput
 from infra.persistence.memory import MemoryPipelineRunRepository
@@ -26,21 +29,22 @@ def test_objective_discovery_stages_have_direct_owners() -> None:
     assert "build_collection_paper_maps" in PaperResearchMapService.__dict__
     assert "discover_candidate_facts" in ObjectiveCandidateService.__dict__
 
-    assert "_build_objective_candidate_inputs" not in ResearchObjectiveService.__dict__
-    assert "_build_paper_research_map_payload" not in ResearchObjectiveService.__dict__
-    assert "_build_objective_discovery_skim" not in ResearchObjectiveService.__dict__
+    assert "start_objective_discovery" in ObjectiveDiscoveryService.__dict__
+    assert "discover_and_replace_objective_candidates" in ObjectiveDiscoveryService.__dict__
 
 
-def _service(pipeline_run_service: PipelineRunService) -> ResearchObjectiveService:
-    return ResearchObjectiveService(
+def _service(pipeline_run_service: PipelineRunService) -> ObjectiveDiscoveryService:
+    input_service = ObjectiveInputService(
         collection_service=object(),
         source_artifact_repository=object(),
         paper_map_repository=object(),
-        objective_repository=object(),
         document_profile_service=object(),
-        finding_synthesis_service=object(),
-        objective_candidate_service=object(),
         paper_map_service=object(),
+    )
+    return ObjectiveDiscoveryService(
+        objective_input_service=input_service,
+        objective_candidate_service=ObjectiveCandidateService(),
+        objective_repository=object(),
         pipeline_run_service=pipeline_run_service,
     )
 
@@ -74,12 +78,12 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(
         )
         return ObjectiveFactSet(research_objectives_ready=True)
 
-    monkeypatch.setattr(service, "resolve_prepared_document_inputs", resolve_inputs)
     monkeypatch.setattr(
-        service,
-        "discover_and_replace_objective_candidates",
-        discover,
+        service.objective_input_service,
+        "resolve_prepared_document_inputs",
+        resolve_inputs,
     )
+    monkeypatch.setattr(service, "discover_and_replace_objective_candidates", discover)
 
     first = await service.start_objective_discovery("col_a", ("doc_a", "doc_b"))
     duplicate = await service.start_objective_discovery(
@@ -88,7 +92,7 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(
 
     assert first["run_id"] == duplicate["run_id"]
     assert first["status"] == "queued"
-    await asyncio.gather(*tuple(service._discovery_workers))
+    await asyncio.gather(*tuple(service._workers))
 
     completed = await pipeline_run_service.get_run(first["run_id"])
     assert calls == 1
@@ -111,15 +115,15 @@ async def test_objective_discovery_records_failure_and_allows_retry(
     async def fail_discovery(*_args, **_kwargs):
         raise RuntimeError("model unavailable")
 
-    monkeypatch.setattr(service, "resolve_prepared_document_inputs", resolve_inputs)
     monkeypatch.setattr(
-        service,
-        "discover_and_replace_objective_candidates",
-        fail_discovery,
+        service.objective_input_service,
+        "resolve_prepared_document_inputs",
+        resolve_inputs,
     )
+    monkeypatch.setattr(service, "discover_and_replace_objective_candidates", fail_discovery)
 
     first = await service.start_objective_discovery("col_a", ("doc_a",))
-    await asyncio.gather(*tuple(service._discovery_workers), return_exceptions=True)
+    await asyncio.gather(*tuple(service._workers), return_exceptions=True)
     failed = await pipeline_run_service.get_run(first["run_id"])
 
     assert failed["status"] == "failed"
@@ -127,7 +131,7 @@ async def test_objective_discovery_records_failure_and_allows_retry(
 
     retry = await service.start_objective_discovery("col_a", ("doc_a",))
     assert retry["run_id"] != first["run_id"]
-    await asyncio.gather(*tuple(service._discovery_workers), return_exceptions=True)
+    await asyncio.gather(*tuple(service._workers), return_exceptions=True)
 
 
 async def test_objective_discovery_progress_does_not_move_backwards() -> None:

@@ -9,8 +9,8 @@ from application.chat.capabilities.objective_candidate import (
     CreateObjectiveCandidateArguments,
     CreateObjectiveCandidateCapability,
 )
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.objective_authoring_service import (
+    ObjectiveAuthoringService,
 )
 from domain.core import ResearchObjective
 from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
@@ -220,7 +220,7 @@ def _all_lineage_with_untrusted_snapshots() -> list[dict]:
 async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call() -> None:
     service = _ObjectiveAuthoringService()
     capability = CreateObjectiveCandidateCapability(
-        research_objective_service=service,
+        objective_authoring_service=service,
     )
 
     result = await capability.execute(
@@ -347,16 +347,10 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -
     assert retried.rank == 1
 
 
-def _service(*, repository: MemoryObjectiveRepository) -> ResearchObjectiveService:
-    return ResearchObjectiveService(
+def _service(*, repository: MemoryObjectiveRepository) -> ObjectiveAuthoringService:
+    return ObjectiveAuthoringService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SimpleNamespace(),
-        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
-        document_profile_service=SimpleNamespace(),
-        finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
     )
 
 
@@ -586,15 +580,9 @@ async def test_service_rejects_noncanonical_derivation_basis_before_persistence(
 
 async def test_derived_candidate_requires_the_current_published_parent_version() -> None:
     repository = _ParentObjectiveRepository(published_version=3)
-    service = ResearchObjectiveService(
+    service = ObjectiveAuthoringService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SimpleNamespace(),
-        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
-        document_profile_service=SimpleNamespace(),
-        finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
     )
     kwargs = {
         "collection_id": "col-1",

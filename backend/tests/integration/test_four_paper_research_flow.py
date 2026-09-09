@@ -350,8 +350,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     with TestClient(create_app(chat_session_service=object())) as client:
         client.app.state.document_profile_service._document_profile_extractor = model
         client.app.state.document_preparation_service._response_client = model
-        research_service = client.app.state.research_objective_service
-        research_service._response_client = model
+        research_service = client.app.state.evidence_analysis_service
+        research_service.objective_input_service._response_client = model
+        client.app.state.objective_discovery_service._response_client = model
         research_service.finding_synthesis_service.assertion_judge = model
 
         login = client.post(

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
 )
 
@@ -37,7 +37,7 @@ async def discover_collection_objectives(
     request: Request,
 ) -> PipelineRunResponse:
     try:
-        run = await request.app.state.research_objective_service.start_objective_discovery(
+        run = await request.app.state.objective_discovery_service.start_objective_discovery(
             collection_id,
             tuple(payload.document_ids),
         )
@@ -93,7 +93,7 @@ async def preview_collection_objective_scope(
     request: Request,
 ) -> ObjectiveScopeResponse:
     try:
-        preview = await request.app.state.research_objective_service.preview_objective_scope(
+        preview = await request.app.state.evidence_analysis_service.preview_objective_scope(
             collection_id,
             objective_id,
         )

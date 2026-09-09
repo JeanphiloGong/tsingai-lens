@@ -331,12 +331,14 @@ class _AuthService:
         return {"user_id": "user-1", "email": "researcher@example.com"}
 
 
-def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> None:
+def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
+    collection_service,
+) -> None:
     service = _Service()
     inert_pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
     app = create_app(
         auth_session_service=_AuthService(),
-        collection_service=SimpleNamespace(),
+        collection_service=collection_service,
         pipeline_run_service=inert_pipeline_run_service,
         source_artifact_repository=object(),
         document_profile_repository=object(),
@@ -369,11 +371,13 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> N
     assert turn.json()["status"] == "completed"
 
 
-def test_chat_message_route_streams_text_then_the_persisted_turn() -> None:
+def test_chat_message_route_streams_text_then_the_persisted_turn(
+    collection_service,
+) -> None:
     service = _Service()
     app = create_app(
         auth_session_service=_AuthService(),
-        collection_service=SimpleNamespace(),
+        collection_service=collection_service,
         pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
         source_artifact_repository=object(),
         document_profile_repository=object(),

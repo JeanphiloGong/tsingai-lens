@@ -26,12 +26,14 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
 )
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
-    PAPER_RESEARCH_MAP_POLICY_VERSION,
     ObjectiveDocumentEvidenceArtifacts,
-    ResearchObjectiveService,
-    _paper_map_input_fingerprint,
+    ObjectiveEvidenceAnalysisService,
+)
+from application.core.objectives.objective_input_service import (
+    PAPER_RESEARCH_MAP_POLICY_VERSION,
+    paper_map_input_fingerprint,
 )
 from domain.core import (
     ObjectiveAnalysis,
@@ -124,7 +126,7 @@ def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> 
         asset_sha256=None,
     )
 
-    contexts = ResearchObjectiveService._document_contexts_for_evidence(
+    contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
         {
             "blocks_by_document_id": {
                 "paper-1": [
@@ -211,7 +213,7 @@ def test_table_context_can_complete_material_for_result_reconstruction() -> None
             "confidence": 0.9,
         }
     )
-    contexts = ResearchObjectiveService._document_contexts_for_evidence(
+    contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
         {
             "blocks_by_document_id": {},
             "tables_by_document_id": {
@@ -649,21 +651,21 @@ async def test_selected_document_builds_and_reuses_its_bound_paper_map() -> None
     paper_map_service = _RecordingPaperMapService()
     service, source_inputs = _paper_map_loading_service(paper_map_service)
 
-    first = await service._load_or_build_paper_maps(
+    first = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=(
             PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
         ),
         source_inputs=source_inputs,
     )
-    second = await service._load_or_build_paper_maps(
+    second = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=(
             PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
         ),
         source_inputs=source_inputs,
     )
-    refreshed = await service._load_or_build_paper_maps(
+    refreshed = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=(
             PreparedDocumentInput("paper-selected", "profile-fingerprint-v2"),
@@ -686,17 +688,17 @@ async def test_paper_map_rebuilds_when_its_scientific_logic_version_changes(
         PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
     )
 
-    first = await service._load_or_build_paper_maps(
+    first = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=document_inputs,
         source_inputs=source_inputs,
     )
     monkeypatch.setattr(
-        "application.core.objectives.research_objective_service."
+        "application.core.objectives.objective_input_service."
         "PAPER_RESEARCH_MAP_POLICY_VERSION",
         "paper_research_map_policy.changed",
     )
-    refreshed = await service._load_or_build_paper_maps(
+    refreshed = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=document_inputs,
         source_inputs=source_inputs,
@@ -783,7 +785,7 @@ def _paper_map(
             "evidence_density": "high",
             "confidence": 0.9,
             "warnings": [],
-            "input_fingerprint": _paper_map_input_fingerprint(
+            "input_fingerprint": paper_map_input_fingerprint(
                 f"fingerprint-{document_id}"
             ),
             "map_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
@@ -1198,7 +1200,7 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_document(
+    await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
             documents=[
@@ -1288,8 +1290,8 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         collection_service=collection_service,
         response_client=extractor,
     )
-    service.finding_synthesis_service.assertion_judge = service._response_client
-    await service.source_artifact_repository.replace_document(
+    service.finding_synthesis_service.assertion_judge = extractor
+    await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
             documents=[
@@ -1362,7 +1364,6 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
     )
 
     failing_extractor = _FailingRouteExtractor()
-    service._response_client = failing_extractor
     service._objective_evidence_router = failing_extractor
     service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = await service.generate_objective_analysis_artifacts(
@@ -1392,7 +1393,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_document(
+    await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
             documents=[
@@ -1514,7 +1515,7 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         tables=[],
     )
     for document in documents:
-        await service.source_artifact_repository.replace_document(
+        await service.objective_input_service.source_artifact_repository.replace_document(
             collection_id, document
         )
     await _seed_document_profiles(service, collection_id)
@@ -1602,7 +1603,7 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     )
     analysis_service = ObjectiveAnalysisService(
         objective_repository=service.objective_repository,
-        research_objective_service=service,
+        evidence_analysis_service=service,
     )
     first_queued = await analysis_service.queue_analysis(
         collection_id,
@@ -1763,9 +1764,9 @@ async def test_objective_source_loading_uses_one_exact_document_batch(tmp_path) 
             raise AssertionError("Objective loading must not read documents one by one")
 
     repository = BatchOnlySourceRepository()
-    service.source_artifact_repository = repository
+    service.objective_input_service.source_artifact_repository = repository
 
-    documents = await service._load_source_documents(
+    documents = await service.objective_input_service._load_source_documents(
         "collection-1",
         document_inputs=requested_inputs,
     )

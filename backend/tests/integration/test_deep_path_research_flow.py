@@ -31,8 +31,11 @@ from application.core.objectives.analysis_service import ObjectiveAnalysisServic
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.objective_authoring_service import (
+    ObjectiveAuthoringService,
+)
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveEvidenceAnalysisService,
 )
 from application.evaluation import FindingFeedbackService
 from application.goal.experiment_plan_service import ExperimentPlanService
@@ -323,19 +326,20 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
             document_analysis_version="document-profile.test",
         )
 
-    research_objective_service = ResearchObjectiveService(
+    evidence_analysis_service = ObjectiveEvidenceAnalysisService(
         collection_service=collection_service,
-        source_artifact_repository=source_repository,
         paper_map_repository=SimpleNamespace(),
         objective_repository=objective_repository,
-        document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
+        objective_input_service=SimpleNamespace(),
+    )
+    objective_authoring_service = ObjectiveAuthoringService(
+        collection_service=collection_service,
+        objective_repository=objective_repository,
     )
     objective_analysis_service = ObjectiveAnalysisService(
         objective_repository=objective_repository,
-        research_objective_service=research_objective_service,
+        evidence_analysis_service=evidence_analysis_service,
     )
     finding_feedback_service = FindingFeedbackService(
         review_repository=finding_review_repository,
@@ -349,10 +353,10 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
     capabilities = CapabilityRegistry(
         (
             CreateObjectiveCandidateCapability(
-                research_objective_service=research_objective_service
+                objective_authoring_service=objective_authoring_service
             ),
             ConfirmObjectiveCapability(
-                research_objective_service=research_objective_service
+                objective_authoring_service=objective_authoring_service
             ),
             InspectDocumentSourcesCapability(
                 collection_service=collection_service,
@@ -495,7 +499,7 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
             "document_id": "doc_b",
             "source_ref": no_result.blocks[0].block_id,
         },
-        user_message="Check whether the review reports the target outcome.",
+        user_message="Check whether the review paper reports the target outcome.",
     )
     methods_source = methods_result.data["sources"][0]
     table_source = result_table.data["sources"][0]

@@ -169,8 +169,8 @@ def test_app_lifespan_composes_one_shared_collection_service(
             state.document_profile_service,
             state.goal_service,
             state.chat_session_service,
-            state.research_objective_service,
-            state.objective_analysis_service.research_objective_service,
+            state.evidence_analysis_service,
+            state.objective_analysis_service.evidence_analysis_service,
         )
 
         assert all(

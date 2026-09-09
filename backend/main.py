@@ -67,9 +67,16 @@ from application.core.objectives.finding_authoring_service import (
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
+from application.core.objectives.objective_discovery_service import (
+    ObjectiveDiscoveryService,
+)
+from application.core.objectives.objective_authoring_service import (
+    ObjectiveAuthoringService,
+)
+from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import PaperResearchMapService
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveEvidenceAnalysisService,
 )
 from application.pipeline import PipelineRunService
 from application.evaluation import (
@@ -246,7 +253,9 @@ class ApplicationRuntime:
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
     reference_workflow_service: SourceReferenceWorkflowService
-    research_objective_service: ResearchObjectiveService
+    evidence_analysis_service: ObjectiveEvidenceAnalysisService
+    objective_discovery_service: ObjectiveDiscoveryService
+    objective_authoring_service: ObjectiveAuthoringService
     goal_service: GoalService
     chat_session_service: ChatSessionService
     experiment_plan_service: ExperimentPlanService
@@ -330,6 +339,24 @@ async def build_application_runtime(
             document_profile_repository=document_profile_repository,
         )
         paper_map_service = PaperResearchMapService()
+        objective_candidate_service = ObjectiveCandidateService()
+        objective_input_service = ObjectiveInputService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_map_repository=paper_map_repository,
+            document_profile_service=document_profile_service,
+            paper_map_service=paper_map_service,
+        )
+        objective_discovery_service = ObjectiveDiscoveryService(
+            objective_input_service=objective_input_service,
+            objective_candidate_service=objective_candidate_service,
+            objective_repository=objective_repository,
+            pipeline_run_service=pipeline_run_service,
+        )
+        objective_authoring_service = ObjectiveAuthoringService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+        )
         document_preparation_service = DocumentPreparationService(
             collection_service=collection_service,
             pipeline_run_service=pipeline_run_service,
@@ -359,16 +386,12 @@ async def build_application_runtime(
             objective_repository=objective_repository,
             source_artifact_repository=source_artifact_repository,
         )
-        research_objective_service = ResearchObjectiveService(
+        evidence_analysis_service = ObjectiveEvidenceAnalysisService(
             collection_service=collection_service,
-            source_artifact_repository=source_artifact_repository,
             paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
-            document_profile_service=document_profile_service,
             finding_synthesis_service=finding_synthesis_service,
-            objective_candidate_service=ObjectiveCandidateService(),
-            paper_map_service=paper_map_service,
-            pipeline_run_service=pipeline_run_service,
+            objective_input_service=objective_input_service,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,
@@ -380,7 +403,7 @@ async def build_application_runtime(
         goal_service = GoalService(collection_service)
         objective_analysis_service = ObjectiveAnalysisService(
             objective_repository=objective_repository,
-            research_objective_service=research_objective_service,
+            evidence_analysis_service=evidence_analysis_service,
         )
 
         if overrides.chat_session_service is None:
@@ -473,10 +496,10 @@ async def build_application_runtime(
                                 paper_map_repository=paper_map_repository,
                             ),
                             CreateObjectiveCandidateCapability(
-                                research_objective_service=research_objective_service,
+                                objective_authoring_service=objective_authoring_service,
                             ),
                             ConfirmObjectiveCapability(
-                                research_objective_service=research_objective_service,
+                                objective_authoring_service=objective_authoring_service,
                             ),
                             StartObjectiveAnalysisCapability(
                                 collection_service=collection_service,
@@ -538,7 +561,9 @@ async def build_application_runtime(
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
             reference_workflow_service=reference_workflow_service,
-            research_objective_service=research_objective_service,
+            evidence_analysis_service=evidence_analysis_service,
+            objective_discovery_service=objective_discovery_service,
+            objective_authoring_service=objective_authoring_service,
             goal_service=goal_service,
             chat_session_service=chat_session_service,
             experiment_plan_service=experiment_plan_service,
@@ -572,7 +597,9 @@ def install_application_runtime(
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service
     application.state.reference_workflow_service = runtime.reference_workflow_service
-    application.state.research_objective_service = runtime.research_objective_service
+    application.state.evidence_analysis_service = runtime.evidence_analysis_service
+    application.state.objective_discovery_service = runtime.objective_discovery_service
+    application.state.objective_authoring_service = runtime.objective_authoring_service
     application.state.goal_service = runtime.goal_service
     application.state.chat_session_service = runtime.chat_session_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
@@ -588,7 +615,7 @@ def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
         try:
             install_application_runtime(application, runtime)
             await runtime.document_preparation_service.recover_interrupted_runs()
-            await runtime.research_objective_service.recover_interrupted_discoveries()
+            await runtime.objective_discovery_service.recover_interrupted_discoveries()
             await runtime.objective_analysis_service.recover_interrupted_analyses()
             yield
         finally:

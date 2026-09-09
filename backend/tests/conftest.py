@@ -61,7 +61,7 @@ def _patch_domain_model_extractors(monkeypatch):
     from application.core.document_profiles import (
         service as document_profile_service,
     )
-    from application.core.objectives import research_objective_service
+    from application.core.objectives import objective_input_service
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
@@ -71,7 +71,7 @@ def _patch_domain_model_extractors(monkeypatch):
         lambda: fake,
     )
     monkeypatch.setattr(
-        research_objective_service,
+        objective_input_service,
         "build_default_structured_response_client",
         lambda: fake,
     )

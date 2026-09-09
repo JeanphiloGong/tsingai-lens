@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
-    ResearchObjectiveService,
+    ObjectiveEvidenceAnalysisService,
 )
 from application.core.objectives.scope_screening import screen_objective_scope
 from domain.core import PaperResearchMap, ResearchObjective
@@ -226,15 +226,12 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
     paper_map_repository = SimpleNamespace(
         list_collection=lambda collection_id: _async_value(paper_maps)
     )
-    service = ResearchObjectiveService(
+    service = ObjectiveEvidenceAnalysisService(
         collection_service=collection_service,
-        source_artifact_repository=SimpleNamespace(),
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
+        objective_input_service=SimpleNamespace(),
     )
 
     preview = await service.preview_objective_scope("col-1", "obj-1")
@@ -246,13 +243,12 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
 
 
 async def test_service_reports_scope_not_ready_without_collection_paper_maps() -> None:
-    service = ResearchObjectiveService(
+    service = ObjectiveEvidenceAnalysisService(
         collection_service=SimpleNamespace(
             get_collection=lambda collection_id: _async_value(
                 {"collection_id": collection_id}
             )
         ),
-        source_artifact_repository=SimpleNamespace(),
         paper_map_repository=SimpleNamespace(
             list_collection=lambda collection_id: _async_value(())
         ),
@@ -261,10 +257,8 @@ async def test_service_reports_scope_not_ready_without_collection_paper_maps() -
                 _objective()
             )
         ),
-        document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
+        objective_input_service=SimpleNamespace(),
     )
 
     with pytest.raises(ObjectiveScopeNotReadyError):

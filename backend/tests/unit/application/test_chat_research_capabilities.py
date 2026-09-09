@@ -56,8 +56,11 @@ from application.chat.capabilities import (
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.objective_authoring_service import (
+    ObjectiveAuthoringService,
+)
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveEvidenceAnalysisService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from domain.core import (
@@ -2463,7 +2466,7 @@ async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candi
     )
     service = _ObjectiveAuthoringService(objective)
     capability = CreateObjectiveCandidateCapability(
-        research_objective_service=service,
+        objective_authoring_service=service,
     )
     arguments = CreateObjectiveCandidateArguments.model_validate(
         {
@@ -2500,7 +2503,7 @@ async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candi
 async def test_agent_confirms_objective_without_starting_analysis() -> None:
     objective = _objective("objective-agent")
     service = _ObjectiveConfirmationService(objective)
-    capability = ConfirmObjectiveCapability(research_objective_service=service)
+    capability = ConfirmObjectiveCapability(objective_authoring_service=service)
 
     result = await capability.execute(
         _context("call-confirm-objective"),
@@ -2851,15 +2854,9 @@ async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence
 async def test_core_authoring_without_discovery_persists_a_seedless_question_as_untested() -> None:
     repository = _ObjectiveAuthoringRepository()
     repository.facts = ObjectiveFactSet()
-    service = ResearchObjectiveService(
+    service = ObjectiveAuthoringService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SimpleNamespace(),
-        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
-        document_profile_service=SimpleNamespace(),
-        finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
     )
 
     created = await service.create_chat_assisted_candidate(
@@ -2887,15 +2884,9 @@ async def test_core_authoring_without_discovery_persists_a_seedless_question_as_
 
 async def test_core_authoring_rejects_a_seed_document_outside_the_collection() -> None:
     repository = _ObjectiveAuthoringRepository()
-    service = ResearchObjectiveService(
+    service = ObjectiveAuthoringService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SimpleNamespace(),
-        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
-        document_profile_service=SimpleNamespace(),
-        finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
     )
 
     with pytest.raises(FileNotFoundError, match="document not found"):
@@ -3753,7 +3744,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                     paper_map_repository=paper_map_repository,
                 ),
                 CreateObjectiveCandidateCapability(
-                    research_objective_service=authoring_service,
+                    objective_authoring_service=authoring_service,
                 ),
                 StartObjectiveAnalysisCapability(
                     collection_service=_CollectionService(),
@@ -3832,15 +3823,9 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
 
 async def test_core_authoring_keeps_seed_documents_as_question_provenance() -> None:
     repository = _ObjectiveAuthoringRepository()
-    service = ResearchObjectiveService(
+    service = ObjectiveAuthoringService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SimpleNamespace(),
-        paper_map_repository=SimpleNamespace(),
         objective_repository=repository,
-        document_profile_service=SimpleNamespace(),
-        finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
     )
 
     created = await service.create_chat_assisted_candidate(

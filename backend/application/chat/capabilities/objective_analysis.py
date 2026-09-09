@@ -61,15 +61,15 @@ class ConfirmObjectiveCapability:
         input_model=ConfirmObjectiveArguments,
     )
 
-    def __init__(self, *, research_objective_service: Any) -> None:
-        self.research_objective_service = research_objective_service
+    def __init__(self, *, objective_authoring_service: Any) -> None:
+        self.objective_authoring_service = objective_authoring_service
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ConfirmObjectiveArguments,
     ) -> ChatToolResult:
-        objective = await self.research_objective_service.confirm_objective(
+        objective = await self.objective_authoring_service.confirm_objective(
             collection_id=context.collection_id,
             user_id=context.user_id,
             objective_id=arguments.objective_id,

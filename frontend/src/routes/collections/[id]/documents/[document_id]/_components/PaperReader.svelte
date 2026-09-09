@@ -37,6 +37,7 @@
 	export let activeSourceAnchor: SourceAnchor | null = null;
 	export let sourceJumpToken = 0;
 	import SourceSelection from './SourceSelection.svelte';
+	import { selectableSource } from './sourceSelection';
 	export let selectedSourceKeys: string[] = [];
 	export let selectionDisabled = false;
 	export let onToggleSource: (selection: DocumentSourceSelection) => void = () => {};
@@ -545,11 +546,6 @@
 		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
 	}
 
-	function selectParsedSource(pageNumber: number, sourceSpanId: string | null) {
-		currentPage = pageNumber;
-		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
-	}
-
 	function parsedSourceSelection(
 		pageNumber: number,
 		paragraph: WorkbenchPdfParagraph
@@ -841,18 +837,24 @@
 						>
 							<div class="parsed-source-page__label">{page.label}</div>
 							{#each page.paragraphs as paragraph}
-								<div class="parsed-source-entry">
-									<button
-										type="button"
+								{@const selection = parsedSourceSelection(page.page_number, paragraph)}
+								<div
+									class="parsed-source-entry"
+									use:selectableSource={{
+										selection,
+										disabled: selectionDisabled,
+										onToggle: onToggleSource
+									}}
+								>
+									<div
 										class="parsed-source-paragraph"
 										class:active={paragraph.source_span_id === activeSourceSpanId}
-										on:click={() => selectParsedSource(page.page_number, paragraph.source_span_id)}
 									>
 										<span>{paragraph.section || $t('workbench.sectionFallback')}</span>
 										<p>{paragraph.text}</p>
-									</button>
+									</div>
 									<SourceSelection
-										selection={parsedSourceSelection(page.page_number, paragraph)}
+										{selection}
 										selectedKeys={selectedSourceKeys}
 										disabled={selectionDisabled}
 										onToggle={onToggleSource}

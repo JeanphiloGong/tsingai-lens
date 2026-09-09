@@ -400,9 +400,13 @@ reads remain observable through the conversation's capability results and Source
 links. An unavailable paper shows an error and retry in its own pane; other open
 papers and the conversation remain available.
 
-Source checkboxes accumulate distinct blocks from the current Collection,
-including tables and figures. Duplicate locators cannot create duplicate
-attachments. The composer can request inspection of related sections in those
+Clicking a source-mapped paragraph, list item, table, or figure toggles that
+whole block in the pending question context. Selected blocks use a background,
+edge marker, and check mark; there is no separate checkbox or selection mode.
+The native selection button remains available to keyboard and assistive-technology
+users, with focus shown around its block. Dragging to copy text and clicking a
+link or another control do not toggle the block. Duplicate locators cannot create
+duplicate attachments. The composer can request inspection of related sections in those
 papers; this option is enabled initially in the split workspace. Its explicit
 request becomes part of the saved question and asks for exact links, supporting
 or conflicting passages, and disclosure of unread or unavailable content.

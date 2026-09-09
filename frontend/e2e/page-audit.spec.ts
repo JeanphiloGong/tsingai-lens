@@ -200,15 +200,9 @@ test.describe('page interaction audit', () => {
 			expect(
 				await paneA.getByTestId('markdown-paper-reader').evaluate((node) => node.scrollTop)
 			).toBe(scrollA);
-			await paneA
-				.getByRole('checkbox', { name: 'Select source block', exact: true })
-				.first()
-				.check();
+			await paneA.locator('[data-source-ref="methods"]').click();
 			await tabs.getByRole('tab', { name: papers[1].title }).click();
-			await paneB
-				.getByRole('checkbox', { name: 'Select source block', exact: true })
-				.first()
-				.check();
+			await paneB.locator('[data-source-ref="methods"]').click();
 			await page.getByRole('button', { name: 'Review selected passages', exact: true }).click();
 			await expect(page.locator('.selection-tray li')).toHaveCount(2);
 			await page.locator('.selection-tray li').first().getByRole('link').click();
@@ -569,10 +563,24 @@ test.describe('page interaction audit', () => {
 			);
 		});
 		await page.goto(`/collections/${collectionId}/documents/${documentId}`);
-		const blocks = page.getByRole('checkbox', { name: 'Select source block', exact: true });
+		const blocks = page.locator('.source-selectable');
 		await expect(blocks).toHaveCount(2);
-		await blocks.nth(0).check();
-		await blocks.nth(1).check();
+		await expect(page.locator('.source-selection input[type="checkbox"]')).toHaveCount(0);
+		const firstBlock = (await blocks.nth(0).boundingBox())!;
+		await page.mouse.move(firstBlock.x + 4, firstBlock.y + 10);
+		await page.mouse.down();
+		await page.mouse.move(firstBlock.x + 140, firstBlock.y + 10, { steps: 8 });
+		await page.mouse.up();
+		expect(
+			await page.evaluate(() => window.getSelection()?.toString().length ?? 0)
+		).toBeGreaterThan(0);
+		const keyboardSelection = blocks.nth(0).getByRole('button', { name: 'Select source block' });
+		await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'false');
+		await page.evaluate(() => window.getSelection()?.removeAllRanges());
+		await keyboardSelection.focus();
+		await keyboardSelection.press('Space');
+		await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'true');
+		await blocks.nth(1).click();
 		await page
 			.locator('.reader-header')
 			.getByRole('button', { name: /Ask research assistant/ })
@@ -589,7 +597,9 @@ test.describe('page interaction audit', () => {
 			(sent!.source_contexts as { source_ref: string }[]).map((source) => source.source_ref)
 		).toEqual(['abstract', 'results']);
 		await expect(panel.getByTestId('pending-source-context')).toHaveCount(0);
-		await expect(blocks.nth(0)).not.toBeChecked();
+		await expect(
+			blocks.nth(0).getByRole('button', { name: 'Select source block' })
+		).toHaveAttribute('aria-pressed', 'false');
 		await expect(page.locator('.document-reader-root')).toBeVisible();
 		await expect(page).toHaveURL(new RegExp(`/documents/${documentId}$`));
 		await page.mouse.move(0, 0);

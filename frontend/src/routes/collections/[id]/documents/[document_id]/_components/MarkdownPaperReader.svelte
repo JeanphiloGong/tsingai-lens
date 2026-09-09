@@ -51,6 +51,7 @@
 	export let sourceJumpToken = 0;
 	let readerRoot: HTMLElement;
 	import SourceSelection from './SourceSelection.svelte';
+	import { selectableSource } from './sourceSelection';
 	export let selectedSourceKeys: string[] = [];
 	export let selectionDisabled = false;
 	export let onToggleSource: (selection: DocumentSourceSelection) => void = () => {};
@@ -592,6 +593,11 @@
 		{#if activeFallback}
 			<aside
 				class="markdown-source-fallback"
+				use:selectableSource={{
+					selection: activeFallbackSelection,
+					disabled: selectionDisabled,
+					onToggle: onToggleSource
+				}}
 				data-testid="markdown-active-source-fallback"
 				aria-label={$t('workbench.selectedSourceBlockLabel')}
 				aria-current="location"
@@ -672,6 +678,11 @@
 				{:else if node.type === 'paragraph'}
 					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<p
+						use:selectableSource={{
+							selection,
+							disabled: selectionDisabled,
+							onToggle: onToggleSource
+						}}
 						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
@@ -699,6 +710,11 @@
 					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<figure
 						class="markdown-figure"
+						use:selectableSource={{
+							selection,
+							disabled: selectionDisabled,
+							onToggle: onToggleSource
+						}}
 						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
@@ -722,6 +738,11 @@
 							{@const itemKey = markdownListItemKey(node, index, item, itemIndex)}
 							{@const selection = sourceSelection(item.sourceMap, item.text)}
 							<li
+								use:selectableSource={{
+									selection,
+									disabled: selectionDisabled,
+									onToggle: onToggleSource
+								}}
 								class:markdown-node--selectable={Boolean(selection)}
 								class:markdown-node--active={activeNodeKey === itemKey}
 								aria-current={activeNodeKey === itemKey ? 'location' : undefined}
@@ -754,6 +775,11 @@
 					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<div
 						class="markdown-table-wrapper"
+						use:selectableSource={{
+							selection,
+							disabled: selectionDisabled,
+							onToggle: onToggleSource
+						}}
 						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}

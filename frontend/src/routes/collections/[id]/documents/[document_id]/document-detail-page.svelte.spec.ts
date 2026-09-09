@@ -415,6 +415,70 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		).toBe(false);
 	});
 
+	it('selects entire paragraphs and tables directly without checkbox controls', async () => {
+		renderReader();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		const paragraph = document.querySelector<HTMLElement>('[data-source-ref="results"]')!;
+		const table = document.querySelector<HTMLElement>('[data-source-ref="table-1"]')!;
+		const pending = () =>
+			JSON.parse(
+				sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? '{"contexts":[]}'
+			).contexts;
+		expect(document.querySelector('.source-selection input[type="checkbox"]')).toBeNull();
+		paragraph.click();
+		await vi.waitFor(() =>
+			expect(paragraph.querySelector('.keyboard-selection')?.getAttribute('aria-pressed')).toBe(
+				'true'
+			)
+		);
+		table.querySelector('td')!.click();
+		await vi.waitFor(() => expect(pending()).toHaveLength(2));
+		expect(pending().map((source: { source_ref: string }) => source.source_ref)).toEqual([
+			'results',
+			'table-1'
+		]);
+		paragraph.click();
+		await vi.waitFor(() => expect(pending()).toHaveLength(1));
+		expect(get(agent).open).toBe(false);
+		agent.update((state) => ({ ...state, busy: true }));
+		await vi.waitFor(() =>
+			expect(paragraph.classList.contains('source-selection-disabled')).toBe(true)
+		);
+		paragraph.click();
+		expect(pending()).toHaveLength(1);
+	});
+
+	it('preserves copying and links while keeping native keyboard selection available', async () => {
+		renderReader();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		const paragraph = document.querySelector<HTMLElement>('[data-source-ref="results"]')!;
+		const range = document.createRange();
+		range.selectNodeContents(paragraph);
+		const selection = window.getSelection()!;
+		selection.removeAllRanges();
+		selection.addRange(range);
+		try {
+			paragraph.click();
+			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+		} finally {
+			selection.removeAllRanges();
+		}
+		const link = paragraph.appendChild(document.createElement('a'));
+		link.href = '#source-link';
+		link.textContent = 'Source link';
+		link.addEventListener('click', (event) => event.preventDefault());
+		link.click();
+		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+		const keyboardControl = paragraph.querySelector<HTMLButtonElement>('.keyboard-selection')!;
+		keyboardControl.focus();
+		expect(document.activeElement).toBe(keyboardControl);
+		keyboardControl.click();
+		await vi.waitFor(() => expect(keyboardControl.getAttribute('aria-pressed')).toBe('true'));
+		expect(
+			JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!).contexts
+		).toHaveLength(1);
+	});
+
 	it('locates matching Source references inside the correct mounted paper', async () => {
 		const originalFetch = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {

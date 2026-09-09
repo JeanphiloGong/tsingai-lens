@@ -26,6 +26,18 @@ export const authState = writable<AuthState>({
 	user: null
 });
 
+const authInvalidationKey = 'lens.authInvalidation';
+let authGeneration = 0;
+let logoutRequest: Promise<void> | null = null;
+
+export function startAuthSynchronization() {
+	const handleStorage = (event: StorageEvent) => {
+		if (event.key === authInvalidationKey && event.newValue) invalidateAuth();
+	};
+	window.addEventListener('storage', handleStorage);
+	return () => window.removeEventListener('storage', handleStorage);
+}
+
 function normalizeUser(value: unknown): AuthUser | null {
 	if (!value || typeof value !== 'object') return null;
 	const record = value as Partial<AuthUser>;
@@ -51,11 +63,14 @@ function setAuthenticated(payload: unknown) {
 }
 
 export async function fetchCurrentSession() {
+	const generation = ++authGeneration;
 	authState.set({ ...get(authState), status: 'loading' });
 	try {
 		const data = await requestJson('/auth/me', { method: 'GET' });
+		if (generation !== authGeneration) return null;
 		return setAuthenticated(data);
 	} catch (error) {
+		if (generation !== authGeneration) return null;
 		if (isHttpStatusError(error, 401)) {
 			clearAuthState();
 			return null;
@@ -66,22 +81,44 @@ export async function fetchCurrentSession() {
 }
 
 export async function login(email: string, password: string) {
+	const generation = ++authGeneration;
+	// The earlier logout must finish clearing its cookie before login sets a new one.
+	if (logoutRequest) await logoutRequest.catch(() => undefined);
+	if (generation !== authGeneration) throw new Error('error.authSessionChanged');
 	const data = await requestJson('/auth/login', {
 		method: 'POST',
 		body: JSON.stringify({ email, password })
 	});
+	if (generation !== authGeneration) throw new Error('error.authSessionChanged');
 	return setAuthenticated(data);
 }
 
-export async function logout() {
-	try {
-		await requestJson('/auth/logout', { method: 'POST' });
-	} finally {
-		clearAuthState();
-	}
+export function logout() {
+	if (logoutRequest) return logoutRequest;
+	clearAuthState();
+	logoutRequest = requestJson('/auth/logout', { method: 'POST' })
+		.then(() => undefined)
+		.finally(() => {
+			logoutRequest = null;
+		});
+	return logoutRequest;
 }
 
 export function clearAuthState() {
+	invalidateAuth();
+	if (typeof window === 'undefined') return;
+	try {
+		window.localStorage.setItem(
+			authInvalidationKey,
+			crypto.getRandomValues(new Uint32Array(4)).join('-')
+		);
+	} catch {
+		// Local sign-out still works when browser storage is unavailable.
+	}
+}
+
+function invalidateAuth() {
+	authGeneration += 1;
 	clearOtherUsersChatStorage();
 	authState.set(anonymousState);
 }

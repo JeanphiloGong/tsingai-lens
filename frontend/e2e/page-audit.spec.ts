@@ -37,6 +37,46 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	test('waits for a delayed logout before completing a new sign-in', async ({ page }) => {
+		let finish!: () => void;
+		const completion = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		let logins = 0;
+		await page.route('**/api/v1/auth/logout', async (route) => {
+			await completion;
+			return route.fulfill(json({}));
+		});
+		await page.route('**/api/v1/auth/login', (route) => {
+			logins += 1;
+			return route.fulfill(
+				json({
+					user: {
+						user_id: 'user_2',
+						email: 'second@example.test',
+						display_name: 'Second Researcher'
+					}
+				})
+			);
+		});
+		try {
+			await page.goto('/');
+			await page.getByRole('button', { name: 'Log out', exact: true }).click();
+			await expect(page).toHaveURL(/\/login$/);
+			await page.locator('#auth-email').fill('second@example.test');
+			await page.locator('#auth-password').fill('test-only');
+			await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+			await expect(page.getByRole('button', { name: 'Signing in...', exact: true })).toBeDisabled();
+			expect(logins).toBe(0);
+			finish();
+			await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeVisible();
+			expect(logins).toBe(1);
+			expect(new URL(page.url()).pathname).toBe('/');
+		} finally {
+			finish();
+		}
+	});
+
 	test('recovers a lost PDF upload on a plain HTTP installation', async ({ page }) => {
 		let uploads = 0;
 		let preparations = 0;
@@ -79,6 +119,61 @@ test.describe('page interaction audit', () => {
 		expect(preparations).toBe(1);
 		if (screenshotDir)
 			await page.screenshot({ path: join(screenshotDir, 'http-upload-recovered.png') });
+	});
+
+	test('signing out in another tab prevents late replies from restoring private history', async ({
+		page,
+		context
+	}) => {
+		const privateQuestion = 'Unpublished alloy treatment comparison';
+		await page.addInitScript(() =>
+			localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+		);
+		let finish!: () => void;
+		const completion = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			if (route.request().method() === 'GET')
+				return route.fulfill(json({ items: [], pending_approval: null, feedback: [] }));
+			await completion;
+			return route.fulfill(
+				sseTurn({
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						agentMessage('private_user', 'user', privateQuestion),
+						agentMessage('private_answer', 'assistant', 'Private comparison finished after logout')
+					],
+					pending_approval: null,
+					error_code: null
+				})
+			);
+		});
+		const other = await context.newPage();
+		await mockApis(other);
+		await other.route('**/api/v1/auth/logout', (route) => route.fulfill(json({})));
+		try {
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await sendAgentMessage(page, privateQuestion);
+			await expect(page.getByTestId('research-progress')).toBeVisible();
+			await other.goto('/');
+			await other.getByRole('button', { name: 'Log out', exact: true }).click();
+			await expect(other).toHaveURL(/\/login$/);
+			finish();
+			await expect(page).toHaveURL(/\/login$/);
+			await expect(
+				page.getByText('Private comparison finished after logout', { exact: true })
+			).toHaveCount(0);
+			expect(
+				await page.evaluate(() => localStorage.getItem('lens.chatSessionHistory.user_1:col_123'))
+			).toBeNull();
+		} finally {
+			finish();
+			await other.close();
+		}
 	});
 
 	for (const width of [320, 768, 1024, 1440]) {

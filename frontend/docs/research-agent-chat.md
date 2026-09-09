@@ -128,6 +128,12 @@ Chat waits for an authenticated account before reading these keys. Successful
 authentication retains only that account's entries and removes unscoped legacy
 entries. Logout clears Chat browser storage, including pending Source handoffs,
 even if its HTTP request fails; it does not delete server conversations.
+Logout also invalidates other open tabs through a browser storage event. Those
+tabs clear their account state and pending Sources, leave the conversation, and
+ignore late authentication and Chat responses.
+A new login in the same tab waits for its pending logout request to settle
+before setting a new session cookie. The old logout completion does not clear
+authentication or navigate again; logout failure still permits a subsequent login.
 An unavailable session read preserves its history entry and offers a retry of
 that exact session. Only an explicit `404` removes the missing session and
 creates a replacement; network errors and other HTTP failures remain visible.

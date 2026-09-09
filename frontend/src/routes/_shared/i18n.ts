@@ -2611,6 +2611,7 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: 'Unexpected error.',
 			requestFailed: 'The request could not be completed. Please try again.',
+			authSessionChanged: 'Your sign-in session changed. Please sign in again.',
 			collectionNotFound: 'This collection does not exist.',
 			graphNotReady:
 				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
@@ -5107,6 +5108,7 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: '发生未知错误。',
 			requestFailed: '请求未能完成，请稍后重试。',
+			authSessionChanged: '登录状态已发生变化，请重新登录。',
 			collectionNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。',

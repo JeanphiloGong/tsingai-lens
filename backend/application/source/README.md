@@ -3,6 +3,32 @@
 This package owns Collection lifecycle, current Document membership, and
 one-Document preparation orchestration.
 
+## Start Here
+
+- HTTP upload: `controllers/source/collections.py:upload_collection_document`
+- Queue preparation: `DocumentPreparationService.queue_document_preparation()`
+- Execute preparation: `DocumentPreparationService.run_document_preparation()`
+- Read prepared Source: `ArtifactInputService`
+
+The preparation input is one stored Document. The output is the current
+`SourceDocument`, its `DocumentProfile`, and a `ready` Document status. Source
+parsing and profile classification may call the model, but Collection and
+Document membership do not. This package owns Pipeline Run progress for this
+flow; it does not form Objectives or create Evidence.
+
+## Boundary Checklist
+
+| Concern | Owner | Persistent result |
+|---|---|---|
+| Collection and Document membership | `collection_service.py` | Collection/Document records |
+| Source/Profile preparation | `document_preparation_service.py` | Source artifact, Profile, run |
+| Display Markdown | `document_markdown_service.py` | none |
+| References | `reference_extraction_service.py` | Source references |
+| Original-file archive | `collection_service.py` | temporary download only |
+
+When changing this package, begin with the single-document flow and preserve
+the storage keys, fingerprints, task states, and controller response shapes.
+
 ## Main Flow
 
 ```text

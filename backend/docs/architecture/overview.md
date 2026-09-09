@@ -5,6 +5,31 @@
 The backend turns uploaded papers into traceable document-level preparation and
 then performs research only over papers the researcher explicitly selects.
 
+## Start Here
+
+Read this page first, then follow the first entry point that matches the task:
+
+| Research step | First code entry point | Reads | Calls the model | Persists domain state |
+|---|---|---|---|---|
+| Upload a paper | `controllers/source/collections.py:upload_collection_document` | upload bytes | No | Collection and Document |
+| Prepare one paper | `application/source/document_preparation_service.py:queue_document_preparation` | current Document and source file | Profile stage only | Source, Profile, Pipeline Run |
+| Form candidate questions | `controllers/core/research_objectives.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
+| Analyze one confirmed question | `controllers/core/research_objectives.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
+| Chat or Agent request | `controllers/chat/sessions.py` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
+
+The normal reading path is:
+
+```text
+HTTP controller
+  -> application service
+  -> domain record/repository port
+  -> infrastructure implementation
+```
+
+Start with the owning application README before opening a large service file.
+Controllers shape HTTP only; repositories store records only; the scientific
+meaning belongs to the Core services and analysis stages.
+
 ## Real-World Chain
 
 For a materials researcher comparing how a process variable affects an outcome:

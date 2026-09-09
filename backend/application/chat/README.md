@@ -4,6 +4,38 @@ This package owns the collection-bound Research Agent conversation. It turns
 an authenticated user's message into resource-bounded model decisions, ordered
 typed capability calls, and a durable, reviewable trajectory.
 
+## Start Here
+
+- HTTP entry: `controllers/chat/sessions.py`
+- Turn orchestration: `ChatSessionService.post_message_for_user()`
+- Agent loop: `ResearchAgentRunner.run_turn()`
+- Tool lookup: `CapabilityRegistry`
+- Approval continuation: `ChatSessionService.decide_tool_call_for_user()`
+
+One turn follows this sequence:
+
+```text
+user message -> bounded model decision -> capability call
+  -> capability result -> trajectory checkpoint -> final answer or approval
+```
+
+Read capabilities may inspect canonical collection resources. Write
+capabilities stop for exact user approval. Chat never owns a second Objective,
+Evidence, Finding, or Analysis record; it calls the Source and Core services.
+
+## Boundary Checklist
+
+| Concern | Owner | Scientific authority |
+|---|---|---|
+| Conversation and checkpointing | `session_service.py` | none |
+| Context selection | `context_builder.py` | none |
+| Model/tool loop | `agent_runner.py` | none; execution only |
+| Tool permissions | `authorization.py` and capability policy | approval only |
+| Objective, Evidence, Finding data | `application/core/` | Core services |
+
+When adding a capability, define its typed input/output and approval risk first;
+do not add scientific state to the Chat trajectory.
+
 Chat is the orchestration and approval boundary for the Agent. It references
 Source and Core application services for collection facts and scientific work;
 it does not create a second Objective, Evidence, Finding, or Analysis model.

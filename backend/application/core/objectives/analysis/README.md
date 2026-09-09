@@ -3,6 +3,27 @@
 This package owns the research work performed after a user confirms one
 `ResearchObjective`.
 
+## Start Here
+
+The runtime entry is
+`ResearchObjectiveService.generate_objective_analysis_artifacts()`. It runs
+the stages below in order; each stage has one scientific question and returns
+transient data to the next stage:
+
+| Stage | File | Question | Durable output |
+|---|---|---|---|
+| Screening | `source_screening.py` | Which Source units are worth inspecting? | none |
+| Routing | `evidence_routing.py` | Which exact Source should be read next? | none |
+| Extraction | `source_extraction.py` | What facts are explicitly stated in this Source? | none |
+| Grounding | `source_validation.py` | Does the Source support each returned field? | none |
+| Experiment binding | `paper_experiment.py` | Which same-paper facts belong to one experiment? | transient Evidence drafts |
+| Materialization | `evidence_materialization.py` | Which validated drafts become Evidence? | ObjectiveEvidence |
+| Finding synthesis | `finding_synthesis.py` | Which Evidence can be compared across papers? | Findings |
+
+The files also contain model contracts and technical safeguards. Those details
+must not change the stage order or turn a route, map, or failed model call into
+a scientific conclusion.
+
 Read the analysis responsibilities in real research order:
 
 1. `source_screening.py` decides which Source units require inspection for the

@@ -12,6 +12,30 @@ The two activities share paper inputs but not scientific authority. A Paper Map
 can suggest what to inspect; only Objective analysis can publish Evidence and
 Findings.
 
+## Start Here
+
+Use the following entry points when modifying the Core workflow:
+
+| Task | Entry point | Result |
+|---|---|---|
+| Discover candidates | `ResearchObjectiveService.start_objective_discovery()` | queued discovery run |
+| Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
+| Create/confirm a candidate | `ResearchObjectiveService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
+| Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
+| Generate analysis artifacts | `ResearchObjectiveService.generate_objective_analysis_artifacts()` | per-paper Evidence and Finding inputs |
+| Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
+
+The scientific order is always the source of truth:
+
+```text
+Paper Map -> candidate Objective -> confirmed Objective
+  -> framing -> routing -> Source extraction -> grounding
+  -> paper experiment binding -> cross-paper Finding
+```
+
+Paper Maps and routes are navigation inputs. Only grounded Source facts may
+become Evidence, and only compatible Evidence may become a Finding.
+
 ## Document-Level Paper Map
 
 `PaperResearchMapService.build_document_paper_map()` receives one prepared
@@ -242,7 +266,7 @@ state through the public API.
 - `research_objective_service.py`: selected-input loading and scientific
   orchestration.
 - `analysis_service.py`: versioning, dispatch, progress, retry, and publication.
-- `analysis/paper_framing.py`: paper relevance and scope.
+- `analysis/source_screening.py`: paper relevance and Source scope.
 - `analysis/evidence_routing.py`: likely Source selection.
 - `analysis/source_extraction.py`: Source-local extraction and grounding.
 - `analysis/paper_experiment.py`: within-paper experiment binding.

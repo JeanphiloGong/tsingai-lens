@@ -137,7 +137,9 @@ keeping Lens-specific research boundaries explicit:
   model.
 - `ResearchSidebar.svelte` owns collection navigation, session history, and
   the responsive desktop/mobile navigation rail. It receives presentation data
-  and callbacks from the route; it does not load or persist sessions.
+  and callbacks from the route; it does not load or persist sessions. On small
+  screens the history rail is collapsed behind an explicit toggle so session
+  switching remains available without consuming the conversation viewport.
 - `ConversationHeader.svelte` owns the current collection/session status and
   optional Objective link. This keeps responsive header layout and status
   animation local to the header instead of coupling it to the message stream.

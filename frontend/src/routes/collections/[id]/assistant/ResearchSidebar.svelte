@@ -17,6 +17,7 @@
 	export let onNewSession: () => void = () => {};
 	export let onSwitchSession: (sessionId: string) => void = () => {};
 	export let formatHistoryTime: (value: string) => string = () => '';
+	let mobileHistoryOpen = false;
 </script>
 
 <aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
@@ -31,17 +32,34 @@
 		</div>
 	</div>
 
-	<button
-		class="new-session"
-		type="button"
-		disabled={loading || sending || deciding}
-		on:click={onNewSession}
-	>
-		<span class="new-session-icon" aria-hidden="true">+</span>
-		<span>{$t('researchAgent.newSession')}</span>
-	</button>
+	<div class="sidebar-actions">
+		<button
+			class="new-session"
+			type="button"
+			disabled={loading || sending || deciding}
+			on:click={onNewSession}
+		>
+			<span class="new-session-icon" aria-hidden="true">+</span>
+			<span>{$t('researchAgent.newSession')}</span>
+		</button>
+		<button
+			class="mobile-history-toggle"
+			type="button"
+			aria-expanded={mobileHistoryOpen}
+			on:click={() => (mobileHistoryOpen = !mobileHistoryOpen)}
+		>
+			<span aria-hidden="true">☰</span>
+			<span
+				>{$t(mobileHistoryOpen ? 'researchAgent.hideHistory' : 'researchAgent.showHistory')}</span
+			>
+		</button>
+	</div>
 
-	<section class="history" aria-label={$t('researchAgent.historyTitle')}>
+	<section
+		class="history"
+		class:mobile-open={mobileHistoryOpen}
+		aria-label={$t('researchAgent.historyTitle')}
+	>
 		<h2>{$t('researchAgent.historyTitle')}</h2>
 		<div class="history-list">
 			{#each history as item (item.session_id)}
@@ -61,7 +79,7 @@
 		</div>
 	</section>
 
-	<div class="collection-context">
+	<div class="collection-context" class:mobile-open={mobileHistoryOpen}>
 		<span>
 			<small>{$t('researchAgent.currentCollection')}</small>
 			<strong>{collectionId}</strong>
@@ -155,6 +173,34 @@
 			background-color 140ms ease,
 			border-color 140ms ease,
 			transform 140ms ease;
+	}
+
+	.sidebar-actions {
+		display: grid;
+		gap: 8px;
+	}
+
+	.mobile-history-toggle {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		min-height: 40px;
+		padding: 0 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 10px;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.mobile-history-toggle:hover,
+	.mobile-history-toggle[aria-expanded='true'] {
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
+		color: var(--brand-primary);
 	}
 
 	.new-session-icon {
@@ -297,16 +343,44 @@
 			border-bottom: 0;
 		}
 
-		.new-session {
+		.sidebar-actions {
 			grid-column: 2;
 			grid-row: 1 / span 2;
 			margin: 0;
+		}
+
+		.new-session,
+		.mobile-history-toggle {
+			display: inline-flex;
 			padding: 0 12px;
+		}
+
+		.new-session {
+			margin-top: 0;
 		}
 
 		.history,
 		.collection-context {
 			display: none;
+		}
+
+		.history.mobile-open,
+		.collection-context.mobile-open {
+			grid-column: 1 / -1;
+		}
+
+		.history.mobile-open {
+			display: flex;
+			grid-row: 3;
+			margin-top: 4px;
+			padding-top: 12px;
+			border-top: 1px solid var(--border-default);
+		}
+
+		.collection-context.mobile-open {
+			display: grid;
+			grid-row: 4;
+			padding-top: 12px;
 		}
 	}
 </style>

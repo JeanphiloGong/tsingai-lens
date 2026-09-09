@@ -340,6 +340,12 @@ test.describe('page interaction audit', () => {
 		const sendButton = page.getByRole('button', { name: 'Send' });
 		await expect(composer).toBeVisible();
 		await expect(sendButton).toBeVisible();
+		const historyToggle = page.getByRole('button', { name: 'Show history' });
+		await expect(historyToggle).toBeVisible();
+		await historyToggle.click();
+		await expect(page.getByText('Current collection')).toBeVisible();
+		await expect(page.getByLabel('Research Agent sessions').getByText(collectionId)).toBeVisible();
+		await page.getByRole('button', { name: 'Hide history' }).click();
 		const mobileLayout = await page.evaluate(() => {
 			const inputElement = document.querySelector<HTMLTextAreaElement>('.composer textarea');
 			const addButton = document.querySelector<HTMLButtonElement>('.composer .add-papers');

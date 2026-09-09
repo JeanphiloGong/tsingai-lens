@@ -12,9 +12,7 @@
 	export let collectionName = '';
 	export let history: SessionSummary[] = [];
 	export let activeSessionId = '';
-	export let loading = false;
-	export let sending = false;
-	export let deciding = false;
+	export let disabled = false;
 	export let onNewSession: () => void = () => {};
 	export let onSwitchSession: (sessionId: string) => void = () => {};
 	export let formatHistoryTime: (value: string) => string = () => '';
@@ -34,12 +32,7 @@
 	</div>
 
 	<div class="sidebar-actions">
-		<button
-			class="new-session"
-			type="button"
-			disabled={loading || sending || deciding}
-			on:click={onNewSession}
-		>
+		<button class="new-session" type="button" {disabled} on:click={onNewSession}>
 			<span class="new-session-icon" aria-hidden="true">+</span>
 			<span>{$t('researchAgent.newSession')}</span>
 		</button>
@@ -70,7 +63,7 @@
 					class="history-item"
 					class:active={item.session_id === activeSessionId}
 					type="button"
-					disabled={loading || sending || deciding}
+					{disabled}
 					on:click={() => {
 						mobileHistoryOpen = false;
 						onSwitchSession(item.session_id);

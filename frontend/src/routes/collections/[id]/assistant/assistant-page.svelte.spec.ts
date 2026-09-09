@@ -44,6 +44,7 @@ vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
+const Conversation = (await import('./ResearchConversation.svelte')).default;
 
 const createdAt = '2026-08-19T08:00:00+00:00';
 const session = {
@@ -313,6 +314,121 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
 			.toBeVisible();
 	});
+
+	for (const embedded of [false, true]) {
+		it(`starts another session during generation and recovers the original (embedded=${embedded})`, async () => {
+			let created = 0;
+			let controller: ReadableStreamDefaultController<Uint8Array>;
+			let originalSignal: AbortSignal | null | undefined;
+			let completed = false;
+			const originalQuestion = message('question-a', 'user', 'Compare the heat treatments');
+			const originalAnswer = message('answer-a', 'assistant', 'Original research completed');
+			const source = {
+				resource_ref: {
+					resource_type: 'source' as const,
+					resource_id: 'doc_1:methods',
+					href: null
+				},
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'LPBF study',
+				source_kind: 'text_window',
+				source_ref: 'methods',
+				page: 3,
+				quote: 'Samples were heat treated at 1040 C.',
+				heading_path: 'Methods',
+				quote_truncated: false
+			};
+			sessionStorage.setItem(
+				'lens.chatSourceContext.researcher_1:col_123',
+				JSON.stringify({ contexts: [source] })
+			);
+			const submitted: string[] = [];
+			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				const method = requestMethod(input, init);
+				if (path === '/api/v1/chat-sessions') {
+					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
+				}
+				const id = path.split('/')[4];
+				if (!path.endsWith('/messages')) return jsonResponse({ ...session, session_id: id });
+				if (method === 'GET') {
+					return jsonResponse({
+						items: completed ? [originalQuestion, originalAnswer] : [],
+						running: !completed,
+						pending_approval: null,
+						feedback: []
+					});
+				}
+				submitted.push(id);
+				if (id === 'chat_1') {
+					originalQuestion.content = requestBody(input, init).message;
+					originalQuestion.source_contexts = [source];
+					originalSignal = init?.signal;
+					return new Response(
+						new ReadableStream({
+							start(value) {
+								controller = value;
+							}
+						}),
+						{
+							headers: { 'Content-Type': 'text/event-stream' }
+						}
+					);
+				}
+				expect(requestBody(input, init)).not.toHaveProperty('source_contexts');
+				return streamResponse({
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						message('question-b', 'user', 'Check specimen counts', { session_id: id }),
+						message('answer-b', 'assistant', 'Second research completed', { session_id: id })
+					],
+					pending_approval: null,
+					error_code: null
+				});
+			});
+			render(Conversation, { embedded });
+			const composer = browserPage.getByRole('textbox', { name: 'Message', exact: true });
+			const newSession = browserPage.getByRole('button', { name: 'New session', exact: true });
+			await expect.element(composer).toBeEnabled();
+			await send(originalQuestion.content, composer);
+			await expect.element(newSession).toBeDisabled();
+			await vi.waitFor(() => expect(controller).toBeDefined());
+			controller!.enqueue(
+				new TextEncoder().encode(
+					'event: progress\ndata: {"phase":"reading","cycle_index":1,"elapsed_ms":1}\n\n'
+				)
+			);
+			await expect.element(newSession).toBeEnabled();
+			await newSession.click();
+			await expect.element(composer).toBeEnabled();
+			expect(created).toBe(2);
+			expect(originalSignal?.aborted).toBe(true);
+			await expect
+				.element(browserPage.getByTestId('pending-source-context'))
+				.not.toBeInTheDocument();
+			await send('Check specimen counts', composer);
+			await expect.element(browserPage.getByText('Second research completed')).toBeVisible();
+			if (embedded) await browserPage.getByRole('button', { name: 'Conversation history' }).click();
+			else if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history' }).click();
+			await browserPage.getByRole('button', { name: /Compare the heat treatments/ }).click();
+			await expect.element(composer).toBeDisabled();
+			await expect.element(newSession).toBeEnabled();
+			await expect.element(browserPage.getByTestId('pending-source-context')).toBeVisible();
+			completed = true;
+			await expect.element(browserPage.getByText('Original research completed')).toBeVisible();
+			await expect.element(composer).toBeEnabled();
+			await expect
+				.element(browserPage.getByTestId('pending-source-context'))
+				.not.toBeInTheDocument();
+			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+			expect(submitted).toEqual(['chat_1', 'chat_2']);
+			expect(document.querySelector('[role="alert"]')).toBeNull();
+		});
+	}
 
 	it('uses the saved question as the compact title and preserves the Objective link', async () => {
 		const question = 'Compare the heat-treatment conditions across these LPBF papers';

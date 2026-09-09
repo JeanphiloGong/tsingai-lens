@@ -43,7 +43,9 @@
 	export let sourceContextVersion = 0;
 	export let onSourcesChanged: () => void = () => {};
 	export let onBusyChange: (busy: boolean) => void = () => {};
-	$: onBusyChange(sending || deciding || Boolean(recoveringCallId));
+	$: onBusyChange(
+		loading || sending || deciding || revising || running || Boolean(recoveringCallId)
+	);
 	let showHistory = false;
 
 	type StoredChatSession = {
@@ -65,6 +67,8 @@
 	let history: StoredChatSession[] = [];
 	let loading = false;
 	let sending = false;
+	let submitting = false;
+	$: sessionNavigationDisabled = loading || submitting || deciding || revising;
 	let progress: ChatProgress | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
@@ -107,7 +111,7 @@
 	$: collectionId = $page.params.id ?? '';
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
 	$: if (sourceContextVersion && userId && collectionId) {
-		pendingSourceContexts = readPendingChatSourceContexts(userId, collectionId);
+		refreshPendingSources();
 	}
 	$: collectionName = userId
 		? ($collections.find((item) => item.id === collectionId)?.name?.trim() ?? '')
@@ -128,6 +132,14 @@
 
 	function sessionStorageKey() {
 		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}${embedded ? ':documents' : ''}`;
+	}
+
+	function refreshPendingSources() {
+		pendingSourceContexts = readPendingChatSourceContexts(
+			userId,
+			collectionId,
+			session ? { sessionId: session.session_id, messages } : undefined
+		);
 	}
 
 	function historyStorageKey() {
@@ -219,6 +231,7 @@
 		revisionRequest = null;
 		input = '';
 		sending = false;
+		submitting = false;
 		streamingText = '';
 		deciding = false;
 		progressHistory = [];
@@ -270,12 +283,9 @@
 				running = trajectory.running ?? false;
 				loadFeedback(trajectory.feedback);
 				pendingApproval = trajectory.pending_approval;
-				pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId, {
-					sessionId: nextSession.session_id,
-					messages
-				});
 			}
 			session = nextSession;
+			refreshPendingSources();
 			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
@@ -333,6 +343,8 @@
 				...activeSession,
 				updated_at: messages.at(-1)?.created_at ?? activeSession.updated_at
 			};
+			refreshPendingSources();
+			onSourcesChanged();
 			upsertHistory(session);
 		} catch (err) {
 			if (!isCurrentSession(generation, ownerCollectionId)) return;
@@ -392,7 +404,7 @@
 	}
 
 	async function startNewSession() {
-		if (loading || sending || deciding || revising) return;
+		if (sessionNavigationDisabled) return;
 		clearStoredSessionId();
 		session = null;
 		messages = [];
@@ -402,7 +414,7 @@
 	}
 
 	async function switchSession(sessionId: string, preserveDraft = false) {
-		if (sessionId === activeSessionId || loading || sending || deciding || revising) return;
+		if (sessionId === activeSessionId || sessionNavigationDisabled) return;
 		const draft = input;
 		const owner = userId;
 		session = null;
@@ -554,23 +566,31 @@
 		streamingText = '';
 		if (!isRevision) input = '';
 		sending = true;
+		submitting = true;
 		progress = { phase: 'starting', cycle_index: 0, elapsed_ms: 0 };
 		progressHistory = [progress];
 
 		error = '';
 		notice = '';
+		const acknowledgeSubmission = () => {
+			if (!submitting) return;
+			submitting = false;
+			upsertHistory(activeSession);
+		};
 		try {
 			const turn = await streamChatMessage(
 				activeSession.session_id,
 				text,
 				(content) => {
 					if (!isCurrentSession(generation, activeCollectionId)) return;
+					acknowledgeSubmission();
 					pendingText += content;
 					if (!textFrame) textFrame = requestAnimationFrame(flushText);
 				},
 				sourceContexts,
 				(nextProgress) => {
 					if (!isCurrentSession(generation, activeCollectionId)) return;
+					acknowledgeSubmission();
 					progress = nextProgress;
 					progressHistory = appendChatProgress(progressHistory, nextProgress);
 				},
@@ -622,6 +642,7 @@
 			signal?.removeEventListener('abort', cancelTextFrame);
 			if (isCurrentSession(generation, activeCollectionId)) {
 				sending = false;
+				submitting = false;
 				progress = null;
 				progressHistory = [];
 				if (isRevision) {
@@ -763,9 +784,7 @@
 			{collectionName}
 			{history}
 			{activeSessionId}
-			{loading}
-			{sending}
-			{deciding}
+			disabled={sessionNavigationDisabled}
 			onNewSession={startNewSession}
 			onSwitchSession={switchSession}
 			{formatHistoryTime}
@@ -777,7 +796,7 @@
 			<div class="embedded-toolbar">
 				<IconButton
 					label={$t('researchAgent.newSession')}
-					disabled={loading || sending || deciding}
+					disabled={sessionNavigationDisabled}
 					onClick={startNewSession}><Plus size={16} /></IconButton
 				>
 				<IconButton
@@ -795,7 +814,7 @@
 						<button
 							type="button"
 							class:active={item.session_id === activeSessionId}
-							disabled={loading || sending || deciding}
+							disabled={sessionNavigationDisabled}
 							on:click={() => {
 								void switchSession(item.session_id);
 								showHistory = false;

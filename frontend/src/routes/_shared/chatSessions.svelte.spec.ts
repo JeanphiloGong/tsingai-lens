@@ -103,7 +103,7 @@ describe('pending Source recovery', () => {
 		expect(readPendingChatSourceContexts('user_1', 'col_123')).toEqual([]);
 	});
 
-	it('does not consume a submission using another conversation trajectory', () => {
+	it('keeps submitted Sources recoverable only in their original conversation', () => {
 		storePendingChatSourceContexts('user_1', 'col_123', [source], {
 			session_id: 'chat_1',
 			content: question.content,
@@ -113,6 +113,13 @@ describe('pending Source recovery', () => {
 			readPendingChatSourceContexts('user_1', 'col_123', {
 				sessionId: 'chat_2',
 				messages: [{ ...question, session_id: 'chat_2' }]
+			})
+		).toEqual([]);
+		expect(readPendingChatSourceContexts('user_1', 'col_123')).toEqual([]);
+		expect(
+			readPendingChatSourceContexts('user_1', 'col_123', {
+				sessionId: 'chat_1',
+				messages: []
 			})
 		).toEqual([source]);
 	});

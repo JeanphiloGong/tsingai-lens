@@ -384,6 +384,7 @@ export function readPendingChatSourceContexts(
 			return [];
 		}
 		const submission = value?.submission as Record<string, unknown> | undefined;
+		if (submission && (!persisted || submission.session_id !== persisted.sessionId)) return [];
 		if (persisted && submission?.session_id === persisted.sessionId) {
 			const afterIndex =
 				submission.after_message_id === null

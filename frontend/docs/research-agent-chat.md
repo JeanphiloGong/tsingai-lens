@@ -163,7 +163,9 @@ confirmed, the pending Source remains available for retry. This check also runs
 when returning to a conversation or reloading the page. A pending handoff records
 its submitted session, question, and preceding message so an older use of the
 same Source cannot consume a new submission. Selecting a Source again starts a
-new handoff. These submission markers stay in browser storage and are not sent
+new handoff. Submitted Sources are recoverable only in their originating session;
+they are not offered as pending selections in a new conversation or the reader.
+These submission markers stay in browser storage and are not sent
 as scientific context. The durable user
 message then owns the Source context. The browser
 sends the canonical locator kind (`text_window`, `table`, or `figure`) and a
@@ -249,6 +251,13 @@ While loading, generating, recovering, or awaiting approval, revision actions
 are disabled. The backend also serializes turns and branch creation across
 workers. A disconnected browser can poll the persisted trajectory and its
 `running` flag, including when no tool request has been produced yet.
+Once the stream confirms that the backend has accepted a question, New session
+and history switching remain available during generation. Switching disconnects
+that view's stream without cancelling the backend turn. The accepted question
+already has a history entry; returning reloads its messages and polls while it is
+running. New sessions can submit their own questions independently. Navigation
+waits only for session loading, question acceptance, or an outstanding approval
+or branch-creation request, not for ordinary answer generation.
 Completed writes remain historical observations. A newly proposed write always
 requires a fresh exact-argument approval and cannot reuse a historical call.
 

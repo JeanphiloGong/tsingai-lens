@@ -404,6 +404,8 @@ async def build_application_runtime(
         objective_analysis_service = ObjectiveAnalysisService(
             objective_repository=objective_repository,
             evidence_analysis_service=evidence_analysis_service,
+            objective_input_service=objective_input_service,
+            document_profile_service=document_profile_service,
         )
 
         if overrides.chat_session_service is None:

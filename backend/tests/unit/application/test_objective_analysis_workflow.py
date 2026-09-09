@@ -1604,6 +1604,8 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     analysis_service = ObjectiveAnalysisService(
         objective_repository=service.objective_repository,
         evidence_analysis_service=service,
+        objective_input_service=service.objective_input_service,
+        document_profile_service=service.objective_input_service.document_profile_service,
     )
     first_queued = await analysis_service.queue_analysis(
         collection_id,

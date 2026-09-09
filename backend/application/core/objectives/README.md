@@ -46,6 +46,10 @@ requested creation or confirmation. Scientific analysis returns records and
 stores reusable per-paper checkpoints; `ObjectiveAnalysisService` controls the
 complete version's publication. Both HTTP and Agent callers use these owners.
 
+The analysis runtime receives `ObjectiveInputService` and
+`DocumentProfileService` directly at construction. It does not reach through
+the scientific engine to discover those dependencies.
+
 ## Changing This Package
 
 | Change | First owner | Focused test under `tests/unit/application/` |

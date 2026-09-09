@@ -488,12 +488,8 @@ class FakeObjectiveRepository:
         return records[offset : offset + limit], len(records)
 
 
-class FakeObjectiveEvidenceAnalysisService:
-    def __init__(self, *, artifacts=None, error: Exception | None = None) -> None:
-        self.artifacts = artifacts
-        self.error = error
-        self.calls = 0
-        self.objective_input_service = self
+class FakeObjectiveInputService:
+    def __init__(self) -> None:
         async def read_document_profiles(collection_id, document_ids=None):
             if document_ids is not None and "paper-1" not in document_ids:
                 return ()
@@ -522,6 +518,13 @@ class FakeObjectiveEvidenceAnalysisService:
             )
             for document_id in document_ids
         )
+
+
+class FakeObjectiveEvidenceAnalysisService:
+    def __init__(self, *, artifacts=None, error: Exception | None = None) -> None:
+        self.artifacts = artifacts
+        self.error = error
+        self.calls = 0
 
     async def generate_objective_analysis_artifacts(
         self, collection_id, analysis, progress_callback=None
@@ -587,9 +590,12 @@ class DiagnosticsRecordingObjectiveEvidenceAnalysisService(FakeObjectiveEvidence
 def _service(*, repository=None, analyzer=None):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeObjectiveEvidenceAnalysisService()
+    inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=repository,
         evidence_analysis_service=analyzer,
+        objective_input_service=inputs,
+        document_profile_service=inputs.document_profile_service,
     )
     return service, repository, analyzer
 
@@ -701,9 +707,12 @@ async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start(
     def unavailable_task_factory(_coroutine):
         raise RuntimeError("event loop unavailable")
 
+    inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=repository,
         evidence_analysis_service=analyzer,
+        objective_input_service=inputs,
+        document_profile_service=inputs.document_profile_service,
         task_factory=unavailable_task_factory,
     )
 
@@ -721,9 +730,12 @@ async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start(
 async def test_start_analysis_enforces_the_service_concurrency_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=FakeObjectiveRepository(),
         evidence_analysis_service=FakeObjectiveEvidenceAnalysisService(),
+        objective_input_service=inputs,
+        document_profile_service=inputs.document_profile_service,
         max_concurrency=1,
     )
     release_first = asyncio.Event()

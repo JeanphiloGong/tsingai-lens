@@ -13,6 +13,7 @@ import logging
 from time import perf_counter
 from typing import Any, Callable
 
+from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
 )
@@ -21,6 +22,7 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveAnalysisArtifacts,
     ObjectiveEvidenceAnalysisService,
 )
+from application.core.objectives.objective_input_service import ObjectiveInputService
 from domain.core import ObjectiveAnalysis, ResearchObjective
 from application.repositories.objective_repository import ObjectiveRepository
 from infra.llm.usage import capture_llm_usage
@@ -177,6 +179,8 @@ class ObjectiveAnalysisService:
         *,
         objective_repository: ObjectiveRepository,
         evidence_analysis_service: ObjectiveEvidenceAnalysisService,
+        objective_input_service: ObjectiveInputService,
+        document_profile_service: DocumentProfileService,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
         task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
@@ -184,6 +188,8 @@ class ObjectiveAnalysisService:
             raise ValueError("objective analysis concurrency must be positive")
         self.objective_repository = objective_repository
         self.evidence_analysis_service = evidence_analysis_service
+        self.objective_input_service = objective_input_service
+        self.document_profile_service = document_profile_service
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
@@ -254,7 +260,7 @@ class ObjectiveAnalysisService:
         document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         document_inputs = (
-            await self.evidence_analysis_service.objective_input_service.resolve_prepared_document_inputs(
+            await self.objective_input_service.resolve_prepared_document_inputs(
                 collection_id,
                 document_ids,
             )
@@ -464,7 +470,7 @@ class ObjectiveAnalysisService:
             objective_id,
             version,
         )
-        profiles = await self.evidence_analysis_service.objective_input_service.document_profile_service.read_document_profiles(
+        profiles = await self.document_profile_service.read_document_profiles(
             collection_id,
             tuple(item.document_id for item in analysis.document_inputs),
         )

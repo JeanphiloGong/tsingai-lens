@@ -340,6 +340,8 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
     objective_analysis_service = ObjectiveAnalysisService(
         objective_repository=objective_repository,
         evidence_analysis_service=evidence_analysis_service,
+        objective_input_service=SimpleNamespace(),
+        document_profile_service=SimpleNamespace(),
     )
     finding_feedback_service = FindingFeedbackService(
         review_repository=finding_review_repository,

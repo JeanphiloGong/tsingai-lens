@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -19,6 +20,25 @@ class ChatSessionResponse(BaseModel):
     collection_id: str
     created_at: str
     updated_at: str
+    root_session_id: str | None = None
+    parent_session_id: str | None = None
+    fork_message_id: str | None = None
+    fork_position: int | None = None
+    fork_content: str | None = None
+
+
+class ChatBranchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str = Field(min_length=1, max_length=128)
+    request_id: UUID
+    message: str | None = Field(default=None, min_length=1, max_length=12000)
+
+
+class ChatBranchOptions(BaseModel):
+    message_id: str
+    session_ids: list[str]
+    active_session_id: str
 
 
 class ChatResourceRefResponse(BaseModel):
@@ -102,6 +122,7 @@ class ChatTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=12000)
+    branch_revision: bool = False
     source_contexts: list[ChatSourceContextPayload] = Field(
         default_factory=list,
         max_length=12,
@@ -173,3 +194,6 @@ class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
     feedback: list[ChatMessageFeedbackResponse] = Field(default_factory=list)
+    branches: list[ChatBranchOptions] = Field(default_factory=list)
+    branch_draft: ChatMessageResponse | None = None
+    running: bool = False

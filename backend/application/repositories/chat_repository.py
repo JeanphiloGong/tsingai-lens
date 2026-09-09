@@ -1,12 +1,28 @@
 from __future__ import annotations
 
 from typing import Protocol
+from contextlib import AbstractAsyncContextManager
 
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 from domain.chat.feedback import ChatMessageFeedback
 
 
+class ChatSessionBusyError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("the research response is still running; retry when it finishes")
+
+
 class ChatRepository(Protocol):
+    def session_execution(self, session_id: str) -> AbstractAsyncContextManager[None]: ...
+
+    async def is_session_running(self, session_id: str) -> bool: ...
+
+    async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]: ...
+
+    async def add_branch(
+        self, *, session: ChatSession, source_session_id: str, before_position: int,
+    ) -> ChatSession: ...
+
     async def add_session(self, record: ChatSession) -> None: ...
 
     async def read_session(self, session_id: str) -> ChatSession | None: ...

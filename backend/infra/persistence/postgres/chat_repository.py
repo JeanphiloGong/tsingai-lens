@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+import json
+from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -17,6 +20,7 @@ from domain.chat import (
     ToolCallStatus,
 )
 from domain.chat.feedback import ChatMessageFeedback
+from application.repositories.chat_repository import ChatSessionBusyError
 from infra.persistence.postgres.models.chat import (
     ChatMessageFeedbackRow,
     ChatMessageRow,
@@ -30,6 +34,102 @@ class PostgresChatRepository:
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         self.session_factory = session_factory
+
+    @asynccontextmanager
+    async def session_execution(self, session_id: str):
+        # Transaction locks are released even when the worker disconnects or crashes.
+        async with self.session_factory.begin() as database:
+            acquired = await database.scalar(select(func.pg_try_advisory_xact_lock(
+                func.hashtextextended(f"chat-execution:{session_id}", 0),
+            )))
+            if not acquired:
+                raise ChatSessionBusyError()
+            # Long model runs must not exhaust the pool needed by their checkpoints.
+            connection = await database.connection()
+            connection.sync_connection.detach()
+            yield
+
+    async def is_session_running(self, session_id: str) -> bool:
+        async with self.session_factory.begin() as database:
+            return not await database.scalar(select(func.pg_try_advisory_xact_lock(
+                func.hashtextextended(f"chat-execution:{session_id}", 0),
+            )))
+
+    async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
+        root_id = session.root_session_id or session.session_id
+        async with self.session_factory() as database:
+            rows = await database.scalars(select(ChatSessionRow).where(
+                ChatSessionRow.user_id == session.user_id,
+                ChatSessionRow.collection_id == session.collection_id,
+                or_(ChatSessionRow.session_id == root_id, ChatSessionRow.root_session_id == root_id),
+            ).order_by(ChatSessionRow.created_at, ChatSessionRow.session_id))
+            return tuple(_session_record(row) for row in rows)
+
+    async def add_branch(
+        self, *, session: ChatSession, source_session_id: str, before_position: int,
+    ) -> ChatSession:
+        async with self.session_factory.begin() as database:
+            await database.execute(select(func.pg_advisory_xact_lock(
+                func.hashtextextended(f"chat-branch:{session.session_id}", 0),
+            )))
+            source = await database.get(ChatSessionRow, source_session_id, with_for_update=True)
+            if source is None or (source.user_id, source.collection_id) != (session.user_id, session.collection_id):
+                raise ValueError("branch source must be an owned conversation")
+            existing = await database.get(ChatSessionRow, session.session_id)
+            if existing is not None:
+                saved = _session_record(existing)
+                if (saved.user_id, saved.collection_id, saved.parent_session_id,
+                    saved.fork_message_id, saved.fork_content) != (
+                    session.user_id, session.collection_id, session.parent_session_id,
+                    session.fork_message_id, session.fork_content,
+                ):
+                    raise ValueError("branch request identity was reused for a different revision")
+                return saved
+            rows = tuple(await database.scalars(select(ChatMessageRow).where(
+                ChatMessageRow.session_id == source_session_id,
+                ChatMessageRow.position < before_position,
+            ).order_by(ChatMessageRow.position)))
+            if len(rows) != before_position:
+                raise ValueError("branch position is outside the saved trajectory")
+            calls = tuple(await database.scalars(select(ChatToolCallRow).where(
+                ChatToolCallRow.session_id == source_session_id,
+            )))
+            if any(call.status not in {"succeeded", "failed", "rejected"} for call in calls):
+                raise ChatSessionBusyError()
+            message_ids = {row.message_id: f"msg_{uuid4().hex}" for row in rows}
+            copied_calls = [call for call in calls if call.assistant_message_id in message_ids]
+            call_ids = {call.tool_call_id: f"call_{uuid4().hex}" for call in copied_calls}
+            result_ids = {row.tool_call_id for row in rows if row.role == "tool"}
+            if set(call_ids) != result_ids:
+                raise ValueError("branch history has unresolved tool results")
+            database.add(ChatSessionRow(**{
+                **session.to_record(),
+                "created_at": _datetime(session.created_at),
+                "updated_at": _datetime(session.updated_at),
+            }))
+            await database.flush()
+            for row in rows:
+                content = row.content
+                if row.role == "tool":
+                    payload = json.loads(content)
+                    payload["tool_call_id"] = call_ids[row.tool_call_id]
+                    content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                database.add(ChatMessageRow(
+                    message_id=message_ids[row.message_id], session_id=session.session_id,
+                    position=row.position, role=row.role, content=content,
+                    tool_call_id=call_ids.get(row.tool_call_id),
+                    source_contexts=row.source_contexts, created_at=row.created_at,
+                ))
+            await database.flush()
+            for call in copied_calls:
+                values = {column.name: getattr(call, column.name) for column in ChatToolCallRow.__table__.columns}
+                values.update(
+                    tool_call_id=call_ids[call.tool_call_id], session_id=session.session_id,
+                    assistant_message_id=message_ids[call.assistant_message_id],
+                )
+                # Historical decisions describe completed work; only fresh calls can be approved.
+                database.add(ChatToolCallRow(**values))
+            return session
 
     async def add_session(self, record: ChatSession) -> None:
         async with self.session_factory.begin() as session:
@@ -176,7 +276,7 @@ class PostgresChatRepository:
             raise ValueError("chat tool call belongs to another session")
         async with self.session_factory.begin() as database:
             session_row = await database.get(
-                ChatSessionRow, session.session_id
+                ChatSessionRow, session.session_id, with_for_update=True
             )
             if session_row is None:
                 raise ValueError(f"chat session not found: {session.session_id}")
@@ -373,6 +473,11 @@ def _session_record(row: ChatSessionRow) -> ChatSession:
         collection_id=row.collection_id,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+        root_session_id=row.root_session_id,
+        parent_session_id=row.parent_session_id,
+        fork_message_id=row.fork_message_id,
+        fork_position=row.fork_position,
+        fork_content=row.fork_content,
     )
 
 

@@ -11,13 +11,16 @@ from fastapi.responses import StreamingResponse
 
 from application.chat.session_service import (
     ChatApprovalPendingError,
+    ChatBranchAlreadyStartedError,
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
+from application.repositories.chat_repository import ChatSessionBusyError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
     ChatMessageFeedbackRequest,
+    ChatBranchRequest,
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
@@ -81,6 +84,24 @@ async def get_chat_session(
     return ChatSessionResponse.model_validate(session.to_record())
 
 
+@router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
+async def branch_chat_message(
+    session_id: str, payload: ChatBranchRequest, request: Request,
+) -> ChatSessionResponse:
+    try:
+        session = await request.app.state.chat_session_service.branch_message_for_user(
+            session_id, payload.message_id, await current_user_id(request),
+            request_id=str(payload.request_id), message=payload.message,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ChatSessionBusyError, ChatApprovalPendingError) as exc:
+        raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "chat_branch_invalid", "message": str(exc)}) from exc
+    return ChatSessionResponse.model_validate(session.to_record())
+
+
 @router.get(
     "/{session_id}/messages",
     response_model=ChatMessageListResponse,
@@ -92,24 +113,18 @@ async def list_chat_messages(
 ) -> ChatMessageListResponse:
     try:
         user_id = await current_user_id(request)
-        messages = await request.app.state.chat_session_service.list_messages_for_user(
-            session_id,
-            user_id,
-        )
-        pending = await request.app.state.chat_session_service.get_pending_approval_for_user(
-            session_id,
-            user_id,
-        )
-        feedback = await request.app.state.chat_session_service.list_feedback_for_user(
-            session_id, user_id,
-        )
+        trajectory = await request.app.state.chat_session_service.get_trajectory_for_user(session_id, user_id)
+        pending = trajectory["pending_approval"]
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatMessageListResponse(
-        items=[_message_response(item) for item in messages],
-        feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in feedback],
+        items=[_message_response(item) for item in trajectory["messages"]],
+        feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in trajectory["feedback"]],
+        branches=trajectory["branches"],
+        branch_draft=_message_response(trajectory["branch_draft"]) if trajectory["branch_draft"] else None,
+        running=trajectory["running"],
         pending_approval=(
             ChatToolCallResponse.model_validate(pending.to_record())
             if pending is not None
@@ -167,6 +182,7 @@ async def post_chat_message(
                 user_id,
                 message=payload.message,
                 source_contexts=_source_contexts(payload),
+                **({"branch_revision": True} if payload.branch_revision else {}),
             )
             return StreamingResponse(
                 _chat_event_stream(events),
@@ -181,6 +197,7 @@ async def post_chat_message(
             user_id,
             message=payload.message,
             source_contexts=_source_contexts(payload),
+            **({"branch_revision": True} if payload.branch_revision else {}),
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
@@ -193,6 +210,10 @@ async def post_chat_message(
                 "tool_call_id": exc.tool_call_id,
             },
         ) from exc
+    except ChatSessionBusyError as exc:
+        raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
+    except ChatBranchAlreadyStartedError as exc:
+        raise HTTPException(status_code=409, detail={"code": "chat_branch_already_started", "message": str(exc)}) from exc
     except ChatSourceContextError as exc:
         raise HTTPException(
             status_code=422,
@@ -256,6 +277,8 @@ async def decide_chat_tool_call(
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatSessionBusyError as exc:
+        raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=404,

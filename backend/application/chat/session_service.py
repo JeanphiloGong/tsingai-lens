@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import logging
@@ -28,7 +29,7 @@ from domain.chat import (
     ToolResultStatus,
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
-from application.repositories.chat_repository import ChatRepository
+from application.repositories.chat_repository import ChatRepository, ChatSessionBusyError
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 
 
@@ -51,6 +52,10 @@ class ChatSourceContextError(ValueError):
 
 
 class ChatMessageNotFoundError(FileNotFoundError):
+    pass
+
+
+class ChatBranchAlreadyStartedError(RuntimeError):
     pass
 
 
@@ -126,11 +131,88 @@ class ChatSessionService:
                     return call
         return None
 
-    async def list_feedback_for_user(
-        self, session_id: str, user_id: str
-    ) -> tuple[ChatMessageFeedback, ...]:
-        await self.get_session_for_user(session_id, user_id)
-        return await self.repository.read_feedback(session_id, user_id)
+    async def _branch_origin(
+        self, session: ChatSession, position: int,
+    ) -> tuple[ChatSession, ChatMessage, str]:
+        selected_id = None
+        while session.parent_session_id is not None and position <= session.fork_position:
+            if position == session.fork_position:
+                selected_id = session.session_id
+            session = await self.get_session_for_user(session.parent_session_id, session.user_id)
+        messages = await self.repository.read_messages(session.session_id)
+        return session, messages[position], selected_id or session.session_id
+
+    async def branch_message_for_user(
+        self, session_id: str, message_id: str, user_id: str, *,
+        request_id: str, message: str | None = None,
+    ) -> ChatSession:
+        session = await self.get_session_for_user(session_id, user_id)
+        async with self.repository.session_execution(session_id):
+            messages = await self.repository.read_messages(session_id)
+            position = next((index for index, item in enumerate(messages)
+                             if item.message_id == message_id and item.role.value == "user"), None)
+            if position is None:
+                raise ChatMessageNotFoundError("saved user message not found")
+            original = messages[position]
+            content = original.content if message is None else message.strip()
+            if not content or len(content) > 12000:
+                raise ValueError("revised question must contain 1 to 12000 characters")
+            await self._canonical_source_contexts(session, original.source_contexts)
+            pending = await self.get_pending_approval_for_user(session_id, user_id)
+            if pending is not None:
+                raise ChatApprovalPendingError(pending.tool_call_id)
+            origin, anchor, _ = await self._branch_origin(session, position)
+            now = _now_iso()
+            branch = ChatSession(
+                session_id="chat_branch_" + sha256(f"{user_id}:{request_id}".encode()).hexdigest()[:40],
+                user_id=user_id, collection_id=session.collection_id,
+                created_at=now, updated_at=now,
+                root_session_id=session.root_session_id or session.session_id,
+                parent_session_id=origin.session_id, fork_message_id=anchor.message_id,
+                fork_position=position, fork_content=content,
+            )
+            return await self.repository.add_branch(
+                session=branch, source_session_id=session_id, before_position=position,
+            )
+
+    async def get_trajectory_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
+        session = await self.get_session_for_user(session_id, user_id)
+        # Sample execution before messages, so a just-finished turn still gets a final poll.
+        running = await self.repository.is_session_running(session_id)
+        messages = await self.repository.read_messages(session_id)
+        family = await self.repository.read_session_family(session)
+        branches = []
+        positions = sorted({item.fork_position for item in family
+                            if item.fork_position is not None and item.fork_position < len(messages)})
+        for position in positions:
+            message = messages[position]
+            if message.role.value != "user":
+                continue
+            origin, anchor, selected_id = await self._branch_origin(session, position)
+            alternatives = [item.session_id for item in family
+                            if item.parent_session_id == origin.session_id
+                            and item.fork_message_id == anchor.message_id]
+            if alternatives:
+                ids = [origin.session_id, *alternatives]
+                branches.append({"message_id": message.message_id, "session_ids": ids,
+                                 "active_session_id": selected_id if selected_id in ids else origin.session_id})
+        draft = None
+        if session.fork_position is not None and len(messages) == session.fork_position:
+            original = await self.repository.read_message(session.fork_message_id)
+            if original is not None:
+                draft = replace(original, content=session.fork_content)
+        pending = None
+        for message in reversed(messages):
+            for request in message.tool_calls:
+                call = await self.repository.read_tool_call(request.tool_call_id)
+                if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
+                    pending = call
+                    break
+            if pending is not None:
+                break
+        return {"messages": messages, "branches": branches, "branch_draft": draft,
+                "running": running, "pending_approval": pending,
+                "feedback": await self.repository.read_feedback(session_id, user_id)}
 
     async def set_message_feedback_for_user(
         self,
@@ -172,22 +254,26 @@ class ChatSessionService:
         *,
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        branch_revision: bool = False,
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
+        if branch_revision:
+            source_contexts = await self._branch_source_contexts(session, message)
         source_contexts = await self._canonical_source_contexts(
             session, source_contexts
         )
-        previous_messages = await self.repository.read_messages(session_id)
-        pending = await self.get_pending_approval_for_user(session_id, user_id)
-        if pending is not None:
-            raise ChatApprovalPendingError(pending.tool_call_id)
-        result = await self.runner.run_turn(
-            context=self._context(session),
-            previous_messages=previous_messages,
-            user_message=message,
-            source_contexts=source_contexts,
-            checkpoint=self._trajectory_checkpoint(session),
-        )
+        async with self.repository.session_execution(session_id):
+            previous_messages = await self.repository.read_messages(session_id)
+            if branch_revision and len(previous_messages) != session.fork_position:
+                raise ChatBranchAlreadyStartedError("this revision has already been sent")
+            await self._ensure_turn_ready(previous_messages)
+            result = await self.runner.run_turn(
+                context=self._context(session),
+                previous_messages=previous_messages,
+                user_message=message,
+                source_contexts=source_contexts,
+                checkpoint=self._trajectory_checkpoint(session),
+            )
         return self._turn_record(result, previous_count=len(previous_messages))
 
     async def stream_message_for_user(
@@ -197,12 +283,19 @@ class ChatSessionService:
         *,
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        branch_revision: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         session = await self.get_session_for_user(session_id, user_id)
+        if branch_revision:
+            source_contexts = await self._branch_source_contexts(session, message)
+        if await self.repository.is_session_running(session_id):
+            raise ChatSessionBusyError()
         source_contexts = await self._canonical_source_contexts(
             session, source_contexts
         )
         previous_messages = await self.repository.read_messages(session_id)
+        if branch_revision and len(previous_messages) != session.fork_position:
+            raise ChatBranchAlreadyStartedError("this revision has already been sent")
         pending = await self.get_pending_approval_for_user(session_id, user_id)
         if pending is not None:
             raise ChatApprovalPendingError(pending.tool_call_id)
@@ -226,21 +319,26 @@ class ChatSessionService:
 
             async def run_turn() -> None:
                 try:
-                    result = await self.runner.run_turn(
-                        context=self._context(session),
-                        previous_messages=previous_messages,
-                        user_message=message,
-                        source_contexts=source_contexts,
-                        checkpoint=self._trajectory_checkpoint(session),
-                        text_delta_callback=emit_text_delta,
-                        progress_callback=emit_progress,
-                    )
+                    async with self.repository.session_execution(session_id):
+                        current_messages = await self.repository.read_messages(session_id)
+                        if branch_revision and len(current_messages) != session.fork_position:
+                            raise ChatBranchAlreadyStartedError("this revision has already been sent")
+                        await self._ensure_turn_ready(current_messages)
+                        result = await self.runner.run_turn(
+                            context=self._context(session),
+                            previous_messages=current_messages,
+                            user_message=message,
+                            source_contexts=source_contexts,
+                            checkpoint=self._trajectory_checkpoint(session),
+                            text_delta_callback=emit_text_delta,
+                            progress_callback=emit_progress,
+                        )
                     await queue.put(
                         {
                             "type": "turn",
                             "turn": self._turn_record(
                                 result,
-                                previous_count=len(previous_messages),
+                                previous_count=len(current_messages),
                             ),
                         }
                     )
@@ -286,6 +384,27 @@ class ChatSessionService:
                 await asyncio.gather(heartbeat_task, return_exceptions=True)
 
         return events()
+
+    async def _ensure_turn_ready(self, messages: tuple[ChatMessage, ...]) -> None:
+        for message in messages:
+            for request in message.tool_calls:
+                call = await self.repository.read_tool_call(request.tool_call_id)
+                if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
+                    raise ChatApprovalPendingError(call.tool_call_id)
+                if call is None or call.status not in {
+                    ToolCallStatus.SUCCEEDED, ToolCallStatus.FAILED, ToolCallStatus.REJECTED,
+                }:
+                    raise ChatSessionBusyError()
+
+    async def _branch_source_contexts(
+        self, session: ChatSession, message: str,
+    ) -> tuple[ChatSourceContext, ...]:
+        if session.fork_message_id is None or message != session.fork_content:
+            raise ChatSourceContextError("revision must match the saved branch question")
+        original = await self.repository.read_message(session.fork_message_id)
+        if original is None or original.session_id != session.parent_session_id:
+            raise ChatSourceContextError("the original question is no longer available")
+        return original.source_contexts
 
     async def _canonical_source_contexts(
         self,
@@ -401,7 +520,7 @@ class ChatSessionService:
         if existing is None or existing.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
         if existing.status is ToolCallStatus.SUCCEEDED:
-            return {"status": "completed", "messages": (), "pending_approval": None}
+            return {"status": "completed", "completion_reason": "model_answer", "messages": (), "pending_approval": None}
         if existing.status is ToolCallStatus.REJECTED:
             return {"status": "rejected", "messages": (), "pending_approval": None}
 
@@ -444,35 +563,33 @@ class ChatSessionService:
                 "pending_approval": None,
             }
 
-        claimed = await self.repository.claim_approved_tool_call(
-            session_id=session_id,
-            tool_call_id=tool_call_id,
-            user_id=user_id,
-            started_at=_now_iso(),
-        )
-        if claimed is None:
-            current = await self.repository.read_tool_call(tool_call_id)
-            if current is not None and current.status is ToolCallStatus.SUCCEEDED:
-                return {
-                    "status": "completed",
-                    "messages": (),
-                    "pending_approval": None,
-                }
-            if current is not None and current.status is ToolCallStatus.FAILED:
-                return {
-                    "status": "failed",
-                    "messages": (),
-                    "pending_approval": None,
-                    "error_code": current.error_code,
-                }
-            raise ValueError("approved research action is already running")
-
-        run_result = await self.runner.resume_claimed_call(
-            context=self._context(session),
-            previous_messages=previous_messages,
-            claimed_call=claimed,
-            checkpoint=self._trajectory_checkpoint(session),
-        )
+        async with self.repository.session_execution(session_id):
+            claimed = await self.repository.claim_approved_tool_call(
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                user_id=user_id,
+                started_at=_now_iso(),
+            )
+            if claimed is None:
+                current = await self.repository.read_tool_call(tool_call_id)
+                if current is not None and current.status is ToolCallStatus.SUCCEEDED:
+                    return {
+                        "status": "completed", "completion_reason": "model_answer",
+                        "messages": (), "pending_approval": None,
+                    }
+                if current is not None and current.status is ToolCallStatus.FAILED:
+                    return {
+                        "status": "failed", "messages": (), "pending_approval": None,
+                        "error_code": current.error_code,
+                    }
+                raise ValueError("approved research action is already running")
+            previous_messages = await self.repository.read_messages(session_id)
+            run_result = await self.runner.resume_claimed_call(
+                context=self._context(session),
+                previous_messages=previous_messages,
+                claimed_call=claimed,
+                checkpoint=self._trajectory_checkpoint(session),
+            )
         return self._turn_record(
             run_result,
             previous_count=len(previous_messages),

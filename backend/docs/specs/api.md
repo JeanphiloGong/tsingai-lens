@@ -136,6 +136,7 @@ handoff record or a second research-result identity.
 - `GET /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
+- `POST /api/v1/chat-sessions/{session_id}/branches`
 - `PUT /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback`
 - `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
@@ -145,6 +146,40 @@ record ordinary user and assistant conversation, model tool intent, and bounded
 structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
+
+Message editing and answer regeneration preserve the original trajectory.
+`POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,
+a UUID `request_id`, and optional revised `message` (1-12000 non-whitespace
+characters). Omitting `message` retries the original question. It returns an
+owned `ChatSession` with `root_session_id`, `parent_session_id`,
+`fork_message_id`, `fork_position`, and `fork_content`; these fields are null
+for an original session. The same UUID and revision return the same branch.
+Reusing a UUID for different content is rejected with 422.
+
+Branch creation atomically copies complete turns before the selected question,
+assigning new message and call identities while retaining canonical Source and
+resource references. Later answers and writes stay in their original branch.
+Copied terminal calls describe historical work; they cannot be claimed again.
+New writes require a new exact approval. Branching requires both session and
+current Collection ownership, and returns 409 during execution or unresolved
+approval/recovery, 404 for an unavailable saved user message, and 422 for an
+invalid revision or stale Source.
+
+To execute the saved revision, `POST /messages` accepts `branch_revision: true`
+with the exact `fork_content`. The backend restores Source contexts from the
+original question, validates them against current Sources, and accepts this
+branch's initial turn at most once. A repeated send returns 409
+`chat_branch_already_started`; the client reads the saved trajectory to recover.
+Both ordinary JSON and SSE submission support this behavior.
+
+`GET /messages` also returns `branches` (per-question `message_id`, ordered
+`session_ids`, and `active_session_id`), `branch_draft` (the unsent revision or
+null), and `running`. These fields survive browser reloads. Execution uses a
+PostgreSQL transaction advisory lock shared by workers and branch creation.
+Each running turn holds one dedicated database connection outside the normal
+checkpoint pool; transaction completion or connection loss releases the lock.
+Browser disconnection does not cancel an already running turn. Apply migration
+`20260909_0057` before running this version against an existing database.
 
 Answer usefulness feedback is separate from scientific Finding review. For
 example, a researcher can mark an LPBF comparison answer incomplete, request

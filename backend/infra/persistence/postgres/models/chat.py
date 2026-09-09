@@ -45,6 +45,11 @@ class ChatSessionRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    root_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    parent_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    fork_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    fork_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fork_content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ChatMessageRow(Base):

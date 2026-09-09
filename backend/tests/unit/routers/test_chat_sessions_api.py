@@ -89,9 +89,10 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         return self.messages
 
-    async def list_feedback_for_user(self, session_id: str, user_id: str):
+    async def get_trajectory_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
-        return ()
+        return {"branches": [], "branch_draft": None, "running": False,
+                "messages": self.messages, "pending_approval": self.pending, "feedback": ()}
 
     async def get_pending_approval_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)

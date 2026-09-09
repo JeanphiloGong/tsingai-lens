@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from hashlib import sha256
 from typing import Any
@@ -24,6 +25,7 @@ from application.chat.session_service import (
     ChatSessionService,
     ChatSourceContextError,
 )
+from application.repositories.chat_repository import ChatSessionBusyError
 from application.chat.capabilities.document_sources import ReadSourceCapability
 from domain.chat import (
     ChatMessage,
@@ -125,6 +127,7 @@ class _SourceArtifactRepository:
 class _Repository:
     def __init__(self) -> None:
         self.sessions: dict[str, ChatSession] = {}
+        self.active_sessions: set[str] = set()
         self.messages: dict[str, tuple[ChatMessage, ...]] = {}
         self.calls: dict[str, ChatToolCall] = {}
         self.results: dict[str, ChatToolResult] = {}
@@ -135,6 +138,19 @@ class _Repository:
     async def add_session(self, record: ChatSession) -> None:
         self.sessions[record.session_id] = record
         self.messages[record.session_id] = ()
+
+    @asynccontextmanager
+    async def session_execution(self, session_id: str):
+        if session_id in self.active_sessions:
+            raise ChatSessionBusyError()
+        self.active_sessions.add(session_id)
+        try:
+            yield
+        finally:
+            self.active_sessions.remove(session_id)
+
+    async def is_session_running(self, session_id: str) -> bool:
+        return session_id in self.active_sessions
 
     async def read_session(self, session_id: str) -> ChatSession | None:
         return self.sessions.get(session_id)

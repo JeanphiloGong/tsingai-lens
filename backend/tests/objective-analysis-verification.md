@@ -37,6 +37,10 @@ IDs, timestamps, and run IDs fixed or explicitly separate them from the
 scientific comparison. Also check OpenAPI, failure responses, and repository
 round trips. A passing unit suite alone does not prove the complete chain.
 
+The extraction suite tests a single reading batch through
+`_extract_source_round()` and the complete adaptive reading loop through
+`extract_and_validate_source_facts()`. Keep both gates: a single batch cannot
+prove that subsequent context reads stop correctly or preserve result anchors.
 Analysis lifecycle tests separately cover safe historical failure messages,
 internal failure locations, retry versions, and retained published results.
 

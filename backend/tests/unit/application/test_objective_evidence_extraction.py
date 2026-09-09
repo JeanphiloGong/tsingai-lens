@@ -26,6 +26,7 @@ from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     StructuredEvidenceExtractions,
     extract_and_validate_source_facts,
+    _extract_source_round,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
@@ -460,7 +461,7 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
             return StructuredEvidenceExtractions()
 
     extractor = CapturingExtractor()
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -469,7 +470,6 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
         blocks_by_document_id={"paper-1": [result_block, methods_block]},
         tables_by_document_id={"paper-1": [table]},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     result_payload = next(
@@ -1503,7 +1503,7 @@ def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() ->
         }
     )
     with capture_analysis_diagnostics() as diagnostics:
-        drafts = extract_and_validate_source_facts(
+        drafts = _extract_source_round(
             collection_id="col-test",
             source_extractor=_StudySourceEvidenceExtractor(
                 {"conclusion-intent": None}
@@ -1514,7 +1514,6 @@ def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() ->
             blocks_by_document_id={"paper-preheating": [block]},
             tables_by_document_id={"paper-preheating": []},
             document_trees_by_document_id={},
-            _allow_adaptive_context_expansion=False,
         )
         evidence_records, contributions = evidence_materialization.materialize_evidence(
             collection_id="col-test",
@@ -1613,7 +1612,7 @@ def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() 
     )
 
     with capture_analysis_diagnostics() as diagnostics:
-        drafts = extract_and_validate_source_facts(
+        drafts = _extract_source_round(
             collection_id="col-test",
             source_extractor=_StudySourceEvidenceExtractor(
                 {"introduction-cited-context": None}
@@ -1624,7 +1623,6 @@ def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() 
             blocks_by_document_id={"paper-preheating": [block]},
             tables_by_document_id={"paper-preheating": []},
             document_trees_by_document_id={},
-            _allow_adaptive_context_expansion=False,
         )
         evidence_records, contributions = evidence_materialization.materialize_evidence(
             collection_id="col-test",
@@ -1674,7 +1672,7 @@ def test_empty_mixed_current_and_cited_result_route_still_needs_context() -> Non
         6,
     )
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=_StudySourceEvidenceExtractor(
             {"results-mixed-context": None}
@@ -1687,7 +1685,6 @@ def test_empty_mixed_current_and_cited_result_route_still_needs_context() -> Non
         blocks_by_document_id={"paper-1": [block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1
@@ -3741,7 +3738,7 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
     )
 
     with capture_analysis_diagnostics() as diagnostics:
-        drafts = extract_and_validate_source_facts(
+        drafts = _extract_source_round(
             collection_id="col-test",
             source_extractor=_StudySourceEvidenceExtractor(
                 {"methods-empty": None}
@@ -3752,7 +3749,6 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
             blocks_by_document_id={"paper-1": [block]},
             tables_by_document_id={"paper-1": []},
             document_trees_by_document_id={},
-            _allow_adaptive_context_expansion=False,
         )
         evidence_records, contributions = evidence_materialization.materialize_evidence(
             collection_id="col-test",
@@ -3842,7 +3838,7 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
                 }
             )
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=OmittedConfidenceExtractor(),
         objectives=(objective,),
@@ -3851,7 +3847,6 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
         blocks_by_document_id={"paper-1": [block]},
         tables_by_document_id={},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     result = next(item for item in drafts if item.reported_result is not None)
@@ -3951,7 +3946,7 @@ def test_objective_outcome_does_not_synthesize_unreported_test_context() -> None
         }
     )
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -3960,7 +3955,6 @@ def test_objective_outcome_does_not_synthesize_unreported_test_context() -> None
         blocks_by_document_id={"paper-1": [result_block, methods_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert [draft.source_ref for draft in drafts] == [result_block.block_id]
@@ -4020,7 +4014,7 @@ def test_method_context_is_not_created_for_paper_outside_objective_route_scope()
         def extract_source(self, payload: dict[str, Any]):
             return StructuredEvidenceExtractions()
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=EmptyExtractor(),
         objectives=(objective,),
@@ -4032,7 +4026,6 @@ def test_method_context_is_not_created_for_paper_outside_objective_route_scope()
         },
         tables_by_document_id={},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert {draft.document_id for draft in drafts} == {"paper-in-scope"}
@@ -4388,7 +4381,7 @@ def test_empty_selected_result_keeps_direct_result_role_when_reason_mentions_con
     )
     extractor = _StudySourceEvidenceExtractor({result_block.block_id: None})
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4397,7 +4390,6 @@ def test_empty_selected_result_keeps_direct_result_role_when_reason_mentions_con
         blocks_by_document_id={"paper-1": [result_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1
@@ -4597,7 +4589,7 @@ def test_selected_result_source_is_retained_when_validated_model_record_is_empty
     # scientific payload because the record contains no source-grounded fact.
     extractor = _StudySourceEvidenceExtractor({abstract_block.block_id: {}})
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4606,7 +4598,6 @@ def test_selected_result_source_is_retained_when_validated_model_record_is_empty
         blocks_by_document_id={"paper-1": [abstract_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1
@@ -4651,7 +4642,7 @@ def test_successfully_inspected_extractable_source_leaves_trace_only_marker() ->
     )
     extractor = _StudySourceEvidenceExtractor({abstract_block.block_id: None})
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4660,7 +4651,6 @@ def test_successfully_inspected_extractable_source_leaves_trace_only_marker() ->
         blocks_by_document_id={"paper-1": [abstract_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1

@@ -46,6 +46,15 @@ passes. The next Source sees only already accepted facts. Missing conditions
 remain missing unless an inspected Source in the same paper supports them.
 The detailed rules are in [Scientific Analysis](docs/scientific-analysis.md).
 
+Within `source_extraction.py`, start with
+`extract_and_validate_source_facts()` for the reading loop, then
+`_extract_source_round()` for one batch's immediate extraction and validation.
+The loop reuses that batch operation without recursive execution modes.
+`_build_adaptive_context_routes()` coordinates missing-result anchors, candidate
+collection, result-local matching, and next-read selection. Its private
+`_ContextSourceCandidate` names navigation scores and Source identities; it is
+not a persisted record or grounded Evidence.
+
 ## Technical Support
 
 - [`table_repair.py`](table_repair.py): `repair_table_source()` restores a

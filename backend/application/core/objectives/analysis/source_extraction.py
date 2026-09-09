@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from functools import partial
 from hashlib import sha1
-from typing import Any, Callable, Iterable, Literal, Mapping
+from typing import Any, Callable, Iterable, Literal, Mapping, NamedTuple
 
 from openai import APIConnectionError, APIStatusError
 from pydantic import (
@@ -1783,9 +1783,164 @@ def extract_and_validate_source_facts(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     table_cells_by_document_id: dict[str, list[Any]] | None = None,
     progress_callback: ProgressCallback | None = None,
-    _allow_adaptive_context_expansion: bool = True,
-    _document_state_seed: tuple[ExtractedEvidenceDraft, ...] = (),
 ) -> tuple[ExtractedEvidenceDraft, ...]:
+    """Inspect Sources, then read missing same-paper context while facts advance."""
+    units = list(
+        _extract_source_round(
+            collection_id=collection_id,
+            source_extractor=source_extractor,
+            paper_facts_extractor=paper_facts_extractor,
+            objectives=objectives,
+            objective_paper_frames=objective_paper_frames,
+            objective_evidence_routes=objective_evidence_routes,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
+            table_cells_by_document_id=table_cells_by_document_id,
+            progress_callback=progress_callback,
+        )
+    )
+    seen = {unit.evidence_id for unit in units}
+    # Context discovery is a stateful closure loop. Each round can expose
+    # new sample or condition labels that make another same-paper Source
+    # discoverable. Only previously unread context Sources are added. The
+    # result anchor stays immutable; deterministic paper reconstruction
+    # joins newly grounded context without repeating scientific extraction.
+    known_routes = list(objective_evidence_routes)
+    context_round = 0
+    initial_route_keys = {
+        (route.document_id, route.source_kind, route.source_ref)
+        for route in objective_evidence_routes
+    }
+    available_source_count = sum(
+        len((blocks_by_document_id or {}).get(document_id, ()))
+        + len((tables_by_document_id or {}).get(document_id, ()))
+        + len((figures_by_document_id or {}).get(document_id, ()))
+        for document_id in {
+            route.document_id for route in objective_evidence_routes
+        }
+    )
+    # A paper can be reviewed as far as its concrete Source inventory,
+    # but never beyond it. This replaces an arbitrary round count while
+    # keeping adaptive expansion finite even when a route selector is
+    # imperfect or a provider repeats a candidate.
+    adaptive_source_budget = max(
+        available_source_count - len(initial_route_keys),
+        0,
+    )
+    adaptive_source_count = 0
+    while True:
+        context_round += 1
+        context_state_before = _objective_context_progress_state(
+            units,
+            objectives,
+        )
+        adaptive_context_routes = _build_adaptive_context_routes(
+            objectives=objectives,
+            source_facts=tuple(units),
+            objective_evidence_routes=tuple(known_routes),
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
+        )
+        if adaptive_context_routes:
+            known_routes.extend(adaptive_context_routes)
+            adaptive_source_count += len(adaptive_context_routes)
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_context_expansion",
+                    "collection_id": collection_id,
+                    "route_count": len(adaptive_context_routes),
+                    "context_round": context_round,
+                    "document_keys": sorted(
+                        {
+                            f"{route.objective_id}:{route.document_id}"
+                            for route in adaptive_context_routes
+                        }
+                    ),
+                    "reason": "partial_result_requires_same_paper_context",
+                }
+            )
+            expanded_context_units = _extract_source_round(
+                collection_id=collection_id,
+                source_extractor=source_extractor,
+                paper_facts_extractor=paper_facts_extractor,
+                objectives=objectives,
+                objective_paper_frames=objective_paper_frames,
+                objective_evidence_routes=adaptive_context_routes,
+                blocks_by_document_id=blocks_by_document_id,
+                tables_by_document_id=tables_by_document_id,
+                figures_by_document_id=figures_by_document_id,
+                document_trees_by_document_id=document_trees_by_document_id,
+                table_cells_by_document_id=table_cells_by_document_id,
+                progress_callback=progress_callback,
+                document_state=tuple(units),
+            )
+            for unit in expanded_context_units:
+                if unit.evidence_id in seen:
+                    continue
+                seen.add(unit.evidence_id)
+                units.append(unit)
+
+        context_state_after = _objective_context_progress_state(
+            units,
+            objectives,
+        )
+        if context_state_after == context_state_before:
+            _record_objective_context_scope_gap(
+                collection_id=collection_id,
+                context_round=context_round,
+                units=units,
+                objectives=objectives,
+                reason=(
+                    "Same-paper Sources were inspected but did not reduce "
+                    "the remaining context gap."
+                ),
+            )
+            break
+        if not adaptive_context_routes:
+            break
+        if adaptive_source_count >= adaptive_source_budget:
+            _record_objective_context_scope_gap(
+                collection_id=collection_id,
+                context_round=context_round,
+                units=units,
+                objectives=objectives,
+                reason=(
+                    "The available same-paper Source scope was exhausted "
+                    "before all comparison context was source-grounded."
+                ),
+            )
+            break
+
+    logger.info(
+        "Research objective evidence extraction finished collection_id=%s objective_extractions=%s",
+        collection_id,
+        len(units),
+    )
+    return tuple(units)
+
+
+def _extract_source_round(
+    *,
+    collection_id: str,
+    source_extractor: ObjectiveSourceExtractor,
+    paper_facts_extractor: PaperFactsExtractor | None = None,
+    objectives: tuple[ResearchObjective, ...],
+    objective_paper_frames: tuple[PaperAnalysisFrame, ...],
+    objective_evidence_routes: tuple[EvidenceCandidate, ...],
+    blocks_by_document_id: dict[str, list[Any]],
+    tables_by_document_id: dict[str, list[Any]],
+    figures_by_document_id: dict[str, list[Any]] | None = None,
+    document_trees_by_document_id: dict[str, SourceDocumentTree],
+    table_cells_by_document_id: dict[str, list[Any]] | None = None,
+    progress_callback: ProgressCallback | None = None,
+    document_state: tuple[ExtractedEvidenceDraft, ...] = (),
+) -> tuple[ExtractedEvidenceDraft, ...]:
+    """Read one ordered batch; validate each Source before updating paper state."""
     objective_by_id = {objective.objective_id: objective for objective in objectives}
     frame_by_key = {
         (frame.objective_id, frame.document_id): frame
@@ -1810,7 +1965,7 @@ def extract_and_validate_source_facts(
     units: list[ExtractedEvidenceDraft] = []
     seen: set[str] = set()
     document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
-    for seed in _document_state_seed:
+    for seed in document_state:
         document_state_units.setdefault(
             (seed.objective_id, seed.document_id),
             [],
@@ -1865,7 +2020,7 @@ def extract_and_validate_source_facts(
                 f"source_kind={route.source_kind} "
                 f"source_ref={route.source_ref}"
             )
-        objective_context = objective_by_id.get(route.objective_id)
+        objective_context = objective
         frame = frame_by_key.get((route.objective_id, route.document_id))
         tree_position = _route_tree_position(
             _source_candidate_from_route(
@@ -1880,11 +2035,7 @@ def extract_and_validate_source_facts(
         payload = {
             "collection_id": collection_id,
             "objective": _route_prompt_objective_record(objective),
-            "paper_frame": _route_prompt_paper_frame_record(
-                frame_by_key[(route.objective_id, route.document_id)]
-            )
-            if (route.objective_id, route.document_id) in frame_by_key
-            else {},
+            "paper_frame": _route_prompt_paper_frame_record(frame) if frame else {},
             "evidence_route": _objective_evidence_prompt_route_record(route),
             "tree_position": tree_position,
             "document_state": prior_document_state,
@@ -2229,127 +2380,6 @@ def extract_and_validate_source_facts(
             route_position,
             max(len(extractable_routes) - route_position, 0),
         )
-    if _allow_adaptive_context_expansion:
-        # Context discovery is a stateful closure loop. Each round can expose
-        # new sample or condition labels that make another same-paper Source
-        # discoverable. Only previously unread context Sources are added. The
-        # result anchor stays immutable; deterministic paper reconstruction
-        # joins newly grounded context without repeating scientific extraction.
-        known_routes = list(objective_evidence_routes)
-        context_round = 0
-        initial_route_keys = {
-            (route.document_id, route.source_kind, route.source_ref)
-            for route in objective_evidence_routes
-        }
-        available_source_count = sum(
-            len((blocks_by_document_id or {}).get(document_id, ()))
-            + len((tables_by_document_id or {}).get(document_id, ()))
-            + len((figures_by_document_id or {}).get(document_id, ()))
-            for document_id in {
-                route.document_id for route in objective_evidence_routes
-            }
-        )
-        # A paper can be reviewed as far as its concrete Source inventory,
-        # but never beyond it. This replaces an arbitrary round count while
-        # keeping adaptive expansion finite even when a route selector is
-        # imperfect or a provider repeats a candidate.
-        adaptive_source_budget = max(
-            available_source_count - len(initial_route_keys),
-            0,
-        )
-        adaptive_source_count = 0
-        while True:
-            context_round += 1
-            context_state_before = _objective_context_progress_state(
-                units,
-                objectives,
-            )
-            adaptive_context_routes = _build_adaptive_context_routes(
-                objectives=objectives,
-                source_facts=tuple(units),
-                objective_evidence_routes=tuple(known_routes),
-                objective_paper_frames=objective_paper_frames,
-                blocks_by_document_id=blocks_by_document_id,
-                tables_by_document_id=tables_by_document_id,
-                figures_by_document_id=figures_by_document_id,
-                document_trees_by_document_id=document_trees_by_document_id,
-            )
-            if adaptive_context_routes:
-                known_routes.extend(adaptive_context_routes)
-                adaptive_source_count += len(adaptive_context_routes)
-                record_analysis_diagnostic(
-                    {
-                        "trace_type": "objective_context_expansion",
-                        "collection_id": collection_id,
-                        "route_count": len(adaptive_context_routes),
-                        "context_round": context_round,
-                        "document_keys": sorted(
-                            {
-                                f"{route.objective_id}:{route.document_id}"
-                                for route in adaptive_context_routes
-                            }
-                        ),
-                        "reason": "partial_result_requires_same_paper_context",
-                    }
-                )
-                expanded_context_units = extract_and_validate_source_facts(
-                    collection_id=collection_id,
-                    source_extractor=source_extractor,
-                    paper_facts_extractor=paper_facts_extractor,
-                    objectives=objectives,
-                    objective_paper_frames=objective_paper_frames,
-                    objective_evidence_routes=adaptive_context_routes,
-                    blocks_by_document_id=blocks_by_document_id,
-                    tables_by_document_id=tables_by_document_id,
-                    figures_by_document_id=figures_by_document_id,
-                    document_trees_by_document_id=document_trees_by_document_id,
-                    table_cells_by_document_id=table_cells_by_document_id,
-                    progress_callback=progress_callback,
-                    _document_state_seed=tuple(units),
-                    _allow_adaptive_context_expansion=False,
-                )
-                for unit in expanded_context_units:
-                    if unit.evidence_id in seen:
-                        continue
-                    seen.add(unit.evidence_id)
-                    units.append(unit)
-
-            context_state_after = _objective_context_progress_state(
-                units,
-                objectives,
-            )
-            if context_state_after == context_state_before:
-                _record_objective_context_scope_gap(
-                    collection_id=collection_id,
-                    context_round=context_round,
-                    units=units,
-                    objectives=objectives,
-                    reason=(
-                        "Same-paper Sources were inspected but did not reduce "
-                        "the remaining context gap."
-                    ),
-                )
-                break
-            if not adaptive_context_routes:
-                break
-            if adaptive_source_count >= adaptive_source_budget:
-                _record_objective_context_scope_gap(
-                    collection_id=collection_id,
-                    context_round=context_round,
-                    units=units,
-                    objectives=objectives,
-                    reason=(
-                        "The available same-paper Source scope was exhausted "
-                        "before all comparison context was source-grounded."
-                    ),
-                )
-                break
-
-    logger.info(
-        "Research objective evidence extraction finished collection_id=%s objective_extractions=%s",
-        collection_id,
-        len(units),
-    )
     return tuple(units)
 
 
@@ -2641,6 +2671,19 @@ def _objective_source_mentions_target_outcome(
     )
 
 
+class _ContextSourceCandidate(NamedTuple):
+    """A possible next read and its ranking signals, never a grounded fact."""
+
+    priority: int
+    position: int
+    source_kind: str
+    source_ref: str
+    role: str
+    matched_fields: tuple[str, ...]
+    term_hits: int
+    specificity: int
+
+
 def _build_adaptive_context_routes(
     *,
     objectives: tuple[ResearchObjective, ...],
@@ -2665,32 +2708,7 @@ def _build_adaptive_context_routes(
     """
 
     objective_by_id = {objective.objective_id: objective for objective in objectives}
-    anchors_by_key: dict[
-        tuple[str, str],
-        list[ExtractedEvidenceDraft],
-    ] = {}
-    context_seed = tuple(
-        unit
-        for unit in source_facts
-        if unit.reported_result is None
-        and unit.evidence_role in _OBJECTIVE_CONTEXT_ROLES
-    )
-    for unit in source_facts:
-        objective = objective_by_id.get(unit.objective_id)
-        if objective is None or not _objective_fact_needs_context(unit, objective):
-            continue
-        if _objective_context_bundle_can_bind_result(
-            unit,
-            context_seed=context_seed,
-            objective=objective,
-        ):
-            continue
-        fields = _objective_missing_context_fields(unit, objective)
-        if fields:
-            anchors_by_key.setdefault(
-                (unit.objective_id, unit.document_id),
-                [],
-            ).append(unit)
+    anchors_by_key = _incomplete_result_anchors(source_facts, objective_by_id)
     if not anchors_by_key:
         return ()
 
@@ -2727,325 +2745,28 @@ def _build_adaptive_context_routes(
             document_id=document_id,
             objective_id=objective_id,
         )
-        candidates: list[
-            tuple[int, int, str, str, str, tuple[str, ...], int, int]
-        ] = []
-        candidate_search_text: dict[tuple[str, str], tuple[str, str]] = {}
-        frame_candidate_keys: set[tuple[str, str]] = set()
-
-        # Framing is a paper-level reading decision.  When it marked a Source
-        # relevant, that decision must survive an over-selective first router;
-        # otherwise a researcher would continue reading the Source while the
-        # analysis silently stops.  These routes are still ordinary transient
-        # routes and must pass the same extraction and grounding path below.
-        frame = next(
-            (
-                paper_frame
-                for paper_frame in objective_paper_frames
-                if paper_frame.objective_id == objective_id
-                and paper_frame.document_id == document_id
-            ),
-            None,
+        (
+            candidates,
+            candidate_search_text,
+            frame_candidate_keys,
+        ) = _collect_context_source_candidates(
+            objective_id=objective_id,
+            document_id=document_id,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+            document_tree=document_tree,
+            existing_source_keys=existing_source_keys,
         )
-        if frame is not None:
-            frame_sources: list[tuple[str, str]] = []
-            for disposition in frame.source_dispositions:
-                if not disposition.is_relevant:
-                    continue
-                source_kind = disposition.source_kind.casefold()
-                route_source_kind = (
-                    "table"
-                    if source_kind == "table"
-                    else "figure"
-                    if source_kind == "figure"
-                    else "text_window"
-                    if source_kind in {"section", "block", "text", "text_window"}
-                    else ""
-                )
-                source_ref = disposition.source_ref.strip()
-                if not route_source_kind or not source_ref:
-                    continue
-                if source_kind == "section" and document_tree is not None:
-                    section_node = _tree_node_for_route_source(
-                        document_tree=document_tree,
-                        source_ref_kind="section",
-                        source_ref_id=source_ref,
-                    )
-                    child_refs = (
-                        tuple(
-                            str(
-                                getattr(
-                                    document_tree.nodes.get(child_id),
-                                    "source_ref_id",
-                                    "",
-                                )
-                                or ""
-                            ).strip()
-                            for child_id in getattr(
-                                section_node,
-                                "child_ids",
-                                (),
-                            )
-                            if document_tree.nodes.get(child_id) is not None
-                            and document_tree.nodes[child_id].node_type
-                            in {"paragraph", "list_item", "caption"}
-                        )
-                        if section_node is not None
-                        else ()
-                    )
-                    frame_sources.extend(
-                        ("text_window", child_ref)
-                        for child_ref in child_refs
-                        if child_ref
-                    )
-                    if child_refs:
-                        continue
-                frame_sources.append((route_source_kind, source_ref))
-
-            record_analysis_diagnostic(
-                {
-                    "trace_type": "objective_frame_context_candidates",
-                    "objective_id": objective_id,
-                    "document_id": document_id,
-                    "frame_source_disposition_count": len(frame.source_dispositions),
-                    "frame_relevant_source_count": sum(
-                        1 for item in frame.source_dispositions if item.is_relevant
-                    ),
-                    "frame_route_candidate_count": len(frame_sources),
-                    "frame_route_candidate_refs": [
-                        {"source_kind": kind, "source_ref": source_ref}
-                        for kind, source_ref in frame_sources[:20]
-                    ],
-                }
-            )
-            for route_source_kind, source_ref in frame_sources:
-                if document_tree is not None:
-                    source_node = document_tree.nodes.get(source_ref)
-                    resolved_source_ref = str(
-                        getattr(source_node, "source_ref_id", "") or ""
-                    ).strip()
-                    if resolved_source_ref:
-                        source_ref = resolved_source_ref
-                source_key = (route_source_kind, source_ref)
-                if (
-                    (objective_id, document_id, *source_key)
-                    in existing_source_keys
-                    or source_key in frame_candidate_keys
-                ):
-                    continue
-                frame_route = EvidenceCandidate.from_mapping(
-                    {
-                        "objective_id": objective_id,
-                        "document_id": document_id,
-                        "source_kind": route_source_kind,
-                        "source_ref": source_ref,
-                        "role": "process_or_treatment",
-                        "extractable": True,
-                        "confidence": 0.8,
-                    }
-                )
-                frame_source = _build_objective_route_source_payload(
-                    route=frame_route,
-                    blocks=blocks_by_document_id.get(document_id, []),
-                    tables=tables_by_document_id.get(document_id, []),
-                    figures=figures_by_document_id.get(document_id, []),
-                    document_tree=document_tree,
-                    table_cells=[],
-                )
-                if not frame_source:
-                    continue
-                heading = _adaptive_context_source_heading(
-                    heading_path=frame_source.get("heading_path"),
-                    document_tree=document_tree,
-                    source_ref_kind=(
-                        "block" if route_source_kind == "text_window" else route_source_kind
-                    ),
-                    source_ref=source_ref,
-                )
-                source_text = " ".join(
-                    str(frame_source.get(key) or "")
-                    for key in (
-                        "text",
-                        "caption_text",
-                        "heading_path",
-                        "table_markdown",
-                        "table_visual_text",
-                        "column_headers",
-                        "table_matrix",
-                    )
-                )
-                matched_fields = _adaptive_context_matched_fields(
-                    heading=heading,
-                    text=source_text,
-                    missing_fields=missing_fields,
-                    specific_terms=specific_terms,
-                    specific_term_fields=specific_term_fields,
-                )
-                candidates.append(
-                    (
-                        -1,
-                        -1,
-                        route_source_kind,
-                        source_ref,
-                        _adaptive_context_route_role(heading),
-                        matched_fields,
-                        _adaptive_context_term_hits(source_text, specific_terms),
-                        _adaptive_context_specificity_score(source_text),
-                    )
-                )
-                candidate_search_text[source_key] = (heading, source_text)
-                frame_candidate_keys.add(source_key)
-                existing_source_keys.add(
-                    (objective_id, document_id, *source_key)
-                )
-        for position, block in enumerate(blocks_by_document_id.get(document_id, ())):
-            source_ref = _text(getattr(block, "block_id", ""))
-            text = _text(getattr(block, "text", ""))
-            heading = _adaptive_context_heading(
-                block,
-                document_tree=document_tree,
-                source_ref_kind="block",
-                source_ref=source_ref,
-            )
-            if not source_ref or not text:
-                continue
-            source_key = (objective_id, document_id, "text_window", source_ref)
-            if source_key in existing_source_keys:
-                continue
-            role = _adaptive_context_route_role(heading)
-            matched_fields = _adaptive_context_matched_fields(
-                heading=heading,
-                text=text,
-                missing_fields=missing_fields,
-                specific_terms=specific_terms,
-                specific_term_fields=specific_term_fields,
-            )
-            if not matched_fields:
-                continue
-            priority = 0 if specific_terms and _contains_any_term(text, specific_terms) else 1
-            candidates.append(
-                (
-                    priority,
-                    position,
-                    "text_window",
-                    source_ref,
-                    role,
-                    matched_fields,
-                    _adaptive_context_term_hits(text, specific_terms),
-                    _adaptive_context_specificity_score(text),
-                )
-            )
-            candidate_search_text[("text_window", source_ref)] = (heading, text)
-
-        for position, table in enumerate(tables_by_document_id.get(document_id, ())):
-            source_ref = _text(getattr(table, "table_id", ""))
-            if not source_ref:
-                continue
-            heading = " ".join(
-                part
-                for part in (
-                    _adaptive_context_source_heading(
-                        heading_path=getattr(table, "heading_path", ""),
-                        document_tree=document_tree,
-                        source_ref_kind="table",
-                        source_ref=source_ref,
-                    ),
-                    _text(getattr(table, "caption_text", "")),
-                    " ".join(
-                        _text(value)
-                        for value in (getattr(table, "column_headers", ()) or ())
-                    ),
-                )
-                if part
-            ).casefold()
-            source_key = (objective_id, document_id, "table", source_ref)
-            if source_key in existing_source_keys:
-                continue
-            role = _adaptive_context_route_role(heading)
-            table_text = " ".join(
-                part
-                for part in (
-                    heading,
-                    " ".join(
-                        _text(row)
-                        for row in (getattr(table, "table_matrix", ()) or ())
-                    ),
-                )
-                if part
-            )
-            matched_fields = _adaptive_context_matched_fields(
-                heading=heading,
-                text=table_text,
-                missing_fields=missing_fields,
-                specific_terms=specific_terms,
-                specific_term_fields=specific_term_fields,
-            )
-            if not matched_fields:
-                continue
-            priority = 0 if specific_terms and _contains_any_term(table_text, specific_terms) else 1
-            candidates.append(
-                (
-                    priority,
-                    position,
-                    "table",
-                    source_ref,
-                    role,
-                    matched_fields,
-                    _adaptive_context_term_hits(table_text, specific_terms),
-                    _adaptive_context_specificity_score(table_text),
-                )
-            )
-            candidate_search_text[("table", source_ref)] = (heading, table_text)
-
-        for position, figure in enumerate(figures_by_document_id.get(document_id, ())):
-            source_ref = _text(getattr(figure, "figure_id", ""))
-            caption = _text(getattr(figure, "caption_text", ""))
-            if not source_ref or not caption:
-                continue
-            heading = " ".join(
-                part
-                for part in (
-                    _adaptive_context_source_heading(
-                        heading_path=getattr(figure, "heading_path", ""),
-                        document_tree=document_tree,
-                        source_ref_kind="figure",
-                        source_ref=source_ref,
-                    ),
-                    caption,
-                )
-                if part
-            ).casefold()
-            source_key = (objective_id, document_id, "figure", source_ref)
-            if source_key in existing_source_keys:
-                continue
-            matched_fields = _adaptive_context_matched_fields(
-                heading=heading,
-                text=caption,
-                missing_fields=missing_fields,
-                specific_terms=specific_terms,
-                specific_term_fields=specific_term_fields,
-            )
-            if not matched_fields:
-                continue
-            priority = 0 if specific_terms and _contains_any_term(caption, specific_terms) else 1
-            candidates.append(
-                (
-                    priority,
-                    position,
-                    "figure",
-                    source_ref,
-                    "characterization",
-                    matched_fields,
-                    _adaptive_context_term_hits(caption, specific_terms),
-                    _adaptive_context_specificity_score(caption),
-                )
-            )
-            candidate_search_text[("figure", source_ref)] = (heading, caption)
 
         selected_by_key: dict[
             tuple[str, str],
             tuple[
-                tuple[int, int, str, str, str, tuple[str, ...], int, int],
+                _ContextSourceCandidate,
                 set[str],
                 set[str],
             ],
@@ -3100,241 +2821,47 @@ def _build_adaptive_context_routes(
                 document_id=document_id,
                 objective_id=objective_id,
             )
-            anchor_candidates: list[
-                tuple[int, int, str, str, str, tuple[str, ...], int, int]
-            ] = []
-            structural_candidate_count = 0
-            for candidate in candidates:
-                source_key = (candidate[2], candidate[3])
-                heading, source_text = candidate_search_text.get(source_key, ("", ""))
-                matched_fields = _adaptive_context_matched_fields(
-                    heading=heading,
-                    text=source_text,
-                    missing_fields=anchor_missing_fields,
-                    specific_terms=anchor_terms,
-                    specific_term_fields=anchor_term_fields,
-                )
-                if not matched_fields and source_key not in frame_candidate_keys:
-                    continue
-                anchor_candidates.append(
-                    (
-                        candidate[0],
-                        candidate[1],
-                        candidate[2],
-                        candidate[3],
-                        candidate[4],
-                        matched_fields,
-                        _adaptive_context_term_hits(
-                            source_text,
-                            anchor_terms,
-                            term_fields=anchor_term_fields,
-                            wanted_fields=anchor_missing_fields,
-                        ),
-                        _adaptive_context_specificity_score(source_text),
-                    )
-                )
-
-            # Researchers follow local document structure when a result refers
-            # to a terse group label or an abbreviated condition.  Such a
-            # neighbouring Source may not contain any objective keyword, so
-            # lexical matching alone would silently omit it. Add a small,
-            # bounded structural window around text result anchors. These
-            # candidates carry no matched field families and therefore cannot
-            # claim scientific closure before extraction and validation.
-            anchor_block_position = next(
-                (
-                    position
-                    for position, block in enumerate(
-                        blocks_by_document_id.get(document_id, ())
-                    )
-                    if _text(getattr(block, "block_id", ""))
-                    == _text(anchor.source_ref)
-                ),
-                None,
+            (
+                anchor_candidates,
+                structural_candidate_count,
+            ) = _match_context_candidates_to_result(
+                anchor=anchor,
+                anchor_missing_fields=anchor_missing_fields,
+                anchor_terms=anchor_terms,
+                anchor_term_fields=anchor_term_fields,
+                candidates=candidates,
+                candidate_search_text=candidate_search_text,
+                frame_candidate_keys=frame_candidate_keys,
+                blocks_by_document_id=blocks_by_document_id,
+                document_tree=document_tree,
+                existing_source_keys=existing_source_keys,
             )
-            if anchor_block_position is not None:
-                for position, block in enumerate(
-                    blocks_by_document_id.get(document_id, ())
-                ):
-                    source_ref = _text(getattr(block, "block_id", ""))
-                    text = _text(getattr(block, "text", ""))
-                    if (
-                        not source_ref
-                        or not text
-                        or source_ref == _text(anchor.source_ref)
-                        or abs(position - anchor_block_position)
-                        > _ADAPTIVE_CONTEXT_NEIGHBOR_RADIUS
-                    ):
-                        continue
-                    source_key = ("text_window", source_ref)
-                    if (
-                        (objective_id, document_id, *source_key)
-                        in existing_source_keys
-                        or source_key in candidate_search_text
-                    ):
-                        continue
-                    heading = _adaptive_context_heading(
-                        block,
-                        document_tree=document_tree,
-                        source_ref_kind="block",
-                        source_ref=source_ref,
-                    )
-                    candidate_search_text[source_key] = (heading, text)
-                    anchor_candidates.append(
-                        (
-                            2,
-                            abs(position - anchor_block_position),
-                            "text_window",
-                            source_ref,
-                            _adaptive_context_route_role(heading),
-                            (),
-                            0,
-                            _adaptive_context_specificity_score(text),
-                        )
-                    )
-                    structural_candidate_count += 1
-
-            remaining_candidates = list(anchor_candidates)
-            anchor_selected: list[
-                tuple[int, int, str, str, str, tuple[str, ...], int, int]
-            ] = []
-            anchor_uncovered = set(anchor_missing_fields)
-            while remaining_candidates and anchor_uncovered:
-                covering_candidates = [
-                    item
-                    for item in remaining_candidates
-                    if set(item[5]) & anchor_uncovered
-                ]
-                if not covering_candidates:
-                    break
-                chosen = max(
-                    covering_candidates,
-                    key=lambda item: (
-                        # When process/test closure is still open, a Methods
-                        # or procedure Source is the researcher's next read;
-                        # a high-volume Results paragraph cannot substitute for
-                        # fixed controls merely because it contains more
-                        # objective words or numeric tokens.
-                        (
-                            2
-                            if "process" in anchor_uncovered
-                            and item[4] == "process_or_treatment"
-                            else 2
-                            if "test" in anchor_uncovered
-                            and item[4] == "test_condition"
-                            else 1
-                            if item[4]
-                            in {"process_or_treatment", "test_condition"}
-                            else 0
-                        ),
-                        (
-                            _adaptive_context_test_source_score(
-                                *candidate_search_text.get(
-                                    (item[2], item[3]),
-                                    ("", ""),
-                                ),
-                                outcomes=objective.outcomes,
-                            )
-                            if "test" in anchor_uncovered
-                            else 0
-                        ),
-                        item[6],
-                        item[7],
-                        len(set(item[5]) & anchor_uncovered),
-                        len(item[5]),
-                        2 if item[2] == "table" else 1 if item[2] == "figure" else 0,
-                        -item[0],
-                        -item[1],
-                        item[3],
-                    ),
-                )
-                chosen_heading, chosen_text = candidate_search_text.get(
-                    (chosen[2], chosen[3]),
-                    ("", ""),
-                )
-                selected_fields = set(chosen[5]) & anchor_uncovered
-                remaining_candidates.remove(chosen)
-                if (
-                    anchor.reported_result is not None
-                    and "test" in selected_fields
-                    and _adaptive_context_test_source_score(
-                        chosen_heading,
-                        chosen_text,
-                        outcomes=objective.outcomes,
-                    )
-                ):
-                    # This Source won because it explains how the target outcome
-                    # was characterized. Incidental words such as ``specimen``
-                    # or ``laser`` are navigation signals, not proof that the
-                    # same paragraph establishes sample or process context.
-                    # Keep this read narrowly test-focused and continue the
-                    # selection loop for every other real context gap.
-                    selected_fields = {"test"}
-                chosen = (
-                    *chosen[:5],
-                    tuple(sorted(selected_fields)),
-                    *chosen[6:],
-                )
-                anchor_selected.append(chosen)
-                anchor_uncovered.difference_update(chosen[5])
-
-            if anchor_uncovered:
-                frame_fallbacks = [
-                    item
-                    for item in remaining_candidates
-                    if (item[2], item[3]) in frame_candidate_keys
-                ]
-                if frame_fallbacks:
-                    anchor_selected.append(
-                        max(
-                            frame_fallbacks,
-                            key=lambda item: (
-                                item[6],
-                                item[7],
-                                2 if item[2] == "table" else 1 if item[2] == "figure" else 0,
-                                -item[1],
-                                item[3],
-                            ),
-                        )
-                    )
-
-            if anchor_uncovered:
-                structural_fallbacks = [
-                    item
-                    for item in remaining_candidates
-                    if item[0] == 2 and not item[5]
-                ]
-                if structural_fallbacks:
-                    # Read the nearest structural neighbour even when it does
-                    # not advertise a field family. The next extraction pass
-                    # decides whether it contains usable context.
-                    anchor_selected.append(
-                        min(
-                            structural_fallbacks,
-                            key=lambda item: (
-                                item[1],
-                                -item[7],
-                                item[3],
-                            ),
-                        )
-                    )
+            anchor_selected, anchor_uncovered = _choose_context_reads(
+                objective=objective,
+                anchor=anchor,
+                anchor_missing_fields=anchor_missing_fields,
+                anchor_candidates=anchor_candidates,
+                candidate_search_text=candidate_search_text,
+                frame_candidate_keys=frame_candidate_keys,
+            )
 
             anchor_refs = {
                 grouped_anchor.source_ref or grouped_anchor.evidence_id
                 for grouped_anchor in anchor_group
             }
             for selected in anchor_selected:
-                source_key = (selected[2], selected[3])
+                source_key = (selected.source_kind, selected.source_ref)
                 existing = selected_by_key.get(source_key)
                 if existing is None:
                     selected_by_key[source_key] = (
                         selected,
-                        set(selected[5]),
+                        set(selected.matched_fields),
                         set(anchor_refs),
                     )
                     continue
-                existing[1].update(selected[5])
-                existing[2].update(anchor_refs)
+                _, source_fields, source_anchor_refs = existing
+                source_fields.update(selected.matched_fields)
+                source_anchor_refs.update(anchor_refs)
             uncovered_fields.update(anchor_uncovered)
             anchor_audits.append(
                 {
@@ -3381,27 +2908,14 @@ def _build_adaptive_context_routes(
                 "closure_basis": "candidate_source_match_only",
             }
         )
-        for (
-            (
-                _priority,
-                _position,
-                source_kind,
-                source_ref,
-                role,
-                _candidate_matched_fields,
-                _term_hits,
-                _specificity,
-            ),
-            matched_fields,
-            anchor_refs,
-        ) in selected_candidates:
+        for candidate, matched_fields, anchor_refs in selected_candidates:
             route = EvidenceCandidate.from_mapping(
                 {
                     "objective_id": objective_id,
                     "document_id": document_id,
-                    "source_kind": source_kind,
-                    "source_ref": source_ref,
-                    "role": role,
+                    "source_kind": candidate.source_kind,
+                    "source_ref": candidate.source_ref,
+                    "role": candidate.role,
                     "extractable": True,
                     "reason": (
                         (
@@ -3419,9 +2933,623 @@ def _build_adaptive_context_routes(
             )
             adaptive_routes.append(route)
             existing_source_keys.add(
-                (objective_id, document_id, source_kind, source_ref)
+                (objective_id, document_id, candidate.source_kind, candidate.source_ref)
             )
     return tuple(adaptive_routes)
+
+
+def _incomplete_result_anchors(
+    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    objective_by_id: Mapping[str, ResearchObjective],
+) -> dict[tuple[str, str], list[ExtractedEvidenceDraft]]:
+    """Find results whose missing context cannot already bind from read Sources."""
+    anchors_by_key: dict[
+        tuple[str, str],
+        list[ExtractedEvidenceDraft],
+    ] = {}
+    context_seed = tuple(
+        unit
+        for unit in source_facts
+        if unit.reported_result is None
+        and unit.evidence_role in _OBJECTIVE_CONTEXT_ROLES
+    )
+    for unit in source_facts:
+        objective = objective_by_id.get(unit.objective_id)
+        if objective is None or not _objective_fact_needs_context(unit, objective):
+            continue
+        if _objective_context_bundle_can_bind_result(
+            unit,
+            context_seed=context_seed,
+            objective=objective,
+        ):
+            continue
+        fields = _objective_missing_context_fields(unit, objective)
+        if fields:
+            anchors_by_key.setdefault(
+                (unit.objective_id, unit.document_id),
+                [],
+            ).append(unit)
+    return anchors_by_key
+
+
+def _collect_context_source_candidates(
+    *,
+    objective_id: str,
+    document_id: str,
+    missing_fields: set[str],
+    specific_terms: tuple[str, ...],
+    specific_term_fields: Mapping[str, frozenset[str]],
+    objective_paper_frames: tuple[PaperAnalysisFrame, ...],
+    blocks_by_document_id: dict[str, list[Any]],
+    tables_by_document_id: dict[str, list[Any]],
+    figures_by_document_id: dict[str, list[Any]],
+    document_tree: SourceDocumentTree | None,
+    existing_source_keys: set[tuple[str, str, str, str]],
+) -> tuple[
+    list[_ContextSourceCandidate],
+    dict[tuple[str, str], tuple[str, str]],
+    set[tuple[str, str]],
+]:
+    """Collect lexical and framing candidates, indexing each framed Source once."""
+    candidates: list[_ContextSourceCandidate] = []
+    candidate_search_text: dict[tuple[str, str], tuple[str, str]] = {}
+    frame_candidate_keys: set[tuple[str, str]] = set()
+
+    # Framing is a paper-level reading decision.  When it marked a Source
+    # relevant, that decision must survive an over-selective first router;
+    # otherwise a researcher would continue reading the Source while the
+    # analysis silently stops.  These routes are still ordinary transient
+    # routes and must pass the same extraction and grounding path below.
+    frame = next(
+        (
+            paper_frame
+            for paper_frame in objective_paper_frames
+            if paper_frame.objective_id == objective_id
+            and paper_frame.document_id == document_id
+        ),
+        None,
+    )
+    if frame is not None:
+        frame_sources: list[tuple[str, str]] = []
+        for disposition in frame.source_dispositions:
+            if not disposition.is_relevant:
+                continue
+            source_kind = disposition.source_kind.casefold()
+            route_source_kind = (
+                "table"
+                if source_kind == "table"
+                else "figure"
+                if source_kind == "figure"
+                else "text_window"
+                if source_kind in {"section", "block", "text", "text_window"}
+                else ""
+            )
+            source_ref = disposition.source_ref.strip()
+            if not route_source_kind or not source_ref:
+                continue
+            if source_kind == "section" and document_tree is not None:
+                section_node = _tree_node_for_route_source(
+                    document_tree=document_tree,
+                    source_ref_kind="section",
+                    source_ref_id=source_ref,
+                )
+                child_refs = (
+                    tuple(
+                        str(
+                            getattr(
+                                document_tree.nodes.get(child_id),
+                                "source_ref_id",
+                                "",
+                            )
+                            or ""
+                        ).strip()
+                        for child_id in getattr(
+                            section_node,
+                            "child_ids",
+                            (),
+                        )
+                        if document_tree.nodes.get(child_id) is not None
+                        and document_tree.nodes[child_id].node_type
+                        in {"paragraph", "list_item", "caption"}
+                    )
+                    if section_node is not None
+                    else ()
+                )
+                frame_sources.extend(
+                    ("text_window", child_ref)
+                    for child_ref in child_refs
+                    if child_ref
+                )
+                if child_refs:
+                    continue
+            frame_sources.append((route_source_kind, source_ref))
+
+        record_analysis_diagnostic(
+            {
+                "trace_type": "objective_frame_context_candidates",
+                "objective_id": objective_id,
+                "document_id": document_id,
+                "frame_source_disposition_count": len(frame.source_dispositions),
+                "frame_relevant_source_count": sum(
+                    1 for item in frame.source_dispositions if item.is_relevant
+                ),
+                "frame_route_candidate_count": len(frame_sources),
+                "frame_route_candidate_refs": [
+                    {"source_kind": kind, "source_ref": source_ref}
+                    for kind, source_ref in frame_sources[:20]
+                ],
+            }
+        )
+        for route_source_kind, source_ref in frame_sources:
+            if document_tree is not None:
+                source_node = document_tree.nodes.get(source_ref)
+                resolved_source_ref = str(
+                    getattr(source_node, "source_ref_id", "") or ""
+                ).strip()
+                if resolved_source_ref:
+                    source_ref = resolved_source_ref
+            source_key = (route_source_kind, source_ref)
+            if (
+                (objective_id, document_id, *source_key)
+                in existing_source_keys
+                or source_key in frame_candidate_keys
+            ):
+                continue
+            frame_route = EvidenceCandidate.from_mapping(
+                {
+                    "objective_id": objective_id,
+                    "document_id": document_id,
+                    "source_kind": route_source_kind,
+                    "source_ref": source_ref,
+                    "role": "process_or_treatment",
+                    "extractable": True,
+                    "confidence": 0.8,
+                }
+            )
+            frame_source = _build_objective_route_source_payload(
+                route=frame_route,
+                blocks=blocks_by_document_id.get(document_id, []),
+                tables=tables_by_document_id.get(document_id, []),
+                figures=figures_by_document_id.get(document_id, []),
+                document_tree=document_tree,
+                table_cells=[],
+            )
+            if not frame_source:
+                continue
+            heading = _adaptive_context_source_heading(
+                heading_path=frame_source.get("heading_path"),
+                document_tree=document_tree,
+                source_ref_kind=(
+                    "block" if route_source_kind == "text_window" else route_source_kind
+                ),
+                source_ref=source_ref,
+            )
+            source_text = " ".join(
+                str(frame_source.get(key) or "")
+                for key in (
+                    "text",
+                    "caption_text",
+                    "heading_path",
+                    "table_markdown",
+                    "table_visual_text",
+                    "column_headers",
+                    "table_matrix",
+                )
+            )
+            matched_fields = _adaptive_context_matched_fields(
+                heading=heading,
+                text=source_text,
+                missing_fields=missing_fields,
+                specific_terms=specific_terms,
+                specific_term_fields=specific_term_fields,
+            )
+            candidates.append(
+                _ContextSourceCandidate(
+                    priority=-1,
+                    position=-1,
+                    source_kind=route_source_kind,
+                    source_ref=source_ref,
+                    role=_adaptive_context_route_role(heading),
+                    matched_fields=matched_fields,
+                    term_hits=_adaptive_context_term_hits(source_text, specific_terms),
+                    specificity=_adaptive_context_specificity_score(source_text),
+                )
+            )
+            candidate_search_text[source_key] = (heading, source_text)
+            frame_candidate_keys.add(source_key)
+            existing_source_keys.add(
+                (objective_id, document_id, *source_key)
+            )
+    for position, block in enumerate(blocks_by_document_id.get(document_id, ())):
+        source_ref = _text(getattr(block, "block_id", ""))
+        text = _text(getattr(block, "text", ""))
+        heading = _adaptive_context_heading(
+            block,
+            document_tree=document_tree,
+            source_ref_kind="block",
+            source_ref=source_ref,
+        )
+        if not source_ref or not text:
+            continue
+        source_key = (objective_id, document_id, "text_window", source_ref)
+        if source_key in existing_source_keys:
+            continue
+        role = _adaptive_context_route_role(heading)
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=text,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+        )
+        if not matched_fields:
+            continue
+        priority = 0 if specific_terms and _contains_any_term(text, specific_terms) else 1
+        candidates.append(
+            _ContextSourceCandidate(
+                priority=priority,
+                position=position,
+                source_kind="text_window",
+                source_ref=source_ref,
+                role=role,
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(text, specific_terms),
+                specificity=_adaptive_context_specificity_score(text),
+            )
+        )
+        candidate_search_text[("text_window", source_ref)] = (heading, text)
+
+    for position, table in enumerate(tables_by_document_id.get(document_id, ())):
+        source_ref = _text(getattr(table, "table_id", ""))
+        if not source_ref:
+            continue
+        heading = " ".join(
+            part
+            for part in (
+                _adaptive_context_source_heading(
+                    heading_path=getattr(table, "heading_path", ""),
+                    document_tree=document_tree,
+                    source_ref_kind="table",
+                    source_ref=source_ref,
+                ),
+                _text(getattr(table, "caption_text", "")),
+                " ".join(
+                    _text(value)
+                    for value in (getattr(table, "column_headers", ()) or ())
+                ),
+            )
+            if part
+        ).casefold()
+        source_key = (objective_id, document_id, "table", source_ref)
+        if source_key in existing_source_keys:
+            continue
+        role = _adaptive_context_route_role(heading)
+        table_text = " ".join(
+            part
+            for part in (
+                heading,
+                " ".join(
+                    _text(row)
+                    for row in (getattr(table, "table_matrix", ()) or ())
+                ),
+            )
+            if part
+        )
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=table_text,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+        )
+        if not matched_fields:
+            continue
+        priority = 0 if specific_terms and _contains_any_term(table_text, specific_terms) else 1
+        candidates.append(
+            _ContextSourceCandidate(
+                priority=priority,
+                position=position,
+                source_kind="table",
+                source_ref=source_ref,
+                role=role,
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(table_text, specific_terms),
+                specificity=_adaptive_context_specificity_score(table_text),
+            )
+        )
+        candidate_search_text[("table", source_ref)] = (heading, table_text)
+
+    for position, figure in enumerate(figures_by_document_id.get(document_id, ())):
+        source_ref = _text(getattr(figure, "figure_id", ""))
+        caption = _text(getattr(figure, "caption_text", ""))
+        if not source_ref or not caption:
+            continue
+        heading = " ".join(
+            part
+            for part in (
+                _adaptive_context_source_heading(
+                    heading_path=getattr(figure, "heading_path", ""),
+                    document_tree=document_tree,
+                    source_ref_kind="figure",
+                    source_ref=source_ref,
+                ),
+                caption,
+            )
+            if part
+        ).casefold()
+        source_key = (objective_id, document_id, "figure", source_ref)
+        if source_key in existing_source_keys:
+            continue
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=caption,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+        )
+        if not matched_fields:
+            continue
+        priority = 0 if specific_terms and _contains_any_term(caption, specific_terms) else 1
+        candidates.append(
+            _ContextSourceCandidate(
+                priority=priority,
+                position=position,
+                source_kind="figure",
+                source_ref=source_ref,
+                role="characterization",
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(caption, specific_terms),
+                specificity=_adaptive_context_specificity_score(caption),
+            )
+        )
+        candidate_search_text[("figure", source_ref)] = (heading, caption)
+
+    return candidates, candidate_search_text, frame_candidate_keys
+
+
+def _match_context_candidates_to_result(
+    *,
+    anchor: ExtractedEvidenceDraft,
+    anchor_missing_fields: set[str],
+    anchor_terms: tuple[str, ...],
+    anchor_term_fields: Mapping[str, frozenset[str]],
+    candidates: list[_ContextSourceCandidate],
+    candidate_search_text: dict[tuple[str, str], tuple[str, str]],
+    frame_candidate_keys: set[tuple[str, str]],
+    blocks_by_document_id: dict[str, list[Any]],
+    document_tree: SourceDocumentTree | None,
+    existing_source_keys: set[tuple[str, str, str, str]],
+) -> tuple[list[_ContextSourceCandidate], int]:
+    """Match one result's gaps and index previously unseen structural neighbors."""
+    objective_id = anchor.objective_id
+    document_id = anchor.document_id
+    anchor_candidates: list[_ContextSourceCandidate] = []
+    structural_candidate_count = 0
+    for candidate in candidates:
+        source_key = (candidate.source_kind, candidate.source_ref)
+        heading, source_text = candidate_search_text.get(source_key, ("", ""))
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=source_text,
+            missing_fields=anchor_missing_fields,
+            specific_terms=anchor_terms,
+            specific_term_fields=anchor_term_fields,
+        )
+        if not matched_fields and source_key not in frame_candidate_keys:
+            continue
+        anchor_candidates.append(
+            _ContextSourceCandidate(
+                priority=candidate.priority,
+                position=candidate.position,
+                source_kind=candidate.source_kind,
+                source_ref=candidate.source_ref,
+                role=candidate.role,
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(
+                    source_text,
+                    anchor_terms,
+                    term_fields=anchor_term_fields,
+                    wanted_fields=anchor_missing_fields,
+                ),
+                specificity=_adaptive_context_specificity_score(source_text),
+            )
+        )
+
+    # Researchers follow local document structure when a result refers
+    # to a terse group label or an abbreviated condition.  Such a
+    # neighbouring Source may not contain any objective keyword, so
+    # lexical matching alone would silently omit it. Add a small,
+    # bounded structural window around text result anchors. These
+    # candidates carry no matched field families and therefore cannot
+    # claim scientific closure before extraction and validation.
+    anchor_block_position = next(
+        (
+            position
+            for position, block in enumerate(
+                blocks_by_document_id.get(document_id, ())
+            )
+            if _text(getattr(block, "block_id", ""))
+            == _text(anchor.source_ref)
+        ),
+        None,
+    )
+    if anchor_block_position is not None:
+        for position, block in enumerate(
+            blocks_by_document_id.get(document_id, ())
+        ):
+            source_ref = _text(getattr(block, "block_id", ""))
+            text = _text(getattr(block, "text", ""))
+            if (
+                not source_ref
+                or not text
+                or source_ref == _text(anchor.source_ref)
+                or abs(position - anchor_block_position)
+                > _ADAPTIVE_CONTEXT_NEIGHBOR_RADIUS
+            ):
+                continue
+            source_key = ("text_window", source_ref)
+            if (
+                (objective_id, document_id, *source_key)
+                in existing_source_keys
+                or source_key in candidate_search_text
+            ):
+                continue
+            heading = _adaptive_context_heading(
+                block,
+                document_tree=document_tree,
+                source_ref_kind="block",
+                source_ref=source_ref,
+            )
+            candidate_search_text[source_key] = (heading, text)
+            anchor_candidates.append(
+                _ContextSourceCandidate(
+                    priority=2,
+                    position=abs(position - anchor_block_position),
+                    source_kind="text_window",
+                    source_ref=source_ref,
+                    role=_adaptive_context_route_role(heading),
+                    matched_fields=(),
+                    term_hits=0,
+                    specificity=_adaptive_context_specificity_score(text),
+                )
+            )
+            structural_candidate_count += 1
+
+    return anchor_candidates, structural_candidate_count
+
+
+def _choose_context_reads(
+    *,
+    objective: ResearchObjective,
+    anchor: ExtractedEvidenceDraft,
+    anchor_missing_fields: set[str],
+    anchor_candidates: list[_ContextSourceCandidate],
+    candidate_search_text: Mapping[tuple[str, str], tuple[str, str]],
+    frame_candidate_keys: set[tuple[str, str]],
+) -> tuple[list[_ContextSourceCandidate], set[str]]:
+    """Choose the next useful reads; matched fields are navigation, not Evidence."""
+    remaining_candidates = list(anchor_candidates)
+    anchor_selected: list[_ContextSourceCandidate] = []
+    anchor_uncovered = set(anchor_missing_fields)
+    while remaining_candidates and anchor_uncovered:
+        covering_candidates = [
+            item
+            for item in remaining_candidates
+            if set(item.matched_fields) & anchor_uncovered
+        ]
+        if not covering_candidates:
+            break
+        chosen = max(
+            covering_candidates,
+            key=lambda item: (
+                # When process/test closure is still open, a Methods
+                # or procedure Source is the researcher's next read;
+                # a high-volume Results paragraph cannot substitute for
+                # fixed controls merely because it contains more
+                # objective words or numeric tokens.
+                (
+                    2
+                    if "process" in anchor_uncovered
+                    and item.role == "process_or_treatment"
+                    else 2
+                    if "test" in anchor_uncovered
+                    and item.role == "test_condition"
+                    else 1
+                    if item.role
+                    in {"process_or_treatment", "test_condition"}
+                    else 0
+                ),
+                (
+                    _adaptive_context_test_source_score(
+                        *candidate_search_text.get(
+                            (item.source_kind, item.source_ref),
+                            ("", ""),
+                        ),
+                        outcomes=objective.outcomes,
+                    )
+                    if "test" in anchor_uncovered
+                    else 0
+                ),
+                item.term_hits,
+                item.specificity,
+                len(set(item.matched_fields) & anchor_uncovered),
+                len(item.matched_fields),
+                2 if item.source_kind == "table" else 1 if item.source_kind == "figure" else 0,
+                -item.priority,
+                -item.position,
+                item.source_ref,
+            ),
+        )
+        chosen_heading, chosen_text = candidate_search_text.get(
+            (chosen.source_kind, chosen.source_ref),
+            ("", ""),
+        )
+        selected_fields = set(chosen.matched_fields) & anchor_uncovered
+        remaining_candidates.remove(chosen)
+        if (
+            anchor.reported_result is not None
+            and "test" in selected_fields
+            and _adaptive_context_test_source_score(
+                chosen_heading,
+                chosen_text,
+                outcomes=objective.outcomes,
+            )
+        ):
+            # This Source won because it explains how the target outcome
+            # was characterized. Incidental words such as ``specimen``
+            # or ``laser`` are navigation signals, not proof that the
+            # same paragraph establishes sample or process context.
+            # Keep this read narrowly test-focused and continue the
+            # selection loop for every other real context gap.
+            selected_fields = {"test"}
+        chosen = chosen._replace(matched_fields=tuple(sorted(selected_fields)))
+        anchor_selected.append(chosen)
+        anchor_uncovered.difference_update(chosen.matched_fields)
+
+    if anchor_uncovered:
+        frame_fallbacks = [
+            item
+            for item in remaining_candidates
+            if (item.source_kind, item.source_ref) in frame_candidate_keys
+        ]
+        if frame_fallbacks:
+            anchor_selected.append(
+                max(
+                    frame_fallbacks,
+                    key=lambda item: (
+                        item.term_hits,
+                        item.specificity,
+                        2 if item.source_kind == "table" else 1 if item.source_kind == "figure" else 0,
+                        -item.position,
+                        item.source_ref,
+                    ),
+                )
+            )
+
+    if anchor_uncovered:
+        structural_fallbacks = [
+            item
+            for item in remaining_candidates
+            if item.priority == 2 and not item.matched_fields
+        ]
+        if structural_fallbacks:
+            # Read the nearest structural neighbour even when it does
+            # not advertise a field family. The next extraction pass
+            # decides whether it contains usable context.
+            anchor_selected.append(
+                min(
+                    structural_fallbacks,
+                    key=lambda item: (
+                        item.position,
+                        -item.specificity,
+                        item.source_ref,
+                    ),
+                )
+            )
+
+    return anchor_selected, anchor_uncovered
+
+
 
 
 _ADAPTIVE_CONTEXT_FIELD_MARKERS: dict[str, tuple[str, ...]] = {

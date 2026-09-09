@@ -128,6 +128,12 @@ Analysis. It also loads the matching Source documents, Profiles, document trees,
 and reusable Paper Maps; it does not form scientific claims or persist
 Objectives/Evidence.
 
+`load_source_inputs()` returns `ObjectiveSourceInputs`, a typed dictionary of
+the selected domain objects and their document indexes. Analysis adds only
+`paper_maps` through `ObjectiveAnalysisInputs`. Model clients remain service
+dependencies: reading prepared paper data neither initializes a client nor
+passes one through the scientific input bundle.
+
 A stored Paper Map is reusable only when its input fingerprint and policy
 version match and its Source coverage contains no technical extraction failure.
 Another requested workflow rebuilds a technically failed map once through the

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Sequence
 
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
 from application.core.objectives.analysis.evidence_materialization import (
@@ -43,6 +43,7 @@ from application.core.objectives.analysis.source_validation import (
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.objective_input_service import (
     ObjectiveInputService,
+    ObjectiveSourceInputs,
     ResearchObjectivesNotReadyError,
 )
 from application.core.objectives.scope_screening import (
@@ -57,16 +58,30 @@ from domain.core import (
     ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     PaperContribution,
+    PaperResearchMap,
     PreparedDocumentInput,
     ResearchObjective,
 )
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.repositories.objective_repository import ObjectiveRepository
-from domain.source import render_markdown_table, render_plain_table_text
+from domain.source import (
+    SourceBlock,
+    SourceFigure,
+    SourceTable,
+    render_markdown_table,
+    render_plain_table_text,
+)
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+class ObjectiveAnalysisInputs(ObjectiveSourceInputs):
+    """The selected prepared Sources plus their Paper Map navigation priors."""
+
+    paper_maps: tuple[PaperResearchMap, ...]
+
 
 _OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v1"
 OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
@@ -180,7 +195,7 @@ class ObjectiveEvidenceAnalysisService:
             collection_id,
             document_inputs=analysis.document_inputs,
         )
-        response_client = objective_inputs["response_client"]
+        response_client = self.objective_input_service.response_client
         if self._objective_source_screener is None:
             self._objective_source_screener = ObjectiveSourceScreener(response_client)
         if self._objective_evidence_router is None:
@@ -355,7 +370,7 @@ class ObjectiveEvidenceAnalysisService:
         collection_id: str,
         analysis: ObjectiveAnalysis,
         objective: ResearchObjective,
-        objective_inputs: dict[str, Any],
+        objective_inputs: ObjectiveAnalysisInputs,
         progress_callback: ProgressCallback | None,
     ) -> ObjectiveDocumentEvidenceArtifacts:
         screened_sources = screen_sources(
@@ -405,7 +420,11 @@ class ObjectiveEvidenceAnalysisService:
             collection_id=collection_id,
             source_facts=validated_source_facts,
             objectives=(objective,),
-            document_contexts=self._document_contexts_for_evidence(objective_inputs),
+            document_contexts=self._document_contexts_for_evidence(
+                blocks_by_document_id=objective_inputs["blocks_by_document_id"],
+                tables_by_document_id=objective_inputs["tables_by_document_id"],
+                figures_by_document_id=objective_inputs["figures_by_document_id"],
+            ),
         )
         evidence_records, contributions = materialize_evidence(
             collection_id=collection_id,
@@ -433,7 +452,10 @@ class ObjectiveEvidenceAnalysisService:
 
     @staticmethod
     def _document_contexts_for_evidence(
-        objective_inputs: dict[str, Any],
+        *,
+        blocks_by_document_id: Mapping[str, Sequence[SourceBlock]],
+        tables_by_document_id: Mapping[str, Sequence[SourceTable]],
+        figures_by_document_id: Mapping[str, Sequence[SourceFigure]],
     ) -> dict[str, tuple[dict[str, Any], ...]]:
         """Expose bounded, resolvable same-paper context to reconstruction.
 
@@ -445,9 +467,6 @@ class ObjectiveEvidenceAnalysisService:
         """
 
         contexts: dict[str, tuple[dict[str, Any], ...]] = {}
-        blocks_by_document_id = objective_inputs.get("blocks_by_document_id", {})
-        tables_by_document_id = objective_inputs.get("tables_by_document_id", {})
-        figures_by_document_id = objective_inputs.get("figures_by_document_id", {})
         document_ids = tuple(
             dict.fromkeys(
                 (
@@ -671,9 +690,9 @@ class ObjectiveEvidenceAnalysisService:
     @staticmethod
     def _objective_inputs_for_document(
         collection_id: str,
-        objective_inputs: dict[str, Any],
+        objective_inputs: ObjectiveAnalysisInputs,
         document_id: str,
-    ) -> dict[str, Any]:
+    ) -> ObjectiveAnalysisInputs:
         documents = tuple(
             item
             for item in objective_inputs["documents"]
@@ -709,7 +728,6 @@ class ObjectiveEvidenceAnalysisService:
                     document_id
                 ]
             },
-            "response_client": objective_inputs["response_client"],
         }
 
     @staticmethod
@@ -718,7 +736,7 @@ class ObjectiveEvidenceAnalysisService:
         analysis: ObjectiveAnalysis,
         *,
         objective: ResearchObjective,
-        objective_inputs: dict[str, Any],
+        objective_inputs: ObjectiveAnalysisInputs,
     ) -> ObjectiveDocumentEvidenceArtifacts:
         if checkpoint.contribution is None:
             raise ValueError("terminal document Evidence lacks a contribution")
@@ -775,7 +793,7 @@ class ObjectiveEvidenceAnalysisService:
         collection_id: str,
         *,
         document_inputs: tuple[PreparedDocumentInput, ...],
-    ) -> dict[str, Any]:
+    ) -> ObjectiveAnalysisInputs:
         source_inputs = await self.objective_input_service.load_source_inputs(
             collection_id,
             document_inputs=document_inputs,

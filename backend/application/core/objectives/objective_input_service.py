@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
-from typing import Any
+from typing import Any, TypedDict
 
 from application.core.document_profiles.service import (
     DocumentProfileService,
@@ -35,10 +35,27 @@ from domain.core.document_profile import DocumentProfile
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import (
+    SourceBlock,
     SourceDocument,
+    SourceDocumentTree,
+    SourceFigure,
     SourceReferenceSet,
+    SourceTable,
+    SourceTableCell,
     build_source_document_tree,
 )
+
+
+class ObjectiveSourceInputs(TypedDict):
+    """Prepared paper data shared by discovery and analysis, without model clients."""
+
+    documents: tuple[SourceDocument, ...]
+    profiles_by_document_id: dict[str, DocumentProfile]
+    blocks_by_document_id: dict[str, list[SourceBlock]]
+    tables_by_document_id: dict[str, list[SourceTable]]
+    table_cells_by_document_id: dict[str, list[SourceTableCell]]
+    figures_by_document_id: dict[str, list[SourceFigure]]
+    document_trees_by_document_id: dict[str, SourceDocumentTree | None]
 
 
 _PAPER_MAP_DOCUMENT_MAX_CONCURRENCY = 10
@@ -124,7 +141,7 @@ class ObjectiveInputService:
         collection_id: str,
         *,
         document_inputs: tuple[PreparedDocumentInput, ...],
-    ) -> dict[str, Any]:
+    ) -> ObjectiveSourceInputs:
         current_inputs = await self.resolve_prepared_document_inputs(
             collection_id,
             tuple(item.document_id for item in document_inputs),
@@ -192,7 +209,6 @@ class ObjectiveInputService:
                 document.document_id: list(document.figures) for document in documents
             },
             "document_trees_by_document_id": document_trees_by_document_id,
-            "response_client": self.response_client,
         }
 
     async def load_or_build_paper_maps(
@@ -200,7 +216,7 @@ class ObjectiveInputService:
         collection_id: str,
         *,
         document_inputs: tuple[PreparedDocumentInput, ...],
-        source_inputs: dict[str, Any],
+        source_inputs: ObjectiveSourceInputs,
         progress_callback: Any | None = None,
     ) -> tuple[PaperResearchMap, ...]:
         document_ids = tuple(item.document_id for item in document_inputs)
@@ -333,6 +349,7 @@ class ObjectiveInputService:
 
 __all__ = [
     "ObjectiveInputService",
+    "ObjectiveSourceInputs",
     "PAPER_RESEARCH_MAP_POLICY_VERSION",
     "ResearchObjectivesNotReadyError",
     "paper_map_input_fingerprint",

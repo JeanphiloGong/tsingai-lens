@@ -129,7 +129,7 @@ def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> 
     )
 
     contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
-        {
+        **{
             "blocks_by_document_id": {
                 "paper-1": [
                     SimpleNamespace(
@@ -216,7 +216,7 @@ def test_table_context_can_complete_material_for_result_reconstruction() -> None
         }
     )
     contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
-        {
+        **{
             "blocks_by_document_id": {},
             "tables_by_document_id": {
                 "paper-ti64": [
@@ -617,8 +617,11 @@ def _paper_map_loading_service(
     return service, {
         "documents": (documents[0],),
         "profiles_by_document_id": {"paper-selected": SimpleNamespace()},
+        "blocks_by_document_id": {"paper-selected": []},
+        "tables_by_document_id": {"paper-selected": []},
+        "table_cells_by_document_id": {"paper-selected": []},
+        "figures_by_document_id": {"paper-selected": []},
         "document_trees_by_document_id": {"paper-selected": None},
-        "response_client": SimpleNamespace(),
     }
 
 
@@ -647,6 +650,75 @@ def _ready_objective_facts(
             for relationship in study.relationships
         ),
     )
+
+
+async def test_source_inputs_load_without_initializing_a_model(tmp_path, monkeypatch):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection = await collection_service.create_collection("Prepared paper inputs")
+    collection_id = collection["collection_id"]
+    service = _build_research_objective_service(collection_service=collection_service)
+    documents = source_documents_from_records(
+        documents=[
+            {"id": document_id, "title": document_id, "text": "Laser power study."}
+            for document_id in ("paper-1", "paper-2")
+        ],
+        blocks=[
+            {
+                "block_id": f"abstract-{document_id}",
+                "document_id": document_id,
+                "text": "Laser power and relative density were studied.",
+            }
+            for document_id in ("paper-1", "paper-2")
+        ],
+        tables=[],
+    )
+    for document in documents:
+        await service.objective_input_service.source_artifact_repository.replace_document(
+            collection_id, document
+        )
+    await _seed_document_profiles(service, collection_id)
+
+    def unexpected_model_initialization():
+        raise AssertionError("Reading prepared paper data must not initialize a model")
+
+    monkeypatch.setattr(
+        "application.core.objectives.objective_input_service."
+        "build_default_structured_response_client",
+        unexpected_model_initialization,
+    )
+    inputs = await service.objective_input_service.load_source_inputs(
+        collection_id,
+        document_inputs=tuple(
+            PreparedDocumentInput(document.document_id, f"fingerprint-{document.document_id}")
+            for document in documents
+        ),
+    )
+
+    assert set(inputs) == {
+        "documents", "profiles_by_document_id", "blocks_by_document_id",
+        "tables_by_document_id", "table_cells_by_document_id",
+        "figures_by_document_id", "document_trees_by_document_id",
+    }
+    assert inputs["documents"] == documents
+    assert (
+        inputs["blocks_by_document_id"]["paper-1"][0]
+        is inputs["documents"][0].blocks[0]
+    )
+
+    maps = tuple(
+        PaperResearchMap.from_mapping(
+            {"document_id": document.document_id, "doc_role": "experimental"}
+        )
+        for document in documents
+    )
+    selected = service._objective_inputs_for_document(
+        collection_id, {**inputs, "paper_maps": maps}, "paper-2"
+    )
+    assert selected["documents"] == (documents[1],)
+    assert selected["paper_maps"] == (maps[1],)
+    for key in set(inputs) - {"documents"}:
+        assert set(selected[key]) == {"paper-2"}
+        assert selected[key]["paper-2"] is inputs[key]["paper-2"]
 
 
 async def test_selected_document_builds_and_reuses_its_bound_paper_map() -> None:

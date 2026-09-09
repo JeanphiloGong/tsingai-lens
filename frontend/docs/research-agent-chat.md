@@ -374,6 +374,32 @@ unsent selections; opening the panel alone resumes the current session.
 The standalone route and split panel both use `ResearchConversation.svelte`,
 which owns session loading, streaming, approvals, and recovery.
 
+The reading area keeps one tab per opened paper. `DocumentTabs.svelte` owns tab
+selection and keyboard controls; the documents layout owns the opened tabs and
+the primary and comparison pane assignments. `DocumentReader.svelte` receives
+an explicit Collection, document, and Source-location request. Each mounted
+reader retains its reading mode and scroll position across tab switches within
+the workspace. Closing a tab releases that reader without removing its pending
+Source selections or changing the conversation. Leaving the documents workspace
+or reloading restores the canonical document URL, not the entire tab arrangement.
+
+At desktop widths of at least 1100 pixels, researchers may compare two open
+papers side by side. Both paper and conversation separators support dragging
+and keyboard adjustment with bounded widths. Narrower viewports show the active
+paper while retaining the comparison choice; at 820 pixels and below, the Agent
+and reading area alternate. Opening an Agent citation activates the matching
+paper tab and locates its Source within that reader only. Repeating a citation
+repeats the location request without refetching the document. Parsed Source
+locators, PDF page navigation, and fit-width rendering are scoped to each reader.
+
+Opened tabs, selected question context, and completed Agent reads remain distinct:
+opening a paper does not add it to a question or claim the Agent inspected it.
+The selection disclosure reviews and removes pending passages from all open or
+closed paper tabs. Sent context remains in the user message, while actual Agent
+reads remain observable through the conversation's capability results and Source
+links. An unavailable paper shows an error and retry in its own pane; other open
+papers and the conversation remain available.
+
 Source checkboxes accumulate distinct blocks from the current Collection,
 including tables and figures. Duplicate locators cannot create duplicate
 attachments. The composer can request inspection of related sections in those

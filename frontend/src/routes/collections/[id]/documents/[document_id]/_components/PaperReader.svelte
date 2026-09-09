@@ -376,13 +376,48 @@
 		return Array.from({ length: Math.max(1, count) }, (_, index) => index + 1);
 	}
 
+	function fitWidth(node: HTMLElement) {
+		let lastWidth = node.clientWidth;
+		let timer: ReturnType<typeof setTimeout>;
+		const observer = new ResizeObserver(() => {
+			const width = node.clientWidth;
+			if (!width) {
+				lastWidth = 0;
+				clearTimeout(timer);
+				return;
+			}
+			if (Math.abs(width - lastWidth) < 2) return;
+			lastWidth = width;
+			clearTimeout(timer);
+			if (zoom !== 'Fit' || !pdfDocument) return;
+			timer = setTimeout(async () => {
+				if (!mounted || !node.clientWidth || zoom !== 'Fit') return;
+				const generation = loadGeneration;
+				const renderId = renderGeneration + 1;
+				const position = node.scrollTop / Math.max(1, node.scrollHeight);
+				await renderAllPages();
+				if (mounted && generation === loadGeneration && renderId === renderGeneration)
+					node.scrollTop = position * node.scrollHeight;
+			}, 120);
+		});
+		observer.observe(node);
+		return {
+			destroy() {
+				observer.disconnect();
+				clearTimeout(timer);
+			}
+		};
+	}
+
 	async function jumpToSource(anchor: SourceAnchor) {
 		if (!browser) return;
 		const pageNumber = Math.max(1, Math.min(totalPages, anchor.pageIndex + 1));
 		currentPage = pageNumber;
 		await tick();
 		await ensurePageRendered(pageNumber);
-		const target = document.getElementById(`pdf-page-${pageNumber}`);
+		const target = pdfScrollContainer?.querySelector<HTMLElement>(
+			`[data-page-number="${pageNumber}"]`
+		);
 		if (target) {
 			pendingSourceJump = null;
 			scrollPageIntoView(target, 'center');
@@ -396,7 +431,9 @@
 		if (!browser) return;
 		await tick();
 		await ensurePageRendered(pageNumber);
-		const target = document.getElementById(`pdf-page-${pageNumber}`);
+		const target = pdfScrollContainer?.querySelector<HTMLElement>(
+			`[data-page-number="${pageNumber}"]`
+		);
 		if (target) {
 			scrollPageIntoView(target, 'start');
 		}
@@ -618,10 +655,10 @@
 		<button class="rail-bottom" type="button" aria-label={$t('workbench.morePages')}>v</button>
 	</aside>
 
-	<article class="pdf-shell" aria-labelledby="paper-reader-title">
+	<article class="pdf-shell" aria-label={title}>
 		<header class="pdf-header">
 			<div>
-				<h1 id="paper-reader-title">{title}</h1>
+				<h1>{title}</h1>
 				<div class="paper-meta">
 					{#each metadata as item, index}
 						<span>{item}</span>
@@ -726,6 +763,7 @@
 
 		<div
 			class="pdf-scroll-container"
+			use:fitWidth
 			bind:this={pdfScrollContainer}
 			on:scroll={updateCurrentPageFromScroll}
 		>
@@ -754,7 +792,7 @@
 					<section
 						class="pdf-page-shell"
 						data-testid="pdf-page-shell"
-						id={`pdf-page-${page.pageNumber}`}
+						data-page-number={page.pageNumber}
 						aria-label={page.label}
 						style={`width: ${page.width}px; height: ${page.height}px;`}
 						use:pageShell={page.pageNumber}
@@ -798,7 +836,7 @@
 					{#each pages as page}
 						<section
 							class="parsed-source-page"
-							id={`pdf-page-${page.page_number}`}
+							data-page-number={page.page_number}
 							aria-label={page.label}
 						>
 							<div class="parsed-source-page__label">{page.label}</div>
@@ -1565,7 +1603,7 @@
 		}
 	}
 
-	@media (max-width: 1024px) {
+	@container document-reader (max-width: 860px) {
 		.paper-reader-grid {
 			grid-template-columns: 1fr;
 			grid-template-rows: auto minmax(0, 1fr);

@@ -11,3 +11,10 @@ export type DocumentAgentState = {
 };
 
 export type DocumentAgent = Writable<DocumentAgentState>;
+
+export type DocumentTab = {
+	documentId: string;
+	title: string;
+	search: string;
+	navigationVersion: number;
+};

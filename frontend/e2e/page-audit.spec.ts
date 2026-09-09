@@ -37,6 +37,258 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	for (const width of [320, 1024, 1440]) {
+		test(`compares paper tabs with independent reading and shared conversation at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 1000 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			const papers = [
+				{
+					id: 'doc_1',
+					title: 'LPBF 316L study A',
+					filename: 'paper-a.pdf',
+					methods:
+						'Specimens were solution treated at 1040 C for 30 minutes and tensile tested at 293 K.'
+				},
+				{
+					id: 'doc_2',
+					title: 'LPBF 316L study B',
+					filename: 'paper-b.pdf',
+					methods:
+						'Specimens were stress relieved at 650 C for 2 hours and tensile tested at 293 K.'
+				}
+			];
+			const reads: string[] = [];
+			let failSecondPaper = true;
+			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) =>
+				route.fulfill(
+					json({
+						...documentProfiles(),
+						items: papers.map((paper) => ({
+							...documentProfile(),
+							document_id: paper.id,
+							title: paper.title
+						})),
+						count: 2,
+						total: 2
+					})
+				)
+			);
+			await page.route(`**/api/v1/collections/${collectionId}/documents/*/*`, (route) => {
+				const parts = new URL(route.request().url()).pathname.split('/');
+				const paper = papers.find((item) => item.id === parts.at(-2));
+				if (!paper) return route.fallback();
+				const kind = parts.at(-1);
+				if (kind !== 'content' && kind !== 'markdown') return route.fallback();
+				reads.push(`${paper.id}:${kind}`);
+				if (paper.id === 'doc_2' && failSecondPaper)
+					return route.fulfill(json({ detail: 'Source temporarily unavailable' }, 503));
+				const blocks = [
+					{
+						block_id: 'methods',
+						block_type: 'paragraph',
+						heading_path: 'Methods',
+						order: 0,
+						text: paper.methods,
+						page: 2,
+						text_unit_ids: []
+					},
+					...Array.from({ length: 20 }, (_, index) => ({
+						block_id: `results-${index}`,
+						block_type: 'paragraph',
+						heading_path: `Results ${index + 1}`,
+						order: index + 1,
+						text: `Measurement ${index + 1}: compare the specimen state, processing history and test conditions before interpreting the reported tensile response.`,
+						page: index + 3,
+						text_unit_ids: []
+					}))
+				];
+				return route.fulfill(
+					json(
+						kind === 'content'
+							? {
+									...documentContent(),
+									document_id: paper.id,
+									title: paper.title,
+									source_filename: paper.filename,
+									blocks
+								}
+							: {
+									...documentMarkdown(),
+									document_id: paper.id,
+									title: paper.title,
+									source_filename: paper.filename,
+									markdown:
+										`# ${paper.title}\n\n` +
+										blocks.map((block) => `## ${block.heading_path}\n\n${block.text}`).join('\n\n'),
+									source_map: blocks.map((block) => ({
+										...documentMarkdown().source_map[0],
+										markdown_anchor: `block-${block.block_id}`,
+										artifact_id: block.block_id,
+										block_id: block.block_id,
+										heading_path: block.heading_path,
+										page: block.page
+									}))
+								}
+					)
+				);
+			});
+			let sessionsCreated = 0;
+			let submitted: {
+				source_contexts: { document_id: string; source_ref: string }[];
+				message: string;
+			} | null = null;
+			await page.route('**/api/v1/chat-sessions', (route) => {
+				sessionsCreated += 1;
+				return route.fulfill(json(chatSession(), 201));
+			});
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
+				submitted = route.request().postDataJSON();
+				return route.fulfill(
+					sseTurn({
+						messages: [
+							agentMessage('compare-user', 'user', submitted!.message, {
+								source_contexts: submitted!.source_contexts
+							}),
+							agentMessage(
+								'compare-answer',
+								'assistant',
+								'The [methods in study A](/collections/col_123/documents/doc_1?source_ref=methods) and [methods in study B](/collections/col_123/documents/doc_2?source_ref=methods) use different heat treatments. The tensile test temperature matches, but the material states are not equivalent.'
+							)
+						],
+						status: 'completed',
+						completion_reason: 'model_answer',
+						pending_approval: null,
+						error_code: null,
+						warnings: []
+					} as Parameters<typeof sseTurn>[0])
+				);
+			});
+			await page.goto(`/collections/${collectionId}/documents`);
+			await page
+				.locator('.paper-row')
+				.filter({ hasText: papers[0].title })
+				.getByRole('link', { name: 'Open paper' })
+				.click();
+			const paneA = page.locator('.reader-pane[data-document-id="doc_1"]');
+			const paneB = page.locator('.reader-pane[data-document-id="doc_2"]');
+			await expect(paneA.getByTestId('markdown-paper-reader')).toBeVisible();
+			await paneA.getByTestId('markdown-paper-reader').evaluate((node) => {
+				node.scrollTop = 640;
+			});
+			const scrollA = await paneA
+				.getByTestId('markdown-paper-reader')
+				.evaluate((node) => node.scrollTop);
+			expect(scrollA).toBeGreaterThan(500);
+			await page.locator('.library-link').click();
+			await page
+				.locator('.paper-row')
+				.filter({ hasText: papers[1].title })
+				.getByRole('link', { name: 'Open paper' })
+				.click();
+			const tabs = page.getByRole('tablist', { name: 'Open papers' });
+			await expect(tabs.getByRole('tab')).toHaveCount(2);
+			await expect(paneB.getByRole('alert')).toBeVisible();
+			failSecondPaper = false;
+			await paneB.getByRole('button', { name: 'Retry loading paper' }).click();
+			await expect(paneB.getByTestId('markdown-paper-reader')).toBeVisible();
+			await tabs.getByRole('tab', { name: papers[0].title }).click();
+			expect(
+				await paneA.getByTestId('markdown-paper-reader').evaluate((node) => node.scrollTop)
+			).toBe(scrollA);
+			await paneA
+				.getByRole('checkbox', { name: 'Select source block', exact: true })
+				.first()
+				.check();
+			await tabs.getByRole('tab', { name: papers[1].title }).click();
+			await paneB
+				.getByRole('checkbox', { name: 'Select source block', exact: true })
+				.first()
+				.check();
+			await page.getByRole('button', { name: 'Review selected passages', exact: true }).click();
+			await expect(page.locator('.selection-tray li')).toHaveCount(2);
+			await page.locator('.selection-tray li').first().getByRole('link').click();
+			await expect(paneA.getByTestId('markdown-active-source')).toContainText(papers[0].methods);
+			if (width >= 1100) {
+				await page.getByRole('button', { name: 'Compare two papers', exact: true }).click();
+				await expect(paneA).toBeVisible();
+				await expect(paneB).toBeVisible();
+				const divider = page.getByRole('separator', { name: 'Resize paper panes' });
+				await divider.focus();
+				await divider.press('ArrowRight');
+				await expect(divider).toHaveAttribute('aria-valuenow', '55');
+				await divider.press('ArrowLeft');
+			}
+			await page
+				.locator('.workspace-actions')
+				.getByRole('button', { name: 'Ask research assistant', exact: true })
+				.click();
+			await expect(page.getByTestId('pending-source-context')).toHaveCount(2);
+			await expect(page.getByTestId('selected-paper-context')).toHaveCount(0);
+			await sendAgentMessage(page, 'Can I compare the tensile strengths under these conditions?');
+			await expect(page.getByTestId('assistant-message')).toContainText(
+				'material states are not equivalent'
+			);
+			expect(submitted!.source_contexts.map((source) => source.document_id)).toEqual([
+				'doc_1',
+				'doc_2'
+			]);
+			await page.getByRole('link', { name: 'methods in study B', exact: true }).click();
+			await expect(paneB.getByTestId('markdown-active-source')).toContainText(papers[1].methods);
+			await expect(paneB.getByTestId('markdown-active-source')).toBeInViewport();
+			if (width > 820) {
+				await paneB.getByTestId('markdown-paper-reader').evaluate((node) => {
+					node.scrollTop = 900;
+				});
+				await expect(paneB.getByTestId('markdown-active-source')).not.toBeInViewport();
+				await page.getByRole('link', { name: 'methods in study B', exact: true }).click();
+				await expect(paneB.getByTestId('markdown-active-source')).toBeInViewport();
+			}
+			if (width >= 1100) {
+				const left = (await paneA.boundingBox())!;
+				const right = (await paneB.boundingBox())!;
+				const chat = (await page.locator('.agent-pane').boundingBox())!;
+				expect(left.x + left.width).toBeLessThanOrEqual(right.x);
+				expect(right.x + right.width).toBeLessThanOrEqual(chat.x);
+				const separator = page.getByRole('separator', { name: 'Resize conversation pane' });
+				const box = (await separator.boundingBox())!;
+				await page.mouse.move(box.x + 3, box.y + 250);
+				await page.mouse.down();
+				await page.mouse.move(box.x - 30, box.y + 250);
+				await page.mouse.up();
+				expect((await page.locator('.agent-pane').boundingBox())!.width).toBeGreaterThan(
+					chat.width
+				);
+			}
+			await page.mouse.move(0, 0);
+			await expect(
+				tabs.getByRole('button', { name: `Close ${papers[1].title}`, exact: true })
+			).toBeInViewport({ ratio: 1 });
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `document-tabs-${width}.png`) });
+			if (width > 820)
+				await page.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await page.getByRole('button', { name: `Close ${papers[0].title}`, exact: true }).click();
+			await expect(tabs.getByRole('tab')).toHaveCount(1);
+			await expect(paneB).toBeVisible();
+			await tabs.getByRole('tab').focus();
+			await tabs.getByRole('tab').press('Delete');
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			await expect(page.locator('.paper-row')).toHaveCount(2);
+			expect(reads.filter((read) => read === 'doc_1:content')).toHaveLength(1);
+			expect(reads.filter((read) => read === 'doc_2:content')).toHaveLength(2);
+			expect(sessionsCreated).toBe(1);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+				true
+			);
+			expect(errors).toEqual([]);
+		});
+	}
+
 	for (const width of [320, 1440]) {
 		test(`edits and regenerates saved messages with versions at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { tick } from 'svelte';
+	import { Download } from '@lucide/svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
 		DocumentMarkdownResponse,
@@ -47,6 +48,8 @@
 	export let activeSourceRef = '';
 	export let activeSourceQuote = '';
 	export let activeSourceSpan: WorkbenchSourceSpan | null = null;
+	export let sourceJumpToken = 0;
+	let readerRoot: HTMLElement;
 	import SourceSelection from './SourceSelection.svelte';
 	export let selectedSourceKeys: string[] = [];
 	export let selectionDisabled = false;
@@ -59,15 +62,9 @@
 	$: metadata = [
 		markdown?.source_filename
 			? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}`
-			: '',
-		markdown?.parser ? `${$t('workbench.parserLabel')}: ${markdown.parser}` : '',
-		markdown?.source_map.length
-			? `${$t('workbench.sourceMapLabel')}: ${markdown.source_map.length}`
 			: ''
 	].filter(Boolean);
-	$: selectedEvidenceQuote = cleanSourceText(
-		activeSourceQuote || activeSourceSpan?.quote || activeSourceSpan?.target.quote || ''
-	);
+	$: selectedEvidenceQuote = cleanSourceText(activeSourceQuote);
 	$: activeNodeKey = activeMarkdownNodeKey(
 		nodes,
 		activeSourceRef,
@@ -91,9 +88,11 @@
 				} satisfies DocumentSourceSelection)
 			: null;
 	$: if (activeNodeKey) {
+		sourceJumpToken;
 		void scrollActiveNodeIntoView(activeNodeKey);
 	}
 	$: if (activeFallback) {
+		sourceJumpToken;
 		void scrollActiveElementIntoView('[data-testid="markdown-active-source-fallback"]');
 	}
 
@@ -545,7 +544,7 @@
 		await tick();
 		for (let attempt = 0; attempt < 3; attempt += 1) {
 			await nextAnimationFrame();
-			const target = document.querySelector<HTMLElement>(selector);
+			const target = readerRoot?.querySelector<HTMLElement>(selector);
 			if (!target) continue;
 			target.scrollIntoView({ block: 'center', behavior: 'auto' });
 		}
@@ -556,10 +555,17 @@
 	}
 </script>
 
-<section class="markdown-reader" aria-label={$t('workbench.markdownReaderLabel')}>
+<section
+	class="markdown-reader"
+	bind:this={readerRoot}
+	aria-label={$t('workbench.markdownReaderLabel')}
+>
 	<header class="markdown-reader__header">
 		<div>
-			<h1>{title}</h1>
+			{#if !nodes.some((node) => node.type === 'heading' && node.level === 1 && node.text === title)}<h1
+				>
+					{title}
+				</h1>{/if}
 			{#if metadata.length}
 				<div class="markdown-reader__meta">
 					{#each metadata as item, index}
@@ -572,9 +578,12 @@
 			{/if}
 		</div>
 		<div class="markdown-reader__actions">
-			<button type="button" on:click={onShowPdf}>{$t('workbench.pdfPreview')}</button>
 			{#if sourceFileUrl}
-				<a href={sourceFileUrl}>{$t('workbench.downloadSource')}</a>
+				<a
+					href={sourceFileUrl}
+					aria-label={$t('workbench.downloadSource')}
+					title={$t('workbench.downloadSource')}><Download size={17} /></a
+				>
 			{/if}
 		</div>
 	</header>
@@ -810,12 +819,17 @@
 
 	.markdown-reader__header {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		padding: 18px 22px;
+		padding: 8px 16px;
 		border-bottom: 1px solid #e2e8f0;
 		background: #ffffff;
+	}
+
+	.markdown-reader__header > div:first-child {
+		min-width: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.markdown-reader__header h1 {
@@ -829,7 +843,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
-		margin-top: 6px;
+		margin-top: 0;
 		color: #64748b;
 		font-size: 12px;
 		line-height: 18px;
@@ -837,21 +851,20 @@
 
 	.markdown-reader__actions {
 		display: flex;
-		flex-wrap: wrap;
+		flex-shrink: 0;
 		justify-content: flex-end;
 		gap: 8px;
 	}
 
-	.markdown-reader__actions button,
 	.markdown-reader__actions a {
 		display: inline-flex;
 		min-height: 34px;
 		align-items: center;
 		padding: 0 12px;
-		border: 1px solid #dbeafe;
-		border-radius: 8px;
-		background: #eff6ff;
-		color: #1d4ed8;
+		border: 0;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--text-secondary);
 		font-size: 13px;
 		font-weight: 700;
 		text-decoration: none;
@@ -861,7 +874,7 @@
 	.markdown-reader__body {
 		min-width: 0;
 		overflow: auto;
-		padding: 28px clamp(22px, 5vw, 72px) 56px;
+		padding: 24px 28px 56px;
 		color: #1e293b;
 	}
 
@@ -1107,15 +1120,5 @@
 	.markdown-reader__empty h2,
 	.markdown-reader__empty p {
 		margin: 0;
-	}
-
-	@media (max-width: 720px) {
-		.markdown-reader__header {
-			display: grid;
-		}
-
-		.markdown-reader__actions {
-			justify-content: flex-start;
-		}
 	}
 </style>

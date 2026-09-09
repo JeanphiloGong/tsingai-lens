@@ -224,6 +224,19 @@ const translations: Record<Language, Translations> = {
 			sidebarLabel: 'Research Agent sessions',
 			chatLabel: 'Collection Research Agent conversation',
 			newSession: 'New session',
+			workspace: {
+				openPapers: 'Open papers',
+				closePaper: 'Close {title}',
+				compare: 'Compare two papers',
+				single: 'Single paper',
+				comparisonPaper: 'Comparison paper',
+				resizePapers: 'Resize paper panes',
+				resizeAgent: 'Resize conversation pane',
+				selectedBlocks: '{count} selected passages',
+				reviewSelection: 'Review selected passages',
+				removeBlock: 'Remove passage from {title}',
+				retryPaper: 'Retry loading paper'
+			},
 			paperScope: {
 				selected: '{count} papers selected',
 				select: 'Select {title}',
@@ -2888,6 +2901,19 @@ const translations: Record<Language, Translations> = {
 				related: '检查这些论文的其他相关部分',
 				relatedRequest:
 					'请同时检查这些已选块所在论文的其他相关段落、表格和图注，指出支持、限定或矛盾的内容，并附上精确的原文 Source 链接。区分已经读取、尚未读取和无法获取的内容，不要编造相关段落。'
+			},
+			workspace: {
+				openPapers: '已打开的论文',
+				closePaper: '关闭 {title}',
+				compare: '双文献对照',
+				single: '单篇阅读',
+				comparisonPaper: '对照文献',
+				resizePapers: '调整文献分栏宽度',
+				resizeAgent: '调整对话区宽度',
+				selectedBlocks: '已选 {count} 段原文',
+				reviewSelection: '查看已选原文',
+				removeBlock: '移除《{title}》中的原文',
+				retryPaper: '重试加载论文'
 			},
 			historyTitle: '历史会话',
 			showHistory: '展开历史',

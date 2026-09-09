@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
 	import {
@@ -11,33 +10,20 @@
 		fetchChatSession,
 		fetchChatTrajectory,
 		appendChatProgress,
-		formatChatElapsed,
-		getChatProgressActions,
 		readPendingChatSourceContext,
 		streamChatMessage,
 		type ChatMessage,
 		type ChatProgress,
-		type ChatResourceRef,
 		type ChatSession,
 		type ChatSourceContext,
 		type ChatToolCall,
 		type ChatTurn
 	} from '../../../_shared/chatSessions';
-	import {
-		isDuplicateCollectionDocumentError,
-		uploadCollectionDocument
-	} from '../../../_shared/collectionDocuments';
 	import { t } from '../../../_shared/i18n';
-	import { prepareCollectionDocument } from '../../../_shared/pipelineRuns';
-	import {
-		buildChatPresentation,
-		type ChatPresentationItem,
-		type ToolActivityOperation
-	} from './conversationPresentation';
+	import MessageTimeline from './MessageTimeline.svelte';
 	import ConversationHeader from './ConversationHeader.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
-	import type { PaperUploadItem } from './messageComposer';
 
 	type StoredChatSession = {
 		session_id: string;
@@ -45,27 +31,6 @@
 		created_at: string;
 		updated_at: string;
 	};
-
-	type InlineSegment = {
-		text: string;
-		strong: boolean;
-	};
-
-	type RenderBlock =
-		| { kind: 'paragraph'; segments: InlineSegment[] }
-		| { kind: 'list'; items: InlineSegment[][] };
-
-	type ResearchProcessStep = {
-		step_id: string;
-		status: string;
-	};
-
-	const suggestionKeys = [
-		'researchAgent.suggestions.greeting',
-		'researchAgent.suggestions.overview',
-		'researchAgent.suggestions.findings',
-		'researchAgent.suggestions.objectives'
-	];
 
 	let session: ChatSession | null = null;
 	let messages: ChatMessage[] = [];
@@ -75,16 +40,18 @@
 	let sending = false;
 	let progress: ChatProgress | null = null;
 	let progressHistory: ChatProgress[] = [];
-	let progressHistoryExpanded = false;
-	let progressActions: ReturnType<typeof getChatProgressActions> = null;
+	let streamingText = '';
+
 	let deciding = false;
 	let error = '';
 	let notice = '';
 	let input = '';
 	let pendingSourceContext: ChatSourceContext | null = null;
 	let loadedCollectionId = '';
+
 	let sessionGeneration = 0;
 	let sessionController: AbortController | null = null;
+
 	let destroyed = false;
 
 	onDestroy(() => {
@@ -95,23 +62,11 @@
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
 		return !destroyed && generation === sessionGeneration && ownerCollectionId === collectionId;
 	}
-	let uploadItems: PaperUploadItem[] = [];
-	let uploadLoading = false;
-	let uploadError = '';
-	let uploadNotice = '';
-	let uploadSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
-	$: conversationItems = buildChatPresentation(messages, pendingApproval?.tool_call_id ?? null);
-	$: progressActions = progress ? getChatProgressActions(progress) : null;
+
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
-	$: uploadCandidates = uploadItems.filter((item) =>
-		['selected', 'upload_failed', 'preparation_failed'].includes(item.status)
-	);
-	$: uploadBusy =
-		uploadLoading || uploadItems.some((item) => ['uploading', 'preparing'].includes(item.status));
-	$: uploadActionText = getUploadActionText(uploadBusy, uploadCandidates);
 	$: if (browser && collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		uploadItems = [];
@@ -211,6 +166,7 @@
 		messages = [];
 		input = '';
 		sending = false;
+		streamingText = '';
 		deciding = false;
 		progressHistory = [];
 
@@ -281,6 +237,225 @@
 		pendingApproval = null;
 		await loadSession(sessionId);
 	}
+
+	async function sendMessage(nextText = input.trim()) {
+		const text = nextText.trim();
+		if (!session || !text || sending || deciding || pendingApproval) return;
+		const activeSession = session;
+		const activeCollectionId = collectionId;
+		const generation = sessionGeneration;
+		const signal = sessionController?.signal;
+		let pendingText = '';
+		let textFrame = 0;
+		const cancelTextFrame = () => {
+			cancelAnimationFrame(textFrame);
+			textFrame = 0;
+		};
+		const flushText = () => {
+			textFrame = 0;
+			if (!isCurrentSession(generation, activeCollectionId)) return;
+			streamingText += pendingText;
+			pendingText = '';
+		};
+		signal?.addEventListener('abort', cancelTextFrame, { once: true });
+		const previousMessageCount = messages.length;
+		const optimisticId = `local-${Date.now()}`;
+		const streamingId = `local-stream-${Date.now()}`;
+		const createdAt = new Date().toISOString();
+		const sourceContexts = pendingSourceContext ? [pendingSourceContext] : [];
+		const optimisticMessage: ChatMessage = {
+			message_id: optimisticId,
+			session_id: activeSession.session_id,
+			role: 'user',
+			content: text,
+			created_at: createdAt,
+			tool_call_id: null,
+			tool_calls: [],
+			tool_result: null,
+			source_contexts: sourceContexts
+		};
+		const streamingMessage: ChatMessage = {
+			...optimisticMessage,
+			message_id: streamingId,
+			role: 'assistant',
+			content: ''
+		};
+		messages = [...messages, optimisticMessage, streamingMessage];
+		streamingText = '';
+		input = '';
+		sending = true;
+		progress = { phase: 'starting', cycle_index: 0, elapsed_ms: 0 };
+		progressHistory = [progress];
+
+		error = '';
+		notice = '';
+		try {
+			const turn = await streamChatMessage(
+				activeSession.session_id,
+				text,
+				(content) => {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
+					pendingText += content;
+					if (!textFrame) textFrame = requestAnimationFrame(flushText);
+				},
+				sourceContexts,
+				(nextProgress) => {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
+					progress = nextProgress;
+					progressHistory = appendChatProgress(progressHistory, nextProgress);
+				},
+				signal
+			);
+			if (!isCurrentSession(generation, activeCollectionId)) return;
+			cancelTextFrame();
+			flushText();
+			applyTurn(turn, [optimisticId, streamingId]);
+			if (sourceContexts.length) {
+				clearPendingChatSourceContext(activeCollectionId);
+				pendingSourceContext = null;
+			}
+		} catch (err) {
+			if (!isCurrentSession(generation, activeCollectionId)) return;
+			try {
+				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
+				if (!isCurrentSession(generation, activeCollectionId)) return;
+				messages = trajectory.items;
+				pendingApproval = trajectory.pending_approval;
+				if (
+					!messages
+						.slice(previousMessageCount)
+						.some((message) => message.role === 'user' && message.content === text)
+				) {
+					input = text;
+				}
+			} catch {
+				if (!isCurrentSession(generation, activeCollectionId)) return;
+				messages = messages.filter(
+					(message) => ![optimisticId, streamingId].includes(message.message_id)
+				);
+				input = text;
+			}
+			error = errorMessage(err);
+		} finally {
+			cancelTextFrame();
+			signal?.removeEventListener('abort', cancelTextFrame);
+			if (isCurrentSession(generation, activeCollectionId)) {
+				sending = false;
+				progress = null;
+				progressHistory = [];
+			}
+		}
+	}
+
+	function handleComposerInput(value: string) {
+		input = value;
+	}
+
+	function removePendingSourceContext() {
+		clearPendingChatSourceContext(collectionId);
+		pendingSourceContext = null;
+	}
+
+	function applyTurn(
+		turn: ChatTurn,
+		localMessageIds: string[] = [],
+		decidedToolName: string | null = null
+	) {
+		const prior = localMessageIds.length
+			? messages.filter((message) => !localMessageIds.includes(message.message_id))
+			: messages;
+		const knownIds = new Set(prior.map((message) => message.message_id));
+		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
+		pendingApproval = turn.pending_approval;
+		if (turn.status === 'rejected') {
+			notice = $t(rejectionNoticeKey(decidedToolName));
+		}
+		if (turn.status === 'failed') {
+			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
+		}
+		if (turn.status === 'completed' && turn.warnings?.length) {
+			notice = $t('researchAgent.turnLimited');
+		}
+		if (session) {
+			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
+			session = { ...session, updated_at: updatedAt };
+			upsertHistory(session, titleFromMessages(messages));
+		}
+	}
+
+	async function decide(decision: 'approved' | 'rejected') {
+		if (!session || !pendingApproval || deciding) return;
+		const generation = sessionGeneration;
+		const activeCollectionId = collectionId;
+		const call = pendingApproval;
+		deciding = true;
+		error = '';
+		notice = '';
+		try {
+			const turn = await decideChatToolCall(
+				session.session_id,
+				call,
+				decision,
+				sessionController?.signal
+			);
+			if (!isCurrentSession(generation, activeCollectionId)) return;
+			applyTurn(turn, [], call.name);
+		} catch (err) {
+			if (!isCurrentSession(generation, activeCollectionId)) return;
+			error = errorMessage(err);
+		} finally {
+			if (isCurrentSession(generation, activeCollectionId)) deciding = false;
+		}
+	}
+
+	function rejectionNoticeKey(toolName: string | null) {
+		if (toolName === 'start_research_process') return 'researchAgent.researchProcessRejected';
+		if (toolName === 'confirm_objective') return 'researchAgent.objectiveConfirmationRejected';
+		if (toolName === 'start_objective_analysis') return 'researchAgent.objectiveAnalysisRejected';
+		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
+		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
+		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
+		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
+		if (toolName === 'create_research_plan') return 'researchAgent.researchPlanRejected';
+		if (toolName === 'publish_agent_objective_analysis') {
+			return 'researchAgent.agentObjectiveAnalysisRejected';
+		}
+		return 'researchAgent.rejected';
+	}
+
+	function formatHistoryTime(value: string) {
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return '';
+		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+	}
+
+	import {
+		isDuplicateCollectionDocumentError,
+		uploadCollectionDocument
+	} from '../../../_shared/collectionDocuments';
+
+	import { prepareCollectionDocument } from '../../../_shared/pipelineRuns';
+
+	import type { PaperUploadItem } from './messageComposer';
+
+	let uploadItems: PaperUploadItem[] = [];
+
+	let uploadLoading = false;
+
+	let uploadError = '';
+
+	let uploadNotice = '';
+
+	let uploadSequence = 0;
+
+	$: uploadCandidates = uploadItems.filter((item) =>
+		['selected', 'upload_failed', 'preparation_failed'].includes(item.status)
+	);
+
+	$: uploadBusy =
+		uploadLoading || uploadItems.some((item) => ['uploading', 'preparing'].includes(item.status));
+
+	$: uploadActionText = getUploadActionText(uploadBusy, uploadCandidates);
 
 	function isPdf(file: File) {
 		return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
@@ -409,948 +584,6 @@
 			{ count: candidates.length }
 		);
 	}
-
-	async function sendMessage(nextText = input.trim()) {
-		const text = nextText.trim();
-		if (!session || !text || sending || deciding || pendingApproval) return;
-		const activeSession = session;
-		const activeCollectionId = collectionId;
-		const generation = sessionGeneration;
-		const signal = sessionController?.signal;
-		const previousMessageCount = messages.length;
-		const optimisticId = `local-${Date.now()}`;
-		const streamingId = `local-stream-${Date.now()}`;
-		const createdAt = new Date().toISOString();
-		const sourceContexts = pendingSourceContext ? [pendingSourceContext] : [];
-		const optimisticMessage: ChatMessage = {
-			message_id: optimisticId,
-			session_id: activeSession.session_id,
-			role: 'user',
-			content: text,
-			created_at: createdAt,
-			tool_call_id: null,
-			tool_calls: [],
-			tool_result: null,
-			source_contexts: sourceContexts
-		};
-		const streamingMessage: ChatMessage = {
-			...optimisticMessage,
-			message_id: streamingId,
-			role: 'assistant',
-			content: ''
-		};
-		messages = [...messages, optimisticMessage, streamingMessage];
-		input = '';
-		sending = true;
-		progress = { phase: 'starting', cycle_index: 0, elapsed_ms: 0 };
-		progressHistory = [progress];
-		progressHistoryExpanded = false;
-		error = '';
-		notice = '';
-		try {
-			const turn = await streamChatMessage(
-				activeSession.session_id,
-				text,
-				(content) => {
-					if (!isCurrentSession(generation, activeCollectionId)) return;
-					messages = messages.map((message) =>
-						message.message_id === streamingId
-							? { ...message, content: `${message.content}${content}` }
-							: message
-					);
-				},
-				sourceContexts,
-				(nextProgress) => {
-					if (!isCurrentSession(generation, activeCollectionId)) return;
-					progress = nextProgress;
-					progressHistory = appendChatProgress(progressHistory, nextProgress);
-				},
-				signal
-			);
-			if (!isCurrentSession(generation, activeCollectionId)) return;
-			applyTurn(turn, [optimisticId, streamingId]);
-			if (sourceContexts.length) {
-				clearPendingChatSourceContext(activeCollectionId);
-				pendingSourceContext = null;
-			}
-		} catch (err) {
-			if (!isCurrentSession(generation, activeCollectionId)) return;
-			try {
-				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
-				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = trajectory.items;
-				pendingApproval = trajectory.pending_approval;
-				if (
-					!messages
-						.slice(previousMessageCount)
-						.some((message) => message.role === 'user' && message.content === text)
-				) {
-					input = text;
-				}
-			} catch {
-				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = messages.filter(
-					(message) => ![optimisticId, streamingId].includes(message.message_id)
-				);
-				input = text;
-			}
-			error = errorMessage(err);
-		} finally {
-			if (isCurrentSession(generation, activeCollectionId)) {
-				sending = false;
-				progress = null;
-				progressHistory = [];
-				progressHistoryExpanded = false;
-			}
-		}
-	}
-
-	function handleComposerInput(value: string) {
-		input = value;
-	}
-
-	function progressLabel(value: ChatProgress | null) {
-		if (!value) return '';
-		const phase = value.phase;
-		const key = `researchAgent.progress.${phase}`;
-		return $t(key, { cycle: value.cycle_index ?? 0 });
-	}
-
-	function removePendingSourceContext() {
-		clearPendingChatSourceContext(collectionId);
-		pendingSourceContext = null;
-	}
-
-	function applyTurn(
-		turn: ChatTurn,
-		localMessageIds: string[] = [],
-		decidedToolName: string | null = null
-	) {
-		const prior = localMessageIds.length
-			? messages.filter((message) => !localMessageIds.includes(message.message_id))
-			: messages;
-		const knownIds = new Set(prior.map((message) => message.message_id));
-		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
-		pendingApproval = turn.pending_approval;
-		if (turn.status === 'rejected') {
-			notice = $t(rejectionNoticeKey(decidedToolName));
-		}
-		if (turn.status === 'failed') {
-			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
-		}
-		if (turn.status === 'completed' && turn.warnings?.length) {
-			notice = $t('researchAgent.turnLimited');
-		}
-		if (session) {
-			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
-			session = { ...session, updated_at: updatedAt };
-			upsertHistory(session, titleFromMessages(messages));
-		}
-	}
-
-	async function decide(decision: 'approved' | 'rejected') {
-		if (!session || !pendingApproval || deciding) return;
-		const generation = sessionGeneration;
-		const activeCollectionId = collectionId;
-		const call = pendingApproval;
-		deciding = true;
-		error = '';
-		notice = '';
-		try {
-			const turn = await decideChatToolCall(
-				session.session_id,
-				call,
-				decision,
-				sessionController?.signal
-			);
-			if (!isCurrentSession(generation, activeCollectionId)) return;
-			applyTurn(turn, [], call.name);
-		} catch (err) {
-			if (!isCurrentSession(generation, activeCollectionId)) return;
-			error = errorMessage(err);
-		} finally {
-			if (isCurrentSession(generation, activeCollectionId)) deciding = false;
-		}
-	}
-
-	function askSuggestion(key: string) {
-		void sendMessage($t(key));
-	}
-
-	function renderInlineMarkdown(text: string): InlineSegment[] {
-		const segments: InlineSegment[] = [];
-		const pattern = /\*\*([^*]+)\*\*/g;
-		let lastIndex = 0;
-		let match: RegExpExecArray | null;
-		while ((match = pattern.exec(text)) !== null) {
-			if (match.index > lastIndex) {
-				segments.push({ text: text.slice(lastIndex, match.index), strong: false });
-			}
-			segments.push({ text: match[1], strong: true });
-			lastIndex = match.index + match[0].length;
-		}
-		if (lastIndex < text.length) {
-			segments.push({ text: text.slice(lastIndex), strong: false });
-		}
-		return segments.length ? segments : [{ text, strong: false }];
-	}
-
-	function renderMessageBlocks(text: string): RenderBlock[] {
-		return text
-			.split(/\n{2,}/)
-			.map((block) => block.trim())
-			.filter(Boolean)
-			.map((block) => {
-				const lines = block
-					.split('\n')
-					.map((line) => line.trim())
-					.filter(Boolean);
-				const items = lines
-					.map((line) => line.match(/^(?:[-*]\s+|\d+\.\s+)(.+)$/))
-					.filter((match): match is RegExpMatchArray => Boolean(match));
-				if (items.length === lines.length) {
-					return {
-						kind: 'list' as const,
-						items: items.map((item) => renderInlineMarkdown(item[1].trim()))
-					};
-				}
-				return {
-					kind: 'paragraph' as const,
-					segments: renderInlineMarkdown(lines.join(' '))
-				};
-			});
-	}
-
-	function capabilityName(toolName: string | null) {
-		switch (toolName) {
-			case 'get_collection_context':
-				return $t('researchAgent.capability.collection');
-			case 'search_sources':
-				return $t('researchAgent.capability.searchSources');
-			case 'read_source':
-				return $t('researchAgent.capability.readSource');
-			case 'inspect_table':
-				return $t('researchAgent.capability.inspectTable');
-			case 'inspect_document_sources':
-				return $t('researchAgent.capability.documentSources');
-			case 'inspect_research_process':
-				return $t('researchAgent.capability.researchProcess');
-			case 'start_research_process':
-				return $t('researchAgent.capability.startResearchProcess');
-			case 'query_published_findings':
-				return $t('researchAgent.capability.findings');
-			case 'inspect_published_finding':
-				return $t('researchAgent.capability.findingReview');
-			case 'record_finding_feedback':
-				return $t('researchAgent.capability.findingFeedback');
-			case 'curate_finding':
-				return $t('researchAgent.capability.findingCuration');
-			case 'create_finding_draft':
-				return $t('researchAgent.capability.findingDraft');
-			case 'create_finding_version':
-				return $t('researchAgent.capability.findingAuthoring');
-			case 'create_evidence_draft':
-				return $t('researchAgent.capability.evidenceDraft');
-			case 'create_evidence_version':
-				return $t('researchAgent.capability.evidenceAuthoring');
-			case 'publish_agent_objective_analysis':
-				return $t('researchAgent.capability.agentObjectiveAnalysis');
-			case 'propose_objective_drafts':
-				return $t('researchAgent.capability.proposals');
-			case 'create_objective_candidate':
-				return $t('researchAgent.capability.createObjective');
-			case 'confirm_objective':
-				return $t('researchAgent.capability.confirmObjective');
-			case 'derive_objective':
-				return $t('researchAgent.capability.deriveObjective');
-			case 'preview_research_scope':
-				return $t('researchAgent.capability.previewResearchScope');
-			case 'propose_research_plan':
-				return $t('researchAgent.capability.researchPlanDraft');
-			case 'create_research_plan':
-				return $t('researchAgent.capability.researchPlanAuthoring');
-			case 'start_objective_analysis':
-				return $t('researchAgent.capability.startObjectiveAnalysis');
-			case 'inspect_objective_analysis':
-				return $t('researchAgent.capability.inspectObjectiveAnalysis');
-			case 'assess_objective_quality':
-				return $t('researchAgent.capability.objectiveQuality');
-			default:
-				return $t('researchAgent.capability.unknown');
-		}
-	}
-
-	function capabilityRequestLabel(toolName: string | null) {
-		if (toolName === 'inspect_research_process') {
-			return $t('researchAgent.capability.researchProcessRequested');
-		}
-		return $t('researchAgent.capability.requested', {
-			name: capabilityName(toolName)
-		});
-	}
-
-	function resultToolName(message: ChatMessage) {
-		if (!message.tool_call_id) return null;
-		return (
-			messages
-				.flatMap((candidate) => candidate.tool_calls)
-				.find((request) => request.tool_call_id === message.tool_call_id)?.name ?? null
-		);
-	}
-
-	function numberValue(data: Record<string, unknown>, key: string) {
-		const value = data[key];
-		return typeof value === 'number' ? value : 0;
-	}
-
-	function resultSummary(message: ChatMessage) {
-		const result = message.tool_result;
-		if (!result) return '';
-		const name = resultToolName(message);
-		if (result.status === 'failed') {
-			return $t('researchAgent.capability.failed', { name: capabilityName(name) });
-		}
-		if (result.status === 'queued') {
-			return $t('researchAgent.capability.queuedDescription');
-		}
-		if (name === 'get_collection_context') {
-			const collection = result.data.collection;
-			const papers =
-				collection && typeof collection === 'object' && 'paper_count' in collection
-					? Number(collection.paper_count) || 0
-					: 0;
-			return $t('researchAgent.capability.paperCount', {
-				papers,
-				objectives: numberValue(result.data, 'objective_count')
-			});
-		}
-		if (name === 'inspect_document_sources') {
-			return $t('researchAgent.capability.documentSourceCount', {
-				count: numberValue(result.data, 'match_total')
-			});
-		}
-		if (name === 'search_sources') {
-			return $t('researchAgent.capability.documentSourceCount', {
-				count: numberValue(result.data, 'match_total')
-			});
-		}
-		if (name === 'read_source') {
-			const sourceRef = result.data.source_ref;
-			return $t('researchAgent.capability.sourceReadSummary', {
-				source: typeof sourceRef === 'string' && sourceRef.trim() ? sourceRef : '--'
-			});
-		}
-		if (name === 'inspect_table') {
-			return $t('researchAgent.capability.tableSummary', {
-				rows: numberValue(result.data, 'data_row_count'),
-				columns: numberValue(result.data, 'column_count')
-			});
-		}
-		if (name === 'inspect_research_process') {
-			const process = result.data.process;
-			if (!process || typeof process !== 'object' || !('status' in process)) {
-				return $t('researchAgent.capability.researchProcessUnavailable');
-			}
-			switch (String(process.status)) {
-				case 'not_started':
-					return $t('researchAgent.researchProcess.notStartedSummary');
-				case 'queued':
-					return $t('researchAgent.researchProcess.queuedSummary');
-				case 'running':
-					return $t('researchAgent.researchProcess.runningSummary');
-				case 'completed':
-					return $t('researchAgent.researchProcess.completedSummary');
-				case 'partial_success':
-					return $t('researchAgent.researchProcess.partialSummary');
-				case 'failed':
-					return $t('researchAgent.researchProcess.failedSummary');
-				default:
-					return $t('researchAgent.capability.researchProcessUnavailable');
-			}
-		}
-		if (name === 'query_published_findings') {
-			if (result.data.scientific_absence === true) return $t('researchAgent.capability.absence');
-			return $t('researchAgent.capability.findingCount', {
-				findings: numberValue(result.data, 'finding_count'),
-				evidence: numberValue(result.data, 'evidence_count')
-			});
-		}
-		if (name === 'inspect_published_finding') {
-			return $t('researchAgent.capability.findingEvidenceCount', {
-				count: numberValue(result.data, 'evidence_total')
-			});
-		}
-		if (name === 'record_finding_feedback') {
-			return $t('researchAgent.capability.feedbackRecorded');
-		}
-		if (name === 'curate_finding') {
-			return $t('researchAgent.capability.curationRecorded');
-		}
-		if (name === 'create_finding_version') {
-			return result.data.finding
-				? $t('researchAgent.capability.findingPublished')
-				: $t('researchAgent.capability.findingAbstentionPublished');
-		}
-		if (name === 'create_finding_draft') {
-			return $t('researchAgent.capability.findingDraftReady');
-		}
-		if (name === 'create_evidence_draft') {
-			return $t('researchAgent.capability.evidenceDraftReady');
-		}
-		if (name === 'create_evidence_version') {
-			return $t('researchAgent.capability.evidencePublished');
-		}
-		if (name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.capability.agentAnalysisPublished', {
-				count: numberValue(result.data, 'evidence_count')
-			});
-		}
-		if (name === 'propose_objective_drafts') {
-			return $t('researchAgent.capability.draftCount', {
-				count: numberValue(result.data, 'draft_count')
-			});
-		}
-		if (name === 'create_objective_candidate') {
-			return $t('researchAgent.capability.objectiveCreated');
-		}
-		if (name === 'confirm_objective') {
-			return $t('researchAgent.capability.objectiveConfirmed');
-		}
-		if (name === 'derive_objective') {
-			return $t('researchAgent.capability.derivedDraftCount', {
-				count: numberValue(result.data, 'draft_count')
-			});
-		}
-		if (name === 'propose_research_plan') {
-			return $t('researchAgent.capability.researchPlanDraftReady');
-		}
-		if (name === 'create_research_plan') {
-			return $t('researchAgent.capability.researchPlanSaved');
-		}
-		if (name === 'assess_objective_quality') {
-			return $t('researchAgent.capability.qualitySummary', {
-				findings: numberValue(result.data, 'finding_count'),
-				evidence: numberValue(result.data, 'total_evidence_count'),
-				gaps: numberValue(result.data, 'scientific_gap_count'),
-				failures: numberValue(result.data, 'technical_failure_count')
-			});
-		}
-		if (name === 'preview_research_scope') {
-			const counts = result.data.scope_counts;
-			return $t('researchAgent.capability.scopeCount', {
-				likely:
-					counts && typeof counts === 'object' && 'likely_relevant' in counts
-						? Number(counts.likely_relevant) || 0
-						: 0,
-				review:
-					counts && typeof counts === 'object' && 'needs_inspection' in counts
-						? Number(counts.needs_inspection) || 0
-						: 0,
-				excluded:
-					counts && typeof counts === 'object' && 'confidently_out_of_scope' in counts
-						? Number(counts.confidently_out_of_scope) || 0
-						: 0
-			});
-		}
-		if (name === 'inspect_objective_analysis' || name === 'start_objective_analysis') {
-			return objectiveAnalysisSummary(result.data);
-		}
-		return $t('researchAgent.capability.succeeded', { name: capabilityName(name) });
-	}
-
-	function resultTitle(message: ChatMessage) {
-		const result = message.tool_result;
-		if (resultToolName(message) === 'inspect_research_process' && result?.status === 'succeeded') {
-			return $t('researchAgent.capability.researchProcessStatus');
-		}
-		const name = capabilityName(resultToolName(message));
-		if (result?.status === 'failed') return $t('researchAgent.capability.failed', { name });
-		if (result?.status === 'queued') return $t('researchAgent.capability.queued', { name });
-		return $t('researchAgent.capability.succeeded', { name });
-	}
-
-	function resultStatusLabel(message: ChatMessage) {
-		switch (message.tool_result?.status) {
-			case 'queued':
-				return $t('researchAgent.capability.statusQueued');
-			case 'failed':
-				return $t('researchAgent.capability.statusFailed');
-			default:
-				return $t('researchAgent.capability.statusSucceeded');
-		}
-	}
-
-	type ActivityItem = Extract<ChatPresentationItem, { kind: 'activity' }>;
-
-	function activityOperations(activity: ActivityItem) {
-		return activity.operations.filter((operation) => !activity.artifacts.includes(operation));
-	}
-
-	function activitySummary(activity: ActivityItem) {
-		const count = activityOperations(activity).length;
-		const baseKey =
-			activity.status === 'failed'
-				? 'researchAgent.capability.activityFailed'
-				: activity.status === 'in_progress'
-					? 'researchAgent.capability.activityInProgress'
-					: activity.status === 'pending'
-						? 'researchAgent.capability.activityPending'
-						: 'researchAgent.capability.activityCompleted';
-		return $t(`${baseKey}${count === 1 ? 'One' : 'Many'}`, { count });
-	}
-
-	function activityCapabilityNames(activity: ActivityItem) {
-		return Array.from(
-			new Set(activityOperations(activity).map((operation) => capabilityName(operation.toolName)))
-		).join(' · ');
-	}
-
-	function activityHasWarnings(activity: ActivityItem) {
-		return activityOperations(activity).some(
-			(operation) => (operation.resultMessage?.tool_result?.warnings.length ?? 0) > 0
-		);
-	}
-
-	function activityIsOpen(activity: ActivityItem) {
-		return activity.status === 'failed' || activityHasWarnings(activity);
-	}
-
-	function initializeActivityDisclosure(node: HTMLDetailsElement, initiallyOpen: boolean) {
-		node.open = initiallyOpen;
-		let previousAutomaticOpen = initiallyOpen;
-		return {
-			update(automaticOpen: boolean) {
-				if (!previousAutomaticOpen && automaticOpen) node.open = true;
-				previousAutomaticOpen = automaticOpen;
-			}
-		};
-	}
-
-	function activityStatusLabel(activity: ActivityItem) {
-		if (activity.status === 'failed') return $t('researchAgent.capability.statusFailed');
-		if (activity.status === 'in_progress') return $t('researchAgent.capability.statusQueued');
-		if (activity.status === 'pending') return $t('researchAgent.capability.statusPending');
-		return $t('researchAgent.capability.statusSucceeded');
-	}
-
-	function operationTitle(operation: ToolActivityOperation) {
-		return operation.resultMessage
-			? resultTitle(operation.resultMessage)
-			: capabilityRequestLabel(operation.toolName);
-	}
-
-	function operationSummary(operation: ToolActivityOperation) {
-		return operation.resultMessage ? resultSummary(operation.resultMessage) : '';
-	}
-
-	function findingStatement(message: ChatMessage) {
-		const finding = message.tool_result?.data.finding;
-		return finding && typeof finding === 'object' && 'statement' in finding
-			? String(finding.statement ?? '').trim()
-			: '';
-	}
-
-	function resultResearchSteps(message: ChatMessage): ResearchProcessStep[] {
-		if (resultToolName(message) !== 'inspect_research_process') return [];
-		const process = message.tool_result?.data.process;
-		if (!process || typeof process !== 'object' || !('steps' in process)) return [];
-		return Array.isArray(process.steps)
-			? process.steps.filter((step): step is ResearchProcessStep =>
-					Boolean(
-						step &&
-						typeof step === 'object' &&
-						'step_id' in step &&
-						typeof step.step_id === 'string' &&
-						'status' in step &&
-						typeof step.status === 'string'
-					)
-				)
-			: [];
-	}
-
-	function researchStepName(stepId: string) {
-		switch (stepId) {
-			case 'source_understanding':
-				return $t('researchAgent.researchProcess.sourceUnderstanding');
-			case 'paper_classification':
-				return $t('researchAgent.researchProcess.paperClassification');
-			case 'research_scope_screening':
-				return $t('researchAgent.researchProcess.scopeScreening');
-			case 'objective_formation':
-				return $t('researchAgent.researchProcess.objectiveFormation');
-			default:
-				return stepId;
-		}
-	}
-
-	function researchStepStatus(status: string) {
-		switch (status) {
-			case 'completed':
-				return $t('researchAgent.researchProcess.completed');
-			case 'running':
-				return $t('researchAgent.researchProcess.running');
-			case 'failed':
-				return $t('researchAgent.researchProcess.failed');
-			case 'skipped':
-				return $t('researchAgent.researchProcess.skipped');
-			default:
-				return $t('researchAgent.researchProcess.queued');
-		}
-	}
-
-	function researchProcessContext(message: ChatMessage) {
-		const process = message.tool_result?.data.process;
-		if (!process || typeof process !== 'object') return '';
-		const active = 'active_document' in process ? process.active_document : null;
-		const progress = 'document_progress' in process ? process.document_progress : null;
-		const activeTitle =
-			active && typeof active === 'object' && 'title' in active && String(active.title).trim()
-				? String(active.title).trim()
-				: active && typeof active === 'object' && 'document_id' in active
-					? String(active.document_id).trim()
-					: '';
-		if (progress && typeof progress === 'object' && 'current' in progress && 'total' in progress) {
-			return $t('researchAgent.researchProcess.documentProgress', {
-				document: activeTitle || $t('researchAgent.researchProcess.currentPaper'),
-				current: Number(progress.current) || 0,
-				total: Number(progress.total) || 0
-			});
-		}
-		return activeTitle;
-	}
-
-	function resultDrafts(message: ChatMessage) {
-		const drafts = message.tool_result?.data.drafts;
-		return Array.isArray(drafts)
-			? drafts.filter((item): item is Record<string, unknown> =>
-					Boolean(item && typeof item === 'object')
-				)
-			: [];
-	}
-
-	function resultDraft(message: ChatMessage): Record<string, unknown> | null {
-		const draft = message.tool_result?.data.draft;
-		return draft && typeof draft === 'object' && !Array.isArray(draft)
-			? (draft as Record<string, unknown>)
-			: null;
-	}
-
-	function resultDraftDetails(message: ChatMessage) {
-		const draft = resultDraft(message);
-		if (!draft) return [];
-		const details: Array<{ label: string; value: string }> = [];
-		const add = (label: string, value: unknown) => {
-			const formatted = formatValue(value);
-			if (formatted !== '--') details.push({ label, value: formatted });
-		};
-		if (draft.source_ref) add($t('researchAgent.capability.sourceReference'), draft.source_ref);
-		if (draft.source_kind) add($t('researchAgent.capability.sourceKind'), draft.source_kind);
-		if (draft.evidence_role) add($t('researchAgent.capability.evidenceRole'), draft.evidence_role);
-		if (draft.statement) add($t('researchAgent.capability.findingStatement'), draft.statement);
-		if (draft.assertion_strength)
-			add($t('researchAgent.capability.assertionStrength'), draft.assertion_strength);
-		if (draft.supporting_evidence_ids)
-			add($t('researchAgent.capability.supportingEvidence'), draft.supporting_evidence_ids);
-		if (draft.source_excerpt)
-			add($t('researchAgent.capability.sourceExcerpt'), draft.source_excerpt);
-		if (draft.authoring_note)
-			add($t('researchAgent.capability.authoringNote'), draft.authoring_note);
-		return details;
-	}
-
-	function draftReviewNote(message: ChatMessage) {
-		switch (resultToolName(message)) {
-			case 'create_evidence_draft':
-				return $t('researchAgent.capability.evidenceDraftTransient');
-			case 'create_finding_draft':
-				return $t('researchAgent.capability.findingDraftTransient');
-			default:
-				return '';
-		}
-	}
-
-	function resultPlanData(message: ChatMessage): Record<string, unknown> | null {
-		const data = message.tool_result?.data ?? {};
-		const plan = data.plan;
-		if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
-			return plan as Record<string, unknown>;
-		}
-		return data;
-	}
-
-	function resultPlanContent(message: ChatMessage) {
-		const toolName = resultToolName(message);
-		if (toolName !== 'propose_research_plan' && toolName !== 'create_research_plan') return '';
-		const data = resultPlanData(message);
-		return data && typeof data.content === 'string' ? data.content.trim() : '';
-	}
-
-	function resultPlanTitle(message: ChatMessage) {
-		const toolName = resultToolName(message);
-		if (toolName !== 'propose_research_plan' && toolName !== 'create_research_plan') return '';
-		const data = resultPlanData(message);
-		return data && typeof data.title === 'string' ? data.title.trim() : '';
-	}
-
-	function resultTableMarkdown(message: ChatMessage) {
-		if (resultToolName(message) !== 'inspect_table') return '';
-		const markdown = message.tool_result?.data.table_markdown;
-		return typeof markdown === 'string' ? markdown.trim() : '';
-	}
-
-	function resultSourceContent(message: ChatMessage) {
-		if (resultToolName(message) !== 'read_source') return '';
-		const data = message.tool_result?.data ?? {};
-		for (const key of ['content', 'source_content', 'source_excerpt', 'text']) {
-			const value = data[key];
-			if (typeof value === 'string' && value.trim()) return value.trim();
-		}
-		return '';
-	}
-
-	function resultContinuationNote(message: ChatMessage) {
-		const name = resultToolName(message);
-		const data = message.tool_result?.data ?? {};
-		if (
-			name === 'read_source' &&
-			(data.content_truncated === true ||
-				(data.next_offset !== null && data.next_offset !== undefined))
-		) {
-			return $t('researchAgent.capability.sourceContinuation');
-		}
-		if (
-			name === 'inspect_table' &&
-			(data.content_truncated === true ||
-				(data.next_row_offset !== null && data.next_row_offset !== undefined))
-		) {
-			return $t('researchAgent.capability.tableContinuation');
-		}
-		return '';
-	}
-
-	function resultSourceMatches(message: ChatMessage) {
-		if (resultToolName(message) !== 'search_sources') return [];
-		const matches = message.tool_result?.data.matches;
-		return Array.isArray(matches)
-			? matches.filter((item): item is Record<string, unknown> =>
-					Boolean(item && typeof item === 'object' && !Array.isArray(item))
-				)
-			: [];
-	}
-
-	function resultQuality(message: ChatMessage) {
-		if (resultToolName(message) !== 'assess_objective_quality') return null;
-		return message.tool_result?.data ?? null;
-	}
-
-	function qualityStatusLabel(value: unknown) {
-		switch (String(value ?? '')) {
-			case 'finding_available':
-				return $t('researchAgent.capability.qualityFindingAvailable');
-			case 'finding_available_with_gaps':
-				return $t('researchAgent.capability.qualityFindingWithGaps');
-			case 'scientific_abstention':
-				return $t('researchAgent.capability.qualityScientificAbstention');
-			case 'no_grounded_evidence':
-				return $t('researchAgent.capability.qualityNoGroundedEvidence');
-			default:
-				return $t('researchAgent.capability.qualityNotAnalyzed');
-		}
-	}
-
-	function draftBasisCount(draft: Record<string, unknown>) {
-		return Array.isArray(draft.derivation_basis) ? draft.derivation_basis.length : 0;
-	}
-
-	function draftBasisRationales(draft: Record<string, unknown>) {
-		const basis = draft.derivation_basis;
-		if (!Array.isArray(basis)) return [];
-		return basis
-			.filter((item): item is Record<string, unknown> =>
-				Boolean(item && typeof item === 'object' && !Array.isArray(item))
-			)
-			.map((item) => (typeof item.rationale === 'string' ? item.rationale.trim() : ''))
-			.filter(Boolean);
-	}
-
-	function draftList(draft: Record<string, unknown>, key: string) {
-		const value = draft[key];
-		return Array.isArray(value) ? value.map(String).filter(Boolean).join(', ') : '';
-	}
-
-	function visibleResources(message: ChatMessage) {
-		return (message.tool_result?.resource_refs ?? []).filter(
-			(ref): ref is ChatResourceRef & { href: `/collections/${string}` } =>
-				typeof ref.href === 'string' && ref.href.startsWith('/collections/')
-		);
-	}
-
-	function sourceContextHref(source: ChatSourceContext): `/collections/${string}` {
-		const documentPath = `/collections/${source.collection_id}/documents/${source.document_id}`;
-		const href = source.resource_ref.href;
-		return href?.startsWith(documentPath)
-			? (href as `/collections/${string}`)
-			: (documentPath as `/collections/${string}`);
-	}
-
-	function resourceLabel(resourceType: string) {
-		switch (resourceType) {
-			case 'collection':
-				return $t('researchAgent.resource.collection');
-			case 'research_objective':
-				return $t('researchAgent.resource.objective');
-			case 'finding':
-				return $t('researchAgent.resource.finding');
-			case 'evidence':
-				return $t('researchAgent.resource.evidence');
-			case 'source':
-				return $t('researchAgent.resource.source');
-			case 'document':
-				return $t('researchAgent.resource.document');
-			case 'research_plan':
-				return $t('researchAgent.resource.researchPlan');
-			case 'objective_analysis':
-				return $t('researchAgent.resource.analysis');
-			case 'pipeline_run':
-				return $t('researchAgent.resource.researchProcess');
-			default:
-				return $t('researchAgent.resource.other');
-		}
-	}
-
-	function approvalArguments(call: ChatToolCall) {
-		return Object.entries(call.arguments);
-	}
-
-	function approvalBody(call: ChatToolCall) {
-		if (call.name === 'start_research_process') {
-			return $t('researchAgent.approval.startResearchBody');
-		}
-		if (call.name === 'start_objective_analysis') {
-			return $t('researchAgent.approval.objectiveAnalysisBody');
-		}
-		if (call.name === 'confirm_objective') {
-			return $t('researchAgent.approval.objectiveConfirmationBody');
-		}
-		if (call.name === 'record_finding_feedback') {
-			return $t('researchAgent.approval.findingFeedbackBody');
-		}
-		if (call.name === 'curate_finding') {
-			return $t('researchAgent.approval.findingCurationBody');
-		}
-		if (call.name === 'create_finding_version') {
-			return typeof call.arguments.abstention_reason === 'string'
-				? $t('researchAgent.approval.findingAbstentionBody')
-				: $t('researchAgent.approval.findingAuthoringBody');
-		}
-		if (call.name === 'create_evidence_version') {
-			return $t('researchAgent.approval.evidenceAuthoringBody');
-		}
-		if (call.name === 'create_research_plan') {
-			return $t('researchAgent.approval.researchPlanBody');
-		}
-		if (call.name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.approval.agentObjectiveAnalysisBody');
-		}
-		return $t('researchAgent.approval.body');
-	}
-
-	function approvalAction(call: ChatToolCall) {
-		if (call.name === 'start_research_process') {
-			return $t('researchAgent.approval.startResearch');
-		}
-		if (call.name === 'start_objective_analysis') {
-			return $t('researchAgent.approval.analyzeObjective');
-		}
-		if (call.name === 'confirm_objective') {
-			return $t('researchAgent.approval.confirmObjective');
-		}
-		if (call.name === 'record_finding_feedback') {
-			return $t('researchAgent.approval.recordFeedback');
-		}
-		if (call.name === 'curate_finding') {
-			return $t('researchAgent.approval.saveCuration');
-		}
-		if (call.name === 'create_finding_version') {
-			return typeof call.arguments.abstention_reason === 'string'
-				? $t('researchAgent.approval.publishAbstention')
-				: $t('researchAgent.approval.publishFinding');
-		}
-		if (call.name === 'create_evidence_version') {
-			return $t('researchAgent.approval.publishEvidence');
-		}
-		if (call.name === 'create_research_plan') {
-			return $t('researchAgent.approval.publishResearchPlan');
-		}
-		if (call.name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.approval.publishAgentAnalysis');
-		}
-		return $t('researchAgent.approval.approve');
-	}
-
-	function rejectionNoticeKey(toolName: string | null) {
-		if (toolName === 'start_research_process') return 'researchAgent.researchProcessRejected';
-		if (toolName === 'confirm_objective') return 'researchAgent.objectiveConfirmationRejected';
-		if (toolName === 'start_objective_analysis') return 'researchAgent.objectiveAnalysisRejected';
-		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
-		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
-		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
-		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
-		if (toolName === 'create_research_plan') return 'researchAgent.researchPlanRejected';
-		if (toolName === 'publish_agent_objective_analysis') {
-			return 'researchAgent.agentObjectiveAnalysisRejected';
-		}
-		return 'researchAgent.rejected';
-	}
-
-	function objectiveAnalysisSummary(data: Record<string, unknown>) {
-		const analysis = data.analysis;
-		if (!analysis || typeof analysis !== 'object' || !('status' in analysis)) {
-			return $t('researchAgent.capability.analysisNotStarted');
-		}
-		switch (String(analysis.status)) {
-			case 'queued':
-				return $t('researchAgent.capability.analysisQueued');
-			case 'running': {
-				const progress = 'document_progress' in analysis ? analysis.document_progress : null;
-				return $t('researchAgent.capability.analysisRunning', {
-					current:
-						progress && typeof progress === 'object' && 'current' in progress
-							? Number(progress.current) || 0
-							: 0,
-					total:
-						progress && typeof progress === 'object' && 'total' in progress
-							? Number(progress.total) || 0
-							: 0
-				});
-			}
-			case 'succeeded':
-				return $t('researchAgent.capability.analysisSucceeded');
-			case 'failed':
-				return $t('researchAgent.capability.analysisFailed');
-			default:
-				return $t('researchAgent.capability.analysisNotStarted');
-		}
-	}
-
-	function formatValue(value: unknown) {
-		if (Array.isArray(value)) return value.map(String).join(', ');
-		if (value && typeof value === 'object') return JSON.stringify(value);
-		if (value === null || value === undefined || value === '') return '--';
-		return String(value);
-	}
-
-	function formatTime(value: string) {
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return '';
-		return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
-	}
-
-	function formatHistoryTime(value: string) {
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return '';
-		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
-	}
 </script>
 
 <svelte:head>
@@ -1379,451 +612,19 @@
 		{#if notice}
 			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
-		<div class="message-scroll" aria-live="polite" aria-busy={loading || sending || deciding}>
-			<div class="message-list">
-				{#if loading}
-					<div class="empty-state" role="status">
-						<h3>{$t('researchAgent.loading')}</h3>
-					</div>
-				{:else if messages.length === 0}
-					<div class="empty-state welcome-state">
-						<div class="welcome-avatar" aria-hidden="true">AI</div>
-						<p class="welcome-eyebrow">{$t('researchAgent.welcomeEyebrow')}</p>
-						<h3>{$t('researchAgent.emptyTitle')}</h3>
-						<p>{$t('researchAgent.emptyBody')}</p>
-						<div class="suggestions">
-							{#each suggestionKeys as key (key)}
-								<button
-									type="button"
-									disabled={!session || sending}
-									on:click={() => askSuggestion(key)}
-								>
-									{$t(key)}
-								</button>
-							{/each}
-						</div>
-					</div>
-				{:else}
-					{#each conversationItems as item (item.id)}
-						{#if item.kind === 'message' && item.message.role === 'user'}
-							<article class="user-message" data-testid="user-message">
-								<div>
-									<time>{formatTime(item.message.created_at)}</time>
-									{#if item.message.source_contexts.length}
-										{#each item.message.source_contexts as source (`${source.document_id}:${source.source_ref}`)}
-											<a class="message-source" href={resolve(sourceContextHref(source))}>
-												<strong>{source.document_title}</strong>
-												<small>
-													{source.heading_path ?? source.source_kind}
-													{#if source.page}
-														· {$t('workbench.pageLabel', { page: source.page })}{/if}
-												</small>
-												{#if source.quote_truncated}
-													<small>{$t('researchAgent.sourceContext.truncated')}</small>
-												{/if}
-												<span>{source.quote}</span>
-											</a>
-										{/each}
-									{/if}
-									<p>{item.message.content}</p>
-								</div>
-							</article>
-						{:else if item.kind === 'message' && item.message.role === 'assistant'}
-							<article
-								class="assistant-message"
-								class:streaming={item.message.message_id.startsWith('local-stream-') && sending}
-								data-testid="assistant-message"
-							>
-								<div class="assistant-mark" aria-hidden="true">AI</div>
-								<div class="assistant-content">
-									{#if item.message.message_id.startsWith('local-stream-') && sending && progress}
-										<div class="assistant-progress" role="status" data-testid="research-progress">
-											<button
-												class="progress-current"
-												type="button"
-												aria-expanded={progressHistoryExpanded}
-												aria-label={$t('researchAgent.progress.toggleHistory')}
-												on:click={() => (progressHistoryExpanded = !progressHistoryExpanded)}
-											>
-												<div class="progress-main">
-													<span class="progress-dot" aria-hidden="true"></span>
-													<strong>{progressLabel(progress)}</strong>
-												</div>
-												<div
-													class="progress-metrics"
-													aria-label={$t('researchAgent.progress.detailsLabel')}
-												>
-													{#if progress.cycle_index && progress.cycle_index > 0}
-														<span class="progress-metric"
-															>{$t('researchAgent.progress.cycle', {
-																cycle: progress.cycle_index
-															})}</span
-														>
-													{/if}
-													{#if progressActions}
-														<span class="progress-metric">
-															{$t('researchAgent.progress.actions', {
-																completed: progressActions.completed,
-																total: progressActions.total
-															})}
-														</span>
-													{/if}
-													{#if progress.elapsed_ms !== undefined}
-														<span class="progress-metric progress-time"
-															>{formatChatElapsed(progress.elapsed_ms)}</span
-														>
-													{/if}
-												</div>
-												{#if progressHistory.length > 1}
-													<span class="progress-chevron" aria-hidden="true"></span>
-												{/if}
-											</button>
-											{#if progressHistoryExpanded && progressHistory.length > 1}
-												<ol
-													class="progress-trail"
-													aria-label={$t('researchAgent.progress.historyLabel')}
-												>
-													{#each progressHistory.slice(0, -1) as entry (entry.phase + (entry.elapsed_ms ?? 0))}
-														{@const entryActions = getChatProgressActions(entry)}
-														<li>
-															<span class="progress-history-mark" aria-hidden="true">✓</span>
-															<span>{progressLabel(entry)}</span>
-															{#if entryActions}
-																<small
-																	>{$t('researchAgent.progress.actions', {
-																		completed: entryActions.completed,
-																		total: entryActions.total
-																	})}</small
-																>
-															{/if}
-														</li>
-													{/each}
-												</ol>
-											{/if}
-										</div>
-									{/if}
-									<time>{formatTime(item.message.created_at)}</time>
-									{#if item.message.content}
-										<div class="assistant-copy">
-											{#each renderMessageBlocks(item.message.content) as block, blockIndex (blockIndex)}
-												{#if block.kind === 'list'}
-													<ul>
-														{#each block.items as item, itemIndex (itemIndex)}
-															<li>
-																{#each item as segment, segmentIndex (segmentIndex)}
-																	{#if segment.strong}<strong>{segment.text}</strong
-																		>{:else}{segment.text}{/if}
-																{/each}
-															</li>
-														{/each}
-													</ul>
-												{:else}
-													<p>
-														{#each block.segments as segment, segmentIndex (segmentIndex)}
-															{#if segment.strong}<strong>{segment.text}</strong
-																>{:else}{segment.text}{/if}
-														{/each}
-													</p>
-												{/if}
-											{/each}
-											{#if item.message.message_id.startsWith('local-stream-')}
-												<span class="stream-cursor" aria-hidden="true"></span>
-											{/if}
-										</div>
-									{:else if item.message.message_id.startsWith('local-stream-')}
-										<div
-											class="assistant-copy streaming-copy"
-											role="status"
-											aria-label={$t('researchAgent.sending')}
-										>
-											<span class="stream-cursor" aria-hidden="true"></span>
-										</div>
-									{/if}
-								</div>
-							</article>
-						{:else if item.kind === 'activity'}
-							{#if activityOperations(item).length}
-								<details
-									class="research-activity"
-									class:failed={item.status === 'failed'}
-									class:active={item.status === 'in_progress' || item.status === 'pending'}
-									use:initializeActivityDisclosure={activityIsOpen(item)}
-									data-testid="research-activity"
-								>
-									<summary>
-										<span class="activity-icon" aria-hidden="true">
-											{item.status === 'failed' ? '!' : item.status === 'completed' ? '✓' : '…'}
-										</span>
-										<span class="activity-heading">
-											<strong>{activitySummary(item)}</strong>
-											<small>{activityCapabilityNames(item)}</small>
-										</span>
-										<span class="activity-status">{activityStatusLabel(item)}</span>
-										<span class="activity-toggle" aria-hidden="true"></span>
-									</summary>
-									<div class="activity-operations">
-										{#each activityOperations(item) as operation (operation.toolCallId)}
-											<div class="activity-operation">
-												<span class="operation-mark" aria-hidden="true"></span>
-												<div>
-													<strong>{operationTitle(operation)}</strong>
-													{#if operationSummary(operation)}
-														<p>{operationSummary(operation)}</p>
-													{/if}
-													{#if operation.resultMessage?.tool_result?.warnings.length}
-														<div class="warnings">
-															<strong>{$t('researchAgent.warnings')}</strong>
-															<ul>
-																{#each operation.resultMessage.tool_result.warnings as warning, warningIndex (warningIndex)}
-																	<li>{warning}</li>
-																{/each}
-															</ul>
-														</div>
-													{/if}
-													{#if operation.resultMessage && visibleResources(operation.resultMessage).length}
-														<nav class="resource-links" aria-label={$t('researchAgent.resources')}>
-															{#each visibleResources(operation.resultMessage) as resource (`${resource.resource_type}:${resource.resource_id}`)}
-																<a href={resolve(resource.href)}
-																	>{resourceLabel(resource.resource_type)}</a
-																>
-															{/each}
-														</nav>
-													{/if}
-												</div>
-											</div>
-										{/each}
-									</div>
-								</details>
-							{/if}
-
-							{#each item.artifacts as artifact (artifact.toolCallId)}
-								{#if artifact.resultMessage?.tool_result}
-									<section
-										class="research-artifact"
-										class:failed={artifact.resultMessage.tool_result.status === 'failed'}
-										class:queued={artifact.resultMessage.tool_result.status === 'queued'}
-										aria-labelledby={`artifact-${artifact.toolCallId}`}
-										data-testid="research-artifact"
-									>
-										<header>
-											<div>
-												<p class="artifact-eyebrow">{$t('researchAgent.capability.artifact')}</p>
-												<h3 id={`artifact-${artifact.toolCallId}`}>
-													{resultTitle(artifact.resultMessage)}
-												</h3>
-												<p>{resultSummary(artifact.resultMessage)}</p>
-											</div>
-											<span
-												class="capability-status"
-												class:failed={artifact.resultMessage.tool_result.status === 'failed'}
-												class:queued={artifact.resultMessage.tool_result.status === 'queued'}
-											>
-												{resultStatusLabel(artifact.resultMessage)}
-											</span>
-										</header>
-
-										{#if findingStatement(artifact.resultMessage)}
-											<blockquote>{findingStatement(artifact.resultMessage)}</blockquote>
-										{/if}
-
-										{#if resultDrafts(artifact.resultMessage).length}
-											<ol class="draft-list">
-												{#each resultDrafts(artifact.resultMessage) as draft, draftIndex (`${String(draft.question ?? '')}-${draftIndex}`)}
-													<li>
-														<strong>{String(draft.question ?? '')}</strong>
-														<p>{draftList(draft, 'variables')} → {draftList(draft, 'outcomes')}</p>
-														<small>
-															{$t('researchAgent.capability.draftSupport', {
-																status: String(draft.support_status ?? 'unknown')
-															})}
-														</small>
-														{#each draftBasisRationales(draft) as rationale (rationale)}
-															<small class="draft-basis">{rationale}</small>
-														{/each}
-													</li>
-												{/each}
-											</ol>
-										{/if}
-
-										{#if resultDraftDetails(artifact.resultMessage).length}
-											<dl class="artifact-details">
-												{#each resultDraftDetails(artifact.resultMessage) as detail (detail.label)}
-													<div>
-														<dt>{detail.label}</dt>
-														<dd
-															class:artifact-detail-quote={detail.label ===
-																$t('researchAgent.capability.sourceExcerpt')}
-														>
-															{detail.value}
-														</dd>
-													</div>
-												{/each}
-											</dl>
-										{/if}
-										{#if draftReviewNote(artifact.resultMessage)}
-											<p class="artifact-note">{draftReviewNote(artifact.resultMessage)}</p>
-										{/if}
-
-										{#if resultDrafts(artifact.resultMessage).length && resultToolName(artifact.resultMessage) === 'derive_objective'}
-											<p class="artifact-note">
-												{$t('researchAgent.capability.derivationBasisShown', {
-													count: resultDrafts(artifact.resultMessage).reduce(
-														(total, draft) => total + draftBasisCount(draft),
-														0
-													)
-												})}
-											</p>
-										{/if}
-
-										{#if resultPlanContent(artifact.resultMessage)}
-											<div class="plan-preview">
-												{#if resultPlanTitle(artifact.resultMessage)}
-													<strong>{resultPlanTitle(artifact.resultMessage)}</strong>
-												{/if}
-												<pre>{resultPlanContent(artifact.resultMessage)}</pre>
-											</div>
-										{/if}
-
-										{#if resultTableMarkdown(artifact.resultMessage)}
-											<div class="table-preview">
-												<strong>{$t('researchAgent.capability.tablePreview')}</strong>
-												<pre>{resultTableMarkdown(artifact.resultMessage)}</pre>
-											</div>
-										{/if}
-
-										{#if resultSourceContent(artifact.resultMessage)}
-											<div class="source-preview">
-												<strong>{$t('researchAgent.capability.sourcePreview')}</strong>
-												<blockquote>{resultSourceContent(artifact.resultMessage)}</blockquote>
-											</div>
-										{/if}
-										{#if resultContinuationNote(artifact.resultMessage)}
-											<p class="artifact-note">{resultContinuationNote(artifact.resultMessage)}</p>
-										{/if}
-
-										{#if resultSourceMatches(artifact.resultMessage).length}
-											<ul class="source-match-list">
-												{#each resultSourceMatches(artifact.resultMessage) as match, matchIndex (String(match.source_ref ?? matchIndex))}
-													<li>
-														<strong>{String(match.source_ref ?? '')}</strong>
-														{#if match.content}<span>{String(match.content)}</span>{/if}
-													</li>
-												{/each}
-											</ul>
-										{/if}
-
-										{#if resultQuality(artifact.resultMessage)}
-											{@const quality = resultQuality(artifact.resultMessage)}
-											<div class="quality-preview">
-												<strong>{qualityStatusLabel(quality?.quality_status)}</strong>
-												<span>
-													{$t('researchAgent.capability.qualityDetails', {
-														findings: numberValue(quality ?? {}, 'finding_count'),
-														evidence: numberValue(quality ?? {}, 'total_evidence_count'),
-														gaps: numberValue(quality ?? {}, 'scientific_gap_count'),
-														failures: numberValue(quality ?? {}, 'technical_failure_count')
-													})}
-												</span>
-												{#if quality?.runtime_state === 'previous_published_result_available'}
-													<small>{$t('researchAgent.capability.previousResultRetained')}</small>
-												{/if}
-											</div>
-										{/if}
-
-										{#if resultResearchSteps(artifact.resultMessage).length}
-											<div class="research-process">
-												{#if researchProcessContext(artifact.resultMessage)}
-													<p>{researchProcessContext(artifact.resultMessage)}</p>
-												{/if}
-												<ol aria-label={$t('researchAgent.researchProcess.label')}>
-													{#each resultResearchSteps(artifact.resultMessage) as step (step.step_id)}
-														<li
-															class:active={step.status === 'running'}
-															class:failed={step.status === 'failed'}
-														>
-															<span aria-hidden="true"></span>
-															<strong>{researchStepName(step.step_id)}</strong>
-															<small>{researchStepStatus(step.status)}</small>
-														</li>
-													{/each}
-												</ol>
-											</div>
-										{/if}
-
-										{#if artifact.resultMessage.tool_result.warnings.length}
-											<div class="warnings">
-												<strong>{$t('researchAgent.warnings')}</strong>
-												<ul>
-													{#each artifact.resultMessage.tool_result.warnings as warning, warningIndex (warningIndex)}
-														<li>{warning}</li>
-													{/each}
-												</ul>
-											</div>
-										{/if}
-
-										{#if visibleResources(artifact.resultMessage).length}
-											<nav class="resource-links" aria-label={$t('researchAgent.resources')}>
-												{#each visibleResources(artifact.resultMessage) as resource (`${resource.resource_type}:${resource.resource_id}`)}
-													<a href={resolve(resource.href)}
-														>{resourceLabel(resource.resource_type)}</a
-													>
-												{/each}
-											</nav>
-										{/if}
-									</section>
-								{/if}
-							{/each}
-						{/if}
-					{/each}
-				{/if}
-
-				{#if pendingApproval}
-					<section class="approval" aria-labelledby="approval-title">
-						<header>
-							<div>
-								<h3 id="approval-title">{$t('researchAgent.approval.title')}</h3>
-								<p>{approvalBody(pendingApproval)}</p>
-							</div>
-							<div class="approval-header-meta">
-								<span class="approval-status">{$t('researchAgent.approval.status')}</span>
-								<strong>{capabilityName(pendingApproval.name)}</strong>
-							</div>
-						</header>
-						{#if approvalArguments(pendingApproval).length}
-							<h4>{$t('researchAgent.approval.arguments')}</h4>
-							<dl>
-								{#each approvalArguments(pendingApproval) as [key, value] (key)}
-									<div>
-										<dt>{key.replaceAll('_', ' ')}</dt>
-										<dd>{formatValue(value)}</dd>
-									</div>
-								{/each}
-							</dl>
-						{/if}
-						<div class="approval-actions">
-							<button
-								class="reject"
-								type="button"
-								disabled={deciding}
-								on:click={() => decide('rejected')}
-							>
-								{$t('researchAgent.approval.reject')}
-							</button>
-							<button
-								class="approve"
-								type="button"
-								disabled={deciding}
-								on:click={() => decide('approved')}
-							>
-								{deciding
-									? $t('researchAgent.approval.processing')
-									: approvalAction(pendingApproval)}
-							</button>
-						</div>
-					</section>
-				{/if}
-			</div>
-		</div>
+		<MessageTimeline
+			{messages}
+			{streamingText}
+			{pendingApproval}
+			{progress}
+			{progressHistory}
+			{loading}
+			{sending}
+			{deciding}
+			ready={Boolean(session)}
+			onSend={sendMessage}
+			{decide}
+		/>
 
 		<MessageComposer
 			{collectionId}
@@ -1891,48 +692,12 @@
 		overflow: hidden;
 	}
 
-	.assistant-mark {
-		display: grid;
-		place-items: center;
-		background: var(--surface-card);
-		border: 1px solid var(--brand-border);
-		color: var(--brand-primary);
-		font-weight: 800;
-	}
-
-	.approve:hover:not(:disabled) {
-		border-color: var(--brand-primary-hover);
-		background: var(--brand-primary-hover);
-		color: #fff;
-		transform: translateY(-1px);
-	}
-
-	.approve:active:not(:disabled) {
-		transform: translateY(0);
-	}
-
-	button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
-	}
-
 	.conversation {
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
 		background: var(--bg-page);
-	}
-
-	.resource-links a {
-		color: var(--brand-primary);
-		font-weight: 700;
-		text-decoration: none;
-		transition: color 140ms ease;
-	}
-
-	.resource-links a:hover {
-		text-decoration: underline;
 	}
 
 	.status {
@@ -1955,947 +720,15 @@
 		color: var(--warning-text);
 	}
 
-	.assistant-progress {
-		display: flex;
-		flex-direction: column;
-		align-items: stretch;
-		gap: 0;
-		margin-bottom: 8px;
-		color: var(--text-secondary);
-	}
-
-	.progress-current {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		width: 100%;
-		padding: 4px 0;
-		border: 0;
-		background: transparent;
-		color: inherit;
-		text-align: left;
-		cursor: pointer;
-		transition: color 140ms ease;
-	}
-
-	.progress-current:hover {
-		color: var(--brand-primary);
-	}
-
-	.progress-current:focus-visible {
-		outline: 2px solid var(--brand-border);
-		outline-offset: 3px;
-	}
-
-	.progress-main {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		min-width: 0;
-		color: var(--text-primary);
-	}
-
-	.progress-main strong {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.progress-metrics {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 8px;
-		flex-wrap: wrap;
-		margin-left: auto;
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-
-	.progress-metric {
-		padding: 3px 7px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: var(--bg-subtle);
-		white-space: nowrap;
-	}
-
-	.progress-time {
-		min-width: 42px;
-		text-align: right;
-		color: var(--text-tertiary);
-		font-variant-numeric: tabular-nums;
-	}
-
-	.progress-chevron {
-		width: 7px;
-		height: 7px;
-		flex: 0 0 auto;
-		border-right: 1px solid var(--text-tertiary);
-		border-bottom: 1px solid var(--text-tertiary);
-		transform: rotate(45deg) translateY(-2px);
-		transition: transform 120ms ease;
-	}
-
-	.progress-current[aria-expanded='true'] .progress-chevron {
-		transform: rotate(225deg) translate(-1px, -1px);
-	}
-
-	.progress-trail {
-		display: grid;
-		gap: 4px;
-		margin: 2px 0 0 3px;
-		padding: 5px 0 1px 16px;
-		border-left: 1px solid var(--border-default);
-		color: var(--text-tertiary);
-		font-size: 12px;
-		list-style: none;
-		animation: disclosure-in 160ms ease both;
-	}
-
-	.progress-trail li {
-		display: flex;
-		align-items: baseline;
-		gap: 7px;
-		min-width: 0;
-	}
-
-	.progress-trail small {
-		color: var(--text-tertiary);
-	}
-
-	.progress-history-mark {
-		color: var(--brand-primary);
-		font-size: 11px;
-	}
-
-	.progress-dot {
-		width: 8px;
-		height: 8px;
-		flex: 0 0 auto;
-		border-radius: 50%;
-		background: var(--brand-primary);
-		animation: stream-cursor 0.9s steps(1) infinite;
-	}
-
-	.message-scroll {
-		flex: 1;
-		min-height: 0;
-		overflow-y: auto;
-		padding: 36px 32px 44px;
-		scroll-behavior: smooth;
-	}
-
-	.message-list {
-		width: min(100%, 900px);
-		margin: 0 auto;
-		padding-bottom: 8px;
-	}
-
-	.empty-state {
-		max-width: 620px;
-		margin: 88px auto 0;
-		text-align: center;
-	}
-
-	.welcome-state {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-	}
-
-	.welcome-avatar {
-		display: grid;
-		place-items: center;
-		width: 48px;
-		height: 48px;
-		border: 1px solid var(--brand-border);
-		border-radius: 50%;
-		background: var(--brand-soft);
-		color: var(--brand-primary);
-		font-size: 12px;
-		font-weight: 800;
-		letter-spacing: 0;
-	}
-
-	.welcome-eyebrow {
-		margin: 16px 0 0;
-		color: var(--brand-primary);
-		font-size: 11px;
-		font-weight: 800;
-		letter-spacing: 0;
-		text-transform: uppercase;
-	}
-
-	.empty-state h3 {
-		margin: 0;
-		font-size: 20px;
-	}
-
-	.empty-state > p {
-		margin: 8px 0 0;
-		color: var(--text-secondary);
-		font-size: 14px;
-	}
-
-	.suggestions {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 8px;
-		margin-top: 22px;
-	}
-
-	.suggestions button {
-		min-height: 46px;
-		padding: 10px 12px;
-		border: 1px solid var(--border-strong);
-		border-radius: 6px;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.suggestions button:hover:not(:disabled) {
-		border-color: var(--brand-border);
-		background: var(--brand-soft);
-	}
-
-	.user-message {
-		display: flex;
-		justify-content: flex-end;
-		margin-bottom: 24px;
-		animation: message-enter 180ms ease both;
-	}
-
-	.user-message > div {
-		max-width: min(72%, 620px);
-	}
-
-	.user-message time,
-	.assistant-content > time {
-		display: block;
-		margin-bottom: 5px;
-		color: var(--text-tertiary);
-		font-size: 11px;
-	}
-
-	.user-message time {
-		text-align: right;
-	}
-
-	.user-message p {
-		margin: 0;
-		padding: 12px 15px;
-		border-radius: 8px 8px 2px 8px;
-		background: var(--brand-soft);
-		font-size: 14px;
-		line-height: 22px;
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
-	}
-
-	.message-source {
-		display: grid;
-		gap: 3px;
-		margin-bottom: 7px;
-		padding: 10px 12px;
-		border: 1px solid var(--border-default);
-		border-radius: 6px;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		text-align: left;
-		text-decoration: none;
-	}
-
-	.message-source small {
-		color: var(--text-tertiary);
-	}
-
-	.message-source span {
-		display: -webkit-box;
-		overflow: hidden;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 18px;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 3;
-		line-clamp: 3;
-	}
-
-	.assistant-message {
-		display: grid;
-		grid-template-columns: 36px minmax(0, 1fr);
-		gap: 12px;
-		margin-bottom: 18px;
-		animation: message-enter 180ms ease both;
-	}
-
-	.assistant-message.streaming .assistant-mark {
-		border-color: var(--brand-primary);
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 12%, transparent);
-		transition: box-shadow 180ms ease;
-	}
-
-	.assistant-mark {
-		width: 36px;
-		height: 36px;
-		border-radius: 50%;
-		font-size: 10px;
-	}
-
-	.assistant-content {
-		max-width: 760px;
-		min-width: 0;
-	}
-
-	.assistant-content > .assistant-progress {
-		margin: 0 0 8px;
-	}
-
-	.assistant-copy {
-		padding: 2px 0 0;
-		font-size: 14px;
-		line-height: 23px;
-		overflow-wrap: anywhere;
-	}
-
-	.assistant-copy p,
-	.assistant-copy ul {
-		margin: 0 0 9px;
-	}
-
-	.assistant-copy p:last-child,
-	.assistant-copy ul:last-child {
-		margin-bottom: 0;
-	}
-
-	.streaming-copy {
-		min-width: 48px;
-		min-height: 51px;
-	}
-
-	.stream-cursor {
-		display: inline-block;
-		width: 2px;
-		height: 1em;
-		margin-left: 2px;
-		background: currentColor;
-		vertical-align: text-bottom;
-		animation: stream-cursor 0.9s steps(1) infinite;
-	}
-
-	@keyframes stream-cursor {
-		50% {
-			opacity: 0;
-		}
-	}
-
-	@keyframes message-enter {
-		from {
-			opacity: 0;
-			transform: translateY(6px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
-	@keyframes disclosure-in {
-		from {
-			opacity: 0;
-			transform: translateY(-3px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
 	@media (prefers-reduced-motion: reduce) {
-		*,
-		*::before,
-		*::after {
+		:global(.research-agent *),
+		:global(.research-agent *::before),
+		:global(.research-agent *::after) {
 			animation-duration: 0.01ms !important;
 			animation-iteration-count: 1 !important;
 			scroll-behavior: auto !important;
 			transition-duration: 0.01ms !important;
 		}
-
-		.stream-cursor {
-			animation: none;
-		}
-	}
-
-	.research-activity {
-		margin: 0 0 18px 48px;
-		border: 1px solid var(--border-default);
-		border-radius: 6px;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		animation: message-enter 180ms ease both;
-	}
-
-	.research-activity.failed {
-		border-color: var(--danger-border);
-	}
-
-	.research-activity.active {
-		border-color: var(--warning-border);
-	}
-
-	.research-activity summary {
-		display: grid;
-		grid-template-columns: 24px minmax(0, 1fr) auto 12px;
-		align-items: center;
-		gap: 10px;
-		min-height: 52px;
-		padding: 8px 12px;
-		cursor: pointer;
-		list-style: none;
-		transition: background-color 140ms ease;
-	}
-
-	.research-activity summary:hover {
-		background: var(--bg-subtle);
-	}
-
-	.research-activity summary::-webkit-details-marker {
-		display: none;
-	}
-
-	.research-activity summary:focus-visible {
-		outline: 2px solid var(--brand-primary);
-		outline-offset: 2px;
-	}
-
-	.activity-icon {
-		display: grid;
-		place-items: center;
-		width: 22px;
-		height: 22px;
-		border-radius: 50%;
-		background: var(--success-bg);
-		color: var(--success-text);
-		font-size: 12px;
-		font-weight: 800;
-	}
-
-	.research-activity.failed .activity-icon {
-		background: var(--danger-bg);
-		color: var(--danger-text);
-	}
-
-	.research-activity.active .activity-icon {
-		background: var(--warning-bg);
-		color: var(--warning-text);
-	}
-
-	.activity-heading {
-		display: grid;
-		min-width: 0;
-		gap: 1px;
-	}
-
-	.activity-heading strong {
-		font-size: 13px;
-	}
-
-	.activity-heading small {
-		overflow: hidden;
-		color: var(--text-secondary);
-		font-size: 11px;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.activity-status {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-		white-space: nowrap;
-	}
-
-	.activity-toggle {
-		width: 8px;
-		height: 8px;
-		border-right: 1.5px solid currentColor;
-		border-bottom: 1.5px solid currentColor;
-		color: var(--text-tertiary);
-		transform: rotate(45deg) translate(-2px, -2px);
-		transition: transform 140ms ease;
-	}
-
-	.research-activity[open] .activity-toggle {
-		transform: rotate(225deg) translate(-1px, -1px);
-	}
-
-	.activity-operations {
-		padding: 0 12px 10px 46px;
-		border-top: 1px solid var(--border-default);
-	}
-
-	.activity-operation {
-		display: grid;
-		grid-template-columns: 8px minmax(0, 1fr);
-		gap: 10px;
-		padding: 10px 0 0;
-	}
-
-	.operation-mark {
-		width: 6px;
-		height: 6px;
-		margin-top: 6px;
-		border-radius: 50%;
-		background: var(--border-strong);
-	}
-
-	.activity-operation strong {
-		font-size: 12px;
-	}
-
-	.activity-operation p {
-		margin: 2px 0 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.research-artifact {
-		margin: 0 0 22px 48px;
-		padding: 16px;
-		border: 1px solid var(--border-default);
-		border-left: 3px solid var(--brand-primary);
-		border-radius: 6px;
-		background: var(--surface-card);
-		animation: message-enter 200ms ease both;
-	}
-
-	.research-artifact.failed {
-		border-color: var(--danger-border);
-		border-left-color: var(--danger-text);
-	}
-
-	.research-artifact.queued {
-		border-color: var(--warning-border);
-		border-left-color: var(--warning-text);
-	}
-
-	.research-artifact > header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 14px;
-	}
-
-	.research-artifact > header > div {
-		min-width: 0;
-	}
-
-	.research-artifact h3,
-	.research-artifact header p {
-		margin: 0;
-	}
-
-	.research-artifact h3 {
-		font-size: 14px;
-		line-height: 20px;
-	}
-
-	.research-artifact header p:not(.artifact-eyebrow) {
-		margin-top: 3px;
-		color: var(--text-secondary);
-		font-size: 13px;
-	}
-
-	.research-artifact .artifact-eyebrow {
-		margin-bottom: 3px;
-		color: var(--brand-primary);
-		font-size: 10px;
-		font-weight: 800;
-		text-transform: uppercase;
-	}
-
-	.research-artifact blockquote {
-		margin: 14px 0 0;
-		padding: 10px 12px;
-		border-left: 2px solid var(--border-strong);
-		background: var(--bg-subtle);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.capability-status {
-		flex: 0 0 auto;
-		padding: 4px 7px;
-		border: 1px solid var(--success-border);
-		border-radius: 999px;
-		background: var(--success-bg);
-		color: var(--success-text);
-		font-size: 10px;
-		font-weight: 800;
-		line-height: 1.2;
-		white-space: nowrap;
-	}
-
-	.capability-status.queued {
-		border-color: var(--warning-border);
-		background: var(--warning-bg);
-		color: var(--warning-text);
-	}
-
-	.capability-status.failed {
-		border-color: var(--danger-border);
-		background: var(--danger-bg);
-		color: var(--danger-text);
-	}
-
-	.draft-list {
-		display: grid;
-		gap: 8px;
-		margin: 14px 0 0;
-		padding: 0;
-		list-style: none;
-		counter-reset: drafts;
-	}
-
-	.draft-list li {
-		padding-top: 8px;
-		border-top: 1px solid var(--border-default);
-		counter-increment: drafts;
-	}
-
-	.draft-list li > strong::before {
-		content: counter(drafts) '. ';
-	}
-
-	.draft-list p,
-	.draft-list small {
-		margin: 4px 0 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-
-	.draft-list .draft-basis {
-		display: block;
-		color: var(--text-tertiary);
-		font-style: italic;
-	}
-
-	.artifact-details {
-		display: grid;
-		gap: 8px;
-		margin: 14px 0 0;
-		padding-top: 12px;
-		border-top: 1px solid var(--border-default);
-	}
-
-	.artifact-details > div {
-		display: grid;
-		grid-template-columns: minmax(110px, 0.25fr) minmax(0, 1fr);
-		gap: 10px;
-		align-items: start;
-	}
-
-	.artifact-details dt {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-	}
-
-	.artifact-details dd {
-		margin: 0;
-		font-size: 12px;
-		line-height: 18px;
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
-
-	.artifact-detail-quote {
-		max-height: 150px;
-		overflow: auto;
-		padding: 8px 10px;
-		border-left: 2px solid var(--border-strong);
-		background: var(--bg-subtle);
-	}
-
-	.artifact-note {
-		margin: 10px 0 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-
-	.plan-preview,
-	.table-preview,
-	.source-preview,
-	.quality-preview {
-		margin-top: 14px;
-		padding-top: 12px;
-		border-top: 1px solid var(--border-default);
-	}
-
-	.plan-preview strong,
-	.table-preview strong,
-	.source-preview strong,
-	.quality-preview strong {
-		display: block;
-		font-size: 12px;
-	}
-
-	.plan-preview pre,
-	.table-preview pre {
-		max-height: 260px;
-		margin: 8px 0 0;
-		padding: 10px;
-		overflow: auto;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: var(--bg-subtle);
-		font: inherit;
-		font-size: 12px;
-		line-height: 18px;
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
-
-	.source-preview blockquote {
-		max-height: 260px;
-		overflow: auto;
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
-
-	.source-match-list {
-		display: grid;
-		gap: 8px;
-		margin: 14px 0 0;
-		padding: 12px 0 0 18px;
-		border-top: 1px solid var(--border-default);
-	}
-
-	.source-match-list li {
-		padding-left: 2px;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.source-match-list strong,
-	.source-match-list span {
-		display: block;
-	}
-
-	.source-match-list span {
-		margin-top: 2px;
-		max-height: 120px;
-		overflow: auto;
-		color: var(--text-secondary);
-		white-space: pre-wrap;
-	}
-
-	.quality-preview {
-		display: grid;
-		gap: 5px;
-	}
-
-	.quality-preview span,
-	.quality-preview small {
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-
-	.research-process {
-		margin-top: 14px;
-		padding-top: 12px;
-		border-top: 1px solid var(--border-default);
-	}
-
-	.research-process > p {
-		margin: 0 0 10px;
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-
-	.research-process ol {
-		display: grid;
-		gap: 9px;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.research-process li {
-		display: grid;
-		grid-template-columns: 10px minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 9px;
-		min-height: 22px;
-	}
-
-	.research-process li > span {
-		width: 8px;
-		height: 8px;
-		border: 1px solid var(--border-strong);
-		border-radius: 50%;
-		background: var(--surface-card);
-	}
-
-	.research-process li.active > span {
-		border-color: var(--brand-primary);
-		background: var(--brand-primary);
-	}
-
-	.research-process li.failed > span {
-		border-color: var(--danger-text);
-		background: var(--danger-text);
-	}
-
-	.research-process li strong,
-	.research-process li small {
-		font-size: 12px;
-	}
-
-	.research-process li small {
-		color: var(--text-secondary);
-	}
-
-	.warnings {
-		margin-top: 12px;
-		padding: 10px 12px;
-		border-left: 3px solid var(--warning-border);
-		background: var(--warning-bg);
-		color: var(--warning-text);
-		font-size: 12px;
-	}
-
-	.warnings ul {
-		margin: 5px 0 0;
-		padding-left: 18px;
-	}
-
-	.resource-links {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px 14px;
-		margin-top: 12px;
-		font-size: 12px;
-	}
-
-	.approval {
-		margin: 8px 0 24px 48px;
-		padding: 18px;
-		border: 1px solid var(--warning-border);
-		border-radius: 8px;
-		background: var(--warning-bg);
-	}
-
-	.approval > header {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 18px;
-	}
-
-	.approval h3,
-	.approval h4,
-	.approval p {
-		margin: 0;
-	}
-
-	.approval h3 {
-		font-size: 16px;
-	}
-
-	.approval h4 {
-		margin-top: 18px;
-		font-size: 12px;
-		text-transform: uppercase;
-	}
-
-	.approval header p {
-		margin-top: 4px;
-		color: var(--text-secondary);
-		font-size: 13px;
-	}
-
-	.approval-header-meta > strong {
-		color: var(--warning-text);
-		font-size: 12px;
-	}
-
-	.approval-header-meta {
-		display: grid;
-		justify-items: end;
-		gap: 6px;
-		flex: 0 0 auto;
-	}
-
-	.approval-status {
-		padding: 4px 7px;
-		border: 1px solid var(--warning-border);
-		border-radius: 999px;
-		background: var(--surface-card);
-		color: var(--warning-text);
-		font-size: 10px;
-		font-weight: 800;
-		line-height: 1.2;
-		white-space: nowrap;
-	}
-
-	.approval dl {
-		display: grid;
-		gap: 0;
-		margin: 8px 0 0;
-		border-top: 1px solid var(--warning-border);
-	}
-
-	.approval dl div {
-		display: grid;
-		grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
-		gap: 16px;
-		padding: 8px 0;
-		border-bottom: 1px solid var(--warning-border);
-	}
-
-	.approval dt {
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-		text-transform: capitalize;
-	}
-
-	.approval dd {
-		margin: 0;
-		font-size: 13px;
-		overflow-wrap: anywhere;
-	}
-
-	.approval-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 8px;
-		margin-top: 16px;
-	}
-
-	.approval-actions button {
-		min-height: 38px;
-		padding: 0 14px;
-		border-radius: 6px;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.reject {
-		border: 1px solid var(--border-strong);
-		background: var(--surface-card);
-		color: var(--text-primary);
-	}
-
-	.approve {
-		border: 1px solid var(--brand-primary);
-		background: var(--brand-primary);
-		color: #fff;
 	}
 
 	@media (max-width: 820px) {
@@ -2904,58 +737,8 @@
 			grid-template-rows: auto minmax(0, 1fr);
 		}
 
-		.message-scroll {
-			padding-left: 18px;
-			padding-right: 18px;
-		}
-
 		.status {
 			width: calc(100% - 36px);
-		}
-	}
-
-	@media (max-width: 560px) {
-		.progress-current {
-			align-items: flex-start;
-			flex-wrap: wrap;
-			gap: 6px;
-		}
-
-		.progress-main {
-			flex: 1 1 calc(100% - 18px);
-		}
-
-		.progress-metrics {
-			justify-content: flex-start;
-			margin-left: 17px;
-		}
-
-		.suggestions {
-			grid-template-columns: 1fr;
-		}
-
-		.user-message > div {
-			max-width: 90%;
-		}
-
-		.research-activity,
-		.research-artifact,
-		.approval {
-			margin-left: 0;
-		}
-
-		.research-activity summary {
-			grid-template-columns: 24px minmax(0, 1fr) 12px;
-		}
-
-		.activity-status {
-			display: none;
-		}
-
-		.approval > header,
-		.approval dl div {
-			grid-template-columns: 1fr;
-			flex-direction: column;
 		}
 	}
 </style>

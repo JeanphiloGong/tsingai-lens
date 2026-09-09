@@ -151,9 +151,21 @@ keeping Lens-specific research boundaries explicit:
 - `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
   keyboard interaction. The route retains upload and message orchestration,
   while the composer sends on Enter and preserves Shift+Enter for a newline.
+- `MessageTimeline.svelte` owns history rendering and the conversation viewport.
+- `UserMessage.svelte` and `AssistantMessage.svelte` own role presentation.
+  `MessageContent.svelte` owns escaped text formatting and the transient cursor;
+  `ResearchProgress.svelte` owns the response-local progress disclosure.
+- `ResearchActivity.svelte`, `ResearchArtifact.svelte`, and `ApprovalPanel.svelte`
+  own capability activity, reviewable research outputs, and exact write decisions.
+  Shared result links and warnings retain one rendering path; the capability
+  presentation helpers use the already-associated tool name instead of searching
+  the conversation on every render.
 - `conversationPresentation.ts` converts the durable trajectory into ordered
   message, activity, and artifact items. This keeps grouping and display
-  policy out of the transport callbacks.
+  policy out of the transport callbacks. Streamed text is separate from the
+  trajectory and is flushed at most once per animation frame, so text deltas do
+  not rebuild historical activity groups. The final persisted turn replaces
+  the transient response.
 - The message timeline gives each role a stable visual grammar: user content
   is a right-aligned bubble, Assistant text is an open reading column with an
   avatar and inline progress, and evidence-bearing artifacts retain the

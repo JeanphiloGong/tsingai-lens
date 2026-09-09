@@ -4,8 +4,36 @@ import {
 	formatChatElapsed,
 	getChatProgressActions,
 	streamChatMessage,
+	setChatMessageFeedback,
 	type ChatProgress
 } from './chatSessions';
+
+describe('answer feedback requests', () => {
+	it('uses the same-origin API with encoded identities and explicit withdrawal', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response('null', {
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		const controller = new AbortController();
+		try {
+			await expect(
+				setChatMessageFeedback('session/one', 'message?one', { rating: null }, controller.signal)
+			).resolves.toBeNull();
+			expect(fetch).toHaveBeenCalledWith(
+				'/api/v1/chat-sessions/session%2Fone/messages/message%3Fone/feedback',
+				expect.objectContaining({
+					method: 'PUT',
+					credentials: 'same-origin',
+					signal: controller.signal,
+					body: '{"rating":null}'
+				})
+			);
+		} finally {
+			fetch.mockRestore();
+		}
+	});
+});
 
 describe('chat stream lifecycle', () => {
 	it('releases an unfinished response when its conversation is left', async () => {

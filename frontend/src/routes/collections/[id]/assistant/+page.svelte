@@ -13,6 +13,10 @@
 		appendChatProgress,
 		readPendingChatSourceContext,
 		streamChatMessage,
+		setChatMessageFeedback,
+		type ChatFeedbackInput,
+		type ChatFeedbackState,
+		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatProgress,
 		type ChatSession,
@@ -35,6 +39,7 @@
 
 	let session: ChatSession | null = null;
 	let messages: ChatMessage[] = [];
+	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
 	let history: StoredChatSession[] = [];
 	let loading = false;
@@ -164,6 +169,7 @@
 		sessionController = null;
 		session = null;
 		messages = [];
+		feedbackByMessage = {};
 		input = '';
 		sending = false;
 		streamingText = '';
@@ -212,6 +218,7 @@
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = trajectory.items;
+				loadFeedback(trajectory.feedback);
 				pendingApproval = trajectory.pending_approval;
 			}
 			session = nextSession;
@@ -226,6 +233,52 @@
 			pendingApproval = null;
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) loading = false;
+		}
+	}
+
+	function loadFeedback(feedback: ChatMessageFeedback[]) {
+		// An in-session trajectory recovery may have started before a feedback save.
+		feedbackByMessage = {
+			...Object.fromEntries(
+				feedback.map((item) => [item.message_id, { feedback: item, saving: false, error: '' }])
+			),
+			...feedbackByMessage
+		};
+	}
+
+	async function saveFeedback(messageId: string, input: ChatFeedbackInput): Promise<boolean> {
+		if (!session || feedbackByMessage[messageId]?.saving) return false;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		const current = feedbackByMessage[messageId]?.feedback ?? null;
+		feedbackByMessage = {
+			...feedbackByMessage,
+			[messageId]: { feedback: current, saving: true, error: '' }
+		};
+		try {
+			const saved = await setChatMessageFeedback(
+				session.session_id,
+				messageId,
+				input,
+				sessionController?.signal
+			);
+			if (!isCurrentSession(generation, ownerCollectionId)) return false;
+			feedbackByMessage = {
+				...feedbackByMessage,
+				[messageId]: { feedback: saved, saving: false, error: '' }
+			};
+			return true;
+		} catch {
+			if (!isCurrentSession(generation, ownerCollectionId)) return false;
+			feedbackByMessage = {
+				...feedbackByMessage,
+				[messageId]: {
+					feedback: current,
+					saving: false,
+					error: $t('researchAgent.feedback.failed')
+				}
+			};
+			return false;
 		}
 	}
 
@@ -488,6 +541,8 @@
 		<MessageTimeline
 			sessionId={activeSessionId}
 			{messages}
+			{feedbackByMessage}
+			onFeedback={saveFeedback}
 			{streamingText}
 			{pendingApproval}
 			{progress}

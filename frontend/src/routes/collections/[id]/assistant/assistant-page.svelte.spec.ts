@@ -162,7 +162,7 @@ function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
 }
 
 function installApi({
-	trajectory = { items: [], pending_approval: null },
+	trajectory = { feedback: [], items: [], pending_approval: null },
 	messageTurn,
 	messageDeltas = [],
 	messageDelayMs = 0,
@@ -290,6 +290,65 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockReset();
 	});
 
+	it.each(['collection', 'account'])(
+		'aborts pending feedback and ignores its response after changing %s',
+		async (scope) => {
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({
+				trajectory: {
+					items: [message('answer', 'assistant', 'Compare matching tensile test conditions.')],
+					pending_approval: null,
+					feedback: []
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			let finish!: (response: Response) => void;
+			const pending = new Promise<Response>((resolve) => {
+				finish = resolve;
+			});
+			let signal: AbortSignal | undefined;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input).endsWith('/feedback')) {
+					signal = init?.signal ?? undefined;
+					return pending;
+				}
+				if (requestPath(input) === '/api/v1/chat-sessions')
+					return Promise.resolve(
+						jsonResponse({
+							...session,
+							session_id: 'chat_new',
+							collection_id: scope === 'collection' ? 'col_456' : 'col_123',
+							user_id: scope === 'account' ? 'researcher_2' : session.user_id
+						})
+					);
+				return original(input, init);
+			});
+			render(Page);
+			await browserPage.getByRole('button', { name: 'Helpful', exact: true }).click();
+			await expect.element(browserPage.getByText('Saving...', { exact: true })).toBeVisible();
+			if (scope === 'collection')
+				setPage({
+					params: { id: 'col_456' },
+					url: new URL('http://localhost/collections/col_456/assistant')
+				});
+			else
+				authState.set({
+					status: 'authenticated',
+					user: { user_id: 'researcher_2', email: 'other@example.test' }
+				});
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			expect(signal?.aborted).toBe(true);
+			finish(jsonResponse({ detail: 'Previous feedback failed' }, 503));
+			await new Promise(requestAnimationFrame);
+			await expect
+				.element(browserPage.getByText('Could not save feedback. Please try again.'))
+				.not.toBeInTheDocument();
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Helpful', exact: true }))
+				.not.toBeInTheDocument();
+		}
+	);
+
 	it.each([503, 403, 'offline'] as const)(
 		'retains the selected conversation after %s and retries it',
 		async (failure) => {
@@ -304,6 +363,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify(history));
 			installApi({
 				trajectory: {
+					feedback: [],
 					items: [message('restored', 'assistant', 'Original conversation recovered')],
 					pending_approval: null
 				}
@@ -367,7 +427,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 			])
 		);
 		installApi({
-			trajectory: { items: [message('private', 'user', privateTitle)], pending_approval: null }
+			trajectory: {
+				feedback: [],
+				items: [message('private', 'user', privateTitle)],
+				pending_approval: null
+			}
 		});
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
@@ -414,6 +478,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			const question = 'Explain this grain-size result';
 			installApi({
 				trajectory: {
+					feedback: [],
 					items: persisted
 						? [
 								message('saved_user', 'user', question, { source_contexts: [source] }),
@@ -525,6 +590,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					: stage === 'failure'
 						? jsonResponse({ detail: 'Old collection unavailable' }, 503)
 						: jsonResponse({
+								feedback: [],
 								items: [message('old', 'assistant', 'Old collection answer')],
 								pending_approval: pendingCall()
 							})
@@ -550,7 +616,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 			});
 			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 			installApi({
-				trajectory: { items: [], pending_approval: operation === 'approval' ? pendingCall() : null }
+				trajectory: {
+					feedback: [],
+					items: [],
+					pending_approval: operation === 'approval' ? pendingCall() : null
+				}
 			});
 			const original = fetchMock.getMockImplementation()!;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
@@ -1120,6 +1190,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('preserves a researcher-expanded activity while the next answer streams', async () => {
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_1', 'assistant', '', {
 						tool_call_id: null,
@@ -1252,6 +1323,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('keeps a persisted tool request visible while its result is pending', async () => {
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_1', 'assistant', '', {
 						tool_call_id: null,
@@ -2185,6 +2257,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
 						tool_call_id: null,
@@ -2365,6 +2438,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
 						tool_call_id: null,
@@ -2406,6 +2480,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const call = pendingCall();
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
 						tool_call_id: null,
@@ -2458,6 +2533,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const call = pendingCall();
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
 						tool_call_id: null,
@@ -2534,6 +2610,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
 						tool_call_id: null,

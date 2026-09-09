@@ -239,6 +239,26 @@ const translations: Record<Language, Translations> = {
 			messageLabel: 'Message',
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
+			feedback: {
+				helpful: 'Helpful',
+				notHelpful: 'Not helpful',
+				edit: 'Edit feedback',
+				reason: 'What could be better?',
+				optional: 'Select a reason (optional)',
+				comment: 'Additional feedback (optional)',
+				save: 'Save',
+				cancel: 'Cancel',
+				saving: 'Saving...',
+				saved: 'Feedback saved',
+				removed: 'Feedback removed',
+				failed: 'Could not save feedback. Please try again.',
+				reasons: {
+					incorrect: 'Incorrect answer',
+					incomplete: 'Incomplete answer',
+					unclear: 'Unclear explanation',
+					other: 'Other'
+				}
+			},
 			sending: 'Sending...',
 			progress: {
 				starting: 'Starting research...',
@@ -2820,6 +2840,26 @@ const translations: Record<Language, Translations> = {
 			messageLabel: '消息',
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
+			feedback: {
+				helpful: '有帮助',
+				notHelpful: '没有帮助',
+				edit: '编辑评价',
+				reason: '哪些地方需要改进？',
+				optional: '选择原因（可选）',
+				comment: '补充说明（可选）',
+				save: '保存',
+				cancel: '取消',
+				saving: '正在保存...',
+				saved: '评价已保存',
+				removed: '评价已撤销',
+				failed: '评价保存失败，请重试。',
+				reasons: {
+					incorrect: '内容有误',
+					incomplete: '回答不完整',
+					unclear: '表达不清楚',
+					other: '其他'
+				}
+			},
 			sending: '发送中...',
 			progress: {
 				starting: '正在开始研究...',

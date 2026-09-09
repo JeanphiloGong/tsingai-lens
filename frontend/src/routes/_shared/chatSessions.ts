@@ -99,6 +99,31 @@ export type ChatTurn = {
 export type ChatTrajectory = {
 	items: ChatMessage[];
 	pending_approval: ChatToolCall | null;
+	feedback: ChatMessageFeedback[];
+};
+
+export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
+export type ChatFeedbackInput = {
+	rating: 'helpful' | 'not_helpful' | null;
+	reason?: ChatFeedbackReason | null;
+	comment?: string | null;
+};
+export type ChatMessageFeedback = {
+	feedback_id: string;
+	session_id: string;
+	message_id: string;
+	user_id: string;
+	rating: 'helpful' | 'not_helpful';
+	reason: ChatFeedbackReason | null;
+	comment: string | null;
+	response_digest: string;
+	created_at: string;
+	updated_at: string;
+};
+export type ChatFeedbackState = {
+	feedback: ChatMessageFeedback | null;
+	saving: boolean;
+	error: string;
 };
 
 export type ChatProgress = {
@@ -169,6 +194,18 @@ export async function fetchChatTrajectory(sessionId: string, signal?: AbortSigna
 		signal,
 		method: 'GET'
 	})) as ChatTrajectory;
+}
+
+export async function setChatMessageFeedback(
+	sessionId: string,
+	messageId: string,
+	input: ChatFeedbackInput,
+	signal?: AbortSignal
+) {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/messages/${encodeURIComponent(messageId)}/feedback`,
+		{ signal, method: 'PUT', body: JSON.stringify(input) }
+	)) as ChatMessageFeedback | null;
 }
 
 export async function streamChatMessage(

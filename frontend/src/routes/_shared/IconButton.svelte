@@ -3,6 +3,7 @@
 	export let type: 'button' | 'submit' = 'button';
 	export let variant: 'quiet' | 'primary' = 'quiet';
 	export let disabled = false;
+	export let pressed: boolean | undefined = undefined;
 	export let className = '';
 	export let tooltipAlign: 'start' | 'center' | 'end' = 'center';
 	export let onClick: () => void = () => {};
@@ -19,6 +20,7 @@
 		class="icon-button {className}"
 		class:primary={variant === 'primary'}
 		aria-label={label}
+		aria-pressed={pressed}
 		on:click={onClick}
 	>
 		<span aria-hidden="true"><slot /></span>
@@ -60,6 +62,10 @@
 		border-color: var(--brand-primary);
 		background: var(--brand-primary);
 		color: #fff;
+	}
+	.icon-button[aria-pressed='true'] {
+		background: var(--bg-subtle);
+		color: var(--text-primary);
 	}
 	.icon-button.primary:hover:not(:disabled) {
 		border-color: var(--brand-primary-hover);

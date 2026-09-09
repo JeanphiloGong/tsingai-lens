@@ -85,6 +85,7 @@ POST /api/v1/chat-sessions
 GET  /api/v1/chat-sessions/{session_id}
 GET  /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/messages
+PUT  /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 ```
 
@@ -137,6 +138,35 @@ Source, rejects forged or stale context with `422`, and persists canonical
 title, location, link, quote, and full-Source digest metadata. The browser does
 not establish Source authenticity itself, and a verified context is still not
 Evidence until the Evidence authoring contract is completed.
+
+## Answer Feedback
+
+Each saved Assistant text answer has Helpful and Not helpful icon toggles
+directly below its content. User messages, tool requests/results, and temporary
+streaming text have no feedback controls. Selecting the active rating withdraws
+it; selecting the other rating replaces it and clears the previous details.
+
+A negative rating is saved immediately and opens an inline editor for an
+optional reason and comment. Either rating can be supplemented using Edit
+feedback. Cancel/Escape discards the editor draft while preserving the saved
+rating. Save persists the details; an error leaves the input intact and shows a
+local retry message. Busy controls prevent duplicate in-flight submissions.
+Icon controls have labels, tooltips, and pressed state; the editor focuses its
+comment input and respects reduced motion and narrow viewports.
+
+`+page.svelte` owns the message-keyed saved state, errors, and pending requests.
+It restores feedback from the trajectory's separate `feedback` array and
+aborts/ignores stale responses after session, collection, or account changes.
+`MessageFeedback.svelte` owns the per-answer editor. No feedback is stored in
+browser storage or sent as a conversation message or scientific review action.
+See the backend API authority for the persistence and authorization contract.
+
+The verification scenario starts with a saved answer comparing LPBF tensile
+results under differing conditions. The researcher rates it, requests missing
+test temperatures and Source links, retries a failed save, refreshes to recover
+the details, changes the rating, and withdraws it. Browser tests cover this
+sequence at 320, 768, 1024, and 1440 pixels; PostgreSQL integration tests cover
+the actual authenticated API, concurrent upserts, cascades, and migration.
 
 ## Presentation Architecture
 

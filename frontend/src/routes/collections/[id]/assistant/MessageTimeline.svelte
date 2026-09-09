@@ -4,12 +4,15 @@
 	import { t } from '../../../_shared/i18n';
 	import { buildChatPresentation } from './conversationPresentation';
 	import type { ChatMessage, ChatToolCall, ChatProgress } from '../../../_shared/chatSessions';
+	import type { ChatFeedbackInput, ChatFeedbackState } from '../../../_shared/chatSessions';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import ResearchActivity from './ResearchActivity.svelte';
 	import ResearchArtifact from './ResearchArtifact.svelte';
 	import ApprovalPanel from './ApprovalPanel.svelte';
 	export let messages: ChatMessage[] = [];
+	export let feedbackByMessage: Record<string, ChatFeedbackState> = {};
+	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let sessionId = '';
 	export let streamingText = '';
 	export let pendingApproval: ChatToolCall | null = null;
@@ -163,6 +166,8 @@
 							/>{:else if item.message.role === 'assistant'}<AssistantMessage
 								message={item.message}
 								streaming={item.message.message_id.startsWith('local-stream-') && sending}
+								feedbackState={feedbackByMessage[item.message.message_id]}
+								{onFeedback}
 								{streamingText}
 								{progress}
 								{progressHistory}

@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type Page, type Route } from '@playwright/test';
+import type { ChatFeedbackInput, ChatMessageFeedback } from '../src/routes/_shared/chatSessions';
 
 const collectionId = 'col_123';
 const documentId = 'doc_1';
@@ -36,6 +37,135 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	for (const width of [320, 768, 1024, 1440]) {
+		test(`saves, edits and withdraws answer feedback at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			let feedback: ChatMessageFeedback | null = null;
+			let failNext = false;
+			let releaseSave: (() => void) | undefined;
+			let holdSave = false;
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) =>
+				route.fulfill(
+					json({
+						items: [
+							agentMessage(
+								'question',
+								'user',
+								'Can I compare the tensile strength of these LPBF studies?'
+							),
+							agentMessage(
+								'answer',
+								'assistant',
+								'The studies used different tensile test temperatures. Compare results measured under matching conditions before attributing the strength difference to heat treatment.'
+							)
+						],
+						pending_approval: null,
+						feedback: feedback ? [feedback] : []
+					})
+				)
+			);
+			await page.route(
+				`**/api/v1/chat-sessions/${sessionId}/messages/answer/feedback`,
+				async (route) => {
+					expect(route.request().method()).toBe('PUT');
+					const input = route.request().postDataJSON() as ChatFeedbackInput;
+					if (holdSave)
+						await new Promise<void>((resolve) => {
+							releaseSave = resolve;
+						});
+					if (failNext) {
+						failNext = false;
+						return route.fulfill(json({ detail: 'Temporary failure' }, 503));
+					}
+					feedback = input.rating
+						? {
+								feedback_id: feedback?.feedback_id ?? 'feedback-1',
+								message_id: 'answer',
+								session_id: sessionId,
+								user_id: 'user_1',
+								rating: input.rating,
+								reason: input.reason ?? null,
+								comment: input.comment ?? null,
+								response_digest: 'a'.repeat(64),
+								created_at: feedback?.created_at ?? now(),
+								updated_at: now()
+							}
+						: null;
+					await route.fulfill(json(feedback));
+				}
+			);
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const answer = page.getByTestId('assistant-message');
+			const helpful = answer.getByRole('button', { name: 'Helpful', exact: true });
+			const unhelpful = answer.getByRole('button', { name: 'Not helpful', exact: true });
+			await expect(page.getByTestId('message-feedback')).toHaveCount(1);
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'true');
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'false');
+			await unhelpful.click();
+			const reason = answer.getByLabel('What could be better?');
+			const comment = answer.getByLabel('Additional feedback (optional)');
+			await expect(comment).toBeFocused();
+			await reason.selectOption('incomplete');
+			await comment.fill('Please name the test temperatures and link to the original sources.');
+			holdSave = true;
+			failNext = true;
+			await answer.getByRole('button', { name: 'Save', exact: true }).click();
+			await expect(helpful).toBeDisabled();
+			await expect(answer.getByRole('status')).toHaveText('Saving...');
+			await expect.poll(() => Boolean(releaseSave)).toBe(true);
+			holdSave = false;
+			releaseSave!();
+			await expect(answer.getByRole('alert')).toHaveText(
+				'Could not save feedback. Please try again.'
+			);
+			await expect(comment).toHaveValue(
+				'Please name the test temperatures and link to the original sources.'
+			);
+			await expect(unhelpful).toHaveAttribute('aria-pressed', 'true');
+			await answer.getByRole('button', { name: 'Save', exact: true }).click();
+			await expect(comment).toHaveCount(0);
+			await page.reload();
+			await expect(unhelpful).toHaveAttribute('aria-pressed', 'true');
+			await answer.getByRole('button', { name: 'Edit feedback' }).click();
+			await expect(reason).toHaveValue('incomplete');
+			await expect(comment).toHaveValue(
+				'Please name the test temperatures and link to the original sources.'
+			);
+			await expectNoHorizontalOverflow(page);
+			await expect(answer.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `answer-feedback-${width}.png`),
+					fullPage: true
+				});
+			await comment.fill('This is an unsaved change.');
+			await comment.press('Escape');
+			await expect(answer.getByRole('button', { name: 'Edit feedback' })).toBeFocused();
+			await answer.getByRole('button', { name: 'Edit feedback' }).click();
+			await expect(comment).toHaveValue(
+				'Please name the test temperatures and link to the original sources.'
+			);
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'true');
+			await answer.getByRole('button', { name: 'Edit feedback' }).click();
+			await expect(reason).toHaveCount(0);
+			await expect(comment).toHaveValue('');
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'false');
+			await page.reload();
+			await expect(unhelpful).toHaveAttribute('aria-pressed', 'false');
+			await expect(helpful).toHaveAttribute('aria-pressed', 'false');
+			expect(errors).toEqual([]);
+		});
+	}
+
 	for (const [width, height] of [
 		[390, 844],
 		[375, 667],
@@ -68,7 +198,7 @@ test.describe('page interaction audit', () => {
 			let sent: Record<string, unknown> | null = null;
 			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
 				if (route.request().method() === 'GET')
-					return route.fulfill(json({ items: [], pending_approval: null }));
+					return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
 				sent = route.request().postDataJSON();
 				return route.fulfill(
 					sseTurn({
@@ -267,7 +397,9 @@ test.describe('page interaction audit', () => {
 				return route.fulfill(json(chatSession()));
 			}
 			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'GET') {
-				return route.fulfill(json({ items: trajectory, pending_approval: pendingApproval }));
+				return route.fulfill(
+					json({ feedback: [], items: trajectory, pending_approval: pendingApproval })
+				);
 			}
 			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'POST') {
 				expect(request.headers().accept).toContain('text/event-stream');
@@ -408,7 +540,7 @@ test.describe('page interaction audit', () => {
 		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
 			const request = route.request();
 			if (request.method() === 'GET') {
-				return route.fulfill(json({ items: trajectory, pending_approval: null }));
+				return route.fulfill(json({ feedback: [], items: trajectory, pending_approval: null }));
 			}
 			const prompt = String(request.postDataJSON().message ?? '');
 			expect(request.headers().accept).toContain('text/event-stream');
@@ -539,7 +671,7 @@ test.describe('page interaction audit', () => {
 			});
 			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
 				if (route.request().method() === 'GET')
-					return route.fulfill(json({ items: history, pending_approval: null }));
+					return route.fulfill(json({ feedback: [], items: history, pending_approval: null }));
 				await pending;
 				return route.fulfill(
 					sseTurn({
@@ -649,7 +781,7 @@ test.describe('page interaction audit', () => {
 				};
 				return route.fulfill(sseTurn(turn));
 			}
-			return route.fulfill(json({ items: [], pending_approval: null }));
+			return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
 		});
 
 		try {
@@ -1013,7 +1145,7 @@ async function mockApis(page: Page) {
 		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
 		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));
 		if (path === `/api/v1/chat-sessions/${sessionId}/messages`) {
-			return route.fulfill(json({ items: [], pending_approval: null }));
+			return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
 		}
 
 		return route.fulfill(json({ detail: `unhandled audit route: ${path}` }, 404));

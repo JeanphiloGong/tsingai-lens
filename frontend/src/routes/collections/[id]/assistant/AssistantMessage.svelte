@@ -1,9 +1,13 @@
 <script lang="ts">
 	import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
+	import type { ChatFeedbackInput, ChatFeedbackState } from '../../../_shared/chatSessions';
+	import MessageFeedback from './MessageFeedback.svelte';
 	import ResearchProgress from './ResearchProgress.svelte';
 	import MessageContent from './MessageContent.svelte';
 	import { formatTime } from './conversationPresentation';
 	export let message: ChatMessage;
+	export let feedbackState: ChatFeedbackState | undefined = undefined;
+	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let streaming = false;
 	export let streamingText = '';
 	export let progress: ChatProgress | null = null;
@@ -18,6 +22,13 @@
 		{/if}
 		<time>{formatTime(message.created_at)}</time>
 		<MessageContent content={streaming ? streamingText : message.content} {streaming} />
+		{#if !streaming && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}
+			<MessageFeedback
+				messageId={message.message_id}
+				state={feedbackState}
+				onSave={(input) => onFeedback(message.message_id, input)}
+			/>
+		{/if}
 	</div>
 </article>
 

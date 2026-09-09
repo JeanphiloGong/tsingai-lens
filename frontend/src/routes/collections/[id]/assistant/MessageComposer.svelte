@@ -27,6 +27,12 @@
 	export let uploadStatus: (item: PaperUploadItem) => string = () => '';
 
 	let uploadInput: HTMLInputElement | null = null;
+
+	function handleComposerKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+		event.preventDefault();
+		onSend();
+	}
 </script>
 
 <form class="composer" on:submit|preventDefault={() => onSend()}>
@@ -115,36 +121,35 @@
 	{/if}
 	<div class="composer-row">
 		<div class="composer-shell">
+			<button
+				class="add-papers"
+				type="button"
+				aria-label={$t('researchAgent.upload.add')}
+				title={$t('researchAgent.upload.add')}
+				disabled={uploadBusy}
+				on:click={() => uploadInput?.click()}
+			>
+				<span aria-hidden="true">+</span>
+			</button>
 			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
 			<textarea
 				id="research-agent-message"
 				rows="1"
 				value={input}
-				on:input={(event) => onInput((event.currentTarget as HTMLTextAreaElement).value)}
 				placeholder={$t('researchAgent.messagePlaceholder')}
 				disabled={!session || sending || deciding || Boolean(pendingApproval)}
+				on:input={(event) => onInput((event.currentTarget as HTMLTextAreaElement).value)}
+				on:keydown={handleComposerKeydown}
 			></textarea>
-			<div class="composer-actions">
-				<button
-					class="add-papers"
-					type="button"
-					aria-label={$t('researchAgent.upload.add')}
-					title={$t('researchAgent.upload.add')}
-					disabled={uploadBusy}
-					on:click={() => uploadInput?.click()}
-				>
-					<span aria-hidden="true">+</span>
-				</button>
-				<button
-					class="send-message"
-					type="submit"
-					aria-label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-					title={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-					disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
-				>
-					<span aria-hidden="true">↑</span>
-				</button>
-			</div>
+			<button
+				class="send-message"
+				type="submit"
+				aria-label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+				title={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+				disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
+			>
+				<span aria-hidden="true">↑</span>
+			</button>
 		</div>
 	</div>
 </form>
@@ -153,31 +158,23 @@
 	.composer {
 		display: grid;
 		gap: 10px;
-		width: 100%;
-		padding: 16px 32px max(20px, env(safe-area-inset-bottom));
+		padding: 12px 32px max(14px, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--border-default);
-		background: var(--surface-card);
-		box-sizing: border-box;
-	}
-
-	.composer > * {
-		width: min(100%, 900px);
-		margin-right: auto;
-		margin-left: auto;
+		background: color-mix(in srgb, var(--bg-page) 94%, var(--surface-card));
 	}
 
 	.composer-row {
-		display: block;
-		width: 100%;
+		width: min(100%, 900px);
+		margin: 0 auto;
 	}
 
 	.composer-shell {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: end;
 		gap: 8px;
 		min-height: 56px;
-		padding: 8px 10px 8px 14px;
+		padding: 8px 10px 8px 10px;
 		border: 1px solid var(--border-strong);
 		border-radius: 24px;
 		background: var(--surface-card);
@@ -192,7 +189,7 @@
 		box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 14%, transparent);
 	}
 
-	.composer-row textarea {
+	textarea {
 		width: 100%;
 		min-height: 38px;
 		max-height: 180px;
@@ -205,9 +202,80 @@
 		resize: none;
 	}
 
+	textarea:focus {
+		outline: none;
+	}
+
+	button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+
+	.send-message,
+	.add-papers {
+		display: grid;
+		place-items: center;
+		width: 36px;
+		height: 36px;
+		min-width: 36px;
+		min-height: 36px;
+		padding: 0;
+		border-radius: 50%;
+		font-weight: 700;
+		line-height: 1;
+		cursor: pointer;
+		transition:
+			background-color 140ms ease,
+			border-color 140ms ease,
+			color 140ms ease,
+			transform 140ms ease;
+	}
+
+	.add-papers {
+		border: 0;
+		background: transparent;
+		color: var(--text-secondary);
+	}
+
+	.add-papers:hover:not(:disabled) {
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+	}
+
+	.add-papers > span {
+		font-size: 22px;
+		font-weight: 400;
+		line-height: 1;
+	}
+
+	.send-message {
+		border: 1px solid var(--brand-primary);
+		background: var(--brand-primary);
+		color: #fff;
+	}
+
+	.send-message > span {
+		font-size: 20px;
+		line-height: 1;
+		transform: translateY(-1px);
+	}
+
+	.send-message:disabled {
+		border-color: var(--border-default);
+		background: var(--bg-subtle);
+		color: var(--text-tertiary);
+	}
+
+	.send-message:hover:not(:disabled) {
+		border-color: var(--brand-primary-hover);
+		background: var(--brand-primary-hover);
+	}
+
 	.upload-panel {
 		display: grid;
 		gap: 10px;
+		width: min(100%, 900px);
+		margin: 0 auto;
 		padding: 12px 14px;
 		border: 1px solid var(--border-default);
 		border-radius: 6px;
@@ -222,12 +290,15 @@
 		gap: 12px;
 	}
 
-	.upload-panel > header > div {
+	.upload-panel > header > div,
+	.upload-panel li > div {
 		display: grid;
 		gap: 2px;
+		min-width: 0;
 	}
 
-	.upload-panel > header strong {
+	.upload-panel > header strong,
+	.upload-panel li strong {
 		font-size: 13px;
 	}
 
@@ -254,15 +325,8 @@
 		gap: 9px;
 	}
 
-	.upload-panel li > div {
-		display: grid;
-		min-width: 0;
-		gap: 1px;
-	}
-
 	.upload-panel li strong {
 		overflow: hidden;
-		font-size: 12px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -296,6 +360,8 @@
 	}
 
 	.upload-error--standalone {
+		width: min(100%, 900px);
+		margin: 0 auto;
 		padding: 8px 10px;
 		border: 1px solid var(--danger-border);
 		border-radius: 6px;
@@ -314,65 +380,36 @@
 	}
 
 	.clear-uploads,
-	.add-papers {
+	.upload-primary {
+		min-height: 30px;
+		padding: 0 10px;
 		border: 1px solid var(--border-strong);
 		border-radius: 6px;
 		background: var(--surface-card);
 		color: var(--text-primary);
-		cursor: pointer;
-	}
-
-	.clear-uploads {
-		min-height: 30px;
-		padding: 0 10px;
 		font-size: 12px;
-	}
-
-	.add-papers {
-		display: inline-flex;
-		align-items: center;
-		align-self: end;
-		justify-content: center;
-		gap: 6px;
-		min-height: 42px;
-		padding: 0 12px;
-		font-weight: 700;
-	}
-
-	.composer-actions {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-	}
-
-	.add-papers > span:first-child {
-		font-size: 22px;
-		font-weight: 400;
-		line-height: 1;
-	}
-
-	.clear-uploads:hover:not(:disabled),
-	.add-papers:hover:not(:disabled) {
-		border-color: var(--brand-border);
-		background: var(--brand-soft);
+		cursor: pointer;
 	}
 
 	.upload-primary {
 		min-height: 36px;
-		padding: 0 12px;
-		border: 1px solid var(--brand-primary);
-		border-radius: 6px;
+		border-color: var(--brand-primary);
 		background: var(--brand-primary);
 		color: #fff;
 		font-weight: 700;
-		cursor: pointer;
+	}
+
+	.upload-primary:hover:not(:disabled) {
+		border-color: var(--brand-primary-hover);
+		background: var(--brand-primary-hover);
 	}
 
 	.source-context-preview {
 		display: grid;
-		grid-column: 1 / -1;
 		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 12px;
+		width: min(100%, 900px);
+		margin: 0 auto;
 		padding: 10px 12px;
 		border: 1px solid var(--brand-border);
 		border-radius: 6px;
@@ -405,7 +442,7 @@
 		line-clamp: 3;
 	}
 
-	.composer .remove-source-context {
+	.remove-source-context {
 		width: 30px;
 		height: 30px;
 		min-width: 30px;
@@ -421,65 +458,6 @@
 		line-height: 1;
 	}
 
-	.composer-row textarea:focus {
-		outline: none;
-	}
-
-	.send-message,
-	.add-papers {
-		display: grid;
-		place-items: center;
-		width: 36px;
-		height: 36px;
-		min-width: 36px;
-		min-height: 36px;
-		padding: 0;
-		border-radius: 50%;
-		font-weight: 700;
-		line-height: 1;
-		cursor: pointer;
-		transition:
-			background-color 140ms ease,
-			border-color 140ms ease,
-			color 140ms ease,
-			transform 140ms ease;
-	}
-
-	.add-papers {
-		border: 0;
-		background: transparent;
-		color: var(--text-secondary);
-	}
-
-	.add-papers:hover:not(:disabled) {
-		border-color: transparent;
-		background: var(--bg-subtle);
-		color: var(--text-primary);
-	}
-
-	.send-message {
-		border: 1px solid var(--brand-primary);
-		background: var(--brand-primary);
-		color: #fff;
-	}
-
-	.send-message > span {
-		font-size: 20px;
-		line-height: 1;
-		transform: translateY(-1px);
-	}
-
-	.send-message:disabled {
-		border-color: var(--border-default);
-		background: var(--bg-subtle);
-		color: var(--text-tertiary);
-	}
-
-	.send-message:hover:not(:disabled) {
-		border-color: var(--brand-primary-hover);
-		background: var(--brand-primary-hover);
-	}
-
 	.sr-only {
 		position: absolute;
 		width: 1px;
@@ -492,45 +470,23 @@
 		border: 0;
 	}
 
-	button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
-	}
-	.upload-primary:hover:not(:disabled) {
-		border-color: var(--brand-primary-hover);
-		background: var(--brand-primary-hover);
-		color: #fff;
-		transform: translateY(-1px);
-	}
-	.send-message:active:not(:disabled),
-	.upload-primary:active:not(:disabled) {
-		transform: translateY(0);
-	}
 	@media (max-width: 820px) {
 		.composer {
 			padding-left: 18px;
 			padding-right: 18px;
 		}
 	}
+
 	@media (max-width: 560px) {
 		.composer {
 			gap: 8px;
 			padding: 12px 12px max(12px, env(safe-area-inset-bottom));
 		}
 
-		.composer-row {
-			display: block;
-		}
-
 		.composer-shell {
 			min-height: 52px;
-			padding-left: 12px;
+			padding-left: 8px;
 			padding-right: 8px;
-		}
-
-		.composer-row textarea {
-			min-height: 36px;
-			resize: none;
 		}
 
 		.upload-panel > header,

@@ -1862,6 +1862,10 @@
 		transform: translateY(-1px);
 	}
 
+	.approve:active:not(:disabled) {
+		transform: translateY(0);
+	}
+
 	button:disabled {
 		cursor: not-allowed;
 		opacity: 0.55;

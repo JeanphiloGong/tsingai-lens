@@ -141,8 +141,9 @@ keeping Lens-specific research boundaries explicit:
 - `ConversationHeader.svelte` owns the current collection/session status and
   optional Objective link. This keeps responsive header layout and status
   animation local to the header instead of coupling it to the message stream.
-- `MessageComposer.svelte` owns the composer and PDF handoff presentation.
-  The route retains upload and message orchestration.
+- `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
+  keyboard interaction. The route retains upload and message orchestration,
+  while the composer sends on Enter and preserves Shift+Enter for a newline.
 - `conversationPresentation.ts` converts the durable trajectory into ordered
   message, activity, and artifact items. This keeps grouping and display
   policy out of the transport callbacks.

@@ -342,9 +342,11 @@ test.describe('page interaction audit', () => {
 		await expect(sendButton).toBeVisible();
 		const mobileLayout = await page.evaluate(() => {
 			const inputElement = document.querySelector<HTMLTextAreaElement>('.composer textarea');
+			const addButton = document.querySelector<HTMLButtonElement>('.composer .add-papers');
 			const buttonElement = document.querySelector<HTMLButtonElement>('.composer .send-message');
-			if (!inputElement || !buttonElement) return null;
+			if (!inputElement || !addButton || !buttonElement) return null;
 			const inputRect = inputElement.getBoundingClientRect();
+			const addRect = addButton.getBoundingClientRect();
 			const buttonRect = buttonElement.getBoundingClientRect();
 			const brandHex = getComputedStyle(document.documentElement)
 				.getPropertyValue('--brand-primary')
@@ -352,6 +354,8 @@ test.describe('page interaction audit', () => {
 			const brandChannels = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(brandHex);
 			return {
 				buttonBottom: buttonRect.bottom,
+				addRight: addRect.right,
+				inputLeft: inputRect.left,
 				buttonColor: getComputedStyle(buttonElement).backgroundColor,
 				brandColor: brandChannels
 					? `rgb(${Number.parseInt(brandChannels[1], 16)}, ${Number.parseInt(brandChannels[2], 16)}, ${Number.parseInt(brandChannels[3], 16)})`
@@ -363,11 +367,12 @@ test.describe('page interaction audit', () => {
 		});
 		expect(mobileLayout).not.toBeNull();
 		expect(mobileLayout!.buttonBottom).toBeLessThanOrEqual(mobileLayout!.viewportHeight + 1);
+		expect(mobileLayout!.addRight).toBeLessThanOrEqual(mobileLayout!.inputLeft + 1);
 		expect(Math.abs(mobileLayout!.inputCenter - mobileLayout!.buttonCenter)).toBeLessThan(4);
 		expect(mobileLayout!.buttonColor).not.toBe('rgba(0, 0, 0, 0)');
 
 		await input.fill('First question');
-		await sendButton.click();
+		await input.press('Enter');
 		await expect(page.getByText('Mobile reply 1')).toBeVisible();
 		await input.fill('Follow-up question');
 		await sendButton.click();

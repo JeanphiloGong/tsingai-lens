@@ -104,7 +104,7 @@ class ChatTurnRequest(BaseModel):
     message: str = Field(min_length=1, max_length=12000)
     source_contexts: list[ChatSourceContextPayload] = Field(
         default_factory=list,
-        max_length=1,
+        max_length=12,
     )
 
 

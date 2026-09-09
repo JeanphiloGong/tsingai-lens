@@ -179,7 +179,7 @@ The immutable message records and turn/stream contracts contain no feedback.
 MVP feedback is not supplied to models, training, evaluation datasets, or
 scientific review services.
 
-A user message may carry at most one `source_contexts` item selected from the
+A user message may carry up to 12 `source_contexts` items selected from the
 same Collection's document reader. The item contains a stable Source resource
 reference, document identity, Source kind and reference, optional page and
 heading, a bounded verbatim quote, and whether that quote was shortened. Before

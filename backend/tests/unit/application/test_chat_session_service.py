@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from hashlib import sha256
 from typing import Any
 
@@ -297,6 +298,45 @@ async def test_chat_session_service_persists_selected_source_with_user_message()
         "?view=parsed-paper&source_ref=results&page=3"
     )
     assert stored[1].source_contexts == ()
+
+
+@pytest.mark.parametrize("forged_second_block", [False, True])
+async def test_selected_blocks_are_canonicalized_together_before_a_turn(
+    forged_second_block: bool,
+) -> None:
+    repository = _Repository()
+    sources = _SourceArtifactRepository()
+    methods = SourceBlock(
+        block_id="methods", document_id="doc-1", block_type="paragraph",
+        text="Conductivity was measured using EIS at 25 C.", block_order=1,
+        page=2, heading_path="Methods > EIS",
+    )
+    sources.document = replace(sources.document, blocks=(*sources.document.blocks, methods))
+    service = ChatSessionService(
+        collection_service=_CollectionService(), source_artifact_repository=sources,
+        repository=repository,
+        runner=ResearchAgentRunner(model=_Model(ModelTurn(content="Check the measurement conditions.")), capabilities=CapabilityRegistry(())),
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    contexts = tuple(
+        ChatSourceContext(
+            resource_ref=ChatResourceRef(resource_type="source", resource_id=f"doc-1:{block.block_id}", href=None),
+            collection_id="col-1", document_id="doc-1", document_title="Untrusted client label",
+            source_kind="text_window", source_ref=block.block_id, page=1,
+            quote="Invented room-temperature superconductivity." if forged_second_block and block.block_id == "methods" else block.text,
+        ) for block in sources.document.blocks
+    )
+    if forged_second_block:
+        with pytest.raises(ChatSourceContextError):
+            await service.post_message_for_user(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
+        assert not await repository.read_messages(session.session_id)
+        return
+    await service.post_message_for_user(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
+    stored = await repository.read_messages(session.session_id)
+    assert [item.source_ref for item in stored[0].source_contexts] == ["results", "methods"]
+    assert [item.page for item in stored[0].source_contexts] == [3, 2]
+    assert all(item.document_title == "Canonical Paper A" and item.source_digest for item in stored[0].source_contexts)
+    assert stored[-1].role.value == "assistant"
 
 
 async def test_chat_session_service_rejects_source_from_another_collection() -> None:

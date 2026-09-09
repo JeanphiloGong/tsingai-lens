@@ -214,7 +214,8 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert messages.pending_approval.tool_call_id == "call-1"
 
 
-def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
+@pytest.mark.parametrize("count", [1, 3, 12])
+def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None:
     service = _Service()
     source_context = {
         "resource_ref": {
@@ -238,11 +239,19 @@ def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
     turn = asyncio.run(
         sessions_controller.post_chat_message(
             "chat-1",
-            ChatTurnRequest(message="你好", source_contexts=[source_context]),
+            ChatTurnRequest(message="你好", source_contexts=[source_context] + [
+                {**source_context, "source_ref": f"methods-{index}", "resource_ref": {
+                    **source_context["resource_ref"], "resource_id": f"doc-1:methods-{index}"
+                }} for index in range(1, count)
+            ]),
             _request(service),
         )
     )
 
+    assert len(turn.messages[0].source_contexts) == count
+    if count == 12:
+        with pytest.raises(ValueError):
+            ChatTurnRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
     assert turn.messages[0].source_contexts[0].document_id == "doc-1"
     assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
         ChatResourceRef(

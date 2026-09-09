@@ -22,6 +22,9 @@ class MemoryChatRepository:
     async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
         return self.messages.get(session_id, ())
 
+    async def read_feedback(self, session_id: str, user_id: str) -> tuple:
+        return ()
+
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         return self.calls.get(tool_call_id)
 

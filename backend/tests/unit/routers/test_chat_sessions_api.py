@@ -89,6 +89,10 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         return self.messages
 
+    async def list_feedback_for_user(self, session_id: str, user_id: str):
+        await self.get_session_for_user(session_id, user_id)
+        return ()
+
     async def get_pending_approval_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
         return self.pending

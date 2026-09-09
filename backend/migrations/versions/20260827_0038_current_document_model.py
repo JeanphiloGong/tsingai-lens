@@ -35,7 +35,11 @@ def upgrade() -> None:
     # the then-current ORM. Keep that legacy shape explicit so later
     # migrations can backfill it even though the maintained ORM now owns the
     # merged document_preparations table.
-    Base.metadata.create_all(bind=bind)
+    # Answer feedback is introduced by 0056, not this historical cutover.
+    Base.metadata.create_all(
+        bind=bind,
+        tables=[table for table in Base.metadata.sorted_tables if table.name != "chat_message_feedback"],
+    )
     if "document_preparations" in inspect(bind).get_table_names():
         op.drop_table("document_preparations")
     legacy = MetaData()

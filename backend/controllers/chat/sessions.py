@@ -11,11 +11,14 @@ from fastapi.responses import StreamingResponse
 
 from application.chat.session_service import (
     ChatApprovalPendingError,
+    ChatMessageNotFoundError,
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
+    ChatMessageFeedbackRequest,
+    ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
     ChatSessionCreateRequest,
@@ -88,24 +91,62 @@ async def list_chat_messages(
     request: Request,
 ) -> ChatMessageListResponse:
     try:
+        user_id = await current_user_id(request)
         messages = await request.app.state.chat_session_service.list_messages_for_user(
             session_id,
-            await current_user_id(request),
+            user_id,
         )
         pending = await request.app.state.chat_session_service.get_pending_approval_for_user(
             session_id,
-            await current_user_id(request),
+            user_id,
+        )
+        feedback = await request.app.state.chat_session_service.list_feedback_for_user(
+            session_id, user_id,
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatMessageListResponse(
         items=[_message_response(item) for item in messages],
+        feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in feedback],
         pending_approval=(
             ChatToolCallResponse.model_validate(pending.to_record())
             if pending is not None
             else None
         ),
     )
+
+
+@router.put(
+    "/{session_id}/messages/{message_id}/feedback",
+    response_model=ChatMessageFeedbackResponse | None,
+    summary="Set or withdraw usefulness feedback on an owned assistant answer",
+)
+async def set_chat_message_feedback(
+    session_id: str,
+    message_id: str,
+    payload: ChatMessageFeedbackRequest,
+    request: Request,
+) -> ChatMessageFeedbackResponse | None:
+    try:
+        feedback = await request.app.state.chat_session_service.set_message_feedback_for_user(
+            session_id, message_id, await current_user_id(request),
+            rating=payload.rating, reason=payload.reason, comment=payload.comment,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatMessageNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={
+            "code": "chat_message_not_found", "message": str(exc),
+        }) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "chat_feedback_invalid", "message": str(exc),
+        }) from exc
+    return ChatMessageFeedbackResponse.model_validate(feedback) if feedback else None
 
 
 @router.post(

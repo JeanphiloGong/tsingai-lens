@@ -29,6 +29,7 @@ from domain.chat import (
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.chat_repository import ChatRepository
+from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ class ChatSessionNotFoundError(FileNotFoundError):
 
 
 class ChatSourceContextError(ValueError):
+    pass
+
+
+class ChatMessageNotFoundError(FileNotFoundError):
     pass
 
 
@@ -120,6 +125,45 @@ class ChatSessionService:
                 if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
                     return call
         return None
+
+    async def list_feedback_for_user(
+        self, session_id: str, user_id: str
+    ) -> tuple[ChatMessageFeedback, ...]:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_feedback(session_id, user_id)
+
+    async def set_message_feedback_for_user(
+        self,
+        session_id: str,
+        message_id: str,
+        user_id: str,
+        *,
+        rating: FeedbackRating | None,
+        reason: FeedbackReason | None = None,
+        comment: str | None = None,
+    ) -> ChatMessageFeedback | None:
+        await self.get_session_for_user(session_id, user_id)
+        message = await self.repository.read_message(message_id)
+        if message is None or message.session_id != session_id:
+            raise ChatMessageNotFoundError("chat message not found")
+        ChatMessageFeedback.validate_answer(message)
+        if rating is None:
+            if reason is not None or comment is not None:
+                raise ValueError("withdrawn feedback cannot have a reason or comment")
+            await self.repository.delete_feedback(
+                session_id=session_id, message_id=message_id, user_id=user_id
+            )
+            return None
+        feedback = ChatMessageFeedback.for_answer(
+            message=message,
+            feedback_id=f"feedback_{uuid4().hex}",
+            user_id=user_id,
+            rating=rating,
+            reason=reason,
+            comment=comment,
+            now=_now_iso(),
+        )
+        return await self.repository.save_feedback(feedback)
 
     async def post_message_for_user(
         self,

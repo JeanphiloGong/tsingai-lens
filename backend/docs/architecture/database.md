@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260908_0055`. The identity and fingerprint rules are
+and the Alembic head `20260909_0056`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 17 application tables and 170 mapped fields. A
+The current ORM metadata contains 18 application tables and 181 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -89,6 +89,7 @@ class is in `infra/persistence/postgres/models`.
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `collections`, `document_preparations`, `research_objectives` | Collection-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
 | Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses` | One versioned analysis row contains private checkpoints, paper contributions, public Evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
 | Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
+| Assess an answer's usefulness | `application/chat`, `domain/chat/feedback.py` | `chat_message_feedback` | One mutable user assessment of a saved answer, separate from scientific Finding review and model context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
 | Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. Evaluation items, scores, and failures remain inside their aggregate payloads. |
 
@@ -101,6 +102,7 @@ count. The remaining tables are separate for these concrete reasons:
 | --- | --- |
 | `auth_users`, `auth_sessions` | One user has many independently revocable sessions; session expiry and revocation are not user metadata. |
 | `chat_sessions`, `chat_messages`, `chat_tool_calls` | A session contains ordered messages, and each assistant turn can contain ordered capability calls with approval and execution state. These are different cardinalities and audit events. Tool results are already embedded in their call. |
+| `chat_message_feedback` | A user can revise or withdraw an assessment without rewriting the append-only answer or its tool trajectory. |
 | `collections`, `documents`, `document_preparations` | Collection ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
 | `pipeline_runs` | Technical retry/progress history must remain observable without being confused with scientific artifacts. |
 | `research_objectives`, `objective_analyses` | One Objective can have multiple immutable analysis attempts; the analysis version is the scientific result boundary. |
@@ -253,6 +255,7 @@ create a parallel paper-fact model.
 | --- | --- | --- |
 | `chat_sessions` | `session_id` | Authenticated user and Collection ownership, creation/update timestamps, and monotonic timestamp check. |
 | `chat_messages` | `message_id` | Session ownership, non-negative ordered `position`, role (`user`, `assistant`, `tool`), content, optional tool metadata, and persisted selected `source_contexts`. `(session_id, position)` is unique. |
+| `chat_message_feedback` | `feedback_id` | User/message uniqueness, usefulness rating, optional reason/comment, server-computed saved-answer digest, and timestamps. Foreign keys cascade with the message, session, or user. |
 | `chat_tool_calls` | `tool_call_id` | Session and assistant-message ownership, capability name/arguments, argument digest, risk (`unknown`, `read`, `draft`, `write`), approval/execution status, timing, decision-user provenance, and the optional structured result. One call is allowed per assistant message. |
 
 Tool approval is an explicit state transition recorded with the exact argument
@@ -403,6 +406,8 @@ The database therefore supports these observable outcomes:
 - Deleting an Auth User cascades sessions and Chat sessions but is restricted
   while the user still owns Collections or is recorded as a tool-call decision
   user. Plan author fields are nullable and use `SET NULL`.
+- Chat feedback follows its message, session, and user with `CASCADE`. Explicit
+  withdrawal deletes only the assessment; it never deletes the answer.
 - Deleting a Document cascades its current Source and Profile (including the
   embedded Paper Map cache), and analysis payloads that reference it. A
   document-scoped Pipeline Run uses a
@@ -423,7 +428,7 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260908_0055`. Revisions `0044` and `0045` move preparation provenance and
+`20260909_0056`. Revisions `0044` and `0045` move preparation provenance and
 Task history into artifact-owned and Pipeline Run records.
 Revisions `0047`-`0053` merge Paper Maps, Chat results, Objective intermediate,
 discovery, evaluation child records, and redundant Source/count storage into
@@ -431,6 +436,11 @@ their lifecycle owners. Revisions `0054` and `0055` merge current document
 preparation artifacts and public Objective results. The current ORM metadata and
 migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
+
+Revision `0056` adds answer usefulness feedback; its downgrade drops only that
+table. The historical `0038` ORM-based cutover excludes this table so that
+fresh and existing databases both create it at `0056`. Upgrade/downgrade and
+PostgreSQL metadata parity are verified without runtime schema fallbacks.
 
 When a persisted contract changes, update these surfaces together:
 
@@ -456,7 +466,7 @@ identity used by the Evidence or Finding.
 | `PostgresDocumentProfileRepository` | `document_preparations.profile_json` |
 | `PostgresPaperMapRepository` | `document_preparations.paper_map_payload` |
 | `PostgresObjectiveRepository` | `collections.discovery_*`, `research_objectives`, `objective_analyses` (including checkpoints, contributions, Evidence, and Findings) |
-| `PostgresChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results) |
+| `PostgresChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
 | `PostgresExperimentPlanRepository` | `objective_experiment_plans` |
 | `PostgresFindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
 | `PostgresEvaluationRepository` | All `evaluation_*` tables |
@@ -766,6 +776,25 @@ paper-fact model.
 | `tool_call_id` | `VARCHAR(128)` | Yes | — | Stable identifier of the capability call. |
 | `source_contexts` | `JSONB` | No | default `[]` | User-selected, Source-digest-bound navigation contexts attached to the message. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
+
+#### `chat_message_feedback` - Answer usefulness feedback
+
+| Field | Type | Nullable | Key / constraints | Description |
+| :--- | :--- | :---: | :--- | :--- |
+| `feedback_id` | `VARCHAR(64)` | No | PK | Stable assessment identity until withdrawal. |
+| `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions`; IDX; CASCADE | Owned session, validated against the target message. |
+| `message_id` | `VARCHAR(128)` | No | FK -> `chat_messages`; IDX; CASCADE | Saved Assistant text answer without tool requests. |
+| `user_id` | `VARCHAR(64)` | No | FK -> `auth_users`; CASCADE; UQ with `message_id` | Authenticated assessor. |
+| `rating` | `VARCHAR(16)` | No | `helpful` / `not_helpful` | Current usefulness assessment. Withdrawal deletes the row. |
+| `reason` | `VARCHAR(16)` | Yes | `incorrect` / `incomplete` / `unclear` / `other`; negative rating only | Optional improvement category. |
+| `comment` | `TEXT` | Yes | At most 2000 characters | Optional plain text, trimmed before persistence. |
+| `response_digest` | `VARCHAR(64)` | No | Length 64 | Server-computed SHA-256 of the saved answer's UTF-8 content. |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | Preserved on update | First assessment timestamp. |
+| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `>= created_at` | Last changed assessment timestamp. Identical PUTs preserve it. |
+
+PostgreSQL upserts enforce one current row for concurrent submissions. This is
+not a review history or scientific validity label. It does not modify message
+content, session recency, approvals, Findings, Evidence, or model prompts.
 
 #### `chat_tool_calls` — Capability calls and approvals
 

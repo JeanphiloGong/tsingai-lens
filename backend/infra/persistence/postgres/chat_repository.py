@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.chat import (
@@ -15,7 +16,9 @@ from domain.chat import (
     ChatToolResult,
     ToolCallStatus,
 )
+from domain.chat.feedback import ChatMessageFeedback
 from infra.persistence.postgres.models.chat import (
+    ChatMessageFeedbackRow,
     ChatMessageRow,
     ChatSessionRow,
     ChatToolCallRow,
@@ -73,6 +76,86 @@ class PostgresChatRepository:
                 )
                 for row in rows
             )
+
+    async def read_message(self, message_id: str) -> ChatMessage | None:
+        async with self.session_factory() as session:
+            row = await session.get(ChatMessageRow, message_id)
+            if row is None:
+                return None
+            requests = tuple(
+                _call_record(call).to_request()
+                for call in await session.scalars(
+                    select(ChatToolCallRow)
+                    .where(ChatToolCallRow.assistant_message_id == message_id)
+                    .order_by(ChatToolCallRow.position)
+                )
+            )
+            result = (
+                await session.get(ChatToolCallRow, row.tool_call_id)
+                if row.role == "tool" and row.tool_call_id else None
+            )
+            return _message_record(row, result, requests)
+
+    async def read_feedback(
+        self, session_id: str, user_id: str
+    ) -> tuple[ChatMessageFeedback, ...]:
+        async with self.session_factory() as session:
+            rows = await session.scalars(
+                select(ChatMessageFeedbackRow).where(
+                    ChatMessageFeedbackRow.session_id == session_id,
+                    ChatMessageFeedbackRow.user_id == user_id,
+                ).order_by(ChatMessageFeedbackRow.created_at, ChatMessageFeedbackRow.feedback_id)
+            )
+            return tuple(_feedback_record(row) for row in rows)
+
+    async def save_feedback(self, feedback: ChatMessageFeedback) -> ChatMessageFeedback:
+        row = ChatMessageFeedbackRow
+        statement = insert(row).values(
+            feedback_id=feedback.feedback_id,
+            session_id=feedback.session_id,
+            message_id=feedback.message_id,
+            user_id=feedback.user_id,
+            rating=feedback.rating,
+            reason=feedback.reason,
+            comment=feedback.comment,
+            response_digest=feedback.response_digest,
+            created_at=_datetime(feedback.created_at),
+            updated_at=_datetime(feedback.updated_at),
+        )
+        statement = statement.on_conflict_do_update(
+            constraint="uq_chat_message_feedback_user_message",
+            set_={
+                "rating": statement.excluded.rating,
+                "reason": statement.excluded.reason,
+                "comment": statement.excluded.comment,
+                "response_digest": statement.excluded.response_digest,
+                "updated_at": func.greatest(row.updated_at, statement.excluded.updated_at),
+            },
+            where=or_(
+                row.rating != statement.excluded.rating,
+                row.reason.is_distinct_from(statement.excluded.reason),
+                row.comment.is_distinct_from(statement.excluded.comment),
+                row.response_digest != statement.excluded.response_digest,
+            ),
+        ).returning(row)
+        async with self.session_factory.begin() as session:
+            saved = (await session.scalars(statement)).one_or_none()
+            if saved is None:
+                # An identical PUT keeps the original timestamps as well as identity.
+                saved = (await session.scalars(select(row).where(
+                    row.user_id == feedback.user_id, row.message_id == feedback.message_id,
+                ))).one()
+            return _feedback_record(saved)
+
+    async def delete_feedback(
+        self, *, session_id: str, message_id: str, user_id: str
+    ) -> None:
+        async with self.session_factory.begin() as session:
+            await session.execute(delete(ChatMessageFeedbackRow).where(
+                ChatMessageFeedbackRow.session_id == session_id,
+                ChatMessageFeedbackRow.message_id == message_id,
+                ChatMessageFeedbackRow.user_id == user_id,
+            ))
 
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         async with self.session_factory() as session:
@@ -332,6 +415,21 @@ def _message_record(
             "tool_result": _result_record(result) if result is not None else None,
             "source_contexts": list(row.source_contexts),
         }
+    )
+
+
+def _feedback_record(row: ChatMessageFeedbackRow) -> ChatMessageFeedback:
+    return ChatMessageFeedback(
+        feedback_id=row.feedback_id,
+        session_id=row.session_id,
+        message_id=row.message_id,
+        user_id=row.user_id,
+        rating=row.rating,
+        reason=row.reason,
+        comment=row.comment,
+        response_digest=row.response_digest,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
     )
 
 

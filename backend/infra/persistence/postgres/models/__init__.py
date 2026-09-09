@@ -3,6 +3,7 @@
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
 from infra.persistence.postgres.models.chat import (
+    ChatMessageFeedbackRow,
     ChatMessageRow,
     ChatSessionRow,
     ChatToolCallRow,
@@ -26,6 +27,7 @@ __all__ = [
     "AuthSession",
     "AuthUser",
     "ChatMessageRow",
+    "ChatMessageFeedbackRow",
     "ChatSessionRow",
     "ChatToolCallRow",
     "Collection",

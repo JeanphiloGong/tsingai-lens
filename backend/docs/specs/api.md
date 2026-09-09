@@ -126,6 +126,7 @@ handoff record or a second research-result identity.
 - `GET /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
+- `PUT /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback`
 - `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
 Chat is the independent conversation and Agent trajectory owner. A Chat session
@@ -134,6 +135,39 @@ record ordinary user and assistant conversation, model tool intent, and bounded
 structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
+
+Answer usefulness feedback is separate from scientific Finding review. For
+example, a researcher can mark an LPBF comparison answer incomplete, request
+the missing tensile test conditions, revise that assessment, or withdraw it.
+This never changes an Objective, Evidence, Finding, approval, or model context.
+
+`PUT /chat-sessions/{session_id}/messages/{message_id}/feedback` accepts
+`rating: helpful | not_helpful | null`, optional
+`reason: incorrect | incomplete | unclear | other | null`, and an optional
+`comment` of at most 2000 characters. A reason requires `not_helpful`.
+`rating: null` withdraws the record and requires absent/null reason and comment;
+the response is HTTP 200 with JSON `null`. Comments are trimmed and blank
+comments become null. Extra fields are rejected.
+
+A non-null rating returns `feedback_id`, `session_id`, `message_id`, `user_id`,
+`rating`, `reason`, `comment`, `response_digest`, `created_at`, and `updated_at`.
+The server computes `response_digest` as SHA-256 of the UTF-8 content of the
+canonical saved answer. Identity, authorship, digest, and timestamps cannot be
+supplied by the client. One user has at most one current rating per message;
+updates preserve identity and creation time, and identical PUTs also preserve
+update time. Withdrawal is idempotent and removes the optional details.
+
+The target must be a persisted, non-empty Assistant text message without tool
+requests in the owned session. Authentication is required (`401`); unavailable
+session, collection, or message ownership returns `404`; ineligible message
+roles or invalid input return `422`. Temporary streaming messages have no saved
+identity and cannot receive feedback.
+
+`GET /chat-sessions/{session_id}/messages` returns a separate `feedback` array
+containing the current user's records, alongside `items` and `pending_approval`.
+The immutable message records and turn/stream contracts contain no feedback.
+MVP feedback is not supplied to models, training, evaluation datasets, or
+scientific review services.
 
 A user message may carry at most one `source_contexts` item selected from the
 same Collection's document reader. The item contains a stable Source resource

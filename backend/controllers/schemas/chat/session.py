@@ -138,6 +138,38 @@ class ChatTurnResponse(BaseModel):
         return self
 
 
+class ChatMessageFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: Literal["helpful", "not_helpful"] | None
+    reason: Literal["incorrect", "incomplete", "unclear", "other"] | None = None
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_details(self) -> ChatMessageFeedbackRequest:
+        if self.rating is None and (self.reason is not None or self.comment is not None):
+            raise ValueError("withdrawn feedback cannot have a reason or comment")
+        if self.reason is not None and self.rating != "not_helpful":
+            raise ValueError("only negative feedback may have a reason")
+        return self
+
+
+class ChatMessageFeedbackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    feedback_id: str
+    session_id: str
+    message_id: str
+    user_id: str
+    rating: Literal["helpful", "not_helpful"]
+    reason: Literal["incorrect", "incomplete", "unclear", "other"] | None
+    comment: str | None
+    response_digest: str
+    created_at: str
+    updated_at: str
+
+
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
+    feedback: list[ChatMessageFeedbackResponse] = Field(default_factory=list)

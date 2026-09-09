@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
+from domain.chat.feedback import ChatMessageFeedback
 
 
 class ChatRepository(Protocol):
@@ -13,6 +14,18 @@ class ChatRepository(Protocol):
     async def read_messages(
         self, session_id: str
     ) -> tuple[ChatMessage, ...]: ...
+
+    async def read_message(self, message_id: str) -> ChatMessage | None: ...
+
+    async def read_feedback(
+        self, session_id: str, user_id: str
+    ) -> tuple[ChatMessageFeedback, ...]: ...
+
+    async def save_feedback(self, feedback: ChatMessageFeedback) -> ChatMessageFeedback: ...
+
+    async def delete_feedback(
+        self, *, session_id: str, message_id: str, user_id: str
+    ) -> None: ...
 
     async def read_tool_call(
         self, tool_call_id: str

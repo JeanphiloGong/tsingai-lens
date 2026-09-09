@@ -78,6 +78,41 @@ class ChatMessageRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ChatMessageFeedbackRow(Base):
+    __tablename__ = "chat_message_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "message_id", name="uq_chat_message_feedback_user_message"),
+        CheckConstraint("rating IN ('helpful', 'not_helpful')", name="rating_valid"),
+        CheckConstraint(
+            "reason IS NULL OR (rating = 'not_helpful' AND "
+            "reason IN ('incorrect', 'incomplete', 'unclear', 'other'))",
+            name="reason_valid",
+        ),
+        CheckConstraint("comment IS NULL OR length(comment) <= 2000", name="comment_length"),
+        CheckConstraint("length(response_digest) = 64", name="digest_length"),
+        CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
+    )
+
+    feedback_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    message_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("auth_users.user_id", ondelete="CASCADE"), nullable=False,
+    )
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ChatToolCallRow(Base):
     __tablename__ = "chat_tool_calls"
     __table_args__ = (
@@ -149,6 +184,7 @@ class ChatToolCallRow(Base):
 
 
 __all__ = [
+    "ChatMessageFeedbackRow",
     "ChatMessageRow",
     "ChatSessionRow",
     "ChatToolCallRow",

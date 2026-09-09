@@ -239,77 +239,81 @@
 		disabled={uploadLoading}
 		on:change={selectUploadFiles}
 	/>
-	{#if uploadItems.length}
-		<section class="upload-panel" aria-label={$t('researchAgent.upload.panelTitle')}>
-			<header>
-				<div>
-					<strong>{$t('researchAgent.upload.panelTitle')}</strong>
-					<small>{$t('researchAgent.upload.panelBody')}</small>
-				</div>
-				<button
-					type="button"
-					class="clear-uploads"
-					disabled={uploadLoading}
-					on:click={clearUploadItems}
-				>
-					{$t('researchAgent.upload.clear')}
-				</button>
-			</header>
-			<ul aria-live="polite">
-				{#each uploadItems as item (item.key)}
-					<li>
-						<span class="pdf-mark" aria-hidden="true">PDF</span>
+	{#if uploadItems.length || uploadError || pendingSourceContext}
+		<div class="composer-context">
+			{#if uploadItems.length}
+				<section class="upload-panel" aria-label={$t('researchAgent.upload.panelTitle')}>
+					<header>
 						<div>
-							<strong>{item.file.name}</strong>
-							<small>{uploadStatus(item)}</small>
-							{#if item.error}<small class="upload-item-error">{item.error}</small>{/if}
+							<strong>{$t('researchAgent.upload.panelTitle')}</strong>
+							<small>{$t('researchAgent.upload.panelBody')}</small>
 						</div>
-					</li>
-				{/each}
-			</ul>
-			{#if uploadError}<p class="upload-error" role="alert">{uploadError}</p>{/if}
-			{#if uploadNotice}<p class="upload-notice" role="status">{uploadNotice}</p>{/if}
-			<footer>
-				<a href={resolve('/collections/[id]', { id: collectionId })}>
-					{$t('researchAgent.upload.openProgress')}
-				</a>
-				{#if uploadCandidates.length || uploadBusy}
+						<button
+							type="button"
+							class="clear-uploads"
+							disabled={uploadLoading}
+							on:click={clearUploadItems}
+						>
+							{$t('researchAgent.upload.clear')}
+						</button>
+					</header>
+					<ul aria-live="polite">
+						{#each uploadItems as item (item.key)}
+							<li>
+								<span class="pdf-mark" aria-hidden="true">PDF</span>
+								<div>
+									<strong>{item.file.name}</strong>
+									<small>{uploadStatus(item)}</small>
+									{#if item.error}<small class="upload-item-error">{item.error}</small>{/if}
+								</div>
+							</li>
+						{/each}
+					</ul>
+					{#if uploadError}<p class="upload-error" role="alert">{uploadError}</p>{/if}
+					{#if uploadNotice}<p class="upload-notice" role="status">{uploadNotice}</p>{/if}
+					<footer>
+						<a href={resolve('/collections/[id]', { id: collectionId })}>
+							{$t('researchAgent.upload.openProgress')}
+						</a>
+						{#if uploadCandidates.length || uploadBusy}
+							<button
+								type="button"
+								class="upload-primary"
+								aria-label={uploadActionText}
+								disabled={uploadBusy}
+								on:click={uploadPapers}
+							>
+								{uploadActionText}
+							</button>
+						{/if}
+					</footer>
+				</section>
+			{:else if uploadError}
+				<p class="upload-error upload-error--standalone" role="alert">{uploadError}</p>
+			{/if}
+			{#if pendingSourceContext}
+				<div class="source-context-preview" data-testid="pending-source-context">
+					<div>
+						<strong>{pendingSourceContext.document_title}</strong>
+						<small>
+							{pendingSourceContext.heading_path ?? pendingSourceContext.source_kind}
+							{#if pendingSourceContext.page}
+								· {$t('workbench.pageLabel', { page: pendingSourceContext.page })}{/if}
+						</small>
+						{#if pendingSourceContext.quote_truncated}
+							<small>{$t('researchAgent.sourceContext.truncated')}</small>
+						{/if}
+						<p>{pendingSourceContext.quote}</p>
+					</div>
 					<button
 						type="button"
-						class="upload-primary"
-						aria-label={uploadActionText}
-						disabled={uploadBusy}
-						on:click={uploadPapers}
+						class="remove-source-context"
+						aria-label={$t('researchAgent.sourceContext.remove')}
+						title={$t('researchAgent.sourceContext.remove')}
+						on:click={onRemovePendingSourceContext}>×</button
 					>
-						{uploadActionText}
-					</button>
-				{/if}
-			</footer>
-		</section>
-	{:else if uploadError}
-		<p class="upload-error upload-error--standalone" role="alert">{uploadError}</p>
-	{/if}
-	{#if pendingSourceContext}
-		<div class="source-context-preview" data-testid="pending-source-context">
-			<div>
-				<strong>{pendingSourceContext.document_title}</strong>
-				<small>
-					{pendingSourceContext.heading_path ?? pendingSourceContext.source_kind}
-					{#if pendingSourceContext.page}
-						· {$t('workbench.pageLabel', { page: pendingSourceContext.page })}{/if}
-				</small>
-				{#if pendingSourceContext.quote_truncated}
-					<small>{$t('researchAgent.sourceContext.truncated')}</small>
-				{/if}
-				<p>{pendingSourceContext.quote}</p>
-			</div>
-			<button
-				type="button"
-				class="remove-source-context"
-				aria-label={$t('researchAgent.sourceContext.remove')}
-				title={$t('researchAgent.sourceContext.remove')}
-				on:click={onRemovePendingSourceContext}>×</button
-			>
+				</div>
+			{/if}
 		</div>
 	{/if}
 	<div class="composer-row">
@@ -346,14 +350,28 @@
 
 <style>
 	.composer {
-		display: grid;
+		display: flex;
+		flex-direction: column;
+		flex: 0 1 auto;
+		min-height: 0;
+		max-height: 70%;
 		gap: 10px;
 		padding: 12px 32px max(14px, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--border-default);
 		background: color-mix(in srgb, var(--bg-page) 94%, var(--surface-card));
 	}
 
+	.composer-context {
+		display: grid;
+		grid-auto-rows: max-content;
+		gap: 10px;
+		min-height: 0;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
 	.composer-row {
+		flex: 0 0 auto;
 		width: min(100%, 900px);
 		margin: 0 auto;
 	}
@@ -382,7 +400,7 @@
 	textarea {
 		width: 100%;
 		min-height: 38px;
-		max-height: 180px;
+		max-height: min(180px, 16dvh);
 		padding: 9px 0;
 		border: 0;
 		background: transparent;

@@ -166,7 +166,11 @@ keeping Lens-specific research boundaries explicit:
   original collection. Navigation drops its UI updates and stops the remaining
   batch from starting; it does not move papers to the newly selected collection.
   Account changes clear the attachment UI and prevent an uploaded paper from
-  starting preparation under a different account.
+  starting preparation under a different account. On constrained viewports,
+  attachments and pending Source context share a bounded scroll area above the
+  input, keeping the send control visible alongside a long question. Timeline
+  spacing scrolls with its content so it cannot overlap this input area when
+  the available height shrinks.
 - `MessageTimeline.svelte` owns history rendering and scroll position. It starts
   with the latest 20 presentation items and exposes earlier items in batches of
   20 while preserving the reading position. New turns follow the latest response;

@@ -230,7 +230,7 @@
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
-		padding: 36px 32px 44px;
+		padding: 0 32px;
 		scroll-behavior: auto;
 		overflow-anchor: none;
 	}
@@ -238,7 +238,7 @@
 	.message-list {
 		width: min(100%, 900px);
 		margin: 0 auto;
-		padding-bottom: 8px;
+		padding: 36px 0 52px;
 	}
 
 	.empty-state {

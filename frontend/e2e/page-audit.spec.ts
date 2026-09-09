@@ -36,6 +36,101 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	for (const [width, height] of [
+		[390, 844],
+		[375, 667],
+		[390, 540],
+		[1440, 900]
+	]) {
+		test(`keeps composed research context and Send reachable at ${width}x${height}`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height });
+			await page.addInitScript(() =>
+				sessionStorage.setItem(
+					'lens.chatSourceContext.user_1:col_123',
+					JSON.stringify({
+						resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
+						collection_id: 'col_123',
+						document_id: 'doc_1',
+						document_title:
+							'Effect of post-build heat treatment on the microstructure and tensile properties of LPBF alloys',
+						source_kind: 'text_window',
+						source_ref: 'results',
+						page: 3,
+						quote:
+							'The measured grain size and tensile strength depend on both processing conditions and subsequent heat treatment. Compare samples with equivalent measurement conditions.',
+						heading_path: 'Results and discussion',
+						quote_truncated: false
+					})
+				)
+			);
+			let sent: Record<string, unknown> | null = null;
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: [], pending_approval: null }));
+				sent = route.request().postDataJSON();
+				return route.fulfill(
+					sseTurn({
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						messages: [
+							agentMessage('composed_user', 'user', String(sent?.message)),
+							agentMessage('composed_answer', 'assistant', 'Comparison request received.')
+						],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			});
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const input = page.getByRole('textbox', { name: 'Message', exact: true });
+			await expect(input).toBeEnabled();
+			await page.getByLabel('Choose PDF papers').setInputFiles(
+				Array.from({ length: 8 }, (_, index) => ({
+					name: `LPBF-study-${index + 1}.pdf`,
+					mimeType: 'application/pdf',
+					buffer: Buffer.from('%PDF-1.7')
+				}))
+			);
+			await input.fill(
+				Array.from(
+					{ length: 10 },
+					(_, index) => `Compare study ${index + 1} under equivalent heat treatment conditions.`
+				).join('\n')
+			);
+			const send = page.getByRole('button', { name: 'Send', exact: true });
+			await expect
+				.poll(async () => (await send.boundingBox())!.y + (await send.boundingBox())!.height)
+				.toBeLessThanOrEqual(height);
+			await expect(send).toBeInViewport({ ratio: 1 });
+			await expect
+				.poll(async () => {
+					const messages = (await page.locator('.message-scroll').boundingBox())!;
+					const composer = (await page.locator('.composer').boundingBox())!;
+					return messages.y + messages.height - composer.y;
+				})
+				.toBeLessThanOrEqual(1);
+			const context = page.locator('.composer-context');
+			await expect(context).toBeVisible();
+			await context.evaluate((element) => {
+				element.scrollTop = element.scrollHeight;
+			});
+			await expect(page.getByTestId('pending-source-context')).toBeInViewport();
+			await expectNoHorizontalOverflow(page);
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `research-agent-composed-context-${width}x${height}.png`),
+					fullPage: true
+				});
+			await send.click();
+			await expect(page.getByText('Comparison request received.', { exact: true })).toBeVisible();
+			expect(sent).toHaveProperty('source_contexts');
+			await expect(page.getByTestId('pending-source-context')).toHaveCount(0);
+		});
+	}
+
 	for (const [path, readyText] of routes) {
 		test(`${path} renders usable desktop and mobile viewports`, async ({ page }) => {
 			const consoleErrors: string[] = [];

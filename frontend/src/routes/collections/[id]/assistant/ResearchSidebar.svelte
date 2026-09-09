@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
+	import { LoaderCircle, Clock3, CircleAlert } from '@lucide/svelte';
+	import type { ChatSessionActivity } from './conversationPresentation';
 
 	type SessionSummary = {
 		session_id: string;
@@ -11,6 +13,7 @@
 	export let collectionId = '';
 	export let collectionName = '';
 	export let history: SessionSummary[] = [];
+	export let sessionActivities: Record<string, ChatSessionActivity> = {};
 	export let activeSessionId = '';
 	export let disabled = false;
 	export let onNewSession: () => void = () => {};
@@ -59,6 +62,7 @@
 		<h2>{$t('researchAgent.historyTitle')}</h2>
 		<div class="history-list">
 			{#each history as item (item.session_id)}
+				{@const activity = sessionActivities[item.session_id]}
 				<button
 					class="history-item"
 					class:active={item.session_id === activeSessionId}
@@ -70,7 +74,18 @@
 					}}
 				>
 					<span class="history-title">{item.title}</span>
-					<time>{formatHistoryTime(item.updated_at)}</time>
+					{#if activity && activity !== 'idle'}
+						<span class="session-state" data-state={activity}>
+							{#if activity === 'running'}<LoaderCircle
+									size={12}
+								/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
+									size={12}
+								/>{/if}
+							<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
+						</span>
+					{:else}
+						<time>{formatHistoryTime(item.updated_at)}</time>
+					{/if}
 				</button>
 			{:else}
 				<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>

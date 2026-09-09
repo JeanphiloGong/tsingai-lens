@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatToolResult } from '../../../_shared/chatSessions';
-import { buildChatPresentation } from './conversationPresentation';
+import {
+	buildChatPresentation,
+	getChatSessionActivity,
+	getRecoveredChatProgress
+} from './conversationPresentation';
 
 function message(
 	messageId: string,
@@ -48,6 +52,53 @@ function result(toolCallId: string, status: ChatToolResult['status'] = 'succeede
 }
 
 describe('buildChatPresentation', () => {
+	it('recovers only the current question progress and leaves unknown timing unset', () => {
+		const current = message('current', 'user', { content: 'Compare matched tensile conditions' });
+		const messages = [
+			message('old-question', 'user'),
+			message('old-call', 'assistant', { toolCallId: 'old', toolName: 'read_source' }),
+			message('old-result', 'tool', { toolResult: result('old') }),
+			current,
+			message('read-a', 'assistant', { toolCallId: 'a', toolName: 'read_source' }),
+			message('read-b', 'assistant', { toolCallId: 'b', toolName: 'read_source' }),
+			message('result-a', 'tool', { toolResult: result('a', 'failed') })
+		];
+		expect(getRecoveredChatProgress(messages, Date.parse(current.created_at) + 65000)).toEqual({
+			phase: 'recovering',
+			requested_tool_count: 2,
+			executed_tool_count: 1,
+			elapsed_ms: 65000
+		});
+		expect(getRecoveredChatProgress([], Date.now())).not.toHaveProperty('elapsed_ms');
+	});
+
+	it('distinguishes running, approval, unconfirmed results and idle sessions', () => {
+		const request = message('request', 'assistant', {
+			toolCallId: 'write',
+			toolName: 'create_finding_version'
+		});
+		expect(getChatSessionActivity([], true, null)).toBe('running');
+		expect(getChatSessionActivity([request], false, 'write')).toBe('approval');
+		expect(getChatSessionActivity([request], false, null)).toBe('recovering');
+		expect(
+			getChatSessionActivity(
+				[request, message('result', 'tool', { toolResult: result('write') })],
+				false,
+				null
+			)
+		).toBe('idle');
+	});
+
+	it('shows a partially completed reading group as in progress', () => {
+		const items = buildChatPresentation([
+			message('read-a', 'assistant', { toolCallId: 'a', toolName: 'query_published_findings' }),
+			message('result-a', 'tool', { toolResult: result('a') }),
+			message('read-b', 'assistant', { toolCallId: 'b', toolName: 'query_published_findings' })
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({ kind: 'activity', status: 'in_progress' });
+	});
+
 	it('compresses consecutive routine tool calls into one research activity group', () => {
 		const items = buildChatPresentation([
 			message('user_1', 'user', { content: 'Which findings support this question?' }),

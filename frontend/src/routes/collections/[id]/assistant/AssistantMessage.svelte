@@ -14,19 +14,27 @@
 	export let feedbackState: ChatFeedbackState | undefined = undefined;
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let streaming = false;
+	export let recovering = false;
 	export let streamingText = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
 </script>
 
-<article class="assistant-message" class:streaming data-testid="assistant-message">
+<article
+	class="assistant-message"
+	class:streaming={streaming || recovering}
+	data-testid="assistant-message"
+>
 	<div class="assistant-mark" aria-hidden="true">AI</div>
 	<div class="assistant-content">
-		{#if streaming && progress}
+		{#if (streaming || recovering) && progress}
 			<ResearchProgress {progress} {progressHistory} />
 		{/if}
-		<time>{formatTime(message.created_at)}</time>
-		<MessageContent content={streaming ? streamingText : message.content} {streaming} />
+		{#if !recovering}
+			<time>{formatTime(message.created_at)}</time>
+			<MessageContent content={streaming ? streamingText : message.content} {streaming} />
+		{/if}
+		<slot />
 		{#if !streaming && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}
 			<div class="answer-actions">
 				{#if onRegenerate}

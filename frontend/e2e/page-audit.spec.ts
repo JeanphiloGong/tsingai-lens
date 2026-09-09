@@ -38,6 +38,190 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [390, 1440]) {
+		test(`restores running research beside its answer and in history at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 950 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			let running = true;
+			let checkpoint = false;
+			let toolResults = false;
+			let unavailable = false;
+			const started = new Date(Date.now() - 65000).toISOString();
+			const question = 'Compare heat treatment conditions';
+			const requests: string[] = [];
+			await page.addInitScript(
+				({ question, started }) => {
+					if (localStorage.getItem('lens.chatSession.user_1:col_123')) return;
+					localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_done');
+					localStorage.setItem(
+						'lens.chatSessionHistory.user_1:col_123',
+						JSON.stringify([
+							{
+								session_id: 'chat_work',
+								title: question,
+								created_at: started,
+								updated_at: started
+							},
+							{
+								session_id: 'chat_done',
+								title: 'Earlier comparison',
+								created_at: started,
+								updated_at: started
+							}
+						])
+					);
+				},
+				{ question, started }
+			);
+			await page.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+				const path = new URL(route.request().url()).pathname;
+				const id = path.split('/')[4];
+				requests.push(route.request().method());
+				if (!path.endsWith('/messages'))
+					return route.fulfill(json({ ...chatSession(), session_id: id }));
+				if (id === 'chat_done')
+					return route.fulfill(
+						json({
+							items: [
+								agentMessage('done-q', 'user', 'Earlier comparison'),
+								agentMessage('done-a', 'assistant', 'Earlier comparison completed')
+							],
+							feedback: [],
+							pending_approval: null,
+							running: false
+						})
+					);
+				if (unavailable)
+					return route.fulfill(json({ detail: 'Progress temporarily unavailable' }, 503));
+				if (!checkpoint)
+					return route.fulfill(json({ items: [], feedback: [], pending_approval: null, running }));
+				const items = [
+					agentMessage('work-q', 'user', question, { session_id: id, created_at: started })
+				];
+				if (toolResults)
+					items.push(
+						agentMessage('work-tools', 'assistant', '', {
+							session_id: id,
+							tool_calls: [
+								{
+									tool_call_id: 'read_a',
+									name: 'query_published_findings',
+									arguments: {},
+									position: 0
+								},
+								{
+									tool_call_id: 'read_b',
+									name: 'query_published_findings',
+									arguments: {},
+									position: 1
+								}
+							]
+						}),
+						agentMessage('result-a', 'tool', '', {
+							session_id: id,
+							tool_result: {
+								tool_call_id: 'read_a',
+								status: 'succeeded',
+								data: {},
+								resource_refs: [],
+								warnings: [],
+								error_code: null,
+								error_message: null
+							}
+						})
+					);
+				if (!running)
+					items.push(
+						agentMessage('result-b', 'tool', '', {
+							session_id: id,
+							tool_result: {
+								tool_call_id: 'read_b',
+								status: 'succeeded',
+								data: {},
+								resource_refs: [],
+								warnings: [],
+								error_code: null,
+								error_message: null
+							}
+						}),
+						agentMessage(
+							'work-a',
+							'assistant',
+							'The reported heat treatments differ; compare matched tensile conditions.',
+							{ session_id: id }
+						)
+					);
+				return route.fulfill(json({ items, feedback: [], pending_approval: null, running }));
+			});
+			const history = () => page.locator('.history-item').filter({ hasText: question });
+			const openHistory = async () => {
+				if (width < 820)
+					await page.getByRole('button', { name: 'Show history', exact: true }).click();
+			};
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByTestId('assistant-message')).toContainText(
+				'Earlier comparison completed'
+			);
+			await openHistory();
+			await expect(history()).toContainText('Working');
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `research-history-${width}.png`) });
+			await history().click();
+			const progress = page.getByTestId('research-progress');
+			await expect(progress).toBeVisible();
+			await expect(page.locator('.assistant-message').filter({ has: progress })).toHaveCount(1);
+			await expect(progress).toContainText('Research in progress');
+			await expect(page.locator('.welcome-state')).toHaveCount(0);
+			await expect(progress.locator('.progress-time')).toHaveCount(0);
+			checkpoint = true;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(page.getByTestId('user-message')).toContainText(question);
+			const elapsed = await progress.locator('.progress-time').innerText();
+			await expect(progress.locator('.progress-time')).not.toHaveText(elapsed);
+			await page.locator('.back-workspace').click();
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(progress).toBeVisible();
+			toolResults = true;
+			await expect(progress).toContainText('1 / 2 research actions');
+			await page.reload();
+			await expect(progress).toHaveCount(1);
+			await expect(progress).toContainText('1 / 2 research actions');
+			await expect(progress).toBeInViewport();
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+				true
+			);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `research-reentry-${width}.png`) });
+			unavailable = true;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(page.getByTestId('research-recovery').getByRole('alert')).toBeVisible();
+			await expect(progress).toContainText('Reconnecting to research');
+			await expect(progress).toBeVisible();
+			unavailable = false;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(page.getByTestId('research-recovery').getByRole('alert')).toHaveCount(0);
+			await openHistory();
+			await page.locator('.history-item').filter({ hasText: 'Earlier comparison' }).click();
+			await expect(page.getByTestId('assistant-message')).toContainText(
+				'Earlier comparison completed'
+			);
+			await openHistory();
+			await expect(history()).toContainText('Working');
+			running = false;
+			await expect(history()).not.toContainText('Working', { timeout: 10000 });
+			await history().click();
+			await expect(page.getByTestId('assistant-message').last()).toContainText(
+				'The reported heat treatments differ'
+			);
+			await expect(progress).toHaveCount(0);
+			expect(requests.every((method) => method === 'GET')).toBe(true);
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const width of [390, 1440]) {
 		test(`keeps document and standalone conversations separate at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });
 			const errors: string[] = [];

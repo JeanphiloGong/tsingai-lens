@@ -258,6 +258,26 @@ already has a history entry; returning reloads its messages and polls while it i
 running. New sessions can submit their own questions independently. Navigation
 waits only for session loading, question acceptance, or an outstanding approval
 or branch-creation request, not for ordinary answer generation.
+The standalone sidebar and embedded history show server-confirmed working,
+approval, or unconfirmed-result states. On entry and browser focus, the view
+checks its bounded local history against the existing trajectory endpoint;
+other active or temporarily unavailable sessions are refreshed every five seconds.
+These indicators are transient projections, not persisted task authority.
+An unavailable status remains explicit and does not imply completion.
+
+Returning to a running conversation restores one Assistant progress row after
+its saved messages and research results. It shows elapsed time from the current
+question and counts requested/completed actions from that turn's durable records.
+The row refreshes automatically and disappears when the answer is saved; failed
+refreshes retain the reading state and offer retry in the same row. A running
+conversation with no checkpoint yet shows progress without the welcome screen.
+The trajectory endpoint currently returns neither an in-progress response-text
+snapshot nor research-stage history. Text deltas belong to the original stream
+connection, so the recovered row uses a general in-progress label instead of
+inventing the model's current stage. This is a recovery implementation gap,
+not an SSE limitation: restoring partial text would require a server-owned
+snapshot and a way to resume updates for the same response without duplicating
+content. The current status recovery does not provide that text continuation.
 Completed writes remain historical observations. A newly proposed write always
 requires a fresh exact-argument approval and cannot reuse a historical call.
 

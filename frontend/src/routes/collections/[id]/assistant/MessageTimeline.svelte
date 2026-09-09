@@ -2,7 +2,8 @@
 	import { onMount, tick } from 'svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
-	import { buildChatPresentation } from './conversationPresentation';
+	import { buildChatPresentation, getRecoveredChatProgress } from './conversationPresentation';
+	import { RotateCw } from '@lucide/svelte';
 	import type { ChatMessage, ChatToolCall, ChatProgress } from '../../../_shared/chatSessions';
 	import type {
 		ChatFeedbackInput,
@@ -70,6 +71,24 @@
 	export let recoveryLoading = false;
 	export let recoveryError = '';
 	export let onRefreshRecovery: () => void = () => {};
+	let now = Date.now();
+	$: recovering =
+		!loading && !sending && !pendingApproval && (running || Boolean(recoveringCallId));
+	$: recoveredProgress = {
+		...getRecoveredChatProgress(messages, now),
+		...(recoveryError ? { phase: 'reconnecting' } : {})
+	};
+	$: recoveryMessage = {
+		message_id: `local-recovery-${sessionId}`,
+		session_id: sessionId,
+		role: 'assistant' as const,
+		content: '',
+		created_at: '',
+		tool_call_id: null,
+		tool_calls: [],
+		tool_result: null,
+		source_contexts: []
+	};
 	export let ready = false;
 	export let onSend: (text: string) => void;
 	export let decide: (decision: 'approved' | 'rejected') => void;
@@ -149,10 +168,14 @@
 
 	onMount(() => {
 		mounted = true;
+		const clock = setInterval(() => {
+			if (recovering) now = Date.now();
+		}, 1000);
 		const observer = new ResizeObserver(scheduleScroll);
 		observer.observe(contentElement);
 		observer.observe(scrollElement);
 		return () => {
+			clearInterval(clock);
 			mounted = false;
 			observer.disconnect();
 			cancelAnimationFrame(scrollFrame);
@@ -170,7 +193,7 @@
 		role="log"
 		aria-label={$t('researchAgent.chatLabel')}
 		aria-live="polite"
-		aria-busy={loading || sending || deciding}
+		aria-busy={loading || sending || deciding || recovering}
 		on:scroll={(event) => {
 			const node = event.currentTarget;
 			following = node.scrollHeight - node.scrollTop - node.clientHeight < 64;
@@ -181,7 +204,7 @@
 				<div class="empty-state" role="status">
 					<h3>{$t('researchAgent.loading')}</h3>
 				</div>
-			{:else if messages.length === 0}
+			{:else if messages.length === 0 && !recovering}
 				<div class="empty-state welcome-state">
 					<div class="welcome-avatar" aria-hidden="true">AI</div>
 					<p class="welcome-eyebrow">{$t('researchAgent.welcomeEyebrow')}</p>
@@ -235,41 +258,28 @@
 						/>{#each item.artifacts as artifact (artifact.toolCallId)}<ResearchArtifact
 								{artifact}
 							/>{/each}
-						{#if item.operations.some((operation) => operation.toolCallId === recoveringCallId)}
-							<div class="recovery-status" data-testid="research-recovery" role="status">
-								<div>
-									<span
-										>{$t(
-											recoveryLoading
-												? 'researchAgent.checkingResult'
-												: 'researchAgent.awaitingResult'
-										)}</span
-									>
-									{#if recoveryError}<p class="recovery-error">{recoveryError}</p>{/if}
-								</div>
-								<IconButton
-									label={$t('researchAgent.checkResult')}
-									disabled={recoveryLoading}
-									onClick={onRefreshRecovery}>&#8635;</IconButton
-								>
-							</div>
-						{/if}
 					{/if}{/each}
 			{/if}
 
 			{#if pendingApproval}
 				<ApprovalPanel call={pendingApproval} {deciding} onDecide={decide} />
 			{/if}
-			{#if running && !sending && !recoveringCallId}
-				<div class="recovery-status" role="status" data-testid="research-recovery">
-					<span>{$t('researchAgent.awaitingResult')}</span>
-					<IconButton
-						label={$t('researchAgent.checkResult')}
-						disabled={recoveryLoading}
-						onClick={onRefreshRecovery}>&#8635;</IconButton
-					>
-				</div>
-				{#if recoveryError}<p class="recovery-error" role="alert">{recoveryError}</p>{/if}
+			{#if recovering}
+				<AssistantMessage
+					message={recoveryMessage}
+					recovering
+					progress={recoveredProgress}
+					{onFeedback}
+				>
+					<div class="recovery-controls" data-testid="research-recovery">
+						{#if recoveryError}<p class="recovery-error" role="alert">{recoveryError}</p>{/if}
+						<IconButton
+							label={$t('researchAgent.checkResult')}
+							disabled={recoveryLoading}
+							onClick={onRefreshRecovery}><RotateCw size={14} /></IconButton
+						>
+					</div>
+				</AssistantMessage>
 			{/if}
 		</div>
 	</div>
@@ -283,26 +293,20 @@
 </div>
 
 <style>
-	.recovery-status {
+	.recovery-controls {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-end;
 		gap: 12px;
-		margin: 0 0 20px 48px;
 		color: var(--text-secondary);
 		font-size: 13px;
 		overflow-wrap: anywhere;
 	}
 	.recovery-error {
 		margin: 4px 0 0;
+		flex: 1;
 		color: var(--danger-text);
 	}
-	@media (max-width: 560px) {
-		.recovery-status {
-			margin-left: 0;
-		}
-	}
-
 	.timeline {
 		position: relative;
 		display: flex;

@@ -33,9 +33,10 @@
 	import ConversationHeader from './ConversationHeader.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
+	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
-	import { Plus, History, X } from '@lucide/svelte';
+	import { Plus, History, X, LoaderCircle, Clock3, CircleAlert } from '@lucide/svelte';
 
 	export let embedded = false;
 	export let selectedPapers: Pick<DocumentProfile, 'document_id' | 'title'>[] = [];
@@ -65,6 +66,9 @@
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
 	let history: StoredChatSession[] = [];
+	let sessionActivities: Record<string, ChatSessionActivity> = {};
+	let historyTimer: ReturnType<typeof setTimeout> | undefined;
+	let historyLoading = false;
 	let loading = false;
 	let sending = false;
 	let submitting = false;
@@ -95,6 +99,7 @@
 	onDestroy(() => {
 		destroyed = true;
 		clearTimeout(recoveryTimer);
+		clearTimeout(historyTimer);
 		sessionController?.abort();
 	});
 
@@ -125,9 +130,22 @@
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (browser && (collectionId !== loadedCollectionId || userId !== loadedUserId)) {
+		sessionActivities = {};
 		loadedCollectionId = collectionId;
 		loadedUserId = userId;
 		void loadSession();
+	}
+	$: if (session && !loading) {
+		sessionActivities = {
+			...sessionActivities,
+			[session.session_id]: recoveryError
+				? 'unavailable'
+				: getChatSessionActivity(
+						messages,
+						sending || running,
+						pendingApproval?.tool_call_id ?? null
+					)
+		};
 	}
 
 	function sessionStorageKey() {
@@ -200,11 +218,17 @@
 	}
 
 	function upsertHistory(nextSession: ChatSession, title = '') {
-		const existing = readHistory().filter((item) => item.session_id !== nextSession.session_id);
+		const stored = readHistory();
+		const previous = stored.find((item) => item.session_id === nextSession.session_id);
+		const existing = stored.filter((item) => item.session_id !== nextSession.session_id);
 		writeHistory([
 			{
 				session_id: nextSession.session_id,
-				title: title || titleFromMessages(messages),
+				title:
+					title ||
+					(messages.some((message) => message.role === 'user')
+						? titleFromMessages(messages)
+						: previous?.title || $t('researchAgent.untitledSession')),
 				created_at: nextSession.created_at,
 				updated_at: nextSession.updated_at
 			},
@@ -212,10 +236,63 @@
 		]);
 	}
 
+	async function refreshHistoryActivities(all = false) {
+		if (!session || loading || historyLoading || destroyed) return;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		clearTimeout(historyTimer);
+		historyLoading = true;
+		history = readHistory();
+		const candidates = history.filter(
+			(item) =>
+				item.session_id !== session?.session_id &&
+				(all ||
+					['running', 'approval', 'recovering', 'unavailable'].includes(
+						sessionActivities[item.session_id]
+					))
+		);
+		await Promise.all(
+			candidates.map(async (item) => {
+				let activity: ChatSessionActivity;
+				try {
+					const trajectory = await fetchChatTrajectory(item.session_id, sessionController?.signal);
+					activity = getChatSessionActivity(
+						trajectory.items,
+						trajectory.running ?? false,
+						trajectory.pending_approval?.tool_call_id ?? null
+					);
+				} catch {
+					activity = 'unavailable';
+				}
+				if (
+					!isCurrentSession(generation, ownerCollectionId) ||
+					item.session_id === session?.session_id
+				)
+					return;
+				sessionActivities = { ...sessionActivities, [item.session_id]: activity };
+			})
+		);
+		if (!isCurrentSession(generation, ownerCollectionId)) return;
+		historyLoading = false;
+		if (
+			history.some(
+				(item) =>
+					item.session_id !== session?.session_id &&
+					['running', 'approval', 'recovering', 'unavailable'].includes(
+						sessionActivities[item.session_id]
+					)
+			)
+		) {
+			historyTimer = setTimeout(() => void refreshHistoryActivities(), 5000);
+		}
+	}
+
 	async function loadSession(requestedSessionId = '') {
 		const activeCollectionId = collectionId;
 		const generation = ++sessionGeneration;
 		clearTimeout(recoveryTimer);
+		clearTimeout(historyTimer);
+		historyLoading = false;
 		recoveringCallId = null;
 		recoveryLoading = false;
 		recoveryError = '';
@@ -298,7 +375,10 @@
 			messages = [];
 			pendingApproval = null;
 		} finally {
-			if (isCurrentSession(generation, activeCollectionId)) loading = false;
+			if (isCurrentSession(generation, activeCollectionId)) {
+				loading = false;
+				void refreshHistoryActivities(true);
+			}
 		}
 	}
 
@@ -772,6 +852,13 @@
 	}
 </script>
 
+<svelte:window
+	on:focus={() => void refreshHistoryActivities(true)}
+	on:storage={(event) => {
+		if (event.key === historyStorageKey()) void refreshHistoryActivities(true);
+	}}
+/>
+
 <section
 	class="research-agent"
 	class:embedded
@@ -783,6 +870,7 @@
 			{collectionId}
 			{collectionName}
 			{history}
+			{sessionActivities}
 			{activeSessionId}
 			disabled={sessionNavigationDisabled}
 			onNewSession={startNewSession}
@@ -802,7 +890,10 @@
 				<IconButton
 					label={$t('researchAgent.historyTitle')}
 					pressed={showHistory}
-					onClick={() => (showHistory = !showHistory)}><History size={16} /></IconButton
+					onClick={() => {
+						showHistory = !showHistory;
+						if (showHistory) void refreshHistoryActivities(true);
+					}}><History size={16} /></IconButton
 				>
 				<span title={conversationTitle}
 					>{conversationTitle || $t('researchAgent.untitledSession')}</span
@@ -811,6 +902,7 @@
 			{#if showHistory}
 				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
 					{#each history as item (item.session_id)}
+						{@const activity = sessionActivities[item.session_id]}
 						<button
 							type="button"
 							class:active={item.session_id === activeSessionId}
@@ -818,8 +910,19 @@
 							on:click={() => {
 								void switchSession(item.session_id);
 								showHistory = false;
-							}}>{item.title}</button
-						>
+							}}
+							><span class="embedded-history-title">{item.title}</span>
+							{#if activity && activity !== 'idle'}
+								<span class="session-state" data-state={activity}>
+									{#if activity === 'running'}<LoaderCircle
+											size={12}
+										/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
+											size={12}
+										/>{/if}
+									<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
+								</span>
+							{/if}
+						</button>
 					{/each}
 				</nav>
 			{/if}
@@ -943,6 +1046,43 @@
 </section>
 
 <style>
+	.research-agent :global(.session-state) {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		max-width: 110px;
+		font-size: 11px;
+		line-height: 16px;
+		color: var(--text-secondary);
+	}
+	.research-agent :global(.session-state svg) {
+		flex-shrink: 0;
+	}
+	.research-agent :global(.session-state[data-state='running']) {
+		color: var(--brand-primary);
+	}
+	.research-agent :global(.session-state[data-state='running'] svg) {
+		animation: session-working 1.4s linear infinite;
+	}
+	.research-agent :global(.session-state[data-state='unavailable']) {
+		color: var(--danger-text);
+	}
+	@keyframes session-working {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.research-agent :global(.session-state[data-state='running'] svg) {
+			animation: none;
+		}
+	}
+	.embedded-history-title {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
 	.revision-draft {
 		display: flex;
 		align-items: center;
@@ -1120,7 +1260,10 @@
 		box-shadow: var(--shadow-sm);
 	}
 	.embedded-history button {
-		display: block;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
 		width: 100%;
 		border: 0;
 		padding: 10px;

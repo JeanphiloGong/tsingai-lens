@@ -1,4 +1,35 @@
-import type { ChatMessage } from '../../../_shared/chatSessions';
+import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
+
+export type ChatSessionActivity = 'running' | 'approval' | 'recovering' | 'idle' | 'unavailable';
+
+export function getChatSessionActivity(
+	messages: ChatMessage[],
+	running: boolean,
+	pendingApprovalId: string | null
+): ChatSessionActivity {
+	if (pendingApprovalId) return 'approval';
+	if (running) return 'running';
+	const completed = new Set(messages.map((message) => message.tool_result?.tool_call_id));
+	return messages.some((message) =>
+		message.tool_calls.some((call) => !completed.has(call.tool_call_id))
+	)
+		? 'recovering'
+		: 'idle';
+}
+
+export function getRecoveredChatProgress(messages: ChatMessage[], now: number): ChatProgress {
+	const questionIndex = messages.map((message) => message.role).lastIndexOf('user');
+	const currentTurn = questionIndex < 0 ? [] : messages.slice(questionIndex);
+	const calls = currentTurn.flatMap((message) => message.tool_calls);
+	const completed = new Set(currentTurn.map((message) => message.tool_result?.tool_call_id));
+	const started = Date.parse(currentTurn[0]?.created_at ?? '');
+	return {
+		phase: 'recovering',
+		requested_tool_count: calls.length,
+		executed_tool_count: calls.filter((call) => completed.has(call.tool_call_id)).length,
+		...(Number.isFinite(started) ? { elapsed_ms: Math.max(0, now - started) } : {})
+	};
+}
 
 const reviewableResultTools = new Set([
 	'create_evidence_draft',
@@ -86,7 +117,11 @@ function activityStatus(operations: ToolActivityOperation[]) {
 	if (operations.some((operation) => operation.resultMessage?.tool_result?.status === 'queued')) {
 		return 'in_progress' as const;
 	}
-	if (operations.some((operation) => operation.resultMessage === null)) return 'pending' as const;
+	if (operations.some((operation) => operation.resultMessage === null)) {
+		return operations.some((operation) => operation.resultMessage !== null)
+			? 'in_progress'
+			: 'pending';
+	}
 	return 'completed' as const;
 }
 

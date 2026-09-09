@@ -255,6 +255,12 @@ const translations: Record<Language, Translations> = {
 					'Also inspect other relevant sections, tables and figure captions in the papers containing these selected blocks. Point out supporting, qualifying or conflicting passages with exact Source links. Distinguish what you read from unavailable or unread content; do not invent related passages.'
 			},
 			historyTitle: 'Conversation history',
+			sessionState: {
+				running: 'Working',
+				approval: 'Awaiting approval',
+				recovering: 'Confirming result',
+				unavailable: 'Status unavailable'
+			},
 			showHistory: 'Show history',
 			hideHistory: 'Hide history',
 			earlierMessages: 'Earlier messages',
@@ -311,6 +317,8 @@ const translations: Record<Language, Translations> = {
 				tools: 'Inspecting sources...',
 				finalize: 'Preparing the answer...',
 				waiting: 'Waiting for the research model...',
+				recovering: 'Research in progress...',
+				reconnecting: 'Reconnecting to research...',
 				terminal: 'Finishing research...',
 				detailsLabel: 'Research progress details',
 				cycle: 'Cycle {cycle}',
@@ -2931,6 +2939,12 @@ const translations: Record<Language, Translations> = {
 				retryPaper: '重试加载论文'
 			},
 			historyTitle: '历史会话',
+			sessionState: {
+				running: '正在工作',
+				approval: '等待审批',
+				recovering: '正在确认结果',
+				unavailable: '状态暂不可用'
+			},
 			showHistory: '展开历史',
 			hideHistory: '收起历史',
 			earlierMessages: '更早的消息',
@@ -2986,6 +3000,8 @@ const translations: Record<Language, Translations> = {
 				tools: '正在检查来源...',
 				finalize: '正在整理答案...',
 				waiting: '正在等待研究模型响应...',
+				recovering: '研究正在进行...',
+				reconnecting: '正在重新连接研究状态...',
 				terminal: '正在完成研究...',
 				detailsLabel: '研究进度详情',
 				cycle: '第 {cycle} 轮',

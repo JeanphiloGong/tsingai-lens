@@ -13,6 +13,7 @@ from application.core.objectives.discovery.study_window import (
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
+from application.core.objectives.paper_map_aggregation import PaperMapAggregator
 from domain.core import PaperResearchMap
 from domain.source import build_source_document_tree, source_documents_from_records
 
@@ -477,10 +478,10 @@ def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery
         }
     )
 
-    filtered = PaperResearchMapService()._drop_signals_resolved_by_relationships(
+    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
         paper_map
     )
-    assessment = PaperResearchMapService()._assess_paper_map(
+    assessment = PaperMapAggregator().assess(
         filtered,
         signals=filtered.unresolved_signals,
         final=True,
@@ -527,7 +528,7 @@ def test_tc4_broad_family_signal_matches_expanded_specific_relationship():
         }
     )
 
-    filtered = PaperResearchMapService()._drop_signals_resolved_by_relationships(
+    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
         paper_map
     )
     assert filtered.unresolved_signals == ()
@@ -568,7 +569,7 @@ def test_tc4_microstructure_family_signal_matches_observed_martensite_axis():
         }
     )
 
-    filtered = PaperResearchMapService()._drop_signals_resolved_by_relationships(
+    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
         paper_map
     )
     assert filtered.unresolved_signals == ()
@@ -672,7 +673,7 @@ def test_tc4_background_relationship_is_not_unclear_ownership():
         }
     )
 
-    assessment = PaperResearchMapService()._assess_paper_map(
+    assessment = PaperMapAggregator().assess(
         paper_map,
         signals=(),
         final=True,

@@ -24,3 +24,23 @@ Objective workflow tests follow their application responsibilities under
 
 Reusable Objective service builders and model doubles live under `support/`;
 test modules should not import helpers from other test modules.
+
+## Run A Focused Check
+
+Run commands from `backend/` with the existing development environment:
+
+```bash
+.venv/bin/python -m pytest -q tests/unit/services/test_document_preparation_service.py
+.venv/bin/python -m pytest -q tests/unit/application/test_paper_research_map_service.py
+.venv/bin/python -m pytest -q tests/unit/application/test_research_agent_runner.py
+```
+
+For the complete suite, use `.venv/bin/python -m pytest -q tests`. PostgreSQL
+tests require `LENS_TEST_DATABASE_URL` to name a dedicated `*_test` database
+using the `postgresql+psycopg` driver. They reset that database's schema and run
+migrations; never point them at development or production data. Without the
+test URL, PostgreSQL cases are skipped, which is not storage acceptance.
+
+See [Objective Analysis Verification](objective-analysis-verification.md) for
+the four-paper flow, real P002 Source fixture, numeric table regressions, and
+the limits of deterministic model doubles.

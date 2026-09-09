@@ -30,15 +30,11 @@ Evidence, Finding, or Analysis record; it calls the Source and Core services.
 | Conversation and checkpointing | `session_service.py` | none |
 | Context selection | `context_builder.py` | none |
 | Model/tool loop | `agent_runner.py` | none; execution only |
-| Tool permissions | `authorization.py` and capability policy | approval only |
+| Intent and tool permissions | `intent_policy.py` and `capability_policy.py` | approval only |
 | Objective, Evidence, Finding data | `application/core/` | Core services |
 
 When adding a capability, define its typed input/output and approval risk first;
 do not add scientific state to the Chat trajectory.
-
-Chat is the orchestration and approval boundary for the Agent. It references
-Source and Core application services for collection facts and scientific work;
-it does not create a second Objective, Evidence, Finding, or Analysis model.
 
 ## Main Flow
 
@@ -122,8 +118,12 @@ review status of their supporting Findings and unverified feasibility checks.
   request timeout/output limits, reported usage (including invalid responses),
   and the Research Agent instructions. Implementations must propagate
   cancellation and close in-flight streams without background thread work.
-- `authorization.py`: maps capability risk to automatic execution or exact
-  user approval.
+- `intent_policy.py`: owns request vocabulary and request-to-capability matching.
+  It has no model, persistence, or capability side effects.
+- `capability_policy.py`: selects tools from the request and completed
+  observations, validates batches and exact Source prerequisites, and maps
+  capability risk to automatic execution or exact user approval. The Runner
+  consumes these decisions; it does not define a second permission path.
 - `capabilities/`: contains the explicit typed capability registry and handlers
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
@@ -144,6 +144,38 @@ Do not add arbitrary tools, network access, shell access, or untyped scientific
 state to this package. New capabilities need a real research responsibility,
 an explicit input and result contract, authorization semantics, and an
 end-to-end scenario that preserves Source traceability.
+
+## Changing This Module
+
+For ordinary response wording, start with `model.py`; for request vocabulary,
+start with `intent_policy.py`. For prerequisite reads or approval, use
+`capability_policy.py`. Change `agent_runner.py` only when execution order,
+continuation, checkpointing, or stopping behavior must change.
+
+To add a capability, implement its typed handler under `capabilities/`, register
+it in the existing registry, and explicitly include it in the applicable policy.
+The handler calls the owning Source, Core, or Goal service. The Runner does not
+need a branch for each new capability. A read or draft returns an observation;
+an approved write may persist a scientific resource through its existing owner.
+
+Model failure, invalid tool arguments, rejected approval, and incomplete work
+are recorded in the trajectory. They never become Evidence or a negative
+scientific answer. After a turn stops, the next user message or exact approval
+decision starts its continuation through `ChatSessionService`.
+
+## Tests
+
+From `backend/`, run:
+
+```bash
+.venv/bin/python -m pytest -q tests/unit/application/test_research_agent_runner.py tests/unit/application/test_chat_session_service.py tests/unit/routers/test_chat_sessions_api.py
+```
+
+Capability tests are under `tests/unit/application/test_chat_research_*.py`.
+The real-Source and PostgreSQL research-cycle case is
+`tests/integration/test_deep_path_research_flow.py`; its prerequisites and
+scientific assertions are described in
+[`../../tests/objective-analysis-verification.md`](../../tests/objective-analysis-verification.md).
 
 ## Related Docs
 

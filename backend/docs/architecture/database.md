@@ -217,7 +217,7 @@ record.
 
 ### 6. Objective Analysis, Evidence, and Findings
 
-`ResearchObjectiveService` and its analysis stages implement the evidence-first
+`ObjectiveEvidenceAnalysisService` and its analysis stages implement the evidence-first
 comparison flow: frame each selected paper, route exact Sources, extract and
 ground facts, reconstruct within-paper experiments, compare only compatible
 results, and publish a reviewable Finding set.

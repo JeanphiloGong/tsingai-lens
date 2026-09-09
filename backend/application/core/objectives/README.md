@@ -18,12 +18,52 @@ Use the following entry points when modifying the Core workflow:
 
 | Task | Entry point | Result |
 |---|---|---|
-| Discover candidates | `ResearchObjectiveService.start_objective_discovery()` | queued discovery run |
+| Resolve selected ready papers | `ObjectiveInputService.resolve_prepared_document_inputs()` | frozen input set; no parsing |
+| Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
 | Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
-| Create/confirm a candidate | `ResearchObjectiveService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
+| Create/confirm a candidate | `ObjectiveAuthoringService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
 | Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
-| Generate analysis artifacts | `ResearchObjectiveService.generate_objective_analysis_artifacts()` | per-paper Evidence and Finding inputs |
+| Generate analysis artifacts | `ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` | per-paper Evidence and Finding inputs |
 | Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
+
+Paper Map construction is intentionally split by responsibility:
+
+- `paper_research_map_service.py` coordinates the document-level sequence;
+- `paper_map_sources.py` owns Source selection and window payloads;
+- `paper_map_extraction.py` owns model extraction, structured-output recovery,
+  and window-result normalization;
+- `paper_map_aggregation.py` owns window consolidation, study identity merging,
+  unresolved-signal reconciliation, and final status assessment.
+
+The coordinator must remain the only place that orders these steps. Moving a
+helper does not authorize changing Source order, recovery budgets, or map
+status semantics.
+
+`ObjectiveInputService.load_or_build_paper_maps()` may call the model and store
+a refreshed map. Its other input reads do not create Objectives or Evidence.
+Discovery stores candidate Objectives; authoring stores only the explicitly
+requested creation or confirmation. Scientific analysis returns records and
+stores reusable per-paper checkpoints; `ObjectiveAnalysisService` controls the
+complete version's publication. Both HTTP and Agent callers use these owners.
+
+## Changing This Package
+
+| Change | First owner | Focused test under `tests/unit/application/` |
+|---|---|---|
+| Which prepared papers may enter research | `objective_input_service.py` | `test_objective_discovery_service_ownership.py` |
+| Discovery admission or restart recovery | `objective_discovery_service.py` | `test_objective_discovery_service_ownership.py` |
+| Candidate question formation | `objective_candidate_service.py` | `test_objective_candidate_service.py` |
+| Approved creation, confirmation, or derivation | `objective_authoring_service.py` | `test_objective_derivation_persistence.py` |
+| Initial or expanded Paper Map reading scope | `paper_map_sources.py` | `test_paper_research_map_service.py` |
+| Map extraction and technical recovery | `paper_map_extraction.py` | `test_paper_research_map_service.py` |
+| Map merging, reconciliation, or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
+| One paper's scientific Evidence flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
+| Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
+
+For a scientific stage, continue to [`analysis/README.md`](analysis/README.md).
+For cross-module verification, use the commands in
+[`../../../tests/objective-analysis-verification.md`](../../../tests/objective-analysis-verification.md).
+Do not change the persisted record or HTTP schema merely to move a helper.
 
 The scientific order is always the source of truth:
 
@@ -78,6 +118,11 @@ POST objective-discovery {document_ids}
 `PreparedDocumentInput` contains `document_id` and the current
 `preparation_fingerprint`. Empty, duplicate, unknown, non-ready, or stale inputs
 are rejected. Discovery never falls back to all Collection papers.
+
+`ObjectiveInputService` owns this input boundary for both Discovery and
+Analysis. It also loads the matching Source documents, Profiles, document trees,
+and reusable Paper Maps; it does not form scientific claims or persist
+Objectives/Evidence.
 
 Candidate formation identifies shared scientific themes while preserving each
 paper's stated variables, outcomes, material scope, process theme, and Source
@@ -263,8 +308,13 @@ state through the public API.
 - `paper_research_map_service.py`: one Document's lightweight Paper Map.
 - `objective_candidate_service.py`: candidate formation from selected maps.
 - `scope_screening.py`: collection-wide deterministic scope for one Objective.
-- `research_objective_service.py`: selected-input loading and scientific
-  orchestration.
+- `objective_input_service.py`: selected prepared-paper inputs, Profiles, Source
+  trees, and reusable Paper Maps.
+- `objective_discovery_service.py`: discovery run lifecycle and candidate
+  formation.
+- `objective_authoring_service.py`: user-approved Objective creation,
+  confirmation, and derivation.
+- `objective_analysis_service.py`: source-grounded analysis orchestration.
 - `analysis_service.py`: versioning, dispatch, progress, retry, and publication.
 - `analysis/source_screening.py`: paper relevance and Source scope.
 - `analysis/evidence_routing.py`: likely Source selection.

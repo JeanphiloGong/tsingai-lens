@@ -1725,6 +1725,8 @@ class ResearchAgentRunner:
                 "evidence",
                 "实验",
                 "research",
+                "阅读",
+                "读取",
             )
         )
         generic_source_detail = mentions(

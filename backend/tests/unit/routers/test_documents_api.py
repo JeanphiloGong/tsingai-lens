@@ -11,7 +11,10 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from tests.support.collection_service import build_test_collection_service
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
+)
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
@@ -433,7 +436,9 @@ async def test_document_source_route_streams_current_collection_document(documen
     record = await collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
     payload = b"%PDF-1.4\nfixture\n"
-    documents = await collection_service.import_normalized_batch(
+    documents = await build_test_source_import_service(
+        collection_service
+    ).import_normalized_batch(
         collection_id,
         NormalizedImportBatch(
             documents=(

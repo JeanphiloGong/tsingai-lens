@@ -12,7 +12,10 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from tests.support.collection_service import build_test_collection_service
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
+)
 from domain.core.document_profile import DocumentProfile
 from domain.source import source_documents_from_records
 from infra.source.runtime.source_evidence import build_blocks
@@ -162,7 +165,7 @@ async def test_document_profile_service_does_not_duplicate_source_filename(
     collection_service, profile_service = _build_profile_service(tmp_path)
     collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
-    document_record = await collection_service.add_document(
+    document_record = await build_test_source_import_service(collection_service).add_document(
         collection_id,
         "wang_2024_battery.txt",
         b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",

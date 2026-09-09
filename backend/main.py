@@ -82,6 +82,7 @@ from application.source.document_preparation_service import DocumentPreparationS
 from application.source.document_markdown_service import DocumentMarkdownService
 from application.source.reference_workflow_service import SourceReferenceWorkflowService
 from application.source.source_archive_service import SourceArchiveService
+from application.source.source_import_service import SourceImportService
 from config import DATA_DIR
 from controllers import auth
 from controllers.chat import sessions as chat_sessions
@@ -232,6 +233,7 @@ class ApplicationRuntime:
     auth_session_service: AuthSessionService
     collection_service: CollectionService
     source_archive_service: SourceArchiveService
+    source_import_service: SourceImportService
     pipeline_run_service: PipelineRunService
     document_profile_repository: DocumentProfileRepository
     paper_map_repository: PaperMapRepository
@@ -281,6 +283,10 @@ async def build_application_runtime(
             workspace=FileCollectionWorkspace(),
         )
         source_archive_service = SourceArchiveService(
+            repository=collection_service.repository,
+            object_store=collection_service.object_store,
+        )
+        source_import_service = SourceImportService(
             repository=collection_service.repository,
             object_store=collection_service.object_store,
         )
@@ -519,6 +525,7 @@ async def build_application_runtime(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             source_archive_service=source_archive_service,
+            source_import_service=source_import_service,
             pipeline_run_service=pipeline_run_service,
             document_profile_repository=document_profile_repository,
             paper_map_repository=paper_map_repository,
@@ -552,6 +559,7 @@ def install_application_runtime(
     application.state.auth_session_service = runtime.auth_session_service
     application.state.collection_service = runtime.collection_service
     application.state.source_archive_service = runtime.source_archive_service
+    application.state.source_import_service = runtime.source_import_service
     application.state.pipeline_run_service = runtime.pipeline_run_service
     application.state.document_profile_repository = runtime.document_profile_repository
     application.state.paper_map_repository = runtime.paper_map_repository

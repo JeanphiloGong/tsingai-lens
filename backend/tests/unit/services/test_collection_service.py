@@ -9,13 +9,14 @@ from zipfile import ZipFile
 from pypdf import PdfWriter
 import pytest
 
-import application.source.collection_service as collection_service_module
+import application.source.source_import_service as source_import_service_module
 from application.source.collection_service import CollectionService
 from application.source.source_archive_service import (
     CollectionSourceArchiveError,
     DocumentSourceUnavailableError,
     SourceArchiveService,
 )
+from application.source.source_import_service import SourceImportService
 from domain.source import Document
 from infra.persistence.memory import MemoryCollectionRepository
 from infra.source.ingestion.normalized_import import (
@@ -57,18 +58,24 @@ def test_source_archive_operations_have_a_direct_owner() -> None:
     assert "resolve_document_source_file" not in CollectionService.__dict__
     assert "build_source_archive" in SourceArchiveService.__dict__
     assert "resolve_document_source_file" in SourceArchiveService.__dict__
+    assert "add_document" not in CollectionService.__dict__
+    assert "import_from_adapter" not in CollectionService.__dict__
+    assert "import_normalized_batch" not in CollectionService.__dict__
+    assert "add_document" in SourceImportService.__dict__
+    assert "import_from_adapter" in SourceImportService.__dict__
+    assert "import_normalized_batch" in SourceImportService.__dict__
 
 
 async def test_collection_contains_its_uploaded_documents(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Current papers")
-    first = await service.add_document(
+    first = await _import_service(service).add_document(
         collection["collection_id"],
         "first.pdf",
         _valid_pdf_bytes("First paper"),
         "application/pdf",
     )
-    second = await service.add_document(
+    second = await _import_service(service).add_document(
         collection["collection_id"],
         "second.pdf",
         _valid_pdf_bytes("Second paper"),
@@ -89,10 +96,17 @@ def _archive_service(collection_service: CollectionService) -> SourceArchiveServ
     )
 
 
+def _import_service(collection_service: CollectionService) -> SourceImportService:
+    return SourceImportService(
+        repository=collection_service.repository,
+        object_store=collection_service.object_store,
+    )
+
+
 async def test_collection_update_preserves_documents(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Before")
-    document = await service.add_document(
+    document = await _import_service(service).add_document(
         collection["collection_id"],
         "paper.pdf",
         _valid_pdf_bytes(),
@@ -152,7 +166,9 @@ async def test_normalized_batch_becomes_documents_directly(tmp_path) -> None:
         ),
     )
 
-    documents = await service.import_normalized_batch(collection["collection_id"], batch)
+    documents = await _import_service(service).import_normalized_batch(
+        collection["collection_id"], batch
+    )
 
     assert len(documents) == 1
     assert documents[0]["document_id"].startswith("doc_")
@@ -212,7 +228,9 @@ async def test_failed_document_registration_removes_unregistered_bytes(
     monkeypatch.setattr(service.repository, "add_documents", fail_add_documents)
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await service.import_normalized_batch(collection["collection_id"], batch)
+        await _import_service(service).import_normalized_batch(
+            collection["collection_id"], batch
+        )
 
     key = f"{collection['collection_id']}/input/failed.txt"
     with pytest.raises(FileNotFoundError):
@@ -224,10 +242,10 @@ async def test_source_archive_uses_document_ids(tmp_path) -> None:
     collection = await service.create_collection("Reproduction sources")
     first_payload = _valid_pdf_bytes("First")
     second_payload = _valid_pdf_bytes("Second")
-    first = await service.add_document(
+    first = await _import_service(service).add_document(
         collection["collection_id"], "first.pdf", first_payload, "application/pdf"
     )
-    second = await service.add_document(
+    second = await _import_service(service).add_document(
         collection["collection_id"], "second.pdf", second_payload, "application/pdf"
     )
 
@@ -265,13 +283,13 @@ async def test_source_resolution_reads_only_current_collection_documents(tmp_pat
     service = build_test_collection_service(tmp_path / "collections")
     first_collection = await service.create_collection("First")
     second_collection = await service.create_collection("Second")
-    first = await service.add_document(
+    first = await _import_service(service).add_document(
         first_collection["collection_id"],
         "first.pdf",
         _valid_pdf_bytes("First"),
         "application/pdf",
     )
-    second = await service.add_document(
+    second = await _import_service(service).add_document(
         second_collection["collection_id"],
         "second.pdf",
         _valid_pdf_bytes("Second"),
@@ -318,7 +336,7 @@ async def test_source_resolution_rejects_invalid_storage_key(tmp_path) -> None:
 async def test_delete_collection_removes_documents_and_bytes(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Delete")
-    uploaded = await service.add_document(
+    uploaded = await _import_service(service).add_document(
         collection["collection_id"], "paper.txt", b"Methods", "text/plain"
     )
 
@@ -368,7 +386,7 @@ async def test_import_from_adapter_adds_documents_without_manifest(tmp_path) -> 
                 ),
             )
 
-    result = await service.import_from_adapter(
+    result = await _import_service(service).import_from_adapter(
         collection["collection_id"], FakeAdapter(), "doi:10.1000/test"
     )
 
@@ -402,8 +420,8 @@ async def test_add_file_uses_normalized_upload(monkeypatch, tmp_path) -> None:
             ),
         )
 
-    monkeypatch.setattr(collection_service_module, "normalize_upload", fake_normalize_upload)
-    uploaded = await service.add_document(
+    monkeypatch.setattr(source_import_service_module, "normalize_upload", fake_normalize_upload)
+    uploaded = await _import_service(service).add_document(
         collection["collection_id"], "paper.pdf", b"pdf", "application/pdf"
     )
 

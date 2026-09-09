@@ -6,6 +6,8 @@ one-Document preparation orchestration.
 ## Start Here
 
 - HTTP upload: `controllers/source/collections.py:upload_collection_document`
+- Import implementation: `SourceImportService.add_document()`
+- External import: `SourceImportService.import_from_adapter()`
 - Queue preparation: `DocumentPreparationService.queue_document_preparation()`
 - Execute preparation: `DocumentPreparationService.run_document_preparation()`
 - Read prepared Source: `ArtifactInputService`
@@ -21,6 +23,7 @@ flow; it does not form Objectives or create Evidence.
 | Concern | Owner | Persistent result |
 |---|---|---|
 | Collection and Document membership | `collection_service.py` | Collection/Document records |
+| Upload and external import | `source_import_service.py` | stored Document records |
 | Source/Profile preparation | `document_preparation_service.py` | Source artifact, Profile, run |
 | Display Markdown | `document_markdown_service.py` | none |
 | References | `reference_extraction_service.py` | Source references |
@@ -55,8 +58,10 @@ fingerprint still match.
 
 ## Files
 
-- `collection_service.py`: Collection and current Document lifecycle, upload,
-  import, Figure assets, and preparation-state updates.
+- `collection_service.py`: Collection and current Document lifecycle, Figure
+  assets, and preparation-state updates.
+- `source_import_service.py`: Upload normalization, adapter imports, object
+  storage writes, and Document registration.
 - `source_archive_service.py`: Original-file lookup and bounded reproduction
   archives. It verifies stored bytes but does not change Collection state.
 - `document_preparation_service.py`: Source/Profile preparation sequence,

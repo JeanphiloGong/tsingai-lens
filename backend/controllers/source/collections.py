@@ -157,7 +157,7 @@ async def upload_collection_document(
             collection_id, await current_user_id(request)
         )
         content = await _read_upload_content(file)
-        record = await collection_service.add_document(
+        record = await request.app.state.source_import_service.add_document(
             collection_id=collection_id,
             filename=file.filename or "upload.bin",
             content=content,

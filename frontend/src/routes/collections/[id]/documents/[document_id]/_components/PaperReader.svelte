@@ -188,7 +188,7 @@
 		} catch (error) {
 			if (generation !== loadGeneration) return;
 			pdfDocument = null;
-			pdfError = error instanceof Error ? error.message : String(error);
+			pdfError = $t('workbench.pdfLoadFailed');
 		} finally {
 			if (generation === loadGeneration) {
 				pdfLoading = false;
@@ -243,7 +243,7 @@
 			await renderInitialPages(renderId);
 		} catch (error) {
 			if (generation !== loadGeneration || renderId !== renderGeneration) return;
-			pdfError = error instanceof Error ? error.message : String(error);
+			pdfError = $t('workbench.pdfLoadFailed');
 		}
 	}
 
@@ -350,7 +350,7 @@
 			if (error instanceof Error && error.name === 'RenderingCancelledException') return false;
 			updatePageState(pageNumber, {
 				status: 'error',
-				error: error instanceof Error ? error.message : String(error)
+				error: $t('workbench.pdfPageRenderError')
 			});
 			return false;
 		}

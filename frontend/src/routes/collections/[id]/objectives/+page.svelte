@@ -647,7 +647,7 @@
 						{/if}
 						{#if activeAnalysis?.status === 'failed'}
 							<p class="analysis-error" role="alert">
-								{activeAnalysis.error_message || '本次分析失败，请检查论文范围后重试。'}
+								{$t('researchAgent.capability.analysisFailed')}
 							</p>
 						{/if}
 						<div class="actions">

@@ -49,11 +49,40 @@ describe('collection document API', () => {
 		});
 	});
 
-	it('identifies the file when one upload in a batch fails', async () => {
-		request.mockRejectedValueOnce(new Error('Upload failed.'));
+	it('continues after a failed file and returns only failed files for retry', async () => {
+		const first = new File(['pdf'], 'first.pdf');
+		const damaged = new File(['pdf'], 'damaged.pdf');
+		const last = new File(['pdf'], 'last.pdf');
+		request
+			.mockResolvedValueOnce({
+				document_id: 'doc_1',
+				original_filename: 'first.pdf',
+				stored_filename: 'first.pdf',
+				storage_key: 'col_1/input/first.pdf',
+				sha256: 'a'.repeat(64),
+				status: 'stored',
+				size_bytes: 3,
+				created_at: '2026-08-27T00:00:00Z',
+				updated_at: '2026-08-27T00:00:00Z'
+			})
+			.mockRejectedValueOnce(new Error('Upload failed.'))
+			.mockResolvedValueOnce({
+				document_id: 'doc_2',
+				original_filename: 'last.pdf',
+				stored_filename: 'last.pdf',
+				storage_key: 'col_1/input/last.pdf',
+				sha256: 'b'.repeat(64),
+				status: 'stored',
+				size_bytes: 3,
+				created_at: '2026-08-27T00:00:00Z',
+				updated_at: '2026-08-27T00:00:00Z'
+			});
 
-		await expect(
-			uploadCollectionDocuments('col_1', [new File(['pdf'], 'damaged.pdf')])
-		).rejects.toThrow('damaged.pdf: Upload failed.');
+		const result = await uploadCollectionDocuments('col_1', [first, damaged, last]);
+
+		expect(request).toHaveBeenCalledTimes(3);
+		expect(result.count).toBe(2);
+		expect(result.items.map((item) => item.original_filename)).toEqual(['first.pdf', 'last.pdf']);
+		expect(result.failures).toEqual([{ file: damaged, message: 'Upload failed.' }]);
 	});
 });

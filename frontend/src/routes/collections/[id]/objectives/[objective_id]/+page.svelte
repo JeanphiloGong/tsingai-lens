@@ -9,6 +9,7 @@
 	import EvidenceAuthoringEditor from '../../_components/EvidenceAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
 	import { downloadBlob, errorMessage } from '../../../../_shared/api';
+	import { t } from '../../../../_shared/i18n';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
 		fetchObjectiveAnalysis,
@@ -480,7 +481,11 @@
 								? '分析完成'
 								: '正在分析'}</strong
 					>
-					<span>{active.progress_message || active.error_message || active.phase}</span>
+					<span>
+						{active.status === 'failed'
+							? $t('researchAgent.capability.analysisFailed')
+							: active.progress_message || active.phase}
+					</span>
 					{#if active.status === 'failed' && published && active.analysis_version !== published.analysis_version}
 						<span class="version-note"
 							>正在显示已发布的 v{published.analysis_version}；重试 v{active.analysis_version} 失败。</span

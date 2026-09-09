@@ -23,6 +23,15 @@ export type CollectionDocumentsResponse = {
 	items: CollectionDocument[];
 };
 
+export type CollectionDocumentUploadFailure = {
+	file: File;
+	message: string;
+};
+
+export type CollectionDocumentUploadResponse = CollectionDocumentsResponse & {
+	failures: CollectionDocumentUploadFailure[];
+};
+
 function normalizeCollectionDocument(item: unknown): CollectionDocument | null {
 	if (!item || typeof item !== 'object') return null;
 	const record = item as Record<string, unknown>;
@@ -91,15 +100,19 @@ export function isDuplicateCollectionDocumentError(error: unknown) {
 	return getApiErrorDetail(error) === 'document content already exists in collection';
 }
 
-export async function uploadCollectionDocuments(collectionId: string, files: File[]) {
+export async function uploadCollectionDocuments(
+	collectionId: string,
+	files: File[]
+): Promise<CollectionDocumentUploadResponse> {
 	const items: CollectionDocument[] = [];
+	const failures: CollectionDocumentUploadFailure[] = [];
 	for (const file of files) {
 		try {
 			items.push(await uploadCollectionDocument(collectionId, file));
 		} catch (error) {
-			throw new Error(`${file.name}: ${errorMessage(error)}`, { cause: error });
+			failures.push({ file, message: errorMessage(error) });
 		}
 	}
 
-	return { count: items.length, items } satisfies CollectionDocumentsResponse;
+	return { count: items.length, items, failures };
 }

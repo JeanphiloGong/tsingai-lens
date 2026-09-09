@@ -927,6 +927,9 @@ const translations: Record<Language, Translations> = {
 					'You can add papers at any time. Preparing one paper does not rebuild the others.',
 				uploadSelected: 'Upload {count}',
 				uploadComplete: '{count} paper(s) uploaded.',
+				uploadPartial: '{uploaded} paper(s) uploaded. {failed} still need attention.',
+				uploadFailed: 'No papers were uploaded. Check the selected files and try again.',
+				preparationFailed: 'Paper preparation failed. Retry this paper when ready.',
 				preparePending: 'Prepare {count} pending',
 				preparationQueued: '{count} paper preparation run(s) queued.',
 				discover: 'Form research questions from {count}',
@@ -2577,6 +2580,7 @@ const translations: Record<Language, Translations> = {
 		},
 		error: {
 			unexpected: 'Unexpected error.',
+			requestFailed: 'The request could not be completed. Please try again.',
 			collectionNotFound: 'This collection does not exist.',
 			graphNotReady:
 				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
@@ -3468,6 +3472,9 @@ const translations: Record<Language, Translations> = {
 				actionsLead: '可以随时继续添加论文；准备一篇论文不会重新处理其他论文。',
 				uploadSelected: '上传 {count} 篇',
 				uploadComplete: '已上传 {count} 篇论文。',
+				uploadPartial: '已上传 {uploaded} 篇论文，另有 {failed} 篇需要处理。',
+				uploadFailed: '没有论文上传成功，请检查所选文件后重试。',
+				preparationFailed: '论文准备失败；可以稍后重试这篇论文。',
 				preparePending: '准备 {count} 篇待处理论文',
 				preparationQueued: '已启动 {count} 个论文准备运行。',
 				discover: '从 {count} 篇论文形成研究问题',
@@ -5039,6 +5046,7 @@ const translations: Record<Language, Translations> = {
 		},
 		error: {
 			unexpected: '发生未知错误。',
+			requestFailed: '请求未能完成，请稍后重试。',
 			collectionNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。',

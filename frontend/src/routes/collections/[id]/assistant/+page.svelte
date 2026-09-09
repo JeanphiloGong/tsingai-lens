@@ -656,10 +656,7 @@
 		if (!result) return '';
 		const name = resultToolName(message);
 		if (result.status === 'failed') {
-			return (
-				result.error_message ||
-				$t('researchAgent.capability.failed', { name: capabilityName(name) })
-			);
+			return $t('researchAgent.capability.failed', { name: capabilityName(name) });
 		}
 		if (result.status === 'queued') {
 			return $t('researchAgent.capability.queuedDescription');

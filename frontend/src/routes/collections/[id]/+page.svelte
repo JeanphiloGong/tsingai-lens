@@ -136,7 +136,7 @@
 					count: objectiveList?.objectives.length ?? 0
 				});
 			} else if (finishedDiscovery?.status === 'failed') {
-				error = finishedDiscovery.errors[0] || $t('overview.currentModel.discoveryFailed');
+				error = $t('overview.currentModel.discoveryFailed');
 			}
 		} catch (err) {
 			error = errorMessage(err);
@@ -151,7 +151,7 @@
 			await Promise.all([loadDocuments(), loadRuns(), loadObjectives()]);
 			const latestDiscovery = runs.find((run) => run.pipeline_name === 'objective_discovery');
 			if (latestDiscovery?.status === 'failed') {
-				error = latestDiscovery.errors[0] || $t('overview.currentModel.discoveryFailed');
+				error = $t('overview.currentModel.discoveryFailed');
 			}
 		} catch (err) {
 			error = errorMessage(err);
@@ -232,10 +232,22 @@
 		notice = '';
 		try {
 			const result = await uploadCollectionDocuments(collectionId, selectedFiles);
-			selectedFiles = [];
+			selectedFiles = result.failures.map((failure) => failure.file);
 			if (fileInput) fileInput.value = '';
 			await loadDocuments();
-			notice = $t('overview.currentModel.uploadComplete', { count: result.count });
+			if (result.failures.length) {
+				error = result.failures
+					.map((failure) => `${failure.file.name}: ${failure.message}`)
+					.join('\n');
+				notice = result.count
+					? $t('overview.currentModel.uploadPartial', {
+							uploaded: result.count,
+							failed: result.failures.length
+					  })
+					: $t('overview.currentModel.uploadFailed');
+			} else {
+				notice = $t('overview.currentModel.uploadComplete', { count: result.count });
+			}
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -665,7 +677,7 @@
 							<strong>{document.original_filename}</strong>
 							<span>{documentStatus(document)}</span>
 							{#if runFor(document.document_id)?.errors[0]}
-								<small class="failure">{runFor(document.document_id)?.errors[0]}</small>
+								<small class="failure">{$t('overview.currentModel.preparationFailed')}</small>
 							{/if}
 						</div>
 						<button

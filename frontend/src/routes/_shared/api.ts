@@ -55,6 +55,9 @@ export function errorMessage(error: unknown) {
 		}
 	}
 	if (error instanceof ApiError) {
+		if (error.status >= 500) {
+			return translateKey(get(language), 'error.requestFailed');
+		}
 		const detail = getApiErrorDetail(error);
 		if (typeof detail === 'string' && detail.trim()) return detail;
 		if (detail && typeof detail === 'object' && 'message' in detail) {

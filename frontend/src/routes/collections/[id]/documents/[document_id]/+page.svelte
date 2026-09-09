@@ -85,9 +85,7 @@
 			content
 		});
 		if (!content && !markdown?.markdown) {
-			const failure = contentResult.status === 'rejected' ? contentResult.reason : markdownResult;
-			loadError =
-				failure instanceof Error ? failure.message : $t('workbench.sourceContentUnavailableBody');
+			loadError = $t('workbench.sourceContentUnavailableBody');
 		}
 		applyRequestedSource();
 		appliedRequestKey = requestKey;

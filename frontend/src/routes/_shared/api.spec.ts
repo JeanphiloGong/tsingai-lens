@@ -37,6 +37,20 @@ describe('api shared error handling', () => {
 		expect(errorMessage(error)).toBe(expected);
 	});
 
+	it.each([
+		['en', 'The request could not be completed. Please try again.'],
+		['zh', '请求未能完成，请稍后重试。']
+	] as const)('does not expose technical details from unknown server failures for %s', (lang, expected) => {
+		language.set(lang);
+		const error = new ApiError(500, 'Internal Server Error', {
+			detail: 'PdfiumError: Failed to load document (PDFium: Data format error).'
+		});
+
+		expect(errorMessage(error)).toBe(expected);
+		expect(errorMessage(error)).not.toContain('PdfiumError');
+		expect(errorMessage(error)).not.toContain('500 Internal Server Error');
+	});
+
 	it('redirects to login when an authenticated request loses its session', async () => {
 		const replace = vi.fn();
 		vi.stubGlobal('window', {

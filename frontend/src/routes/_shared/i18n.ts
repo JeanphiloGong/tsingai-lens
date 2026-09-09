@@ -241,7 +241,10 @@ const translations: Record<Language, Translations> = {
 				tools: 'Inspecting sources...',
 				finalize: 'Preparing the answer...',
 				waiting: 'Waiting for the research model...',
-				terminal: 'Finishing research...'
+				terminal: 'Finishing research...',
+				detailsLabel: 'Research progress details',
+				cycle: 'Cycle {cycle}',
+				actions: '{completed} / {total} research actions'
 			},
 			upload: {
 				add: 'Add papers',
@@ -2812,7 +2815,10 @@ const translations: Record<Language, Translations> = {
 				tools: '正在检查来源...',
 				finalize: '正在整理答案...',
 				waiting: '正在等待研究模型响应...',
-				terminal: '正在完成研究...'
+				terminal: '正在完成研究...',
+				detailsLabel: '研究进度详情',
+				cycle: '第 {cycle} 轮',
+				actions: '已完成 {completed} / {total} 个研究动作'
 			},
 			upload: {
 				add: '添加论文',

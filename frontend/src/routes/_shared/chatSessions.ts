@@ -112,6 +112,23 @@ export type ChatProgress = {
 	remaining_token_budget?: number;
 };
 
+export function formatChatElapsed(elapsedMs?: number) {
+	if (!Number.isFinite(elapsedMs)) return '';
+	const totalSeconds = Math.max(0, Math.round(Number(elapsedMs) / 1000));
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+export function getChatProgressActions(progress: ChatProgress) {
+	const completed = Number(progress.executed_tool_count);
+	const total = Number(progress.requested_tool_count);
+	if (!Number.isFinite(completed) || !Number.isFinite(total) || completed < 0 || total <= 0) {
+		return null;
+	}
+	return { completed: Math.min(completed, total), total };
+}
+
 function chatSessionPath(sessionId = '') {
 	return `/chat-sessions${sessionId ? `/${encodeURIComponent(sessionId)}` : ''}`;
 }

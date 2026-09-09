@@ -386,6 +386,48 @@ test.describe('page interaction audit', () => {
 		await expectNoHorizontalOverflow(page);
 	});
 
+	test('anchors live research progress to the assistant response', async ({ page }) => {
+		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			if (route.request().method() === 'POST') {
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				return route.fulfill(
+					json({
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						messages: [
+							agentMessage('msg_progress_user', 'user', 'Track this'),
+							agentMessage('msg_progress_assistant', 'assistant', 'Research complete')
+						],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			}
+			return route.fulfill(json({ items: [], pending_approval: null }));
+		});
+
+		await page.goto(`/collections/${collectionId}/assistant`);
+		await sendAgentMessage(page, 'Track this');
+		await expect(page.locator('.assistant-message .status-progress')).toBeVisible();
+		await expect(page.locator('.conversation > .status-progress')).toHaveCount(0);
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'research-agent-inline-progress-desktop.png'),
+				fullPage: true
+			});
+		}
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(page.locator('.assistant-message .status-progress')).toBeVisible();
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'research-agent-inline-progress-mobile.png'),
+				fullPage: true
+			});
+		}
+	});
+
 	test('mobile app chrome keeps controls inside the viewport', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/');

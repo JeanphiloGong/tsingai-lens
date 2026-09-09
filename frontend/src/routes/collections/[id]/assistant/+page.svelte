@@ -9,6 +9,8 @@
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
+		formatChatElapsed,
+		getChatProgressActions,
 		readPendingChatSourceContext,
 		streamChatMessage,
 		type ChatMessage,
@@ -83,6 +85,7 @@
 	let loading = false;
 	let sending = false;
 	let progress: ChatProgress | null = null;
+	let progressActions: ReturnType<typeof getChatProgressActions> = null;
 	let deciding = false;
 	let error = '';
 	let notice = '';
@@ -98,6 +101,7 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: conversationItems = buildChatPresentation(messages, pendingApproval?.tool_call_id ?? null);
+	$: progressActions = progress ? getChatProgressActions(progress) : null;
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
 	$: uploadCandidates = uploadItems.filter((item) =>
@@ -1379,16 +1383,6 @@
 		{#if notice}
 			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
-		{#if sending && progress}
-			<div class="status status-progress" role="status" data-testid="research-progress">
-				<span class="progress-dot" aria-hidden="true"></span>
-				{progressLabel(progress)}
-				{#if progress.elapsed_ms}
-					<small>{Math.round(progress.elapsed_ms / 1000)}s</small>
-				{/if}
-			</div>
-		{/if}
-
 		<div class="message-scroll" aria-live="polite" aria-busy={loading || sending || deciding}>
 			<div class="message-list">
 				{#if loading}
@@ -1442,6 +1436,43 @@
 							<article class="assistant-message">
 								<div class="assistant-mark" aria-hidden="true">AI</div>
 								<div class="assistant-content">
+									{#if item.message.message_id.startsWith('local-stream-') && sending && progress}
+										<div
+											class="status status-progress"
+											role="status"
+											data-testid="research-progress"
+										>
+											<div class="progress-main">
+												<span class="progress-dot" aria-hidden="true"></span>
+												<strong>{progressLabel(progress)}</strong>
+											</div>
+											<div
+												class="progress-metrics"
+												aria-label={$t('researchAgent.progress.detailsLabel')}
+											>
+												{#if progress.cycle_index && progress.cycle_index > 0}
+													<span class="progress-metric"
+														>{$t('researchAgent.progress.cycle', {
+															cycle: progress.cycle_index
+														})}</span
+													>
+												{/if}
+												{#if progressActions}
+													<span class="progress-metric">
+														{$t('researchAgent.progress.actions', {
+															completed: progressActions.completed,
+															total: progressActions.total
+														})}
+													</span>
+												{/if}
+												{#if progress.elapsed_ms !== undefined}
+													<span class="progress-metric progress-time"
+														>{formatChatElapsed(progress.elapsed_ms)}</span
+													>
+												{/if}
+											</div>
+										</div>
+									{/if}
 									<time>{formatTime(item.message.created_at)}</time>
 									{#if item.message.content}
 										<div class="assistant-copy">
@@ -2157,20 +2188,57 @@
 	.status-progress {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		justify-content: space-between;
+		gap: 16px;
 		border: 1px solid var(--border-default);
 		background: var(--surface-card);
 		color: var(--text-secondary);
 	}
 
-	.status-progress small {
+	.progress-main {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		min-width: 0;
+		color: var(--text-primary);
+	}
+
+	.progress-main strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.progress-metrics {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-wrap: wrap;
 		margin-left: auto;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.progress-metric {
+		padding: 3px 7px;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--surface-muted);
+		white-space: nowrap;
+	}
+
+	.progress-time {
+		min-width: 42px;
+		text-align: right;
 		color: var(--text-tertiary);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.progress-dot {
-		width: 7px;
-		height: 7px;
+		width: 8px;
+		height: 8px;
+		flex: 0 0 auto;
 		border-radius: 50%;
 		background: var(--brand-primary);
 		animation: stream-cursor 0.9s steps(1) infinite;
@@ -2335,6 +2403,10 @@
 	.assistant-content {
 		max-width: 760px;
 		min-width: 0;
+	}
+
+	.assistant-content > .status-progress {
+		margin: 0 0 8px;
 	}
 
 	.assistant-copy {
@@ -3275,6 +3347,17 @@
 	}
 
 	@media (max-width: 560px) {
+		.status-progress {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 8px;
+		}
+
+		.progress-metrics {
+			justify-content: flex-start;
+			margin-left: 17px;
+		}
+
 		.conversation-header {
 			align-items: flex-start;
 			flex-direction: column;

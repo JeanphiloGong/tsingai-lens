@@ -1,10 +1,75 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	appendChatProgress,
 	formatChatElapsed,
 	getChatProgressActions,
+	streamChatMessage,
 	type ChatProgress
 } from './chatSessions';
+
+describe('chat stream lifecycle', () => {
+	it('releases an unfinished response when its conversation is left', async () => {
+		const cancel = vi.fn();
+		const textDelta = vi.fn();
+		const controller = new AbortController();
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(stream) {
+						stream.enqueue(
+							new TextEncoder().encode(
+								'event: text_delta\ndata: {"content":"Comparing the source conditions"}\n\n'
+							)
+						);
+					},
+					cancel
+				})
+			)
+		);
+		try {
+			const response = streamChatMessage(
+				'chat_1',
+				'Compare grain morphology',
+				textDelta,
+				[],
+				undefined,
+				controller.signal
+			);
+			const rejected = expect(response).rejects.toMatchObject({ name: 'AbortError' });
+			await vi.waitFor(() =>
+				expect(textDelta).toHaveBeenCalledWith('Comparing the source conditions')
+			);
+			controller.abort();
+			await rejected;
+			expect(cancel).toHaveBeenCalledOnce();
+			expect(fetch.mock.calls[0][1]?.signal).toBe(controller.signal);
+		} finally {
+			fetch.mockRestore();
+		}
+	});
+
+	it('releases the reader after a malformed stream event', async () => {
+		const cancel = vi.fn();
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(stream) {
+						stream.enqueue(new TextEncoder().encode('event: progress\ndata: invalid\n\n'));
+					},
+					cancel
+				})
+			)
+		);
+		try {
+			await expect(
+				streamChatMessage('chat_1', 'Compare grain morphology', () => {})
+			).rejects.toThrow();
+			expect(cancel).toHaveBeenCalledOnce();
+		} finally {
+			fetch.mockRestore();
+		}
+	});
+});
 
 describe('chat progress presentation helpers', () => {
 	it('formats short and long elapsed durations for the runtime status', () => {

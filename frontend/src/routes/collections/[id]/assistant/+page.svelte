@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
@@ -82,6 +83,18 @@
 	let input = '';
 	let pendingSourceContext: ChatSourceContext | null = null;
 	let loadedCollectionId = '';
+	let sessionGeneration = 0;
+	let sessionController: AbortController | null = null;
+	let destroyed = false;
+
+	onDestroy(() => {
+		destroyed = true;
+		sessionController?.abort();
+	});
+
+	function isCurrentSession(generation: number, ownerCollectionId: string) {
+		return !destroyed && generation === sessionGeneration && ownerCollectionId === collectionId;
+	}
 	let uploadItems: PaperUploadItem[] = [];
 	let uploadLoading = false;
 	let uploadError = '';
@@ -190,6 +203,17 @@
 
 	async function loadSession(requestedSessionId = '') {
 		const activeCollectionId = collectionId;
+		const generation = ++sessionGeneration;
+		sessionController?.abort();
+		const controller = new AbortController();
+		sessionController = controller;
+		session = null;
+		messages = [];
+		input = '';
+		sending = false;
+		deciding = false;
+		progressHistory = [];
+
 		loading = true;
 		error = '';
 		notice = '';
@@ -204,21 +228,25 @@
 			let nextSession: ChatSession | null = null;
 			if (storedSessionId) {
 				try {
-					nextSession = await fetchChatSession(storedSessionId);
+					nextSession = await fetchChatSession(storedSessionId, controller.signal);
+					if (!isCurrentSession(generation, activeCollectionId)) return;
 					if (nextSession.collection_id !== activeCollectionId) nextSession = null;
 				} catch {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
 					nextSession = null;
 					clearStoredSessionId();
 					writeHistory(history.filter((item) => item.session_id !== storedSessionId));
 				}
 			}
 
-			if (activeCollectionId !== collectionId) return;
+			if (!isCurrentSession(generation, activeCollectionId)) return;
 			if (nextSession === null) {
-				nextSession = await createChatSession(activeCollectionId);
+				nextSession = await createChatSession(activeCollectionId, controller.signal);
+				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = [];
 			} else {
-				const trajectory = await fetchChatTrajectory(nextSession.session_id);
+				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
+				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = trajectory.items;
 				pendingApproval = trajectory.pending_approval;
 			}
@@ -226,12 +254,13 @@
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
 		} catch (err) {
+			if (!isCurrentSession(generation, activeCollectionId)) return;
 			error = errorMessage(err);
 			session = null;
 			messages = [];
 			pendingApproval = null;
 		} finally {
-			loading = false;
+			if (isCurrentSession(generation, activeCollectionId)) loading = false;
 		}
 	}
 
@@ -386,6 +415,8 @@
 		if (!session || !text || sending || deciding || pendingApproval) return;
 		const activeSession = session;
 		const activeCollectionId = collectionId;
+		const generation = sessionGeneration;
+		const signal = sessionController?.signal;
 		const previousMessageCount = messages.length;
 		const optimisticId = `local-${Date.now()}`;
 		const streamingId = `local-stream-${Date.now()}`;
@@ -421,6 +452,7 @@
 				activeSession.session_id,
 				text,
 				(content) => {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
 					messages = messages.map((message) =>
 						message.message_id === streamingId
 							? { ...message, content: `${message.content}${content}` }
@@ -429,18 +461,23 @@
 				},
 				sourceContexts,
 				(nextProgress) => {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
 					progress = nextProgress;
 					progressHistory = appendChatProgress(progressHistory, nextProgress);
-				}
+				},
+				signal
 			);
+			if (!isCurrentSession(generation, activeCollectionId)) return;
 			applyTurn(turn, [optimisticId, streamingId]);
 			if (sourceContexts.length) {
 				clearPendingChatSourceContext(activeCollectionId);
 				pendingSourceContext = null;
 			}
 		} catch (err) {
+			if (!isCurrentSession(generation, activeCollectionId)) return;
 			try {
-				const trajectory = await fetchChatTrajectory(activeSession.session_id);
+				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
+				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = trajectory.items;
 				pendingApproval = trajectory.pending_approval;
 				if (
@@ -451,6 +488,7 @@
 					input = text;
 				}
 			} catch {
+				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = messages.filter(
 					(message) => ![optimisticId, streamingId].includes(message.message_id)
 				);
@@ -458,10 +496,12 @@
 			}
 			error = errorMessage(err);
 		} finally {
-			sending = false;
-			progress = null;
-			progressHistory = [];
-			progressHistoryExpanded = false;
+			if (isCurrentSession(generation, activeCollectionId)) {
+				sending = false;
+				progress = null;
+				progressHistory = [];
+				progressHistoryExpanded = false;
+			}
 		}
 	}
 
@@ -510,17 +550,26 @@
 
 	async function decide(decision: 'approved' | 'rejected') {
 		if (!session || !pendingApproval || deciding) return;
+		const generation = sessionGeneration;
+		const activeCollectionId = collectionId;
 		const call = pendingApproval;
 		deciding = true;
 		error = '';
 		notice = '';
 		try {
-			const turn = await decideChatToolCall(session.session_id, call, decision);
+			const turn = await decideChatToolCall(
+				session.session_id,
+				call,
+				decision,
+				sessionController?.signal
+			);
+			if (!isCurrentSession(generation, activeCollectionId)) return;
 			applyTurn(turn, [], call.name);
 		} catch (err) {
+			if (!isCurrentSession(generation, activeCollectionId)) return;
 			error = errorMessage(err);
 		} finally {
-			deciding = false;
+			if (isCurrentSession(generation, activeCollectionId)) deciding = false;
 		}
 	}
 

@@ -149,21 +149,24 @@ function chatSessionPath(sessionId = '') {
 	return `/chat-sessions${sessionId ? `/${encodeURIComponent(sessionId)}` : ''}`;
 }
 
-export async function createChatSession(collectionId: string) {
+export async function createChatSession(collectionId: string, signal?: AbortSignal) {
 	return (await requestJson(chatSessionPath(), {
+		signal,
 		method: 'POST',
 		body: JSON.stringify({ collection_id: collectionId })
 	})) as ChatSession;
 }
 
-export async function fetchChatSession(sessionId: string) {
+export async function fetchChatSession(sessionId: string, signal?: AbortSignal) {
 	return (await requestJson(chatSessionPath(sessionId), {
+		signal,
 		method: 'GET'
 	})) as ChatSession;
 }
 
-export async function fetchChatTrajectory(sessionId: string) {
+export async function fetchChatTrajectory(sessionId: string, signal?: AbortSignal) {
 	return (await requestJson(`${chatSessionPath(sessionId)}/messages`, {
+		signal,
 		method: 'GET'
 	})) as ChatTrajectory;
 }
@@ -173,9 +176,11 @@ export async function streamChatMessage(
 	message: string,
 	onTextDelta: (content: string) => void,
 	sourceContexts: ChatSourceContext[] = [],
-	onProgress?: (progress: ChatProgress) => void
+	onProgress?: (progress: ChatProgress) => void,
+	signal?: AbortSignal
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
+		signal,
 		method: 'POST',
 		credentials: 'same-origin',
 		headers: {
@@ -231,20 +236,32 @@ export async function streamChatMessage(
 		}
 	};
 
-	while (true) {
-		const { done, value } = await reader.read();
-		buffer += decoder.decode(value, { stream: !done });
-		let boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
-		while (boundary?.index !== undefined) {
-			consume(buffer.slice(0, boundary.index));
-			buffer = buffer.slice(boundary.index + boundary[0].length);
-			boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
+	const cancelReader = () => {
+		void reader.cancel().catch(() => {});
+	};
+	signal?.addEventListener('abort', cancelReader, { once: true });
+	try {
+		signal?.throwIfAborted();
+		while (true) {
+			const { done, value } = await reader.read();
+			signal?.throwIfAborted();
+			buffer += decoder.decode(value, { stream: !done });
+			let boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
+			while (boundary?.index !== undefined) {
+				consume(buffer.slice(0, boundary.index));
+				buffer = buffer.slice(boundary.index + boundary[0].length);
+				boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
+			}
+			if (done) break;
 		}
-		if (done) break;
+		if (buffer.trim()) consume(buffer);
+		if (turn === null) throw new Error('The research response ended before completion.');
+		return turn;
+	} finally {
+		signal?.removeEventListener('abort', cancelReader);
+		await reader.cancel().catch(() => {});
+		reader.releaseLock();
 	}
-	if (buffer.trim()) consume(buffer);
-	if (turn === null) throw new Error('The research response ended before completion.');
-	return turn;
 }
 
 function sourceContextStorageKey(collectionId: string) {
@@ -309,11 +326,13 @@ export function clearPendingChatSourceContext(collectionId: string) {
 export async function decideChatToolCall(
 	sessionId: string,
 	call: ChatToolCall,
-	decision: 'approved' | 'rejected'
+	decision: 'approved' | 'rejected',
+	signal?: AbortSignal
 ) {
 	return (await requestJson(
 		`${chatSessionPath(sessionId)}/tool-calls/${encodeURIComponent(call.tool_call_id)}/decision`,
 		{
+			signal,
 			method: 'POST',
 			body: JSON.stringify({
 				decision,

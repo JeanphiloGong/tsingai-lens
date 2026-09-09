@@ -134,7 +134,11 @@ keeping Lens-specific research boundaries explicit:
 
 - `+page.svelte` owns session orchestration, streaming, approval state, and
   the route shell. It does not create a second browser API or persistence
-  model.
+  model. Each session load has a request generation and abort signal; collection
+  changes and unmounting invalidate pending reads, streams, and approval
+  responses before they can update the current conversation or local history.
+  Disconnecting the browser does not revoke an approved backend write; returning
+  to the original session reloads its authoritative trajectory and approval state.
 - `ResearchSidebar.svelte` owns collection navigation, session history, and
   the responsive desktop/mobile navigation rail. It receives presentation data
   and callbacks from the route; it does not load or persist sessions. On small

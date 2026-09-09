@@ -297,6 +297,110 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toHaveAttribute('href', '/collections/col_123');
 	});
 
+	it.each(['creation', 'trajectory', 'failure'])(
+		'ignores a stale session %s after switching collections',
+		async (stage) => {
+			let finish!: (response: Response) => void;
+			const pending = new Promise<Response>((resolve) => {
+				finish = resolve;
+			});
+			if (stage !== 'creation')
+				localStorage.setItem('lens.chatSession.col_123', session.session_id);
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path === '/api/v1/chat-sessions') {
+					return requestBody(input, init).collection_id === 'col_456'
+						? Promise.resolve(
+								jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
+							)
+						: pending;
+				}
+				if (path.endsWith('/messages') || stage === 'failure') return pending;
+				return Promise.resolve(jsonResponse(session));
+			});
+			render(Page);
+			await vi.waitFor(() =>
+				expect(fetchMock).toHaveBeenCalledTimes(stage === 'trajectory' ? 2 : 1)
+			);
+			setPage({
+				params: { id: 'col_456' },
+				url: new URL('http://localhost/collections/col_456/assistant')
+			});
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			finish(
+				stage === 'creation'
+					? jsonResponse(session)
+					: stage === 'failure'
+						? jsonResponse({ detail: 'Old collection unavailable' }, 503)
+						: jsonResponse({
+								items: [message('old', 'assistant', 'Old collection answer')],
+								pending_approval: pendingCall()
+							})
+			);
+			await new Promise(requestAnimationFrame);
+			await new Promise(requestAnimationFrame);
+			expect(localStorage.getItem('lens.chatSession.col_456')).toBe('chat_2');
+			expect(
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.col_456')!)[0].session_id
+			).toBe('chat_2');
+			await expect.element(browserPage.getByText('Old collection answer')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		}
+	);
+
+	it.each(['message', 'approval'])(
+		'ignores a late %s result in a different collection',
+		async (operation) => {
+			let finish!: (response: Response) => void;
+			const pending = new Promise<Response>((resolve) => {
+				finish = resolve;
+			});
+			localStorage.setItem('lens.chatSession.col_123', session.session_id);
+			installApi({
+				trajectory: { items: [], pending_approval: operation === 'approval' ? pendingCall() : null }
+			});
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input) === '/api/v1/chat-sessions')
+					return Promise.resolve(
+						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
+					);
+				if (requestMethod(input, init) === 'POST') return pending;
+				return original(input, init);
+			});
+			render(Page);
+			if (operation === 'message') {
+				await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+				await send('Compare grain morphology', browserPage.getByLabelText('Message'));
+			} else {
+				await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+			}
+			const request = fetchMock.mock.calls.find(
+				([input, init]) => requestMethod(input, init) === 'POST'
+			);
+			setPage({
+				params: { id: 'col_456' },
+				url: new URL('http://localhost/collections/col_456/assistant')
+			});
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			expect(request?.[1]?.signal.aborted).toBe(true);
+			const turn: ChatTurn = {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				messages: [message('old', 'assistant', 'Old collection answer')],
+				pending_approval: null,
+				error_code: null
+			};
+			finish(operation === 'message' ? streamResponse(turn) : jsonResponse(turn));
+			await new Promise(requestAnimationFrame);
+			await new Promise(requestAnimationFrame);
+			await expect.element(browserPage.getByText('Old collection answer')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			expect(localStorage.getItem('lens.chatSession.col_456')).toBe('chat_2');
+		}
+	);
+
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
 		installApi({
 			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 201),

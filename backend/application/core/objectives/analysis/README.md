@@ -57,7 +57,8 @@ The detailed rules are in [Scientific Analysis](docs/scientific-analysis.md).
 - [`../llm/structured_response.py`](../llm/structured_response.py): provider
   invocation, structured response recovery, usage, and traces.
 - [`diagnostics.py`](diagnostics.py): internal analysis observations; diagnostics
-  never fill an Evidence field.
+  never fill an Evidence field. Failure records retain exception types and
+  frame locations without provider exception text, source code, or locals.
 
 ## Changing This Module
 

@@ -9,6 +9,7 @@ from asyncio import (
     run_coroutine_threadsafe,
 )
 from collections.abc import Coroutine
+from dataclasses import replace
 import logging
 from time import perf_counter
 from typing import Any, Callable
@@ -16,7 +17,9 @@ from typing import Any, Callable
 from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
+    record_analysis_failure,
 )
+from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.objective_analysis_service import (
     ObjectiveAnalysisArtifacts,
@@ -342,7 +345,11 @@ class ObjectiveAnalysisService:
             "current_document_id": analysis.current_document_id,
             "progress_message": analysis.progress_message,
             "error_code": analysis.error_code,
-            "error_message": analysis.error_message,
+            "error_message": (
+                analysis_error_message(analysis.error_code)
+                if analysis.status == "failed"
+                else analysis.error_message
+            ),
             "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
             "started_at": analysis.started_at.isoformat() if analysis.started_at else None,
             "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
@@ -560,6 +567,15 @@ class ObjectiveAnalysisService:
                         )
                     )
                     self._validate_artifacts(artifacts)
+                except Exception as exc:
+                    record_analysis_failure(
+                        exc,
+                        collection_id=collection_id,
+                        objective_id=objective_id,
+                        analysis_version=analysis_version,
+                        stage="generate_artifacts",
+                    )
+                    raise
                 finally:
                     claimed = await self.objective_repository.update_analysis_execution_stats(
                         collection_id,
@@ -591,11 +607,19 @@ class ObjectiveAnalysisService:
             )
             return await self._result(collection_id, objective.objective_id, analysis=completed)
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s",
+            record_analysis_failure(
+                exc,
+                collection_id=collection_id,
+                objective_id=objective_id,
+                analysis_version=analysis_version,
+                stage="execute_analysis",
+            )
+            logger.error(
+                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
                 collection_id,
                 objective_id,
                 analysis_version,
+                type(exc).__name__,
             )
             current = await self.objective_repository.read_analysis(
                 collection_id,
@@ -608,7 +632,7 @@ class ObjectiveAnalysisService:
                     objective_id,
                     analysis_version,
                     error_code=self._error_code(exc),
-                    error_message=str(exc) or exc.__class__.__name__,
+                    error_message=analysis_error_message(self._error_code(exc)),
                 )
             return await self._result(collection_id, objective_id, analysis=current)
 
@@ -684,6 +708,11 @@ class ObjectiveAnalysisService:
                 )
         if active is not None and active.error_code == "analysis_interrupted":
             active = None
+        if active is not None and active.status == "failed":
+            active = replace(
+                active,
+                error_message=analysis_error_message(active.error_code),
+            )
         findings = ()
         finding_total = 0
         paper_contributions = ()

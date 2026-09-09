@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from application.core.objectives.agent_analysis_service import (
     AgentObjectiveAnalysisService,
 )
+from application.core.objectives.analysis.diagnostics import capture_analysis_diagnostics
 from application.chat.capabilities.agent_objective_analysis import (
     AgentPaperSummaryArguments,
     PublishAgentObjectiveAnalysisArguments,
@@ -1319,7 +1320,10 @@ async def test_marks_claimed_version_failed_when_publication_fails() -> None:
     repository = _FailingPublicationRepository()
     service, repository = await _service(objective_repository=repository)
 
-    with pytest.raises(RuntimeError, match="database unavailable"):
+    with (
+        capture_analysis_diagnostics() as diagnostics,
+        pytest.raises(RuntimeError, match="database unavailable"),
+    ):
         await service.publish(
             collection_id="col-1",
             objective_id="obj-1",
@@ -1336,3 +1340,12 @@ async def test_marks_claimed_version_failed_when_publication_fails() -> None:
     assert failed is not None
     assert failed.status == "failed"
     assert failed.error_code == "agent_analysis_publish_failed"
+    assert failed.error_message == (
+        "The approved analysis could not be published. Retry the analysis."
+    )
+    assert len(diagnostics.records) == 1
+    failure = diagnostics.records[0]
+    assert failure["stage"] == "agent_analysis_publication"
+    assert failure["error_type"] == "RuntimeError"
+    assert failure["frames"][-1]["function"] == "publish_analysis"
+    assert "database unavailable" not in str(failure)

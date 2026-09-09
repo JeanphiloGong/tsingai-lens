@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any, Callable
 
+from application.core.objectives.analysis.diagnostics import record_analysis_failure
 from application.core.objectives.analysis.evidence_materialization import (
     OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION,
     materialize_evidence,
@@ -39,6 +40,7 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.analysis.source_validation import (
     OBJECTIVE_SOURCE_GROUNDING_VERSION,
 )
+from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.objective_input_service import (
     ObjectiveInputService,
     ResearchObjectivesNotReadyError,
@@ -264,12 +266,20 @@ class ObjectiveEvidenceAnalysisService:
                     completed_at=datetime.now(timezone.utc),
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.exception(
+                record_analysis_failure(
+                    exc,
+                    collection_id=collection_id,
+                    objective_id=active_objective.objective_id,
+                    document_id=document_input.document_id,
+                    stage="document_evidence_extraction",
+                )
+                logger.error(
                     "Objective document Evidence extraction failed "
-                    "collection_id=%s objective_id=%s document_id=%s",
+                    "collection_id=%s objective_id=%s document_id=%s error_type=%s",
                     collection_id,
                     active_objective.objective_id,
                     document_input.document_id,
+                    type(exc).__name__,
                 )
                 checkpoint = running.fail(
                     contribution=self._failed_document_contribution(
@@ -279,7 +289,9 @@ class ObjectiveEvidenceAnalysisService:
                         document_id=document_input.document_id,
                     ),
                     error_code="document_evidence_extraction_failed",
-                    error_message=str(exc) or exc.__class__.__name__,
+                    error_message=analysis_error_message(
+                        "document_evidence_extraction_failed"
+                    ),
                     completed_at=datetime.now(timezone.utc),
                 )
             await self.objective_repository.write_document_evidence(checkpoint)

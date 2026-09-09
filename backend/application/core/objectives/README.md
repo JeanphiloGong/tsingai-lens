@@ -182,6 +182,12 @@ POST objectives/{objective_id}/analysis {document_ids}
 At most one version is queued or running for an Objective. Retry allocates the
 next version. A failed retry never hides an earlier published version.
 
+`analysis_errors.py` owns user-facing wording for existing failure codes.
+Analysis writes use those messages, and failed-analysis reads also apply them
+to historical records without rewriting storage. HTTP and Agent consumers see
+the same safe wording. Technical details remain in internal diagnostics, not in
+the public error message; a scientific abstention remains a successful analysis.
+
 Before execution, the service resolves each frozen Document again and requires
 the same preparation fingerprint. Re-preparing a paper therefore makes the old
 input stale instead of silently changing the analysis.

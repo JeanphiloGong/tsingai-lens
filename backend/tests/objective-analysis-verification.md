@@ -37,6 +37,9 @@ IDs, timestamps, and run IDs fixed or explicitly separate them from the
 scientific comparison. Also check OpenAPI, failure responses, and repository
 round trips. A passing unit suite alone does not prove the complete chain.
 
+Analysis lifecycle tests separately cover safe historical failure messages,
+internal failure locations, retry versions, and retained published results.
+
 ## Researcher-Parity Acceptance
 
 Repository ownership is also checked by

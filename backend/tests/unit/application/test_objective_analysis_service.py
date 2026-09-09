@@ -925,13 +925,14 @@ async def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
     analysis = await repository.read_analysis("collection-1", "objective-1", 1)
     assert analysis is not None
     assert result["analysis"].status == "failed"
-    assert analysis.diagnostics == (
-        {
-            "trace_type": "table_matrix_repair",
-            "table_id": "table-1",
-            "status": "verified",
-        },
-    )
+    assert analysis.diagnostics[0] == {
+        "trace_type": "table_matrix_repair",
+        "table_id": "table-1",
+        "status": "verified",
+    }
+    assert analysis.diagnostics[1]["trace_type"] == "objective_analysis_failure"
+    assert analysis.diagnostics[1]["error_type"] == "RuntimeError"
+    assert len(analysis.diagnostics) == 2
 
 
 async def test_route_progress_does_not_replace_candidate_paper_count() -> None:
@@ -1052,7 +1053,7 @@ async def test_missing_paper_contributions_still_fails_without_publication() -> 
     assert result["analysis"].status == "failed"
     assert (
         result["analysis"].error_message
-        == "objective analysis produced no paper contributions"
+        == "Objective analysis could not be completed. Retry the analysis."
     )
     assert result["objective"].objective.published_analysis_version is None
     assert repository.published_calls == 0
@@ -1115,7 +1116,7 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
     assert result["analysis"].status == "failed"
     assert (
         result["analysis"].error_message
-        == "objective analysis failed to extract every relevant paper"
+        == "Objective analysis could not be completed. Retry the analysis."
     )
     assert result["objective"].objective.published_analysis_version is None
     assert repository.published_calls == 0
@@ -1131,9 +1132,84 @@ async def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version(
     retry = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
     assert failed["analysis"].status == "failed"
-    assert failed["analysis"].error_message == "model unavailable"
+    assert failed["analysis"].error_message == (
+        "Objective analysis could not be completed. Retry the analysis."
+    )
     assert retry["analysis"].analysis_version == 2
     assert repository.objective.active_analysis_version == 2
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "code", "message"),
+    [
+        (
+            TimeoutError,
+            "provider_timeout",
+            "The analysis request timed out. Retry the analysis.",
+        ),
+        (
+            ValueError,
+            "invalid_analysis_artifact",
+            "The analysis returned an invalid result. Retry the analysis.",
+        ),
+        (
+            RuntimeError,
+            "objective_analysis_failed",
+            "Objective analysis could not be completed. Retry the analysis.",
+        ),
+    ],
+)
+async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
+    exception_type: type[Exception],
+    code: str,
+    message: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret_marker = "private-provider-response-marker"
+    service, repository, _ = _service(
+        analyzer=FakeObjectiveEvidenceAnalysisService(error=exception_type(secret_marker))
+    )
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    status = await service.get_analysis_status("collection-1", "objective-1")
+
+    assert result["analysis"].error_message == message
+    assert status["error_code"] == code
+    assert status["error_message"] == message
+    stored = repository.analyses[1]
+    failure = stored.diagnostics[-1]
+    assert failure["error_type"] == exception_type.__name__
+    assert failure["frames"][-1]["function"] == "generate_objective_analysis_artifacts"
+    assert secret_marker not in str(stored.to_record())
+    assert secret_marker not in str(stored.diagnostics)
+    assert secret_marker not in caplog.text
+
+
+@pytest.mark.parametrize("error_code", ["provider_timeout", "legacy_unknown", None])
+async def test_historical_failure_is_safe_without_rewriting_published_or_stored_state(
+    error_code: str | None,
+) -> None:
+    repository = FakeObjectiveRepository(published=True)
+    service, _, _ = _service(repository=repository)
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    stored_failure = replace(
+        repository.analyses[2].fail(
+            error_code="legacy", error_message="private-history-marker"
+        ),
+        error_code=error_code,
+    )
+    repository.analyses[2] = stored_failure
+
+    result = await service.get_analysis_state("collection-1", "objective-1")
+    status = await service.get_analysis_status("collection-1", "objective-1")
+
+    assert result["analysis"].status == "failed"
+    assert result["analysis"].error_code == error_code
+    assert "private-history-marker" not in result["analysis"].error_message
+    assert status["error_message"] == result["analysis"].error_message
+    assert result["published_analysis"].analysis_version == 1
+    assert result["findings"] == (_finding(1),)
+    assert repository.analyses[2] is stored_failure
 
 
 async def test_losing_worker_does_not_run_duplicate_analysis() -> None:
@@ -1226,7 +1302,9 @@ async def test_claim_failure_marks_the_queued_version_failed() -> None:
     )
 
     assert result["analysis"].status == "failed"
-    assert result["analysis"].error_message == "database unavailable"
+    assert result["analysis"].error_message == (
+        "Objective analysis could not be completed. Retry the analysis."
+    )
     assert analyzer.calls == 0
 
 

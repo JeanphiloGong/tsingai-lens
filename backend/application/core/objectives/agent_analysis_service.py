@@ -9,6 +9,8 @@ import math
 from typing import Any, Mapping
 from uuid import uuid4
 
+from application.core.objectives.analysis.diagnostics import record_analysis_failure
+from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_authoring_service import (
     normalize_source_text,
     resolve_canonical_objective_source,
@@ -239,12 +241,19 @@ class AgentObjectiveAnalysisService:
                 abstention_note=abstention_note,
             )
         except Exception as exc:
+            record_analysis_failure(
+                exc,
+                collection_id=collection_id,
+                objective_id=objective_id,
+                analysis_version=running.analysis_version,
+                stage="agent_analysis_publication",
+            )
             await self.objective_repository.fail_analysis(
                 collection_id,
                 objective_id,
                 running.analysis_version,
                 error_code="agent_analysis_publish_failed",
-                error_message=str(exc),
+                error_message=analysis_error_message("agent_analysis_publish_failed"),
                 expected_status="running",
             )
             raise

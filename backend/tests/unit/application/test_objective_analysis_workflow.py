@@ -1631,6 +1631,23 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         checkpoint.status
         for checkpoint in service.objective_repository._document_evidence.values()
     ) == ["failed", "succeeded"]
+    failed_checkpoint = next(
+        checkpoint
+        for checkpoint in service.objective_repository._document_evidence.values()
+        if checkpoint.status == "failed"
+    )
+    assert failed_checkpoint.error_message == (
+        "Evidence could not be extracted from this paper. Retry the analysis."
+    )
+    failure_diagnostic = next(
+        record
+        for record in first["analysis"].diagnostics
+        if record["trace_type"] == "objective_analysis_failure"
+    )
+    assert failure_diagnostic["stage"] == "document_evidence_extraction"
+    assert failure_diagnostic["error_type"] == "RuntimeError"
+    assert failure_diagnostic["frames"][-1]["function"] == "extract_document"
+    assert "provider unavailable" not in str(failure_diagnostic)
     assert len(synthesis_calls) == 1
 
     second_queued = await analysis_service.queue_analysis(

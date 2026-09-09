@@ -19,7 +19,7 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
-from domain.ports import CollectionRepository
+from application.repositories.collection_repository import CollectionRepository
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,

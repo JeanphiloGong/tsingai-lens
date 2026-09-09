@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from collections.abc import Iterator
 import logging
 from tempfile import SpooledTemporaryFile
@@ -16,7 +18,6 @@ from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.collection import (
     CollectionCreateRequest,
     CollectionDeleteResponse,
-    CollectionDocumentSummaryResponse,
     CollectionDocumentListResponse,
     CollectionDocumentResponse,
     CollectionListResponse,
@@ -84,25 +85,8 @@ async def create_collection(
 async def list_collections(request: Request) -> CollectionListResponse:
     items = [
         CollectionSummaryResponse(
-            collection_id=record["collection_id"],
-            name=record["name"],
-            description=record.get("description"),
-            status=record["status"],
-            paper_count=record.get("paper_count", 0),
-            created_at=record["created_at"],
-            updated_at=record["updated_at"],
-            documents=[
-                CollectionDocumentSummaryResponse(
-                    document_id=document["document_id"],
-                    original_filename=document["original_filename"],
-                    media_type=document.get("media_type"),
-                    status=document["status"],
-                    size_bytes=document.get("size_bytes", 0),
-                    created_at=document["created_at"],
-                    updated_at=document["updated_at"],
-                )
-                for document in record.get("documents", [])
-            ],
+            **asdict(record),
+            paper_count=len(record.documents),
         )
         for record in await request.app.state.collection_service.list_collections(
             await current_user_id(request)

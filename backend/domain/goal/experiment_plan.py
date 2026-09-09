@@ -32,6 +32,26 @@ class ExperimentPlanRecord:
     structured_plan: Mapping[str, Any] | None = None
     updated_by: str | None = None
 
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.plan_version, bool)
+            or not isinstance(self.plan_version, int)
+            or self.plan_version < 1
+        ):
+            raise ValueError("plan_version must be a positive integer")
+        if self.plan_version == 1 and self.parent_plan_id is not None:
+            raise ValueError("the first revision cannot have a parent_plan_id")
+        if self.plan_version > 1 and self.parent_plan_id is None:
+            raise ValueError("parent_plan_id is required after the first revision")
+        if self.parent_plan_id == self.plan_id:
+            raise ValueError("parent_plan_id cannot equal plan_id")
+        if self.plan_version > 1 and self.updated_by is None:
+            raise ValueError("updated_by is required after the first revision")
+        if self.structured_plan is not None and not isinstance(
+            self.structured_plan, Mapping
+        ):
+            raise ValueError("structured_plan must be an object")
+
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentPlanRecord":
         source_links = payload.get("source_links")
@@ -39,20 +59,7 @@ class ExperimentPlanRecord:
         plan_version = _positive_int(payload.get("plan_version", 1), "plan_version")
         parent_plan_id = _optional_text(payload.get("parent_plan_id"))
         updated_by = _optional_text(payload.get("updated_by"))
-        if plan_version == 1 and parent_plan_id is not None:
-            raise ValueError("the first revision cannot have a parent_plan_id")
-        if plan_version > 1 and parent_plan_id is None:
-            raise ValueError("parent_plan_id is required after the first revision")
-        if parent_plan_id == plan_id:
-            raise ValueError("parent_plan_id cannot equal plan_id")
-        if plan_version > 1 and updated_by is None:
-            raise ValueError("updated_by is required after the first revision")
         structured_plan = payload.get("structured_plan")
-        if structured_plan is not None and not isinstance(
-            structured_plan,
-            Mapping,
-        ):
-            raise ValueError("structured_plan must be an object")
         return cls(
             plan_id=plan_id,
             collection_id=_required_text(payload.get("collection_id"), "collection_id"),
@@ -79,7 +86,7 @@ class ExperimentPlanRecord:
             structured_plan=(
                 deepcopy(dict(structured_plan))
                 if isinstance(structured_plan, Mapping)
-                else None
+                else structured_plan
             ),
             updated_by=updated_by,
         )
@@ -113,25 +120,27 @@ class ExperimentPlanRecord:
         source_links: tuple[Mapping[str, str], ...] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExperimentPlanRecord":
-        payload = self.to_record()
-        payload.update(
-            {
-                "plan_id": _required_text(plan_id, "plan_id"),
-                "title": title,
-                "content": content,
-                "status": status,
-                "plan_version": self.plan_version + 1,
-                "parent_plan_id": self.plan_id,
-                "structured_plan": structured_plan,
-                "updated_by": updated_by,
-                "updated_at": str(updated_at),
-            }
+        return replace(
+            self,
+            plan_id=_required_text(plan_id, "plan_id"),
+            title=_required_text(title, "title"),
+            content=_required_text(content, "content"),
+            status=normalize_experiment_plan_status(status),
+            plan_version=self.plan_version + 1,
+            parent_plan_id=self.plan_id,
+            structured_plan=(
+                deepcopy(dict(structured_plan))
+                if isinstance(structured_plan, Mapping)
+                else structured_plan
+            ),
+            updated_by=_optional_text(updated_by),
+            updated_at=str(updated_at),
+            source_links=tuple(
+                _string_mapping(item)
+                for item in (self.source_links if source_links is None else source_links)
+            ),
+            metadata=dict(self.metadata if metadata is None else metadata),
         )
-        if source_links is not None:
-            payload["source_links"] = [dict(item) for item in source_links]
-        if metadata is not None:
-            payload["metadata"] = dict(metadata)
-        return ExperimentPlanRecord.from_mapping(payload)
 
     def to_record(self) -> dict[str, Any]:
         return {

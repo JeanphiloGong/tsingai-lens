@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.auth_repository import AuthUserRecord
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -36,13 +38,13 @@ COLLECTION_ID = "col_source"
 @pytest.fixture
 async def source_repository(postgres_session_factory):
     await PostgresAuthRepository(postgres_session_factory).add_user(
-        {
-            "user_id": "user_source",
-            "email": "source@example.com",
-            "display_name": None,
-            "password_hash": "synthetic-password-hash",
-            "created_at": datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
-        }
+        AuthUserRecord(
+            user_id="user_source",
+            email="source@example.com",
+            display_name=None,
+            password_hash="synthetic-password-hash",
+            created_at=datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
+        )
     )
     collections = PostgresCollectionRepository(postgres_session_factory)
     await collections.add_collection(

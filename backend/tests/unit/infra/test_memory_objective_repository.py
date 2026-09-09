@@ -49,6 +49,7 @@ async def test_authored_candidate_does_not_require_objective_discovery() -> None
 
     record = await repository.read_objective_record("col-1", created.objective_id)
     assert record is not None
-    assert record["created_at"]
-    assert record["updated_at"]
+    assert record.objective == created
+    assert record.created_at
+    assert record.updated_at
     assert (await repository.list_objective_records("col-1")) == (record,)

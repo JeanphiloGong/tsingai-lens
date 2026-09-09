@@ -20,7 +20,7 @@ from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from domain.ports import SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import Document, SourceDocument
 from infra.source.config.source_runtime_config import (
     CacheConfig,

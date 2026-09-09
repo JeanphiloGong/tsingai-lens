@@ -2303,25 +2303,11 @@ class ObjectiveEvidence:
         )
 
     def mark_extracted(self, **scientific_content: Any) -> "ObjectiveEvidence":
-        if "extracted" not in OBJECTIVE_EVIDENCE_STATE_TRANSITIONS[
-            self.selection_status
-        ]:
-            raise ValueError(
-                "invalid objective evidence transition: "
-                f"{self.selection_status} -> extracted"
-            )
-        record = self.to_record()
-        record.update(scientific_content)
-        record.update(
-            {
-                "selection_status": "extracted",
-                "resolution_status": scientific_content.get(
-                    "resolution_status", "resolved"
-                ),
-                "failure_reason": None,
-            }
-        )
-        return ObjectiveEvidence.from_mapping(record)
+        """Apply already parsed scientific values without rebuilding source identity."""
+        scientific_content.pop("selection_status", None)
+        scientific_content.setdefault("resolution_status", "resolved")
+        scientific_content["failure_reason"] = None
+        return self._transition("extracted", **scientific_content)
 
     def reject(self, reason: str) -> "ObjectiveEvidence":
         return self._transition(

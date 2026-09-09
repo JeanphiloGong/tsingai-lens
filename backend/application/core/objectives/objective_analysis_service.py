@@ -58,7 +58,8 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.ports import ObjectiveRepository, PaperMapRepository
+from application.repositories.paper_map_repository import PaperMapRepository
+from application.repositories.objective_repository import ObjectiveRepository
 from domain.source import render_markdown_table, render_plain_table_text
 
 logger = logging.getLogger(__name__)

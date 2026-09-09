@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from config import DATA_DIR
-from domain.ports import CollectionPaths
+
+
+@dataclass(frozen=True)
+class CollectionPaths:
+    collection_dir: Path
+    input_dir: Path
+    output_dir: Path
 
 
 class FileCollectionWorkspace:

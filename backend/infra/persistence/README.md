@@ -57,5 +57,9 @@ artifact provenance. A profile without a known input fingerprint remains
 unversioned; a preparation row without a Source artifact is not a parsed Source.
 
 SQLAlchemy models own storage shape, domain records own scientific invariants,
-and Pydantic models own HTTP payloads. Do not add a generic repository, storage
+and Pydantic models own HTTP payloads. Repository contracts and their dedicated
+query results live together in
+[`application/repositories/`](../../application/repositories/README.md).
+Implementations return those results or domain objects, never ORM rows or HTTP
+response models. Do not add a generic repository, storage
 selector, compatibility wrapper, dual write, schema probe, or fallback store.

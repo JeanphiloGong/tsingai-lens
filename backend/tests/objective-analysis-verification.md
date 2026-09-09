@@ -39,6 +39,14 @@ round trips. A passing unit suite alone does not prove the complete chain.
 
 ## Researcher-Parity Acceptance
 
+Repository ownership is also checked by
+`tests/unit/repositories/test_repository_contracts.py`. Collection and Pipeline
+PostgreSQL tests verify bounded summary queries independently of their unchanged
+detail and write paths. Objective tests keep persistence timestamps outside the
+scientific payload, and Evidence/Plan tests ensure state changes do not serialize
+existing objects. Run these checks together with the two complete scenarios above
+when changing repository result types or domain transitions.
+
 The acceptance question is not whether the model produced fluent prose or
 valid JSON. Given the same papers and the same confirmed Objective, a researcher
 must be able to reach a conclusion in the same scientific direction and scope

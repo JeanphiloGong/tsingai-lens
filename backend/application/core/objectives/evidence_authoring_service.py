@@ -19,7 +19,8 @@ from application.core.objectives.analysis_records import (
 )
 from application.source.collection_service import CollectionService
 from domain.core import ObjectiveAnalysis, ObjectiveEvidence
-from domain.ports import ObjectiveRepository, SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 
 @dataclass(frozen=True)

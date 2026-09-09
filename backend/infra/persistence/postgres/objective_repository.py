@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from application.repositories.objective_repository import StoredObjective
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -152,7 +154,7 @@ class PostgresObjectiveRepository:
     async def list_objective_records(
         self,
         collection_id: str,
-    ) -> tuple[dict[str, Any], ...]:
+    ) -> tuple[StoredObjective, ...]:
         async with self.session_factory() as session:
             rows = tuple(
                 await session.scalars(
@@ -238,7 +240,7 @@ class PostgresObjectiveRepository:
         self,
         collection_id: str,
         objective_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> StoredObjective | None:
         async with self.session_factory() as session:
             row = await session.get(
                 ObjectiveResearchRecord,
@@ -794,11 +796,12 @@ class PostgresObjectiveRepository:
     @staticmethod
     def _objective_record_from_row(
         row: ObjectiveResearchRecord,
-    ) -> dict[str, Any]:
-        record = PostgresObjectiveRepository._objective_from_row(row).to_record()
-        record["created_at"] = row.created_at.isoformat()
-        record["updated_at"] = row.updated_at.isoformat()
-        return record
+    ) -> StoredObjective:
+        return StoredObjective(
+            objective=PostgresObjectiveRepository._objective_from_row(row),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     @staticmethod
     def _analysis_from_row(row: ObjectiveAnalysisRecord) -> ObjectiveAnalysis:

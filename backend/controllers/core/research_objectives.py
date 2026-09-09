@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from application.repositories.objective_repository import StoredObjective
+
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
@@ -75,7 +77,7 @@ async def list_collection_objectives(
     )
     return PaginatedObjectiveListResponse(
         collection_id=collection_id,
-        objectives=page,
+        objectives=[_objective_response_record(item) for item in page],
         offset=offset,
         limit=limit,
         total=len(ranked_objectives),
@@ -300,13 +302,21 @@ async def get_objective_evidence_map(
     return ObjectiveEvidenceMapResponse(**payload)
 
 
+def _objective_response_record(stored: StoredObjective) -> dict:
+    return {
+        **stored.objective.to_record(),
+        "created_at": stored.created_at.isoformat() if stored.created_at else None,
+        "updated_at": stored.updated_at.isoformat() if stored.updated_at else None,
+    }
+
+
 def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
     objective = payload["objective"]
     active = payload.get("analysis")
     published = payload.get("published_analysis")
     return ObjectiveAnalysisResponse(
         collection_id=payload["collection_id"],
-        objective=payload.get("objective_record") or objective.to_record(),
+        objective=_objective_response_record(objective),
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
         paper_contributions=[

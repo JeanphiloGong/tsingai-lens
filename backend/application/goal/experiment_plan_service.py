@@ -11,7 +11,7 @@ from application.goal.protocol_contract import (
 )
 from application.goal.research_plan_contract import ResearchPlanStructure
 from domain.goal import ExperimentPlanRecord
-from domain.ports import ExperimentPlanRepository
+from application.repositories.experiment_plan_repository import ExperimentPlanRepository
 
 
 _HISTORICAL_REVIEW_GATE = "reviewed_findings"

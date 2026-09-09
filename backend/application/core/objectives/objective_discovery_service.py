@@ -32,7 +32,7 @@ from application.core.objectives.llm.structured_response import (
 )
 from application.pipeline import PipelineRunService
 from domain.core import ObjectiveFactSet, PreparedDocumentInput
-from domain.ports import ObjectiveRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 logger = logging.getLogger(__name__)
 

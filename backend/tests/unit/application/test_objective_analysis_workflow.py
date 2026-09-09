@@ -1618,7 +1618,7 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     )
 
     assert first["analysis"].status == "succeeded"
-    assert first["objective"].published_analysis_version == 1
+    assert first["objective"].objective.published_analysis_version == 1
     assert extraction_calls == ["paper-1", "paper-2"]
     assert [item.analysis_status for item in first["paper_contributions"]] == [
         "analyzed",
@@ -1644,7 +1644,7 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     )
 
     assert second["analysis"].status == "succeeded"
-    assert second["objective"].published_analysis_version == 2
+    assert second["objective"].objective.published_analysis_version == 2
     assert extraction_calls == ["paper-1", "paper-2", "paper-2"]
     assert all(
         item.analysis_status == "analyzed"

@@ -5,6 +5,8 @@ from __future__ import annotations
 from asyncio import Lock
 from copy import deepcopy
 
+from application.repositories.pipeline_run_repository import PipelineRunSummary
+
 from domain.pipeline import PipelineRun
 
 
@@ -93,7 +95,7 @@ class MemoryPipelineRunRepository:
         status: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> tuple[PipelineRun, ...]:
+    ) -> tuple[PipelineRunSummary, ...]:
         async with self._lock:
             runs = [
                 run
@@ -112,7 +114,27 @@ class MemoryPipelineRunRepository:
                 reverse=True,
             )
             selected = runs[offset : offset + limit if limit is not None else None]
-            return tuple(deepcopy(run) for run in selected)
+            return tuple(
+                PipelineRunSummary(
+                    run_id=run.run_id,
+                    collection_id=run.collection_id,
+                    pipeline_name=run.pipeline_name,
+                    scope_type=run.scope_type,
+                    scope_id=run.scope_id,
+                    status=run.status.value,
+                    current_node=run.current_node,
+                    progress_percent=run.progress_percent,
+                    progress_detail=(
+                        deepcopy(dict(run.progress_detail))
+                        if run.progress_detail is not None
+                        else None
+                    ),
+                    errors=list(run.errors),
+                    warnings=list(run.warnings),
+                    updated_at=run.timestamps.updated_at,
+                )
+                for run in selected
+            )
 
     async def update_run(self, run: PipelineRun) -> bool:
         async with self._lock:

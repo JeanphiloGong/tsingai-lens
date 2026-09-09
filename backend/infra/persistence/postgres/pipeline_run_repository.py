@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from application.repositories.pipeline_run_repository import PipelineRunSummary
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -98,8 +100,21 @@ class PostgresPipelineRunRepository:
         status: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> tuple[PipelineRun, ...]:
-        statement = select(PipelineRunRow)
+    ) -> tuple[PipelineRunSummary, ...]:
+        statement = select(
+            PipelineRunRow.run_id,
+            PipelineRunRow.collection_id,
+            PipelineRunRow.pipeline_name,
+            PipelineRunRow.scope_type,
+            PipelineRunRow.scope_id,
+            PipelineRunRow.status,
+            PipelineRunRow.updated_at,
+            PipelineRunRow.record_json["current_node"].as_string().label("current_node"),
+            PipelineRunRow.record_json["progress_percent"].as_integer().label("progress_percent"),
+            PipelineRunRow.record_json["progress_detail"].label("progress_detail"),
+            PipelineRunRow.record_json["errors"].label("errors"),
+            PipelineRunRow.record_json["warnings"].label("warnings"),
+        )
         if collection_id is not None:
             statement = statement.where(PipelineRunRow.collection_id == collection_id)
         if status is not None:
@@ -113,8 +128,24 @@ class PostgresPipelineRunRepository:
         if limit is not None:
             statement = statement.limit(limit)
         async with self.session_factory() as session:
-            rows = await session.scalars(statement)
-            return tuple(_to_run(row) for row in rows)
+            rows = await session.execute(statement)
+            return tuple(
+                PipelineRunSummary(
+                    run_id=row.run_id,
+                    collection_id=row.collection_id,
+                    pipeline_name=row.pipeline_name,
+                    scope_type=row.scope_type,
+                    scope_id=row.scope_id,
+                    status=row.status,
+                    current_node=row.current_node,
+                    progress_percent=row.progress_percent or 0,
+                    progress_detail=row.progress_detail,
+                    errors=row.errors or [],
+                    warnings=row.warnings or [],
+                    updated_at=_iso(row.updated_at),
+                )
+                for row in rows
+            )
 
     async def update_run(self, run: PipelineRun) -> bool:
         async with self.session_factory.begin() as session:

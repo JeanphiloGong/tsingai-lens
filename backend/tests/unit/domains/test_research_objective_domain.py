@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from domain.core.research_objective import (
+    ObjectiveEvidenceComparison,
+    ObjectiveEvidenceContext,
+    ObjectiveEvidenceResult,
+    ObjectiveEvidenceVariable,
+)
+
 import pytest
 
 from domain.core import (
@@ -744,6 +751,26 @@ def test_excluded_paper_contribution_requires_reason() -> None:
         )
 
 
+def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch) -> None:
+    selected = _candidate_evidence().select(evidence_role="direct_result")
+
+    result = ObjectiveEvidenceResult.from_mapping({
+        "outcome": "strength", "value": 610, "unit": "MPa",
+        "result_text": "The heat-treated sample reached 610 MPa.",
+    })
+
+    def reject_serialization(_self):
+        pytest.fail("scientific state transitions must not serialize existing Evidence")
+
+    monkeypatch.setattr(ObjectiveEvidence, "to_record", reject_serialization)
+    extracted = selected.mark_extracted(reported_result=result)
+
+    assert extracted.reported_result == result
+    assert extracted.selection_status == "extracted"
+    assert extracted.source_excerpt == selected.source_excerpt
+    assert selected.selection_status == "selected"
+
+
 def test_objective_evidence_preserves_source_and_structured_result() -> None:
     candidate = _candidate_evidence()
     selected = candidate.select(
@@ -751,31 +778,31 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
         reason="Reports the target strength result.",
     )
     extracted = selected.mark_extracted(
-        changed_variables=[
-            {
-                "name": "heat treatment",
-                "baseline_value": "as-built",
-                "target_value": "heat-treated",
-            }
-        ],
-        comparison={
+        changed_variables=(
+            ObjectiveEvidenceVariable(
+                name="heat treatment",
+                baseline_value="as-built",
+                target_value="heat-treated",
+            ),
+        ),
+        comparison=ObjectiveEvidenceComparison.from_mapping({
             "baseline_label": "as-built",
             "target_label": "heat-treated",
             "axis_names": ["heat treatment"],
             "comparable": True,
-        },
-        reported_result={
+        }),
+        reported_result=ObjectiveEvidenceResult.from_mapping({
             "outcome": "yield strength",
             "value": 610,
             "unit": "MPa",
             "direction": "increase",
             "result_text": "The heat-treated sample reached 610 MPa.",
-        },
+        }),
         attribution_scope="isolated_effect",
-        scientific_context={
+        scientific_context=ObjectiveEvidenceContext.from_mapping({
             "material": [{"name": "alloy", "value": "316L"}],
             "test": [{"name": "method", "value": "tensile test"}],
-        },
+        }),
     )
 
     assert candidate.selection_status == "candidate"
@@ -965,9 +992,9 @@ def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
         evidence_role="condition_context",
     ).select(evidence_role="condition_context")
     extracted = evidence.mark_extracted(
-        scientific_context={
+        scientific_context=ObjectiveEvidenceContext.from_mapping({
             "test": [{"name": "temperature", "value": 25, "unit": "C"}]
-        }
+        })
     )
 
     assert extracted.supports_finding is True
@@ -979,7 +1006,7 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
         rejected.mark_extracted(
-            scientific_context={"process": [{"name": "state", "value": "invalid"}]}
+            scientific_context=ObjectiveEvidenceContext.from_mapping({"process": [{"name": "state", "value": "invalid"}]})
         )
     with pytest.raises(ValueError, match="identity and source"):
         _candidate_evidence(source_excerpt="")

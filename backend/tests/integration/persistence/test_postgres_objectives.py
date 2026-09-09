@@ -313,9 +313,9 @@ async def test_authored_candidate_persists_without_an_objective_discovery_row(
 
     records = await repository.list_objective_records(COLLECTION_ID)
     assert len(records) == 1
-    assert records[0]["objective_id"] == created.objective_id
-    assert records[0]["created_at"]
-    assert records[0]["updated_at"]
+    assert records[0].objective.objective_id == created.objective_id
+    assert records[0].created_at
+    assert records[0].updated_at
     assert await repository.read_objective_record(
         COLLECTION_ID,
         created.objective_id,

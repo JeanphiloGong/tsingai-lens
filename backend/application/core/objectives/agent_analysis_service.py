@@ -30,7 +30,8 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.ports import ObjectiveRepository, SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 
 AGENT_OBJECTIVE_ANALYSIS_PIPELINE_VERSION = "agent-objective-analysis.v1"

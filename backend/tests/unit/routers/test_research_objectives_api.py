@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.objective_repository import StoredObjective
+
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -231,7 +233,7 @@ class _Repository:
 
     async def list_objective_records(self, collection_id):
         objectives = await self.list_objectives(collection_id)
-        return tuple(objective.to_record() for objective in objectives)
+        return tuple(StoredObjective(objective) for objective in objectives)
 
 
 class _DiscoveryService:
@@ -327,7 +329,7 @@ class _Service:
     async def get_analysis_state(self, collection_id, objective_id):
         return {
             "collection_id": collection_id,
-            "objective": _objective(),
+            "objective": StoredObjective(_objective()),
             "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
             "paper_contributions": (_paper_contribution(),),
@@ -871,7 +873,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
             )
             return {
                 "collection_id": collection_id,
-                "objective": _objective(),
+                "objective": StoredObjective(_objective()),
                 "analysis": analysis,
                 "published_analysis": analysis,
                 "paper_contributions": (_paper_contribution(),),

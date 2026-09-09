@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.auth_repository import AuthUserRecord
+
 from datetime import datetime, timezone
 
 import pytest
@@ -30,13 +32,13 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
 ) -> None:
     sessions = postgres_session_factory
     await PostgresAuthRepository(sessions).add_user(
-        {
-            "user_id": "user-evaluation",
-            "email": "evaluation@example.com",
-            "display_name": "Evaluation Reviewer",
-            "password_hash": "synthetic-password-hash",
-            "created_at": "2026-07-20T00:00:00+00:00",
-        }
+        AuthUserRecord(
+            user_id="user-evaluation",
+            email="evaluation@example.com",
+            display_name="Evaluation Reviewer",
+            password_hash="synthetic-password-hash",
+            created_at="2026-07-20T00:00:00+00:00",
+        )
     )
     collections = PostgresCollectionRepository(sessions)
     for collection_id in ("col-gold", "col-other"):
@@ -210,13 +212,13 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
         )
 
     await PostgresAuthRepository(sessions).add_user(
-        {
-            "user_id": "user-evaluation-cascade",
-            "email": "evaluation-cascade@example.com",
-            "display_name": None,
-            "password_hash": "synthetic-password-hash",
-            "created_at": datetime(2026, 7, 20, tzinfo=timezone.utc).isoformat(),
-        }
+        AuthUserRecord(
+            user_id="user-evaluation-cascade",
+            email="evaluation-cascade@example.com",
+            display_name=None,
+            password_hash="synthetic-password-hash",
+            created_at=datetime(2026, 7, 20, tzinfo=timezone.utc).isoformat(),
+        )
     )
     collections = PostgresCollectionRepository(sessions)
     await collections.add_collection(

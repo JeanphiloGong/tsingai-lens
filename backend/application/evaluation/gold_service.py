@@ -4,7 +4,7 @@ from typing import Any, Mapping
 
 from application.source.collection_service import CollectionService
 from domain.evaluation import EvaluationGoldItem, EvaluationGoldSet
-from domain.ports import EvaluationRepository
+from application.repositories.evaluation_repository import EvaluationRepository
 
 
 class EvaluationGoldService:

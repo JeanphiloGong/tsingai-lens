@@ -6,9 +6,13 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-from domain.ports import CollectionPaths, CollectionRepository
+from application.repositories.collection_repository import (
+    CollectionRepository,
+    CollectionSummary,
+)
 from domain.source import Collection, Document
-from domain.source.ports import ObjectStore
+from application.repositories.object_store import ObjectStore
+from infra.persistence.file.collection_workspace import CollectionPaths
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 
@@ -108,11 +112,8 @@ class CollectionService:
 
     async def list_collections(
         self, owner_user_id: str | None = None
-    ) -> list[dict]:
-        return [
-            record.to_record()
-            for record in await self.repository.list_collections(owner_user_id)
-        ]
+    ) -> tuple[CollectionSummary, ...]:
+        return await self.repository.list_collections(owner_user_id)
 
     async def get_collection(self, collection_id: str) -> dict:
         record = await self.repository.read_collection(collection_id)

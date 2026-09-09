@@ -144,6 +144,9 @@ analysis of an explicitly selected ready subset.
 - `application/chat/` owns conversation, capability trajectory, and approval;
   it references rather than duplicates scientific records.
 - `domain/` owns records and invariants.
+- [`application/repositories/`](../../application/repositories/README.md) owns
+  storage contracts and repository-specific query results. Domain objects do
+  not depend on those contracts.
 - `infra/` owns PostgreSQL, object storage, model providers, and parsing.
 
 PostgreSQL stores structured current state and analysis history. Object storage

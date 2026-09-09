@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.objective_repository import StoredObjective
+
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
@@ -353,7 +355,7 @@ class FakeObjectiveRepository:
         return self.objective
 
     async def read_objective_record(self, collection_id, objective_id):
-        return self.objective.to_record()
+        return StoredObjective(self.objective)
 
     async def queue_analysis(self, collection_id, objective_id, **_kwargs):
         if self.objective.confirmation_status == "candidate":
@@ -602,11 +604,41 @@ async def test_objective_analysis_publishes_one_complete_version() -> None:
     assert queued["analysis"].status == "queued"
     assert result["analysis"].status == "succeeded"
     assert result["analysis"].progress_message == "Objective analysis completed."
-    assert result["objective"].published_analysis_version == 1
+    assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == (_finding(1),)
     assert result["paper_contributions"] == _artifacts(1).contributions
     assert result["warnings"] == []
     assert repository.published_calls == 1
+
+
+async def test_analysis_view_reads_one_typed_objective_snapshot() -> None:
+    class CountingRepository(FakeObjectiveRepository):
+        metadata_reads = 0
+        analysis_reads = 0
+
+        async def read_objective(self, collection_id, objective_id):
+            pytest.fail("the view must not reread the same Objective without metadata")
+
+        async def read_objective_record(self, collection_id, objective_id):
+            self.metadata_reads += 1
+            return StoredObjective(self.objective)
+
+        async def read_analysis(self, collection_id, objective_id, analysis_version=None):
+            assert analysis_version is not None
+            self.analysis_reads += 1
+            return await super().read_analysis(collection_id, objective_id, analysis_version)
+
+        async def read_published_analysis(self, collection_id, objective_id):
+            pytest.fail("the view already knows the published version")
+
+    repository = CountingRepository(published=True)
+    service, _, _ = _service(repository=repository)
+
+    result = await service.get_analysis_state("collection-1", "objective-1")
+
+    assert result["objective"].objective == repository.objective
+    assert repository.metadata_reads == 1
+    assert repository.analysis_reads == 1
 
 
 async def test_objective_analysis_surfaces_authored_scientific_warnings() -> None:
@@ -642,8 +674,8 @@ async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> N
 
     result = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    assert result["objective"].confirmation_status == "confirmed"
-    assert result["objective"].active_analysis_version == 1
+    assert result["objective"].objective.confirmation_status == "confirmed"
+    assert result["objective"].objective.active_analysis_version == 1
     assert result["analysis"].analysis_version == 1
     assert result["analysis"].status == "queued"
 
@@ -654,7 +686,7 @@ async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> No
     queued = await service.start_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
     assert queued["analysis"].status == "queued"
-    assert queued["objective"].active_analysis_version == 1
+    assert queued["objective"].objective.active_analysis_version == 1
     await asyncio.gather(*tuple(service._analysis_tasks))
     completed = await service.get_analysis_state("collection-1", "objective-1")
     assert completed["analysis"].status == "succeeded"
@@ -942,7 +974,7 @@ async def test_empty_finding_output_publishes_scientific_abstention() -> None:
     )
 
     assert result["analysis"].status == "succeeded"
-    assert result["objective"].published_analysis_version == 1
+    assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == ()
     assert result["paper_contributions"] == artifacts.contributions
     assert repository.published_calls == 1
@@ -984,7 +1016,7 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
     )
 
     assert result["analysis"].status == "succeeded"
-    assert result["objective"].published_analysis_version == 1
+    assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == ()
     assert result["paper_contributions"] == (contribution,)
     assert result["warnings"] == [
@@ -1010,7 +1042,7 @@ async def test_missing_paper_contributions_still_fails_without_publication() -> 
         result["analysis"].error_message
         == "objective analysis produced no paper contributions"
     )
-    assert result["objective"].published_analysis_version is None
+    assert result["objective"].objective.published_analysis_version is None
     assert repository.published_calls == 0
 
 
@@ -1073,7 +1105,7 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
         result["analysis"].error_message
         == "objective analysis failed to extract every relevant paper"
     )
-    assert result["objective"].published_analysis_version is None
+    assert result["objective"].objective.published_analysis_version is None
     assert repository.published_calls == 0
 
 

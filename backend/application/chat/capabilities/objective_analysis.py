@@ -418,7 +418,7 @@ class AssessObjectiveQualityCapability:
 
 
 def _project_analysis(payload: dict[str, Any]) -> dict[str, Any]:
-    objective = payload["objective"]
+    objective = payload["objective"].objective
     active = payload.get("analysis")
     published = payload.get("published_analysis")
     if active is None:

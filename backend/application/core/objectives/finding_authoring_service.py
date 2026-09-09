@@ -19,7 +19,7 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
 )
-from domain.ports import ObjectiveRepository
+from application.repositories.objective_repository import ObjectiveRepository
 from application.source.collection_service import CollectionService
 
 

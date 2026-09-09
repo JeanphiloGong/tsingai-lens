@@ -32,7 +32,8 @@ from application.core.objectives.paper_research_map_service import (
 from application.source.collection_service import CollectionService
 from domain.core import PaperResearchMap, PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
-from domain.ports import PaperMapRepository, SourceArtifactRepository
+from application.repositories.paper_map_repository import PaperMapRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import (
     SourceDocument,
     SourceReferenceSet,

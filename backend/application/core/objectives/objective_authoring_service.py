@@ -6,7 +6,7 @@ from typing import Any
 
 from application.source.collection_service import CollectionService
 from domain.core import ResearchObjective, is_question_shaped_objective
-from domain.ports import ObjectiveRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 
 class ObjectiveAuthoringService:

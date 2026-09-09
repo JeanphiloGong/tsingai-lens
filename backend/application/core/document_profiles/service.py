@@ -20,7 +20,10 @@ from domain.core.document_profile import (
     PROFILE_STATUS_COMPLETED,
     summarize_document_profile_collection,
 )
-from domain.ports import DocumentProfileRepository, SourceArtifactRepository
+from application.repositories.document_profile_repository import (
+    DocumentProfileRepository,
+)
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import SourceBlock, SourceDocument, normalize_optional_text
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from domain.ports import SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import SourceReferenceSet
 
 

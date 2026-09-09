@@ -40,7 +40,9 @@ retries only papers whose inspection is missing, failed, or stale.
 - `application/core/`: Document profiling, Paper Map creation, Objective
   discovery, Evidence extraction, and Finding synthesis.
 - `application/chat/`: Research Agent trajectory and approved capability calls.
-- `domain/`: Domain records, invariants, and repository ports.
+- `domain/`: Business objects, invariants, and state transitions.
+- [`application/repositories/`](application/repositories/README.md): Repository
+  contracts and their dedicated query results.
 - `infra/`: PostgreSQL, object storage, Source parsing, and model clients.
 - `docs/`: Backend architecture, API, and operations authorities.
 

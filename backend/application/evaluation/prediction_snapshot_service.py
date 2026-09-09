@@ -8,10 +8,8 @@ from domain.evaluation import (
     EvaluationPredictionItem,
     EvaluationPredictionSnapshot,
 )
-from domain.ports import (
-    EvaluationRepository,
-    ObjectiveRepository,
-)
+from application.repositories.evaluation_repository import EvaluationRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 
 class CoreArtifactsNotReadyForEvaluationError(RuntimeError):

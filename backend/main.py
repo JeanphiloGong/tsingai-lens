@@ -101,15 +101,15 @@ from controllers.core import (
 from controllers.goal import experiment_plans
 from controllers.goal import intake as goals
 from controllers.source import collections, pipeline_runs, references
-from domain.ports import (
-    ChatRepository,
-    ExperimentPlanRepository,
-    FindingReviewRepository,
+from application.repositories.finding_review_repository import FindingReviewRepository
+from application.repositories.paper_map_repository import PaperMapRepository
+from application.repositories.document_profile_repository import (
     DocumentProfileRepository,
-    ObjectiveRepository,
-    PaperMapRepository,
-    SourceArtifactRepository,
 )
+from application.repositories.source_artifact_repository import SourceArtifactRepository
+from application.repositories.experiment_plan_repository import ExperimentPlanRepository
+from application.repositories.chat_repository import ChatRepository
+from application.repositories.objective_repository import ObjectiveRepository
 from infra.llm.chat_model import OpenAIChatModel
 from infra.persistence.database import (
     DatabaseSettings,

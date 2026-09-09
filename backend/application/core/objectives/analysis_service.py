@@ -22,7 +22,7 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveEvidenceAnalysisService,
 )
 from domain.core import ObjectiveAnalysis, ResearchObjective
-from domain.ports import ObjectiveRepository
+from application.repositories.objective_repository import ObjectiveRepository
 from infra.llm.usage import capture_llm_usage
 
 
@@ -267,7 +267,7 @@ class ObjectiveAnalysisService:
             model_name=None,
             prompt_versions={},
         )
-        return await self._result(collection_id, objective, analysis=analysis)
+        return await self._result(collection_id, objective.objective_id, analysis=analysis)
 
     async def fail_analysis_dispatch(
         self,
@@ -286,15 +286,14 @@ class ObjectiveAnalysisService:
             ),
             expected_status="queued",
         )
-        return await self._result(collection_id, objective, analysis=analysis)
+        return await self._result(collection_id, objective.objective_id, analysis=analysis)
 
     async def get_analysis_state(
         self,
         collection_id: str,
         objective_id: str,
     ) -> dict[str, Any]:
-        objective = await self._require_objective(collection_id, objective_id)
-        return await self._result(collection_id, objective)
+        return await self._result(collection_id, objective_id)
 
     async def get_analysis_status(
         self,
@@ -538,7 +537,7 @@ class ObjectiveAnalysisService:
                 analysis_version,
             )
             if claimed is None:
-                return await self._result(collection_id, objective)
+                return await self._result(collection_id, objective.objective_id)
             usage_started_at = perf_counter()
             progress_callback = self._build_progress_callback(claimed)
             with (
@@ -584,7 +583,7 @@ class ObjectiveAnalysisService:
                 abstention_reason=abstention_reason,
                 abstention_note=abstention_note,
             )
-            return await self._result(collection_id, objective, analysis=completed)
+            return await self._result(collection_id, objective.objective_id, analysis=completed)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s",
@@ -605,8 +604,7 @@ class ObjectiveAnalysisService:
                     error_code=self._error_code(exc),
                     error_message=str(exc) or exc.__class__.__name__,
                 )
-            objective = await self._require_objective(collection_id, objective_id)
-            return await self._result(collection_id, objective, analysis=current)
+            return await self._result(collection_id, objective_id, analysis=current)
 
     async def _execute_scheduled_analysis(
         self,
@@ -650,19 +648,34 @@ class ObjectiveAnalysisService:
     async def _result(
         self,
         collection_id: str,
-        objective: ResearchObjective,
+        objective_id: str,
         *,
         analysis: ObjectiveAnalysis | None = None,
     ) -> dict[str, Any]:
-        active = analysis or await self.objective_repository.read_analysis(
-            collection_id,
-            objective.objective_id,
-            objective.active_analysis_version,
+        stored_objective = await self.objective_repository.read_objective_record(
+            collection_id, objective_id
         )
-        published = await self.objective_repository.read_published_analysis(
-            collection_id,
-            objective.objective_id,
-        )
+        if stored_objective is None:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            )
+        objective = stored_objective.objective
+        active = analysis
+        if active is None and objective.active_analysis_version is not None:
+            active = await self.objective_repository.read_analysis(
+                collection_id, objective_id, objective.active_analysis_version
+            )
+        published = None
+        if objective.published_analysis_version is not None:
+            if (
+                active is not None
+                and active.analysis_version == objective.published_analysis_version
+            ):
+                published = active
+            else:
+                published = await self.objective_repository.read_analysis(
+                    collection_id, objective_id, objective.published_analysis_version
+                )
         if active is not None and active.error_code == "analysis_interrupted":
             active = None
         findings = ()
@@ -739,14 +752,9 @@ class ObjectiveAnalysisService:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
-        objective_record = await self.objective_repository.read_objective_record(
-            collection_id,
-            objective.objective_id,
-        )
         return {
             "collection_id": collection_id,
-            "objective": objective,
-            "objective_record": objective_record,
+            "objective": stored_objective,
             "analysis": active,
             "published_analysis": published,
             "findings": findings,

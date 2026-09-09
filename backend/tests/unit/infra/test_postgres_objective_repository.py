@@ -46,8 +46,9 @@ def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
     assert row.updated_at == updated_at
 
     restored = PostgresObjectiveRepository._objective_record_from_row(row)
-    assert restored["created_at"] == created_at.isoformat()
-    assert restored["updated_at"] == updated_at.isoformat()
+    assert restored.objective == objective
+    assert restored.created_at == created_at
+    assert restored.updated_at == updated_at
 
 
 def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
@@ -72,8 +73,8 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
 
     restored = PostgresObjectiveRepository._objective_record_from_row(row)
 
-    assert restored["created_at"] == column_created_at.isoformat()
-    assert restored["updated_at"] == column_updated_at.isoformat()
+    assert restored.created_at == column_created_at
+    assert restored.updated_at == column_updated_at
 
 
 def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> None:

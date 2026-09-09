@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from application.repositories.objective_repository import StoredObjective
+
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
@@ -139,7 +141,7 @@ class MemoryObjectiveRepository:
     async def list_objective_records(
         self,
         collection_id: str,
-    ) -> tuple[dict[str, Any], ...]:
+    ) -> tuple[StoredObjective, ...]:
         objectives = await self.list_objectives(collection_id)
         return tuple(self._objective_record(objective) for objective in objectives)
 
@@ -206,7 +208,7 @@ class MemoryObjectiveRepository:
         self,
         collection_id: str,
         objective_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> StoredObjective | None:
         objective = await self.read_objective(collection_id, objective_id)
         return self._objective_record(objective) if objective is not None else None
 
@@ -644,15 +646,12 @@ class MemoryObjectiveRepository:
     def _objective_record(
         self,
         objective: ResearchObjective,
-    ) -> dict[str, Any]:
-        record = objective.to_record()
+    ) -> StoredObjective:
         created_at, updated_at = self._objective_timestamps.get(
             (objective.collection_id, objective.objective_id),
             (None, None),
         )
-        record["created_at"] = created_at.isoformat() if created_at else None
-        record["updated_at"] = updated_at.isoformat() if updated_at else None
-        return record
+        return StoredObjective(objective, created_at, updated_at)
 
     def _touch_objective(
         self,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.objective_repository import StoredObjective
+
 from collections import deque
 from dataclasses import replace
 from hashlib import sha256
@@ -2949,7 +2951,7 @@ class _ObjectiveAnalysisCapabilityService:
         )
         return {
             "collection_id": "col-1",
-            "objective": objective,
+            "objective": StoredObjective(objective),
             "analysis": analysis,
             "published_analysis": None,
             "warnings": [],

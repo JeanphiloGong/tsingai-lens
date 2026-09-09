@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.auth_repository import AuthUserRecord
+
 from domain.chat import ChatToolRequest
 
 import pytest
@@ -35,7 +37,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "password_hash": "synthetic-password-hash",
         "created_at": "2026-08-19T00:00:00+00:00",
     }
-    await PostgresAuthRepository(postgres_session_factory).add_user(user)
+    await PostgresAuthRepository(postgres_session_factory).add_user(AuthUserRecord(**user))
     collection = Collection.create(
         collection_id="col-chat",
         owner_user_id=user["user_id"],

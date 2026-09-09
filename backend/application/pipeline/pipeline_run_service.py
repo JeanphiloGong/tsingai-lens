@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -15,7 +15,7 @@ from domain.pipeline import (
     PipelineRun,
     PipelineRunStatus,
 )
-from domain.ports import PipelineRunRepository
+from application.repositories.pipeline_run_repository import PipelineRunRepository
 
 
 _PIPELINE_NODES: dict[str, dict[str, tuple[str, ...]]] = {
@@ -125,7 +125,7 @@ class PipelineRunService:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         return [
-            self._project(run)
+            asdict(run)
             for run in await self.repository.list_runs(
                 collection_id=collection_id,
                 status=status,

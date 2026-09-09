@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from domain.ports import CollectionRepository
+from application.repositories.collection_repository import CollectionRepository
 from domain.source import Document
-from domain.source.ports import ObjectStore
+from application.repositories.object_store import ObjectStore
 from infra.source.ingestion import (
     NormalizedImportBatch,
     NormalizedImportDocument,

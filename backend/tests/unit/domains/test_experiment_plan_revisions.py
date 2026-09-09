@@ -85,3 +85,37 @@ def test_first_revision_cannot_point_to_a_parent() -> None:
 def test_plan_version_rejects_non_integral_values() -> None:
     with pytest.raises(ValueError, match="positive integer"):
         ExperimentPlanRecord.from_mapping(_plan_payload(plan_version=1.5))
+
+
+def test_next_revision_is_direct_validated_and_copies_structured_content(monkeypatch) -> None:
+    plan = ExperimentPlanRecord.from_mapping(_plan_payload())
+    structured = {"variables": [{"name": "laser power", "levels": [100, 200]}]}
+
+    def reject_serialization(_self):
+        pytest.fail("revision must not serialize the existing Plan")
+
+    monkeypatch.setattr(ExperimentPlanRecord, "to_record", reject_serialization)
+    revision = plan.next_revision(
+        plan_id="plan-v2", title=" Reviewed matrix ", content=" Approved levels. ",
+        status="ready_for_review", structured_plan=structured,
+        updated_by=" researcher-2 ", updated_at="2026-09-09T00:00:00+00:00",
+    )
+    structured["variables"][0]["levels"].append(300)
+
+    assert revision.plan_version == 2
+    assert revision.parent_plan_id == plan.plan_id
+    assert revision.updated_by == "researcher-2"
+    assert revision.title == "Reviewed matrix"
+    assert revision.structured_plan["variables"][0]["levels"] == [100, 200]
+    assert plan.plan_version == 1
+
+    with pytest.raises(ValueError, match="updated_by"):
+        plan.next_revision(
+            plan_id="plan-v2", title="Reviewed", content="Approved", status="draft",
+            structured_plan=None, updated_by=None, updated_at=plan.updated_at,
+        )
+    with pytest.raises(ValueError, match="cannot equal"):
+        plan.next_revision(
+            plan_id=plan.plan_id, title="Reviewed", content="Approved", status="draft",
+            structured_plan=None, updated_by="reviewer", updated_at=plan.updated_at,
+        )

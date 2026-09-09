@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.auth_repository import AuthUserRecord
+
 import asyncio
 
 import pytest
@@ -48,13 +50,13 @@ async def experiment_plan_repository(source_repository):
         created_by_tool_call_id="call-plan-objective",
     )
     await PostgresAuthRepository(source_repository.session_factory).add_user(
-        {
-            "user_id": "user_reviewer",
-            "email": "reviewer@example.com",
-            "display_name": None,
-            "password_hash": "synthetic-password-hash",
-            "created_at": "2026-09-07T00:30:00+00:00",
-        }
+        AuthUserRecord(
+            user_id="user_reviewer",
+            email="reviewer@example.com",
+            display_name=None,
+            password_hash="synthetic-password-hash",
+            created_at="2026-09-07T00:30:00+00:00",
+        )
     )
     return PostgresExperimentPlanRepository(source_repository.session_factory)
 

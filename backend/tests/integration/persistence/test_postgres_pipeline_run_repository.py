@@ -130,4 +130,27 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
 
     assert await runs.update_run(running) is True
     assert await runs.read_run(running.run_id) == running
-    assert await runs.list_runs(collection_id=COLLECTION_ID) == (running,)
+    summary, = await runs.list_runs(collection_id=COLLECTION_ID)
+    assert summary.run_id == running.run_id
+    assert summary.progress_percent == 45
+    assert summary.warnings == ["low confidence title"]
+    assert not hasattr(summary, "nodes")
+
+
+async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
+    source_repository, monkeypatch
+) -> None:
+    from infra.persistence.postgres import pipeline_run_repository as module
+
+    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    await runs.add_run(_run("history-only", "fingerprint-history"))
+
+    def reject_full_hydration(_row):
+        pytest.fail("history must not reconstruct full pipeline diagnostics")
+
+    monkeypatch.setattr(module, "_to_run", reject_full_hydration)
+    summary, = await runs.list_runs(collection_id=COLLECTION_ID)
+
+    assert summary.run_id == "history-only"
+    assert summary.collection_id == COLLECTION_ID
+    assert summary.status == "queued"

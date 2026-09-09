@@ -27,7 +27,8 @@ from domain.chat import (
     ToolCallStatus,
     ToolResultStatus,
 )
-from domain.ports import ChatRepository, SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
+from application.repositories.chat_repository import ChatRepository
 
 
 logger = logging.getLogger(__name__)

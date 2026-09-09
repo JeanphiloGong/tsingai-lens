@@ -204,6 +204,7 @@ const translations: Record<Language, Translations> = {
 		},
 		researchAgent: {
 			title: 'Research Agent',
+			retrySession: 'Retry conversation',
 			launcher: {
 				eyebrow: 'Research Agent',
 				title: 'Choose a research workspace',
@@ -2786,6 +2787,7 @@ const translations: Record<Language, Translations> = {
 		},
 		researchAgent: {
 			title: '研究 Agent',
+			retrySession: '重试加载会话',
 			launcher: {
 				eyebrow: '研究 Agent',
 				title: '选择研究工作区',

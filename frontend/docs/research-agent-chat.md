@@ -110,16 +110,27 @@ offering a retry.
 The selected session ID and a small presentation-only history are stored under:
 
 ```text
-lens.chatSession.{collection_id}
-lens.chatSessionHistory.{collection_id}
-lens.chatSourceContext.{collection_id}
+lens.chatSession.{encoded_user_id}:{encoded_collection_id}
+lens.chatSessionHistory.{encoded_user_id}:{encoded_collection_id}
+lens.chatSourceContext.{encoded_user_id}:{encoded_collection_id}
 ```
+
+Chat waits for an authenticated account before reading these keys. Successful
+authentication retains only that account's entries and removes unscoped legacy
+entries. Logout clears Chat browser storage, including pending Source handoffs,
+even if its HTTP request fails; it does not delete server conversations.
+An unavailable session read preserves its history entry and offers a retry of
+that exact session. Only an explicit `404` removes the missing session and
+creates a replacement; network errors and other HTTP failures remain visible.
 
 The server trajectory is authoritative. Browser storage remembers which
 session to load, how to label it in the local history list, and one pending
 Source handoff from the document reader. The pending Source is shown above the
 composer and can be removed. It is cleared after the complete persisted turn
-returns; the durable user message then owns the Source context. The browser
+returns, or when recovery after an interrupted stream confirms that the sent
+message and its Source locators were persisted. If persistence cannot be
+confirmed, the pending Source remains available for retry. The durable user
+message then owns the Source context. The browser
 sends the canonical locator kind (`text_window`, `table`, or `figure`) and a
 bounded quote. The backend resolves that locator against the immutable prepared
 Source, rejects forged or stale context with `422`, and persists canonical
@@ -135,7 +146,7 @@ keeping Lens-specific research boundaries explicit:
 - `+page.svelte` owns session orchestration, streaming, approval state, and
   the route shell. It does not create a second browser API or persistence
   model. Each session load has a request generation and abort signal; collection
-  changes and unmounting invalidate pending reads, streams, and approval
+  changes, account changes, and unmounting invalidate pending reads, streams, and approval
   responses before they can update the current conversation or local history.
   Disconnecting the browser does not revoke an approved backend write; returning
   to the original session reloads its authoritative trajectory and approval state.
@@ -154,6 +165,8 @@ keeping Lens-specific research boundaries explicit:
   An upload already started finishes its upload/preparation chain against the
   original collection. Navigation drops its UI updates and stops the remaining
   batch from starting; it does not move papers to the newly selected collection.
+  Account changes clear the attachment UI and prevent an uploaded paper from
+  starting preparation under a different account.
 - `MessageTimeline.svelte` owns history rendering and scroll position. It starts
   with the latest 20 presentation items and exposes earlier items in batches of
   20 while preserving the reading position. New turns follow the latest response;

@@ -335,7 +335,7 @@ test.describe('page interaction audit', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.addInitScript(() =>
 			localStorage.setItem(
-				'lens.chatSessionHistory.col_123',
+				'lens.chatSessionHistory.user_1:col_123',
 				JSON.stringify(
 					Array.from({ length: 12 }, (_, index) => ({
 						session_id: `past_${index}`,
@@ -426,7 +426,9 @@ test.describe('page interaction audit', () => {
 	for (const width of [1440, 390]) {
 		test(`research agent preserves long conversation reading at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 844 });
-			await page.addInitScript(() => localStorage.setItem('lens.chatSession.col_123', 'chat_1'));
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
 			const history = Array.from({ length: 60 }, (_, index) =>
 				agentMessage(
 					`history_${index}`,

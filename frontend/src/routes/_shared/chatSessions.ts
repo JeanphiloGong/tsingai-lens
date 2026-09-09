@@ -264,22 +264,25 @@ export async function streamChatMessage(
 	}
 }
 
-function sourceContextStorageKey(collectionId: string) {
-	return `lens.chatSourceContext.${collectionId}`;
+function sourceContextStorageKey(userId: string, collectionId: string) {
+	return `lens.chatSourceContext.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}`;
 }
 
-export function storePendingChatSourceContext(context: ChatSourceContext) {
+export function storePendingChatSourceContext(userId: string, context: ChatSourceContext) {
 	if (typeof window === 'undefined') return;
 	window.sessionStorage.setItem(
-		sourceContextStorageKey(context.collection_id),
+		sourceContextStorageKey(userId, context.collection_id),
 		JSON.stringify(context)
 	);
 }
 
-export function readPendingChatSourceContext(collectionId: string): ChatSourceContext | null {
+export function readPendingChatSourceContext(
+	userId: string,
+	collectionId: string
+): ChatSourceContext | null {
 	if (typeof window === 'undefined') return null;
 	try {
-		const raw = window.sessionStorage.getItem(sourceContextStorageKey(collectionId));
+		const raw = window.sessionStorage.getItem(sourceContextStorageKey(userId, collectionId));
 		const value = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
 		const resource = value?.resource_ref as Record<string, unknown> | undefined;
 		if (
@@ -293,7 +296,7 @@ export function readPendingChatSourceContext(collectionId: string): ChatSourceCo
 			typeof value.source_ref !== 'string' ||
 			typeof value.quote !== 'string'
 		) {
-			clearPendingChatSourceContext(collectionId);
+			clearPendingChatSourceContext(userId, collectionId);
 			return null;
 		}
 		return {
@@ -313,14 +316,14 @@ export function readPendingChatSourceContext(collectionId: string): ChatSourceCo
 			quote_truncated: value.quote_truncated === true
 		};
 	} catch {
-		clearPendingChatSourceContext(collectionId);
+		clearPendingChatSourceContext(userId, collectionId);
 		return null;
 	}
 }
 
-export function clearPendingChatSourceContext(collectionId: string) {
+export function clearPendingChatSourceContext(userId: string, collectionId: string) {
 	if (typeof window === 'undefined') return;
-	window.sessionStorage.removeItem(sourceContextStorageKey(collectionId));
+	window.sessionStorage.removeItem(sourceContextStorageKey(userId, collectionId));
 }
 
 export async function decideChatToolCall(

@@ -2,7 +2,8 @@
 	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
-	import { errorMessage } from '../../../_shared/api';
+	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
+	import { authState } from '../../../_shared/auth';
 	import {
 		createChatSession,
 		clearPendingChatSourceContext,
@@ -48,6 +49,8 @@
 	let input = '';
 	let pendingSourceContext: ChatSourceContext | null = null;
 	let loadedCollectionId = '';
+	let loadedUserId = '';
+	let failedSessionId: string | null = null;
 
 	let sessionGeneration = 0;
 	let sessionController: AbortController | null = null;
@@ -60,30 +63,32 @@
 	});
 
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
-		return !destroyed && generation === sessionGeneration && ownerCollectionId === collectionId;
+		return (
+			!destroyed &&
+			generation === sessionGeneration &&
+			ownerCollectionId === collectionId &&
+			$authState.status === 'authenticated' &&
+			$authState.user?.user_id === loadedUserId
+		);
 	}
 
 	$: collectionId = $page.params.id ?? '';
+	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
-	$: if (browser && collectionId && collectionId !== loadedCollectionId) {
+	$: if (browser && (collectionId !== loadedCollectionId || userId !== loadedUserId)) {
 		loadedCollectionId = collectionId;
+		loadedUserId = userId;
 		void loadSession();
 	}
 
 	function sessionStorageKey() {
-		return `lens.chatSession.${collectionId}`;
+		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}`;
 	}
 
 	function historyStorageKey() {
-		return `lens.chatSessionHistory.${collectionId}`;
-	}
-
-	function clearLegacySessionStorage() {
-		if (!browser) return;
-		window.localStorage.removeItem(`lens.goalSession.${collectionId}`);
-		window.localStorage.removeItem(`lens.goalSessionHistory.${collectionId}`);
+		return `lens.chatSessionHistory.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}`;
 	}
 
 	function readStoredSessionId() {
@@ -156,8 +161,7 @@
 		const activeCollectionId = collectionId;
 		const generation = ++sessionGeneration;
 		sessionController?.abort();
-		const controller = new AbortController();
-		sessionController = controller;
+		sessionController = null;
 		session = null;
 		messages = [];
 		input = '';
@@ -165,14 +169,21 @@
 		streamingText = '';
 		deciding = false;
 		progressHistory = [];
+		failedSessionId = null;
 
-		loading = true;
+		loading = false;
 		error = '';
 		notice = '';
 		pendingApproval = null;
 		progress = null;
-		pendingSourceContext = readPendingChatSourceContext(activeCollectionId);
-		if (!requestedSessionId) clearLegacySessionStorage();
+		pendingSourceContext = null;
+		history = [];
+		if (!userId || !activeCollectionId) return;
+
+		const controller = new AbortController();
+		sessionController = controller;
+		loading = true;
+		pendingSourceContext = readPendingChatSourceContext(userId, activeCollectionId);
 		history = readHistory();
 
 		try {
@@ -183,8 +194,9 @@
 					nextSession = await fetchChatSession(storedSessionId, controller.signal);
 					if (!isCurrentSession(generation, activeCollectionId)) return;
 					if (nextSession.collection_id !== activeCollectionId) nextSession = null;
-				} catch {
+				} catch (err) {
 					if (!isCurrentSession(generation, activeCollectionId)) return;
+					if (!isHttpStatusError(err, 404)) throw err;
 					nextSession = null;
 					clearStoredSessionId();
 					writeHistory(history.filter((item) => item.session_id !== storedSessionId));
@@ -207,6 +219,7 @@
 			upsertHistory(nextSession);
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
+			failedSessionId = requestedSessionId || readStoredSessionId();
 			error = errorMessage(err);
 			session = null;
 			messages = [];
@@ -307,7 +320,7 @@
 			flushText();
 			applyTurn(turn, [optimisticId, streamingId]);
 			if (sourceContexts.length) {
-				clearPendingChatSourceContext(activeCollectionId);
+				clearPendingChatSourceContext(userId, activeCollectionId);
 				pendingSourceContext = null;
 			}
 		} catch (err) {
@@ -317,12 +330,25 @@
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = trajectory.items;
 				pendingApproval = trajectory.pending_approval;
-				if (
-					!messages
-						.slice(previousMessageCount)
-						.some((message) => message.role === 'user' && message.content === text)
-				) {
+				const persistedMessage = messages
+					.slice(previousMessageCount)
+					.find((message) => message.role === 'user' && message.content === text);
+				if (!persistedMessage) {
 					input = text;
+				} else if (
+					sourceContexts.length &&
+					sourceContexts.every((source) =>
+						persistedMessage.source_contexts.some(
+							(saved) =>
+								saved.collection_id === source.collection_id &&
+								saved.document_id === source.document_id &&
+								saved.source_kind === source.source_kind &&
+								saved.source_ref === source.source_ref
+						)
+					)
+				) {
+					clearPendingChatSourceContext(userId, activeCollectionId);
+					pendingSourceContext = null;
 				}
 			} catch {
 				if (!isCurrentSession(generation, activeCollectionId)) return;
@@ -348,7 +374,7 @@
 	}
 
 	function removePendingSourceContext() {
-		clearPendingChatSourceContext(collectionId);
+		clearPendingChatSourceContext(userId, collectionId);
 		pendingSourceContext = null;
 	}
 
@@ -447,7 +473,14 @@
 		<ConversationHeader {collectionId} objectiveId={queryObjectiveId} />
 
 		{#if error}
-			<div class="status status-error" role="alert">{error}</div>
+			<div class="status status-error" role="alert">
+				<span>{error}</span>
+				{#if failedSessionId !== null}
+					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
+						{$t('researchAgent.retrySession')}
+					</button>
+				{/if}
+			</div>
 		{/if}
 		{#if notice}
 			<div class="status status-notice" role="status">{notice}</div>
@@ -467,16 +500,18 @@
 			{decide}
 		/>
 
-		<MessageComposer
-			{collectionId}
-			{input}
-			{sending}
-			disabled={!session || loading || sending || deciding || Boolean(pendingApproval)}
-			{pendingSourceContext}
-			onInput={handleComposerInput}
-			onSend={sendMessage}
-			onRemovePendingSourceContext={removePendingSourceContext}
-		/>
+		{#key userId}
+			<MessageComposer
+				{collectionId}
+				{input}
+				{sending}
+				disabled={!session || loading || sending || deciding || Boolean(pendingApproval)}
+				{pendingSourceContext}
+				onInput={handleComposerInput}
+				onSend={sendMessage}
+				onRemovePendingSourceContext={removePendingSourceContext}
+			/>
+		{/key}
 	</main>
 </section>
 
@@ -537,9 +572,23 @@
 	}
 
 	.status-error {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
 		border: 1px solid var(--danger-border);
 		background: var(--danger-bg);
 		color: var(--danger-text);
+	}
+
+	.status-error button {
+		flex: 0 0 auto;
+		padding: 6px 10px;
+		border: 1px solid var(--danger-border);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: var(--danger-text);
+		cursor: pointer;
 	}
 
 	.status-notice {

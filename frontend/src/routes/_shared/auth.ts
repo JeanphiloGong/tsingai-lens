@@ -45,6 +45,7 @@ function setAuthenticated(payload: unknown) {
 	if (!user) {
 		throw new Error('Auth response is missing user.');
 	}
+	clearOtherUsersChatStorage(user.user_id);
 	authState.set({ status: 'authenticated', user });
 	return user;
 }
@@ -56,7 +57,7 @@ export async function fetchCurrentSession() {
 		return setAuthenticated(data);
 	} catch (error) {
 		if (isHttpStatusError(error, 401)) {
-			authState.set(anonymousState);
+			clearAuthState();
 			return null;
 		}
 		authState.set(anonymousState);
@@ -73,10 +74,41 @@ export async function login(email: string, password: string) {
 }
 
 export async function logout() {
-	await requestJson('/auth/logout', { method: 'POST' });
-	authState.set(anonymousState);
+	try {
+		await requestJson('/auth/logout', { method: 'POST' });
+	} finally {
+		clearAuthState();
+	}
 }
 
 export function clearAuthState() {
+	clearOtherUsersChatStorage();
 	authState.set(anonymousState);
+}
+
+function clearOtherUsersChatStorage(keepUserId = '') {
+	if (typeof window === 'undefined') return;
+	const prefixes = [
+		'lens.chatSession.',
+		'lens.chatSessionHistory.',
+		'lens.chatSourceContext.',
+		'lens.goalSession.',
+		'lens.goalSessionHistory.'
+	];
+	for (const storageName of ['localStorage', 'sessionStorage'] as const) {
+		try {
+			const storage = window[storageName];
+			for (const key of Object.keys(storage)) {
+				const prefix = prefixes.find((value) => key.startsWith(value));
+				if (
+					prefix &&
+					(!keepUserId || !key.startsWith(`${prefix}${encodeURIComponent(keepUserId)}:`))
+				) {
+					storage.removeItem(key);
+				}
+			}
+		} catch {
+			// Browser storage restrictions must not prevent signing out.
+		}
+	}
 }

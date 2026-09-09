@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
+	import { authState } from '../../../_shared/auth';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { ChatSourceContext } from '../../../_shared/chatSessions';
 	import type { PaperUploadItem } from './messageComposer';
@@ -119,6 +120,7 @@
 		ownerCollectionId: string,
 		generation: number
 	) {
+		const ownerUserId = $authState.user?.user_id;
 		const update = (patch: Partial<PaperUploadItem>) => {
 			if (!destroyed && generation === uploadGeneration && ownerCollectionId === collectionId) {
 				updateUploadItem(item.key, patch);
@@ -146,6 +148,7 @@
 			update({ status: 'preparing', error: '' });
 		}
 
+		if (!ownerUserId || $authState.user?.user_id !== ownerUserId) return 'failed';
 		try {
 			await prepareCollectionDocument(ownerCollectionId, documentId);
 			update({ status: 'queued', documentId, error: '' });

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { authState } from '../../../../_shared/auth';
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import {
@@ -144,7 +145,8 @@
 	}
 
 	function handSourceToResearchAgent(selection: DocumentSourceSelection) {
-		if (!browser || !model) return;
+		const userId = $authState.user?.user_id;
+		if (!browser || !model || !userId) return;
 		const sourceRef = selection.source_ref.trim();
 		const sourceQuote = selection.quote.trim();
 		if (!sourceRef || !sourceQuote) return;
@@ -174,7 +176,7 @@
 			quote_truncated: sourceQuote.length > 6000,
 			source_digest: null
 		};
-		storePendingChatSourceContext(context);
+		storePendingChatSourceContext(userId, context);
 	}
 
 	function positivePageParam(rawValue: string | null) {

@@ -1,6 +1,7 @@
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { authState } from '../../../../_shared/auth';
 
 type DocumentDetailPageState = {
 	params: {
@@ -76,6 +77,10 @@ let scrollIntoViewMock: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewO
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
 		sessionStorage.clear();
+		authState.set({
+			status: 'authenticated',
+			user: { user_id: 'researcher_1', email: 'researcher@example.test' }
+		});
 		setPage({
 			params: { id: 'col_123', document_id: 'doc_1' },
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
@@ -363,7 +368,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		action?.click();
 
 		expect(action?.getAttribute('href')).toBe('/collections/col_123/assistant');
-		expect(JSON.parse(sessionStorage.getItem('lens.chatSourceContext.col_123') ?? 'null')).toEqual({
+		expect(
+			JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? 'null')
+		).toEqual({
 			resource_ref: {
 				resource_type: 'source',
 				resource_id: 'doc_1:results',
@@ -395,7 +402,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		action?.addEventListener('click', (event) => event.preventDefault(), { capture: true });
 		action?.click();
 
-		const context = JSON.parse(sessionStorage.getItem('lens.chatSourceContext.col_123') ?? 'null');
+		const context = JSON.parse(
+			sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? 'null'
+		);
 		expect(context.source_kind).toBe('table');
 		expect(context.source_ref).toBe('table-1');
 		expect(context.quote).toBe(

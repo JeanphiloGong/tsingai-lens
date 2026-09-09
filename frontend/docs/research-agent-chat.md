@@ -134,6 +134,7 @@ The selected session ID and a small presentation-only history are stored under:
 
 ```text
 lens.chatSession.{encoded_user_id}:{encoded_collection_id}
+lens.chatSession.{encoded_user_id}:{encoded_collection_id}:documents
 lens.chatSessionHistory.{encoded_user_id}:{encoded_collection_id}
 lens.chatSourceContext.{encoded_user_id}:{encoded_collection_id}
 ```
@@ -369,8 +370,15 @@ The documents layout owns the split workspace and its local selection state.
 On desktop, the paper list or reader remains beside the conversation; on narrow
 screens, closing the conversation returns to the mounted reading surface.
 Collapsing the panel keeps the same conversation and ongoing work mounted.
-New session creates a separate session in the same Collection and retains
-unsent selections; opening the panel alone resumes the current session.
+The document workspace and standalone Agent remember their active sessions
+separately for the authenticated user and Collection. Opening the document
+panel for the first time creates its own session; reopening or reloading resumes
+that document conversation. New session creates a separate session in the same
+Collection and retains unsent selections, without changing the other entry's
+active session. Both entries share the conversation history, so researchers can
+explicitly select a document conversation from the standalone Agent or vice versa.
+History updates read the latest stored list before changing an entry, preserving
+sessions opened in another browser tab.
 The standalone route and split panel both use `ResearchConversation.svelte`,
 which owns session loading, streaming, approvals, and recovery.
 

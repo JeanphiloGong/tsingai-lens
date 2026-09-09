@@ -127,7 +127,7 @@
 	}
 
 	function sessionStorageKey() {
-		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}`;
+		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}${embedded ? ':documents' : ''}`;
 	}
 
 	function historyStorageKey() {
@@ -188,7 +188,7 @@
 	}
 
 	function upsertHistory(nextSession: ChatSession, title = '') {
-		const existing = history.filter((item) => item.session_id !== nextSession.session_id);
+		const existing = readHistory().filter((item) => item.session_id !== nextSession.session_id);
 		writeHistory([
 			{
 				session_id: nextSession.session_id,
@@ -252,7 +252,7 @@
 					if (!isHttpStatusError(err, 404)) throw err;
 					nextSession = null;
 					clearStoredSessionId();
-					writeHistory(history.filter((item) => item.session_id !== storedSessionId));
+					writeHistory(readHistory().filter((item) => item.session_id !== storedSessionId));
 				}
 			}
 

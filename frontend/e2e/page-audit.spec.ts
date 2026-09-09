@@ -37,6 +37,136 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	for (const width of [390, 1440]) {
+		test(`keeps document and standalone conversations separate at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			const turns = new Map<string, ReturnType<typeof agentMessage>[]>();
+			const submissions: string[] = [];
+			let created = 0;
+			await page.route('**/api/v1/chat-sessions', (route) => {
+				const id = `scope_${++created}`;
+				turns.set(id, []);
+				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
+			});
+			await page.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+				const parts = new URL(route.request().url()).pathname.split('/');
+				const id = parts[4];
+				if (!turns.has(id)) return route.fulfill(json({ detail: 'Session not found' }, 404));
+				if (parts.at(-1) !== 'messages')
+					return route.fulfill(json({ ...chatSession(), session_id: id }));
+				if (route.request().method() === 'GET')
+					return route.fulfill(
+						json({ items: turns.get(id), feedback: [], pending_approval: null })
+					);
+				const body = route.request().postDataJSON();
+				submissions.push(id);
+				const messages = [
+					agentMessage(`${id}-user-${submissions.length}`, 'user', body.message, {
+						session_id: id,
+						source_contexts: body.source_contexts ?? []
+					}),
+					agentMessage(
+						`${id}-answer-${submissions.length}`,
+						'assistant',
+						`Answer for ${id}. [Read paper](/collections/${collectionId}/documents/${documentId}).`,
+						{ session_id: id }
+					)
+				];
+				turns.set(id, [...turns.get(id)!, ...messages]);
+				return route.fulfill(sseTurn({ messages }));
+			});
+			const openReaderChat = async () => {
+				await page
+					.locator('.reader-header')
+					.getByRole('button', { name: 'Ask research assistant', exact: true })
+					.click();
+				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			};
+			const answers = page.getByTestId('assistant-message');
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await sendAgentMessage(page, 'Compare the heat treatments');
+			await expect(answers).toContainText('Answer for scope_1');
+			await answers.getByRole('link', { name: 'Read paper' }).click();
+			await openReaderChat();
+			expect(created).toBe(2);
+			await expect(answers).toHaveCount(0);
+			await sendAgentMessage(page, 'Inspect the specimen preparation');
+			await expect(answers).toContainText('Answer for scope_2');
+			await page.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await openReaderChat();
+			await expect(answers).toContainText('Answer for scope_2');
+			expect(created).toBe(2);
+
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(answers).toContainText('Answer for scope_1');
+			await page.getByRole('button', { name: 'New session', exact: true }).click();
+			await expect(answers).toHaveCount(0);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			expect(created).toBe(3);
+			await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+			await openReaderChat();
+			await expect(answers).toContainText('Answer for scope_2');
+			await page.reload();
+			await openReaderChat();
+			await expect(answers).toContainText('Answer for scope_2');
+			expect(created).toBe(3);
+			const other = await page.context().newPage();
+			await mockApis(other);
+			await other.route('**/api/v1/chat-sessions', (route) => {
+				const id = `scope_${++created}`;
+				turns.set(id, []);
+				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
+			});
+			await other.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+				const path = new URL(route.request().url()).pathname;
+				return route.fulfill(
+					json(
+						path.endsWith('/messages')
+							? { items: [], feedback: [], pending_approval: null }
+							: { ...chatSession(), session_id: path.split('/')[4] }
+					)
+				);
+			});
+			await other.goto(`/collections/${collectionId}/assistant`);
+			await expect(other.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await other.getByRole('button', { name: 'New session', exact: true }).click();
+			await expect.poll(() => created).toBe(4);
+			await expect(other.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			expect(created).toBe(4);
+			await other.close();
+			await sendAgentMessage(page, 'Check the test temperature too');
+			await expect(answers).toHaveCount(2);
+			await page
+				.locator('.embedded-toolbar')
+				.getByRole('button', { name: 'Conversation history' })
+				.click();
+			await expect(page.locator('.embedded-history button')).toHaveCount(4);
+			await page
+				.locator('.embedded-history')
+				.getByRole('button', { name: 'Compare the heat treatments' })
+				.click();
+			await expect(answers).toContainText('Answer for scope_1');
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(answers).toHaveCount(0);
+			if (width < 820) await page.getByRole('button', { name: 'Show history' }).click();
+			await page
+				.locator('.history-item')
+				.filter({ hasText: 'Inspect the specimen preparation' })
+				.click();
+			await expect(answers).toHaveCount(2);
+			await expect(answers.first()).toContainText('Answer for scope_2');
+			expect(submissions).toEqual(['scope_1', 'scope_2', 'scope_2']);
+			expect(turns.get('scope_1')).toHaveLength(2);
+			expect(turns.get('scope_2')).toHaveLength(4);
+			expect(errors).toEqual([]);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `session-scope-${width}.png`) });
+		});
+	}
+
 	for (const width of [320, 1024, 1440]) {
 		test(`compares paper tabs with independent reading and shared conversation at ${width}px`, async ({
 			page

@@ -86,9 +86,10 @@ class _RevisionArguments(_ObjectiveArguments):
 class _Model:
     # Script domain decisions; perform the actual discovery round trip when a
     # scripted call needs a deferred schema. all_tool_spec_names includes both.
-    def __init__(self, *turns: ModelTurn | Exception, discover: tuple[str, ...] = ()) -> None:
+    def __init__(self, *turns: ModelTurn | Exception, discover: tuple[str, ...] = (), source_inspection_required: bool = False) -> None:
         self.turns = deque(turns)
         self.discover = discover
+        self.source_inspection_required = source_inspection_required
         self.discovery_decisions: list[tuple[str, ...]] = []
         self.all_tool_spec_names: list[tuple[str, ...]] = []
         self.tool_spec_names: list[tuple[str, ...]] = []
@@ -118,7 +119,7 @@ class _Model:
         if missing:
             self.discover = ()
             self.discovery_decisions.append(missing)
-            return ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": list(missing)}),))
+            return ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": list(missing), "source_inspection_required": self.source_inspection_required}),))
         self.contexts.append(messages)
         self.request_limits.append((timeout_seconds, max_output_tokens))
         self.tool_spec_names.append(tuple(name for name in names if name != "discover_research_tools"))
@@ -724,6 +725,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
         ),
         ModelTurn(content="已读取结果原文；目前只能对第一篇论文形成有依据的初步判断。"),
         discover=("browse_collection_papers",),
+        source_inspection_required=True,
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -787,7 +789,7 @@ async def test_literature_based_opinion_fails_if_required_read_is_refused() -> N
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "required_research_action_not_completed"
     assert result.messages[-1].content != unsupported_answer
-    assert "will not present an unsupported" in result.messages[-1].content
+    assert "不能据此判断论文没有证据" in result.messages[-1].content
 
 
 async def test_evidence_write_requires_a_complete_matching_source_read() -> None:
@@ -2941,7 +2943,7 @@ async def test_repeated_invalid_model_response_is_distinguished_from_unavailable
 
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_response_invalid"
-    assert "invalid response" in result.messages[-1].content
+    assert "技术中断" in result.messages[-1].content
 
 
 async def test_unexpected_model_failure_remains_model_unavailable(caplog) -> None:

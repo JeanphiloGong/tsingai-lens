@@ -14,6 +14,7 @@ from domain.chat import ChatMessage, ChatMessageRole
 class ChatModelContext:
     messages: tuple[ChatMessage, ...]
     rollover_summary: str = ""
+    require_tool_call: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))

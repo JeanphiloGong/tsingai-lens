@@ -208,11 +208,22 @@ def select_tool_specs(
         and result.get("next_offset") is None
         for result in successful_results.get("browse_collection_papers", ())
     )
-    source_grounded_intent = intent_policy.mentions_terms(user_text, intent_policy.SOURCE_GROUNDED_TERMS)
+    source_grounded_intent = any(
+        result.get("source_inspection_required") is True
+        and result.get("catalog_version") == capabilities.discovery.catalog_version
+        for result in successful_results.get("discover_research_tools", ())
+    )
+    # Reviewing an existing conclusion starts with that conclusion and its
+    # Evidence. Only then can the researcher identify a passage to recheck.
+    finding_review_pending = bool(
+        loaded_names.intersection({"query_published_findings", "inspect_published_finding"})
+        and not successful_results.get("inspect_published_finding")
+    )
+    source_grounded_intent = source_grounded_intent and not finding_review_pending
     has_attached_source_context = bool(
         latest_user is not None and latest_user.source_contexts
     )
-    if source_grounded_intent and not successful_results.get(
+    if source_grounded_intent and "browse_collection_papers" in registered_names and not successful_results.get(
         "browse_collection_papers"
     ) and not has_attached_source_context:
         allowed_names = registered_names.intersection({"browse_collection_papers"})
@@ -253,9 +264,8 @@ def select_tool_specs(
     # not only the paper map. Once the map is complete, require a focused
     # Source search before allowing the model to answer or choose a broad
     # inspection path.
-    comparison_intent = intent_policy.mentions_terms(user_text, intent_policy.COMPARISON_TERMS)
     if (
-        (comparison_intent or source_grounded_intent)
+        source_grounded_intent
         and successful_results.get("browse_collection_papers")
         and not successful_results.get("search_sources")
         and not has_exact_source_read
@@ -362,10 +372,12 @@ def select_tool_specs(
         # An unlinked citation is a correctable draft input, not a finished plan.
         correctable_basis = (
             latest_plan.get("draft_status") == "abstained"
-            and bool(latest_plan.get("missing_evidence_ids"))
+            and bool(latest_plan.get("missing_evidence_ids") or latest_plan.get("missing_finding_ids"))
+            and bool(latest_plan.get("available_finding_ids"))
             and bool(latest_plan.get("available_evidence_ids"))
+            and latest_plan.get("source_analysis_version") is not None
             and not any(latest_plan.get(key) for key in (
-                "missing_finding_ids", "rejected_finding_ids", "failed_evidence_ids",
+                "rejected_finding_ids", "failed_evidence_ids",
             ))
             and (
                 len(plan_calls) == 1
@@ -374,6 +386,8 @@ def select_tool_specs(
         )
         if correctable_basis:
             allowed_names = {"propose_research_plan"}
+        elif latest_plan.get("draft_status") == "abstained":
+            allowed_names = set()
         elif persist_requested:
             allowed_names = {
                 "revise_research_plan"
@@ -723,6 +737,43 @@ def stage_instruction(
                     for objective_id, finding_id in candidates
                 )
             )
+    elif tool_names == ("propose_research_plan",):
+        previous = next(iter(reversed(successful_results.get("propose_research_plan", ()))), {})
+        if previous.get("draft_status") == "abstained":
+            content = (
+                "No reviewable plan exists yet. Correct the citation selection once using "
+                "only the valid previously selected Findings and their linked Evidence below. "
+                "Recheck the scientific choices against those retained references; removing an "
+                "invalid ID does not by itself support its associated claims. Submit the full "
+                "corrected transient draft, not a promise to resubmit.\n"
+                f"Finding IDs: {previous.get('available_finding_ids', [])}\n"
+                f"Evidence IDs: {previous.get('available_evidence_ids', [])}"
+            )
+        else:
+            references = []
+            for result in successful_results.get("inspect_published_finding", ()):
+                finding = result.get("finding")
+                if not isinstance(finding, Mapping) or not finding.get("finding_id"):
+                    continue
+                evidence_ids = [
+                    item["evidence_id"] for item in result.get("evidence", ())
+                    if isinstance(item, Mapping) and item.get("evidence_id")
+                ]
+                references.append(
+                    f"objective_id={result.get('objective_id')}, "
+                    f"analysis_version={result.get('analysis_version')}, "
+                    f"finding_id={finding['finding_id']}, evidence_ids={evidence_ids}"
+                )
+            if references:
+                content = (
+                    "Build the requested plan from these inspected Finding/Evidence relationships. "
+                    "Choose one Objective and analysis version. A current Evidence ID from the "
+                    "collection overview may belong to a different Finding; it cannot be attached "
+                    "to a selected Finding without that relationship. Use only the Evidence IDs "
+                    "listed for the Findings you select below, and only for choices their inspected "
+                    "content supports. Retain the distinction between literature support, the "
+                    "researcher's constraints, and proposed choices.\n" + "\n".join(references)
+                )
     return content
 
 

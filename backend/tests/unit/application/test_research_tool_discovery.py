@@ -23,10 +23,152 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
 
 
 @pytest.mark.anyio
+async def test_discovered_paper_claim_requires_sources_after_survey_and_hides_premature_text():
+    browse = _Capability("browse_collection_papers", ToolRisk.READ, result_data={
+        "paper_total": 1, "returned_paper_count": 1, "next_offset": None,
+        "papers": [{"document_id": "review-1"}],
+    })
+    search = _Capability("search_sources", ToolRisk.READ, result_data={"matches": []})
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={
+            "tool_names": ["browse_collection_papers"], "source_inspection_required": True,
+        }),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(content="Premature claim from the paper map."),
+        ModelTurn(tool_calls=(ModelToolCall(name="search_sources"),)),
+        ModelTurn(content="The relevant passage could not be located; the attributed claim remains unverified."),
+    )
+    chunks = []
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((browse, search))).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Does the review's statement count as an independent measurement?",
+        text_delta_callback=chunks.append,
+    )
+    assert result.status == "completed"
+    assert search.executed_arguments == [{}]
+    assert "Premature" not in "".join(chunks)
+    assert "remains unverified" in "".join(chunks)
+
+
+@pytest.mark.anyio
+async def test_empty_provider_response_retains_exact_read_and_unread_papers():
+    from application.chat.model import ModelResponseError
+
+    browse = _Capability("browse_collection_papers", ToolRisk.READ, result_data={
+        "paper_total": 2, "returned_paper_count": 2, "next_offset": None,
+        "papers": [{"document_id": "p1"}, {"document_id": "p2"}],
+    })
+    read = _Capability("read_source", ToolRisk.READ, result_data={
+        "document_id": "p1", "source_kind": "text_window", "source_ref": "methods",
+        "source_digest": "canonical-digest", "content_truncated": False,
+    })
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="read_source"),)),
+        ModelResponseError("private-provider-content", reason="empty_response"),
+        ModelResponseError("private-provider-content", reason="empty_response"),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((browse, read))).run_turn(
+        context=_context(), previous_messages=(), user_message="Inspect these authors' measurements.",
+    )
+    assert result.error_code == "model_response_invalid"
+    answer = result.messages[-1].content
+    assert "Exact paper Sources read (1): p1:methods" in answer
+    assert "Known papers without an exact read (1): p2" in answer
+    assert "private-provider-content" not in answer
+    assert "does not establish an absence" in answer
+
+
+@pytest.mark.anyio
+async def test_existing_conclusion_is_located_before_rechecking_paper_sources():
+    query = _Capability("query_published_findings", ToolRisk.READ, result_data={"findings": []})
+    browse = _Capability("browse_collection_papers", ToolRisk.READ)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={
+            "tool_names": ["query_published_findings", "inspect_published_finding"],
+            "source_inspection_required": True,
+        }),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="query_published_findings"),)),
+        ModelTurn(content="No published conclusion was found for review."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
+        query, browse, _Capability("inspect_published_finding", ToolRisk.READ),
+    ))).run_turn(context=_context(), previous_messages=(), user_message="Review the published conclusion and its treatment conditions.")
+    assert result.status == "completed"
+    assert query.executed_arguments == [{}]
+    assert browse.executed_arguments == []
+
+
+@pytest.mark.anyio
+async def test_selecting_papers_for_a_later_comparison_does_not_force_reading():
+    browse = _Capability("browse_collection_papers", ToolRisk.READ, result_data={
+        "paper_total": 1, "returned_paper_count": 1, "next_offset": None,
+        "papers": [{"document_id": "p1"}],
+    })
+    search = _Capability("search_sources", ToolRisk.READ)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(content="The paper is selected for the later comparison."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((browse, search))).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="后面比较这三篇论文；先确认文件并保留阅读范围，暂不深入阅读。",
+    )
+    assert result.status == "completed"
+    assert search.executed_arguments == []
+
+
+@pytest.mark.anyio
+async def test_filtered_filename_miss_is_not_reported_as_an_empty_collection():
+    from application.chat.model import ModelResponseError
+
+    browse = _Capability("browse_collection_papers", ToolRisk.READ, result_data={
+        "query": "unmatched-filename", "paper_total": 0, "returned_paper_count": 0,
+        "next_offset": None, "papers": [],
+    })
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelResponseError("empty", reason="empty_response"),
+        ModelResponseError("empty", reason="empty_response"),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((browse,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Locate that filename.",
+    )
+    assert result.error_code == "model_response_invalid"
+    assert "Collection paper total: unknown" in result.messages[-1].content
+    assert "Collection paper total: 0" not in result.messages[-1].content
+
+
+@pytest.mark.anyio
+async def test_followup_answer_keeps_prior_source_read_separate_from_current_progress():
+    read = _Capability("read_source", ToolRisk.READ, result_data={
+        "document_id": "p1", "source_kind": "text_window", "source_ref": "methods",
+        "source_digest": "original-version", "content_truncated": False,
+        "content": "The samples were annealed for two hours.",
+    })
+    runner = ResearchAgentRunner(model=_Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="read_source"),)),
+        ModelTurn(content="I inspected the annealing conditions."),
+    ), capabilities=CapabilityRegistry((read,)))
+    first = await runner.run_turn(context=_context(), previous_messages=(), user_message="Inspect this paper's methods.")
+    messages = [*first.messages, ChatMessage.user(
+        message_id="followup", session_id="chat-1", content="Synthesize what you just read.",
+        created_at="2026-09-09T01:00:00Z",
+    )]
+    instruction = runner._answer_instruction(_context(), messages, [], [], budget_exhausted=True)
+    assert "this request only, not the whole conversation" in instruction.content
+    assert "Exact paper Sources read (0)" in instruction.content
+    assert "source_ref=methods, digest=original-version" in instruction.content
+    assert "Zero new reads does not erase earlier reading" in instruction.content
+    from application.chat.capability_policy import active_successful_results_by_name, has_successful_exact_source_read
+    assert not has_successful_exact_source_read(active_successful_results_by_name(messages))
+
+
+@pytest.mark.anyio
 async def test_discovered_read_runs_and_does_not_carry_into_next_request():
     search = _Capability("search_sources", ToolRisk.READ, result_data={"matches": []})
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["search_sources"]}),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["search_sources"], "source_inspection_required": True}),)),
         ModelTurn(tool_calls=(ModelToolCall(name="search_sources", arguments={}),)),
         ModelTurn(content="No matching Source was located; the measurement remains unverified."),
         ModelTurn(content="Hello."),
@@ -44,7 +186,7 @@ async def test_discovered_read_runs_and_does_not_carry_into_next_request():
 async def test_catalog_cannot_load_a_write():
     writer = _Capability("create_evidence_version", ToolRisk.WRITE)
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["create_evidence_version"]}),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["create_evidence_version"], "source_inspection_required": False}),)),
         ModelTurn(content="No Evidence was saved."),
     )
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((_Capability("search_sources", ToolRisk.READ), writer)))
@@ -123,7 +265,7 @@ async def test_provider_error_during_finalization_does_not_log_details(caplog):
     from application.chat import AgentRunLimits
 
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["search_sources"]}),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["search_sources"], "source_inspection_required": True}),)),
         RuntimeError("provider-secret-do-not-log"),
     )
     result = await ResearchAgentRunner(

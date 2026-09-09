@@ -80,7 +80,7 @@ class OpenAIChatModel:
         if tool_specs:
             request.update(
                 tools=[spec.model_schema() for spec in tool_specs],
-                tool_choice="auto",
+                tool_choice="required" if context.require_tool_call else "auto",
                 parallel_tool_calls=all(spec.risk is ToolRisk.READ for spec in tool_specs),
             )
         if text_delta_callback is not None:
@@ -107,6 +107,17 @@ class OpenAIChatModel:
         message = completion.choices[0].message
         tool_calls = tuple(getattr(message, "tool_calls", None) or ())
         content = str(getattr(message, "content", None) or "").strip()
+        if not content and not tool_calls:
+            finish = getattr(completion.choices[0], "finish_reason", None)
+            logger.warning(
+                "Research model returned no answer or calls model=%s finish=%s "
+                "reasoning_present=%s completion_tokens=%s required_tool=%s",
+                self.model,
+                finish if finish in {"stop", "length", "tool_calls", "content_filter"} else "unknown",
+                bool(getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)),
+                usage.completion_tokens if usage else None,
+                context.require_tool_call,
+            )
         if getattr(completion.choices[0], "finish_reason", None) == "length":
             raise _invalid_response(
                 "research model exhausted its output allowance",
@@ -121,7 +132,7 @@ class OpenAIChatModel:
                     "research model returned no usable content",
                     reason=(
                         "reasoning_only_response"
-                        if getattr(message, "reasoning_content", None)
+                        if getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)
                         else "empty_response"
                     ),
                     usage=usage,

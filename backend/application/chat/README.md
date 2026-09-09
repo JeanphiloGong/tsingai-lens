@@ -81,6 +81,31 @@ load definitions only for the active user request. Automatically selected
 prerequisite readers remain available after execution in that request too.
 The next user request starts with a fresh catalog.
 
+Discovery also records whether the request needs a particular paper's claims
+or measurements inspected. That model-selected obligation survives later
+discovery calls within the request. After a survey, it requires Source
+navigation and complete reading, including for a claim attributed to a review;
+paper selection alone does not impose this obligation. This is an execution
+prerequisite, not a determination that the inspected passage supports the claim.
+Source-reading stages use that recorded request rather than comparison or
+reading keywords. Selecting papers for a later comparison therefore remains
+a navigation task. Existing-conclusion review reads the Finding and Evidence
+before the Source requirement can advance to paper inspection.
+
+At mandatory action stages the model context requests a provider tool call
+(`tool_choice=required`). The runner independently checks that a required
+action occurred, and suppresses answer deltas that would otherwise appear
+before that check. Provider failures remain failures: the deterministic reply
+preserves the reading ledger and distinguishes unread papers and failed reads
+from scientific absence. Empty-response diagnostics contain only model name,
+normalized stop reason, reasoning presence, and token count.
+
+Answer finalization separates the current request's reading ledger from earlier
+complete Source inspections. Zero new reads cannot erase the preceding research
+context; historical references alone cannot recover omitted text or authorize a
+new Evidence write. Filtered filename counts are not reported as collection
+totals, including when a literal filename search has no matches.
+
 For example, a researcher asking to inspect the P002 group definitions can load
 paper navigation, locate the canonical Methods Source, and read its exact
 document/kind/reference tuple. Search previews do not satisfy the complete
@@ -126,14 +151,21 @@ starting more capability work. A fresh user decision can inspect changed
 Sources or propose a new exact approval; the failed action is not retried
 implicitly.
 
-A plan proposal with unlinked Evidence remains an abstention, not a completed
-draft. The Agent may correct that selection once using the available Evidence
-IDs returned for its selected Findings. Rejected Findings, extraction failures,
-and absent current Findings do not qualify for that correction. If that
+Before a plan proposal, the stage instruction lists the inspected Finding and
+Evidence relationships. An Evidence ID in the collection-wide overview is not
+automatically eligible for every Finding. A plan proposal with missing or
+unlinked references remains an abstention, not a completed draft. The Agent may
+correct that selection once using the valid
+subset of its selected Finding IDs and their linked Evidence from one current
+version. Rejected Findings, extraction failures, and a selection with no valid
+current support do not qualify for that correction. If that
 correction has invalid argument structure, one further attempt can address
 the reported field names and error types; argument values are not echoed in
-validation errors. An answer-only response must deliver the requested result
-or explain a concrete evidence gap, rather than announce another inspection.
+validation errors. An unresolved abstention cannot expose a saving capability;
+the final answer explains the missing basis without claiming a draft is ready
+or promising an unexecuted resubmission. An answer-only response must deliver
+the requested result or explain a concrete evidence gap, rather than announce
+another inspection.
 
 Research-plan proposals distinguish condition-dependent trends from conflicting
 measurements under comparable conditions. Small-sample uncertainty can leave a

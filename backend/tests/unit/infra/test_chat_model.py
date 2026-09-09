@@ -129,7 +129,7 @@ async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.5"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.6"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -216,6 +216,18 @@ async def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> N
     assert request["messages"][0]["role"] == "system"
     assert request["messages"][1] == {"role": "user", "content": "你好"}
     assert "tools" not in request
+
+
+@pytest.mark.parametrize("required", [False, True])
+async def test_required_research_action_sets_provider_tool_choice(required):
+    client, completions = _client(_completion(tool_calls=[SimpleNamespace(
+        type="function", function=SimpleNamespace(name="read_source", arguments="{}"),
+    )]))
+    await OpenAIChatModel(client=client, model="test-model").respond(
+        context=ChatModelContext((_message(),), require_tool_call=required),
+        tool_specs=(ToolSpec(name="read_source", description="Read a Source.", risk=ToolRisk.READ, input_model=_NoArguments),),
+    )
+    assert completions.calls[0]["tool_choice"] == ("required" if required else "auto")
 
 
 @pytest.mark.parametrize("stream", [False, True])

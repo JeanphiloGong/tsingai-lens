@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from asyncio import Semaphore, gather, wait_for
 from collections.abc import Awaitable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from hashlib import sha256
@@ -49,10 +49,6 @@ _TrajectoryCheckpoint = Callable[
     Awaitable[None],
 ]
 
-_REQUIRED_ACTION_FAILURE_MESSAGE = (
-    "I could not complete the required source-backed research action, so I will "
-    "not present an unsupported result. Please retry or narrow the request."
-)
 _MODEL_RESPONSE_RETRY_LIMIT = 1
 _REQUIRED_ACTION_RETRY_LIMIT = 1
 _FINAL_ANSWER_INSTRUCTION = (
@@ -390,7 +386,10 @@ class ResearchAgentRunner:
                         required_action_instruction is None
                         and stage_instruction is None
                         and not tool_specs
-                        and self._latest_structured_deliverable(results) is not None
+                        and (
+                            self._latest_structured_deliverable(results) is not None
+                            or any(result.data.get("draft_status") == "abstained" for result in results)
+                        )
                     ):
                         decision_messages = (
                             *decision_messages,
@@ -403,10 +402,16 @@ class ResearchAgentRunner:
                             ),
                         )
                     turn = await self._respond(
-                        self.context_builder.for_model(
-                            decision_messages, active_user_message_id=next(
-                                message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
+                        replace(
+                            self.context_builder.for_model(
+                                decision_messages, active_user_message_id=next(
+                                    message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
+                                ),
                             ),
+                            require_tool_call=capability_policy.required_tool_before_answer(
+                                tool_names,
+                                successful_results=capability_policy.active_successful_results_by_name(messages),
+                            ) is not None,
                         ),
                         tool_specs, progress, text_delta_callback,
                     )
@@ -441,8 +446,7 @@ class ResearchAgentRunner:
                     messages.append(
                         self._assistant(
                             context,
-                            "The research model returned an invalid response for "
-                            "this turn. Please retry.",
+                            self._failure_answer(messages, calls, results),
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -469,12 +473,7 @@ class ResearchAgentRunner:
                     messages.append(
                         self._assistant(
                             context,
-                            (
-                                "The research model timed out for this turn; "
-                                "inspected results were preserved."
-                            )
-                            if provider_timeout
-                            else "The research model is unavailable for this turn.",
+                            self._failure_answer(messages, calls, results),
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -524,7 +523,7 @@ class ResearchAgentRunner:
                         required_tool,
                     )
                     messages.append(
-                        self._assistant(context, _REQUIRED_ACTION_FAILURE_MESSAGE)
+                        self._assistant(context, self._failure_answer(messages, calls, results))
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
                     progress.trace(context, phase="terminal", termination_reason="required_research_action_not_completed")
@@ -635,7 +634,11 @@ class ResearchAgentRunner:
             "max_output_tokens": output_limit,
         }
         if text_delta_callback is not None:
-            arguments["text_delta_callback"] = text_delta_callback
+            # A response rejected for skipping a required read must not appear
+            # in the browser as a completed research answer.
+            arguments["text_delta_callback"] = (
+                (lambda _delta: None) if model_context.require_tool_call else text_delta_callback
+            )
         progress.model_cycles += 1
         try:
             turn = await wait_for(self.model.respond(**arguments), timeout=timeout)
@@ -689,7 +692,7 @@ class ResearchAgentRunner:
                 "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
             )
-            messages.append(self._assistant(context, "The inspected results were preserved, but a final answer could not be completed. Please retry."))
+            messages.append(self._assistant(context, self._failure_answer(messages, calls, results)))
             progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
             await self._checkpoint(checkpoint, messages, calls, results)
             return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
@@ -712,6 +715,25 @@ class ResearchAgentRunner:
         budget_exhausted: bool,
     ) -> ChatMessage:
         active_request = self._active_user_request(messages)
+        last_user = max((index for index, message in enumerate(messages) if message.role is ChatMessageRole.USER), default=0)
+        prior_messages = messages[:last_user]
+        prior_names = {
+            request.tool_call_id: request.name
+            for message in prior_messages for request in message.tool_calls
+        }
+        prior_reads = capability_policy.complete_source_reads({
+            name: [
+                message.tool_result.data for message in prior_messages
+                if message.tool_result is not None
+                and message.tool_result.status is ToolResultStatus.SUCCEEDED
+                and prior_names.get(message.tool_call_id) == name
+            ]
+            for name in ("read_source", "inspect_table", "inspect_document_sources")
+        })
+        prior_reading = "\n".join(
+            f"- document_id={document_id}, kind={kind}, source_ref={ref}, digest={digest}"
+            for document_id, kind, ref, digest in sorted(prior_reads)[:30]
+        ) or "No complete Source read is recorded in earlier requests."
         structured_deliverable = self._latest_structured_deliverable(results)
         deliverable_section = (
             "\n\nCOMPLETED STRUCTURED DELIVERABLE "
@@ -729,6 +751,13 @@ class ResearchAgentRunner:
                 "Do not request another tool and do not restart onboarding."
             )
         )
+        if next((result.data.get("draft_status") for result in reversed(results) if result.data.get("draft_status")), None) == "abstained":
+            lead = (
+                "No reviewable draft was produced. Explain the unresolved support gap from "
+                "the last result and which information would permit a new attempt. Do not "
+                "claim the draft is ready, saved, or about to be resubmitted. No further "
+                "action is available in this turn."
+            )
         return ChatMessage.user(
             message_id=self._message_id(),
             session_id=context.session_id,
@@ -736,7 +765,14 @@ class ResearchAgentRunner:
                 f"{lead}\n\n"
                 "ACTIVE RESEARCH REQUEST (answer this request; do not restart "
                 f"onboarding):\n{active_request}\n\n"
-                f"READING LEDGER:\n{self._reading_ledger(calls, results)}"
+                "CURRENT REQUEST READING LEDGER (this request only, not the whole conversation):\n"
+                f"{self._reading_ledger(calls, results)}\n\n"
+                "EARLIER REQUESTS: COMPLETE SOURCES INSPECTED\n"
+                f"{prior_reading}\n"
+                "Zero new reads does not erase earlier reading. Use earlier Source content still "
+                "present in the trajectory for the requested synthesis; distinguish historical "
+                "inspection from current validation. A reference alone cannot recover omitted "
+                "content or authorize a new Evidence write."
                 f"{deliverable_section}"
             ),
             created_at=_now_iso(),
@@ -815,9 +851,29 @@ class ResearchAgentRunner:
         )[:4_000]
 
     @staticmethod
+    def _failure_answer(
+        messages: list[ChatMessage],
+        calls: list[ChatToolCall],
+        results: list[ChatToolResult],
+    ) -> str:
+        chinese = any("\u4e00" <= char <= "\u9fff" for char in ResearchAgentRunner._active_user_request(messages))
+        lead = (
+            "本轮回答未能完成，已取得的结果已保留。这是技术中断，不能据此判断论文没有证据。可以继续核对未完成的部分。"
+            if chinese else
+            "This turn could not be completed. Obtained results were preserved; the technical "
+            "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
+        )
+        if not any(call.name in {"browse_collection_papers", "read_source", "inspect_table", "inspect_document_sources", "search_sources"} for call in calls):
+            return lead
+        ledger = ResearchAgentRunner._reading_ledger(calls, results, chinese=chinese)
+        return f"{lead}\n\n{ledger}"
+
+    @staticmethod
     def _reading_ledger(
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
+        *,
+        chinese: bool = False,
     ) -> str:
         calls_by_id = {call.tool_call_id: call for call in calls}
         collection_paper_totals: set[int] = set()
@@ -845,7 +901,7 @@ class ResearchAgentRunner:
                 successful_reads.setdefault(name, []).append(result.data)
             if name == "browse_collection_papers":
                 paper_total = result.data.get("paper_total")
-                if isinstance(paper_total, int) and paper_total >= 0:
+                if isinstance(paper_total, int) and paper_total >= 0 and not result.data.get("query"):
                     collection_paper_totals.add(paper_total)
                 screened_documents.update(
                     str(item.get("document_id") or "").strip()
@@ -857,12 +913,20 @@ class ResearchAgentRunner:
             read_documents.add(document_id)
 
         def display(values: set[str]) -> str:
-            return ", ".join(sorted(value for value in values if value)[:30]) or "none"
+            return ", ".join(sorted(value for value in values if value)[:30]) or ("无" if chinese else "none")
 
         paper_total = (
-            str(max(collection_paper_totals)) if collection_paper_totals else "unknown"
+            str(max(collection_paper_totals)) if collection_paper_totals else ("尚未核实" if chinese else "unknown")
         )
         unread_documents = (screened_documents | requested_documents) - read_documents - failed_documents
+        if chinese:
+            return (
+                f"论文总数: {paper_total}\n"
+                f"已浏览论文信息 ({len(screened_documents)}): {display(screened_documents)}\n"
+                f"已完整读取的原文片段 ({len(exact_sources)}): {display(exact_sources)}\n"
+                f"原文读取曾失败的论文 ({len(failed_documents)}): {display(failed_documents)}\n"
+                f"尚未完成原文读取的论文 ({len(unread_documents)}): {display(unread_documents)}"
+            )
         return (
             f"Collection paper total: {paper_total}\n"
             f"Paper identities screened ({len(screened_documents)}): "

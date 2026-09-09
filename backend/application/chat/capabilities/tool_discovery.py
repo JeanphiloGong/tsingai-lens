@@ -18,6 +18,15 @@ class DiscoverResearchToolsArguments(BaseModel):
         min_length=1, max_length=6,
         description="Exact names from the catalog needed for the current research request.",
     )
+    source_inspection_required: bool = Field(
+        description=(
+            "Whether the current request requires checking what a particular paper says, "
+            "its measurements, or cross-paper scientific support. True also for claims "
+            "attributed to reviews or methods papers. False for paper selection, status, "
+            "or reviewing already published analysis without a new paper claim. "
+            "This records a reading prerequisite, not approval or scientific support."
+        ),
+    )
 
 
 class DiscoverResearchToolsCapability:
@@ -56,6 +65,7 @@ class DiscoverResearchToolsCapability:
             data={
                 "catalog_version": self.catalog_version,
                 "loaded_tool_names": names,
+                "source_inspection_required": arguments.source_inspection_required,
                 "tools": [
                     {"name": name, "description": self.tools[name].description, "risk": self.tools[name].risk.value}
                     for name in names

@@ -1320,13 +1320,15 @@
 
 <section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
 	<aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
-		<a class="back-workspace" href={resolve('/collections/[id]', { id: collectionId })}>
-			<span aria-hidden="true">←</span>
-			{$t('researchAgent.backToWorkspace')}
-		</a>
-		<div class="brand">
-			<span class="brand-mark" aria-hidden="true">L</span>
-			<h1>{$t('researchAgent.title')}</h1>
+		<div class="sidebar-top">
+			<a class="back-workspace" href={resolve('/collections/[id]', { id: collectionId })}>
+				<span aria-hidden="true">←</span>
+				{$t('researchAgent.backToWorkspace')}
+			</a>
+			<div class="brand">
+				<span class="brand-mark" aria-hidden="true">L</span>
+				<h1>{$t('researchAgent.title')}</h1>
+			</div>
 		</div>
 
 		<button
@@ -1335,8 +1337,8 @@
 			disabled={loading || sending || deciding}
 			on:click={startNewSession}
 		>
-			<span aria-hidden="true">+</span>
-			{$t('researchAgent.newSession')}
+			<span class="new-session-icon" aria-hidden="true">+</span>
+			<span>{$t('researchAgent.newSession')}</span>
 		</button>
 
 		<section class="history" aria-label={$t('researchAgent.historyTitle')}>
@@ -1369,21 +1371,29 @@
 
 	<main class="conversation">
 		<header class="conversation-header">
-			<div>
-				<h2>{$t('researchAgent.title')}</h2>
-				<p>{$t('researchAgent.headerPrefix')} <strong>{collectionId}</strong></p>
+			<div class="conversation-header-inner">
+				<div class="conversation-heading">
+					<div class="conversation-title-row">
+						<h2>{$t('researchAgent.title')}</h2>
+						<span class="session-state" class:working={sending || deciding}>
+							<span class="session-state-dot" aria-hidden="true"></span>
+							{$t(sending || deciding ? 'researchAgent.working' : 'researchAgent.ready')}
+						</span>
+					</div>
+					<p>{$t('researchAgent.headerPrefix')} <strong>{collectionId}</strong></p>
+				</div>
+				{#if queryObjectiveId}
+					<a
+						class="objective-link"
+						href={resolve('/collections/[id]/objectives/[objective_id]', {
+							id: collectionId,
+							objective_id: queryObjectiveId
+						})}
+					>
+						{$t('researchAgent.objectiveScope')}
+					</a>
+				{/if}
 			</div>
-			{#if queryObjectiveId}
-				<a
-					class="objective-link"
-					href={resolve('/collections/[id]/objectives/[objective_id]', {
-						id: collectionId,
-						objective_id: queryObjectiveId
-					})}
-				>
-					{$t('researchAgent.objectiveScope')}
-				</a>
-			{/if}
 		</header>
 
 		{#if error}
@@ -1419,7 +1429,7 @@
 				{:else}
 					{#each conversationItems as item (item.id)}
 						{#if item.kind === 'message' && item.message.role === 'user'}
-							<article class="user-message">
+							<article class="user-message" data-testid="user-message">
 								<div>
 									<time>{formatTime(item.message.created_at)}</time>
 									{#if item.message.source_contexts.length}
@@ -1442,7 +1452,11 @@
 								</div>
 							</article>
 						{:else if item.kind === 'message' && item.message.role === 'assistant'}
-							<article class="assistant-message">
+							<article
+								class="assistant-message"
+								class:streaming={item.message.message_id.startsWith('local-stream-') && sending}
+								data-testid="assistant-message"
+							>
 								<div class="assistant-mark" aria-hidden="true">AI</div>
 								<div class="assistant-content">
 									{#if item.message.message_id.startsWith('local-stream-') && sending && progress}
@@ -1919,34 +1933,43 @@
 				</div>
 			{/if}
 			<div class="composer-row">
-				<label class="sr-only" for="research-agent-message"
-					>{$t('researchAgent.messageLabel')}</label
-				>
-				<textarea
-					id="research-agent-message"
-					rows="2"
-					bind:value={input}
-					placeholder={$t('researchAgent.messagePlaceholder')}
-					disabled={!session || sending || deciding || Boolean(pendingApproval)}
-				></textarea>
-				<button
-					class="send-message"
-					type="submit"
-					disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
-				>
-					{sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-				</button>
-				<button
-					class="add-papers"
-					type="button"
-					aria-label={$t('researchAgent.upload.add')}
-					title={$t('researchAgent.upload.add')}
-					disabled={uploadBusy}
-					on:click={() => uploadInput?.click()}
-				>
-					<span aria-hidden="true">+</span>
-					<span class="add-papers-label">{$t('researchAgent.upload.add')}</span>
-				</button>
+				<div class="composer-shell">
+					<label class="sr-only" for="research-agent-message"
+						>{$t('researchAgent.messageLabel')}</label
+					>
+					<textarea
+						id="research-agent-message"
+						rows="1"
+						bind:value={input}
+						placeholder={$t('researchAgent.messagePlaceholder')}
+						disabled={!session || sending || deciding || Boolean(pendingApproval)}
+					></textarea>
+					<div class="composer-actions">
+						<button
+							class="add-papers"
+							type="button"
+							aria-label={$t('researchAgent.upload.add')}
+							title={$t('researchAgent.upload.add')}
+							disabled={uploadBusy}
+							on:click={() => uploadInput?.click()}
+						>
+							<span aria-hidden="true">+</span>
+						</button>
+						<button
+							class="send-message"
+							type="submit"
+							aria-label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+							title={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+							disabled={!session ||
+								sending ||
+								deciding ||
+								Boolean(pendingApproval) ||
+								!input.trim()}
+						>
+							<span aria-hidden="true">↑</span>
+						</button>
+					</div>
+				</div>
 			</div>
 		</form>
 	</main>
@@ -1996,9 +2019,14 @@
 		display: flex;
 		min-height: 0;
 		flex-direction: column;
-		padding: 24px 20px;
+		padding: 12px;
 		border-right: 1px solid var(--border-default);
 		background: var(--bg-subtle);
+	}
+
+	.sidebar-top {
+		display: grid;
+		gap: 8px;
 	}
 
 	.back-workspace {
@@ -2006,12 +2034,16 @@
 		align-items: center;
 		align-self: flex-start;
 		gap: 7px;
-		min-height: 30px;
-		padding: 0 8px 0 0;
+		min-height: 32px;
+		padding: 0 8px;
+		border-radius: 8px;
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		text-decoration: none;
+		transition:
+			background-color 140ms ease,
+			color 140ms ease;
 	}
 
 	.back-workspace span {
@@ -2020,14 +2052,16 @@
 	}
 
 	.back-workspace:hover {
+		background: var(--surface-card);
 		color: var(--brand-primary);
 	}
 
 	.brand {
 		display: flex;
 		align-items: center;
-		gap: 12px;
-		margin-top: 18px;
+		gap: 10px;
+		padding: 8px 8px 12px;
+		border-bottom: 1px solid var(--border-default);
 	}
 
 	.brand-mark,
@@ -2041,37 +2075,69 @@
 	}
 
 	.brand-mark {
-		width: 36px;
-		height: 36px;
-		border-radius: 6px;
+		width: 32px;
+		height: 32px;
+		border-radius: 9px;
 	}
 
 	.brand h1 {
 		margin: 0;
-		font-size: 18px;
-		line-height: 24px;
+		font-size: 15px;
+		line-height: 20px;
 	}
 
 	.new-session {
 		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		min-height: 42px;
-		margin-top: 24px;
-		border: 1px solid var(--brand-primary);
-		border-radius: 6px;
-		background: var(--brand-primary);
-		color: #fff;
+		justify-content: flex-start;
+		gap: 9px;
+		min-height: 40px;
+		margin-top: 12px;
+		padding: 0 10px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
 		font-weight: 700;
 		cursor: pointer;
+		transition:
+			background-color 140ms ease,
+			border-color 140ms ease,
+			transform 140ms ease;
 	}
 
-	.new-session:hover:not(:disabled),
+	.new-session-icon {
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 7px;
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+		font-size: 18px;
+		font-weight: 400;
+		line-height: 1;
+	}
+
+	.new-session:hover:not(:disabled) {
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+		transform: translateY(-1px);
+	}
+
 	.approve:hover:not(:disabled),
-	.send-message:hover:not(:disabled),
 	.upload-primary:hover:not(:disabled) {
+		border-color: var(--brand-primary-hover);
 		background: var(--brand-primary-hover);
+		color: #fff;
+		transform: translateY(-1px);
+	}
+
+	.new-session:active:not(:disabled),
+	.send-message:active:not(:disabled),
+	.upload-primary:active:not(:disabled) {
+		transform: translateY(0);
 	}
 
 	button:disabled {
@@ -2084,13 +2150,13 @@
 		min-height: 0;
 		flex: 1;
 		flex-direction: column;
-		margin-top: 32px;
+		margin-top: 22px;
 	}
 
 	.history h2 {
-		margin: 0 0 10px;
+		margin: 0 8px 8px;
 		color: var(--text-secondary);
-		font-size: 12px;
+		font-size: 10px;
 		line-height: 18px;
 		text-transform: uppercase;
 	}
@@ -2106,20 +2172,23 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 8px;
-		min-height: 42px;
-		padding: 8px 10px;
+		min-height: 38px;
+		padding: 7px 9px;
 		border: 1px solid transparent;
-		border-radius: 6px;
+		border-radius: 9px;
 		background: transparent;
 		color: var(--text-primary);
 		text-align: left;
 		cursor: pointer;
+		transition:
+			background-color 140ms ease,
+			border-color 140ms ease;
 	}
 
 	.history-item:hover,
 	.history-item.active {
 		border-color: var(--brand-border);
-		background: var(--surface-card);
+		background: var(--brand-soft);
 	}
 
 	.history-title {
@@ -2167,7 +2236,7 @@
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
-		background: var(--surface-card);
+		background: var(--bg-page);
 	}
 
 	.conversation-header {
@@ -2176,8 +2245,29 @@
 		justify-content: space-between;
 		gap: 20px;
 		min-height: 76px;
-		padding: 16px 32px;
+		padding: 14px 32px;
 		border-bottom: 1px solid var(--border-default);
+		background: var(--surface-card);
+	}
+
+	.conversation-header-inner {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20px;
+		width: min(100%, 900px);
+		margin: 0 auto;
+	}
+
+	.conversation-heading {
+		min-width: 0;
+	}
+
+	.conversation-title-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
 	}
 
 	.conversation-header h2 {
@@ -2192,11 +2282,44 @@
 		font-size: 13px;
 	}
 
+	.session-state {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 3px 7px;
+		border: 1px solid var(--border-default);
+		border-radius: 999px;
+		color: var(--text-tertiary);
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 1;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.session-state.working {
+		border-color: var(--warning-border);
+		color: var(--warning-text);
+	}
+
+	.session-state-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--success-text);
+	}
+
+	.session-state.working .session-state-dot {
+		background: var(--warning-text);
+		animation: state-pulse 1.4s ease-in-out infinite;
+	}
+
 	.objective-link,
 	.resource-links a {
 		color: var(--brand-primary);
 		font-weight: 700;
 		text-decoration: none;
+		transition: color 140ms ease;
 	}
 
 	.objective-link:hover,
@@ -2205,7 +2328,8 @@
 	}
 
 	.status {
-		margin: 12px 32px 0;
+		width: min(calc(100% - 64px), 900px);
+		margin: 12px auto 0;
 		padding: 10px 12px;
 		border-radius: 6px;
 		font-size: 13px;
@@ -2244,6 +2368,11 @@
 		color: inherit;
 		text-align: left;
 		cursor: pointer;
+		transition: color 140ms ease;
+	}
+
+	.progress-current:hover {
+		color: var(--brand-primary);
 	}
 
 	.progress-current:focus-visible {
@@ -2280,7 +2409,7 @@
 		padding: 3px 7px;
 		border: 1px solid var(--border-default);
 		border-radius: 4px;
-		background: var(--surface-muted);
+		background: var(--bg-subtle);
 		white-space: nowrap;
 	}
 
@@ -2314,6 +2443,7 @@
 		color: var(--text-tertiary);
 		font-size: 12px;
 		list-style: none;
+		animation: disclosure-in 160ms ease both;
 	}
 
 	.progress-trail li {
@@ -2345,12 +2475,14 @@
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
-		padding: 28px 32px;
+		padding: 36px 32px 44px;
+		scroll-behavior: smooth;
 	}
 
 	.message-list {
 		width: min(100%, 900px);
 		margin: 0 auto;
+		padding-bottom: 8px;
 	}
 
 	.empty-state {
@@ -2426,6 +2558,7 @@
 		display: flex;
 		justify-content: flex-end;
 		margin-bottom: 24px;
+		animation: message-enter 180ms ease both;
 	}
 
 	.user-message > div {
@@ -2488,6 +2621,13 @@
 		grid-template-columns: 36px minmax(0, 1fr);
 		gap: 12px;
 		margin-bottom: 18px;
+		animation: message-enter 180ms ease both;
+	}
+
+	.assistant-message.streaming .assistant-mark {
+		border-color: var(--brand-primary);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 12%, transparent);
+		transition: box-shadow 180ms ease;
 	}
 
 	.assistant-mark {
@@ -2544,8 +2684,52 @@
 		}
 	}
 
+	@keyframes message-enter {
+		from {
+			opacity: 0;
+			transform: translateY(6px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@keyframes disclosure-in {
+		from {
+			opacity: 0;
+			transform: translateY(-3px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@keyframes state-pulse {
+		0%,
+		100% {
+			opacity: 0.45;
+			transform: scale(0.85);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
 	@media (prefers-reduced-motion: reduce) {
-		.stream-cursor {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			scroll-behavior: auto !important;
+			transition-duration: 0.01ms !important;
+		}
+
+		.stream-cursor,
+		.session-state-dot {
 			animation: none;
 		}
 	}
@@ -2556,6 +2740,7 @@
 		border-radius: 6px;
 		background: var(--surface-card);
 		color: var(--text-primary);
+		animation: message-enter 180ms ease both;
 	}
 
 	.research-activity.failed {
@@ -2575,6 +2760,11 @@
 		padding: 8px 12px;
 		cursor: pointer;
 		list-style: none;
+		transition: background-color 140ms ease;
+	}
+
+	.research-activity summary:hover {
+		background: var(--bg-subtle);
 	}
 
 	.research-activity summary::-webkit-details-marker {
@@ -2685,6 +2875,7 @@
 		border-left: 3px solid var(--brand-primary);
 		border-radius: 6px;
 		background: var(--surface-card);
+		animation: message-enter 200ms ease both;
 	}
 
 	.research-artifact.failed {
@@ -3115,31 +3306,56 @@
 	.composer {
 		display: grid;
 		gap: 10px;
+		width: 100%;
 		padding: 16px 32px max(20px, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--border-default);
 		background: var(--surface-card);
+		box-sizing: border-box;
+	}
+
+	.composer > * {
+		width: min(100%, 900px);
+		margin-right: auto;
+		margin-left: auto;
 	}
 
 	.composer-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto;
-		gap: 10px;
+		display: block;
 		width: 100%;
 	}
 
-	.composer-row textarea {
-		grid-column: 1;
-		grid-row: 1;
-		min-height: 54px;
-		max-height: 150px;
-		padding: 12px 14px;
+	.composer-shell {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: end;
+		gap: 8px;
+		min-height: 56px;
+		padding: 8px 10px 8px 14px;
 		border: 1px solid var(--border-strong);
-		border-radius: 6px;
+		border-radius: 24px;
 		background: var(--surface-card);
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+		transition:
+			border-color 140ms ease,
+			box-shadow 140ms ease;
+	}
+
+	.composer-shell:focus-within {
+		border-color: var(--brand-primary);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 14%, transparent);
+	}
+
+	.composer-row textarea {
+		width: 100%;
+		min-height: 38px;
+		max-height: 180px;
+		padding: 9px 0;
+		border: 0;
+		background: transparent;
 		color: var(--text-primary);
 		font: inherit;
 		line-height: 22px;
-		resize: vertical;
+		resize: none;
 	}
 
 	.upload-panel {
@@ -3276,18 +3492,14 @@
 		font-weight: 700;
 	}
 
-	.composer-row .send-message {
-		grid-column: 2;
-		grid-row: 1;
-	}
-
-	.composer-row .add-papers {
-		grid-column: 3;
-		grid-row: 1;
+	.composer-actions {
+		display: flex;
+		align-items: center;
+		gap: 4px;
 	}
 
 	.add-papers > span:first-child {
-		font-size: 20px;
+		font-size: 22px;
 		font-weight: 400;
 		line-height: 1;
 	}
@@ -3363,21 +3575,62 @@
 	}
 
 	.composer-row textarea:focus {
-		border-color: var(--brand-primary);
-		outline: 2px solid var(--brand-border);
-		outline-offset: 1px;
+		outline: none;
+	}
+
+	.send-message,
+	.add-papers {
+		display: grid;
+		place-items: center;
+		width: 36px;
+		height: 36px;
+		min-width: 36px;
+		min-height: 36px;
+		padding: 0;
+		border-radius: 50%;
+		font-weight: 700;
+		line-height: 1;
+		cursor: pointer;
+		transition:
+			background-color 140ms ease,
+			border-color 140ms ease,
+			color 140ms ease,
+			transform 140ms ease;
+	}
+
+	.add-papers {
+		border: 0;
+		background: transparent;
+		color: var(--text-secondary);
+	}
+
+	.add-papers:hover:not(:disabled) {
+		border-color: transparent;
+		background: var(--bg-subtle);
+		color: var(--text-primary);
 	}
 
 	.send-message {
-		align-self: end;
-		min-width: 92px;
-		min-height: 42px;
 		border: 1px solid var(--brand-primary);
-		border-radius: 6px;
 		background: var(--brand-primary);
 		color: #fff;
-		font-weight: 700;
-		cursor: pointer;
+	}
+
+	.send-message > span {
+		font-size: 20px;
+		line-height: 1;
+		transform: translateY(-1px);
+	}
+
+	.send-message:disabled {
+		border-color: var(--border-default);
+		background: var(--bg-subtle);
+		color: var(--text-tertiary);
+	}
+
+	.send-message:hover:not(:disabled) {
+		border-color: var(--brand-primary-hover);
+		background: var(--brand-primary-hover);
 	}
 
 	.sr-only {
@@ -3409,6 +3662,11 @@
 			border-bottom: 1px solid var(--border-default);
 		}
 
+		.sidebar-top {
+			grid-column: 1;
+			grid-row: 1 / span 2;
+		}
+
 		.back-workspace {
 			grid-column: 1;
 			grid-row: 1;
@@ -3438,6 +3696,10 @@
 			padding-left: 18px;
 			padding-right: 18px;
 		}
+
+		.status {
+			width: calc(100% - 36px);
+		}
 	}
 
 	@media (max-width: 560px) {
@@ -3460,6 +3722,12 @@
 			align-items: flex-start;
 			flex-direction: column;
 			gap: 6px;
+		}
+
+		.conversation-header-inner {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 8px;
 		}
 
 		.suggestions {
@@ -3496,40 +3764,17 @@
 		}
 
 		.composer-row {
-			grid-template-columns: minmax(0, 1fr) auto auto;
-			gap: 8px;
+			display: block;
+		}
+
+		.composer-shell {
+			min-height: 52px;
+			padding-left: 12px;
+			padding-right: 8px;
 		}
 
 		.composer-row textarea {
-			grid-column: 1;
-		}
-
-		.composer-row .send-message {
-			grid-column: 2;
-		}
-
-		.composer-row .add-papers {
-			grid-column: 3;
-		}
-
-		.add-papers {
-			width: 44px;
-			min-width: 44px;
-			padding: 0;
-		}
-
-		.add-papers-label {
-			display: none;
-		}
-
-		.send-message {
-			align-self: stretch;
-			min-width: 76px;
-			width: auto;
-		}
-
-		.composer-row textarea {
-			min-height: 48px;
+			min-height: 36px;
 			resize: none;
 		}
 

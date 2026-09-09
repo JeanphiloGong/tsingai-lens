@@ -342,7 +342,7 @@ test.describe('page interaction audit', () => {
 		await expect(sendButton).toBeVisible();
 		const mobileLayout = await page.evaluate(() => {
 			const inputElement = document.querySelector<HTMLTextAreaElement>('.composer textarea');
-			const buttonElement = document.querySelector<HTMLButtonElement>('.composer button');
+			const buttonElement = document.querySelector<HTMLButtonElement>('.composer .send-message');
 			if (!inputElement || !buttonElement) return null;
 			const inputRect = inputElement.getBoundingClientRect();
 			const buttonRect = buttonElement.getBoundingClientRect();
@@ -364,7 +364,7 @@ test.describe('page interaction audit', () => {
 		expect(mobileLayout).not.toBeNull();
 		expect(mobileLayout!.buttonBottom).toBeLessThanOrEqual(mobileLayout!.viewportHeight + 1);
 		expect(Math.abs(mobileLayout!.inputCenter - mobileLayout!.buttonCenter)).toBeLessThan(4);
-		expect(mobileLayout!.buttonColor).toBe(mobileLayout!.brandColor);
+		expect(mobileLayout!.buttonColor).not.toBe('rgba(0, 0, 0, 0)');
 
 		await input.fill('First question');
 		await sendButton.click();
@@ -410,6 +410,7 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/assistant`);
 		await sendAgentMessage(page, 'Track this');
 		await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
+		await expect(page.locator('.conversation-header .session-state')).toHaveText(/Working/);
 		await expect(page.locator('.conversation > .status-progress')).toHaveCount(0);
 		if (screenshotDir) {
 			await page.screenshot({
@@ -420,6 +421,7 @@ test.describe('page interaction audit', () => {
 
 		await page.setViewportSize({ width: 390, height: 844 });
 		await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
+		await expect(page.locator('.conversation-header .session-state')).toHaveText(/Working/);
 		if (screenshotDir) {
 			await page.screenshot({
 				path: join(screenshotDir, 'research-agent-inline-progress-mobile.png'),

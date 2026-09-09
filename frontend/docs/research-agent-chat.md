@@ -127,6 +127,35 @@ title, location, link, quote, and full-Source digest metadata. The browser does
 not establish Source authenticity itself, and a verified context is still not
 Evidence until the Evidence authoring contract is completed.
 
+## Presentation Architecture
+
+The route follows the same message-first composition used by Open WebUI while
+keeping Lens-specific research boundaries explicit:
+
+- `+page.svelte` owns session orchestration, streaming, approval state, and
+  the route shell. It does not create a second browser API or persistence
+  model.
+- `conversationPresentation.ts` converts the durable trajectory into ordered
+  message, activity, and artifact items. This keeps grouping and display
+  policy out of the transport callbacks.
+- The message timeline gives each role a stable visual grammar: user content
+  is a right-aligned bubble, Assistant text is an open reading column with an
+  avatar and inline progress, and evidence-bearing artifacts retain the
+  stronger framed treatment needed for review.
+- State history and capability activity are native disclosures. Their
+  transitions are short and reversible, while `prefers-reduced-motion`
+  disables non-essential movement. Status labels remain observable research
+  stages; hidden model reasoning and provider internals never enter the view.
+- The header, timeline, and composer share a 900px reading measure. The
+  sidebar is a navigation rail on desktop and a compact collection/session
+  bar on mobile. The composer remains the final focus target and honors the
+  device safe area.
+
+This composition is intentionally a presentation boundary, not a new domain
+layer: server trajectory data remains authoritative, and structured result
+cards continue to link to the canonical Collection, Objective, Finding,
+Evidence, and Source routes.
+
 ## Visible States
 
 ### Empty and ordinary conversation

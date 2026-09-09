@@ -579,6 +579,18 @@ const translations: Record<Language, Translations> = {
 				previousPage: 'Previous',
 				nextPage: 'Next'
 			},
+			findingSummary: {
+				title: 'AI summary',
+				regenerate: 'Regenerate summary',
+				retry: 'Retry',
+				generating: 'Summarizing...',
+				model: 'AI-generated · {model}',
+				summary_input_too_large: 'Too much content to summarize at once.',
+				summary_stale_analysis: 'Results have changed. Refresh this page.',
+				summary_no_evidence: 'No evidence to summarize yet.',
+				summary_evidence_incomplete: 'Some evidence is unavailable.',
+				summary_generation_failed: 'Summary failed. Please retry.'
+			},
 			evidenceMap: {
 				findingFilter: 'Finding',
 				allFindings: 'All findings',
@@ -3227,6 +3239,18 @@ const translations: Record<Language, Translations> = {
 				paginationLabel: '研究目标分页',
 				previousPage: '上一页',
 				nextPage: '下一页'
+			},
+			findingSummary: {
+				title: 'AI 总结',
+				regenerate: '重新生成',
+				retry: '重试',
+				generating: '正在总结…',
+				model: 'AI 生成 · {model}',
+				summary_input_too_large: '内容过多，暂时无法一次总结。',
+				summary_stale_analysis: '分析结果已更新，请刷新页面。',
+				summary_no_evidence: '暂无可供总结的证据。',
+				summary_evidence_incomplete: '部分证据暂时不可用。',
+				summary_generation_failed: '总结生成失败，请重试。'
 			},
 			evidenceMap: {
 				pageTitle: '研究目标证据关系图',

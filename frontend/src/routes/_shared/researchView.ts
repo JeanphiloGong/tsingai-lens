@@ -879,6 +879,44 @@ export async function createEvidenceVersion(
 	}) as Promise<EvidenceAuthoringResult>;
 }
 
+export type FindingEvidenceSummary = {
+	collection_id: string;
+	objective_id: string;
+	finding_id: string;
+	analysis_version: number;
+	language: 'en' | 'zh';
+	text: string;
+	citation_ids: string[];
+	references: Array<{
+		id: string;
+		kind: 'finding' | 'evidence';
+		label: string;
+		document_id?: string | null;
+		source_ref?: string | null;
+		page_numbers?: number[];
+		source_excerpt?: string | null;
+	}>;
+	model: string;
+	prompt_version: string;
+	generated_at: string;
+};
+
+export async function generateFindingSummary(
+	collectionId: string,
+	objectiveId: string,
+	findingId: string,
+	analysisVersion: number,
+	language: 'en' | 'zh',
+	signal?: AbortSignal
+): Promise<FindingEvidenceSummary> {
+	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}/summary`;
+	return requestJson(path, {
+		method: 'POST',
+		body: JSON.stringify({ analysis_version: analysisVersion, language }),
+		signal
+	}) as Promise<FindingEvidenceSummary>;
+}
+
 export async function fetchObjectiveEvidenceMap(
 	collectionId: string,
 	objectiveId: string

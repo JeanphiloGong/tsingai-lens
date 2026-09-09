@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
+	import FindingEvidenceSummary from './FindingEvidenceSummary.svelte';
 	import { errorMessage } from '../../../_shared/api';
 	import {
 		createFindingFeedback,
@@ -660,6 +661,13 @@
 		<div><span>证据确定性</span><strong>{certaintyLabel(finding.certainty)}</strong></div>
 		<div><span>直接文献</span><strong>{directPaperCount} 篇</strong></div>
 	</div>
+
+	<FindingEvidenceSummary
+		{collectionId}
+		objectiveId={finding.objective_id}
+		findingId={finding.finding_id}
+		analysisVersion={finding.analysis_version}
+	/>
 
 	<section aria-labelledby="evidence-comparison-title">
 		<div class="section-heading">

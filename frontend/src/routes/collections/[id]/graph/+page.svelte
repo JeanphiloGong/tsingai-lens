@@ -11,6 +11,7 @@
 		type ObjectiveSummary
 	} from '../../../_shared/researchView';
 	import EvidenceMapFlow from '../_components/EvidenceMapFlow.svelte';
+	import FindingEvidenceSummary from '../_components/FindingEvidenceSummary.svelte';
 
 	let publishedObjectives: ObjectiveSummary[] = [];
 	let selectedObjectiveId = '';
@@ -191,7 +192,19 @@
 			{selectedFindingId}
 			{unlinkedOnly}
 			onSelectFinding={selectFinding}
-		/>
+		>
+			<svelte:fragment slot="summary">
+				{#if selectedFindingId}
+					<FindingEvidenceSummary
+						{collectionId}
+						objectiveId={evidenceMap.objective_id}
+						findingId={selectedFindingId}
+						analysisVersion={evidenceMap.analysis_version}
+						returnTo={`${resolve('/collections/[id]/graph', { id: collectionId })}?objective_id=${encodeURIComponent(evidenceMap.objective_id)}&finding_id=${encodeURIComponent(selectedFindingId)}`}
+					/>
+				{/if}
+			</svelte:fragment>
+		</EvidenceMapFlow>
 	{/if}
 </section>
 

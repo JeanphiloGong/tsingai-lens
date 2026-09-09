@@ -1287,6 +1287,89 @@ test.describe('page interaction audit', () => {
 		await page.waitForLoadState('networkidle');
 	});
 
+	for (const width of [390, 1440]) {
+		for (const surface of ['graph', 'finding']) {
+			test(`single-paragraph AI summary on ${surface} at ${width}px`, async ({ page }) => {
+				await page.setViewportSize({ width, height: 1000 });
+				const errors: string[] = [];
+				page.on('pageerror', (error) => errors.push(error.message));
+				page.on('console', (message) => {
+					if (['error', 'warning'].includes(message.type())) errors.push(message.text());
+				});
+				let requests = 0;
+				const text =
+					'Annealing was associated with higher tensile strength in the reported samples. The treatment and test conditions limit how broadly this result can be applied.';
+				await page.route(`**/objectives/${objectiveId}/findings/finding-1/summary`, (route) => {
+					requests += 1;
+					expect(route.request().postDataJSON()).toEqual({ analysis_version: 1, language: 'en' });
+					return route.fulfill(
+						json({
+							collection_id: collectionId,
+							objective_id: objectiveId,
+							finding_id: 'finding-1',
+							analysis_version: 1,
+							language: 'en',
+							text,
+							citation_ids: ['evidence:evidence-1'],
+							references: [
+								{
+									id: 'evidence:evidence-1',
+									kind: 'evidence',
+									label: 'Table 7',
+									document_id: documentId,
+									source_ref: 'table-7',
+									page_numbers: [7],
+									source_excerpt: 'After annealing, tensile strength increased to 620 MPa.'
+								}
+							],
+							model: 'test-model',
+							prompt_version: 'finding-evidence-summary.v1',
+							generated_at: now()
+						})
+					);
+				});
+				const destination =
+					surface === 'graph'
+						? `/collections/${collectionId}/graph?objective_id=${objectiveId}&finding_id=finding-1`
+						: `/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`;
+				await page.goto(destination);
+				const summary = page.locator('.finding-summary');
+				await expect(summary).toBeVisible();
+				expect(requests).toBe(0);
+				await summary.locator('summary').click();
+				await expect(summary.locator('.summary-text')).toHaveCount(1);
+				await expect(summary.locator('.summary-text')).toContainText(text);
+				await expect(summary.getByRole('heading')).toHaveCount(0);
+				expect(await visibleElementsFitViewport(page, '.finding-summary')).toBe(true);
+				const citation = summary.getByRole('link', { name: '[1]' });
+				const href = new URL((await citation.getAttribute('href'))!, page.url());
+				expect(href.searchParams.get('source_ref')).toBe('table-7');
+				expect(href.searchParams.get('return_to')).toBe(destination);
+				await summary.scrollIntoViewIfNeeded();
+				if (screenshotDir) {
+					await page.screenshot({
+						path: join(screenshotDir, `ai-summary-${surface}-${width}.png`),
+						fullPage: true
+					});
+					await summary.screenshot({
+						path: join(screenshotDir, `ai-summary-paragraph-${surface}-${width}.png`)
+					});
+				}
+				if (surface === 'graph') {
+					await expect(page.getByText('1 failed paper', { exact: true })).toBeVisible();
+					await page.getByRole('combobox', { name: 'Finding', exact: true }).selectOption('');
+					await expect(summary).toHaveCount(0);
+					await page
+						.getByRole('combobox', { name: 'Finding', exact: true })
+						.selectOption('finding-1');
+					await expect(summary.locator('.summary-text')).toHaveCount(0);
+				}
+				expect(requests).toBe(1);
+				expect(errors).toEqual([]);
+			});
+		}
+	}
+
 	test('global Research Agent entry asks for a collection workspace', async ({ page }) => {
 		const consoleErrors: string[] = [];
 		page.on('console', (message) => {

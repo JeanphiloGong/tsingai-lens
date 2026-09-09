@@ -188,6 +188,7 @@
 		</p>
 	{/if}
 
+	<slot name="summary" />
 	<div class="flow" aria-label={$t('research.evidenceMap.flowLabel')}>
 		<section class="column column--objective">
 			<header>

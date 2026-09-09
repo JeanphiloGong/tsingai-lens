@@ -114,6 +114,13 @@ This node owns the Collection route family.
 
 ## Objective Interaction
 
+The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
+Opening "AI summary" requests one short paragraph; it has no categorized
+sections or evidence counters. Compact references link to exact Sources, and
+model attribution remains visible. The optional summary is generated only on
+request and cleared on scope, version, or language changes; it never modifies
+the published result. Failure leaves the original result available with a retry.
+
 The user-facing hierarchy is:
 
 ```text

@@ -38,8 +38,6 @@ _STUDY_CONTEXT_LIMIT = 12
 _STUDY_CONTEXT_VALUE_CHARS = 160
 _VARIED_FACTOR_LIMIT = 12
 _PAPER_MAP_STUDY_LIMIT = 2
-_PAPER_MAP_RELATIONSHIP_LIMIT = 6
-_PAPER_MAP_SIGNAL_LIMIT = PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT
 _PAPER_MAP_CONTEXT_LIMIT = 4
 _PAPER_MAP_VARIED_FACTOR_LIMIT = 6
 _SOURCE_SIGNAL_CONTEXT_LIMIT = 4
@@ -488,7 +486,7 @@ class StructuredPaperMapStudy(_PaperResearchMapResponse):
     ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
     relationships: list[StructuredPaperMapRelationship] = Field(
         min_length=1,
-        max_length=_PAPER_MAP_RELATIONSHIP_LIMIT,
+        max_length=PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     )
     confidence: float = 0.0
 
@@ -575,7 +573,7 @@ class StructuredExperimentalPaperMap(_PaperResearchMapResponse):
     )
     unresolved_signals: list[StructuredPaperMapSignal] = Field(
         default_factory=list,
-        max_length=_PAPER_MAP_SIGNAL_LIMIT,
+        max_length=PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
@@ -1140,7 +1138,7 @@ def _normalize_experimental_paper_map_payload(value: Any) -> Any:
         relationships = _bounded_mapping_list(
             normalized_study,
             "relationships",
-            limit=_PAPER_MAP_RELATIONSHIP_LIMIT,
+            limit=PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
             path=f"studies[{study_index}].relationships",
             overflows=overflows,
         )
@@ -1168,7 +1166,7 @@ def _normalize_experimental_paper_map_payload(value: Any) -> Any:
     signals = _bounded_mapping_list(
         payload,
         "unresolved_signals",
-        limit=_PAPER_MAP_SIGNAL_LIMIT,
+        limit=PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
         path="unresolved_signals",
         overflows=overflows,
     )
@@ -1666,8 +1664,8 @@ def build_paper_research_map_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "source_labels, and confidence. Each factor assertion contains label, role, and "
         "the Source labels establishing that role.\n"
         f"Limits: up to {_PAPER_MAP_STUDY_LIMIT} studies, up to "
-        f"{_PAPER_MAP_RELATIONSHIP_LIMIT} relationships per study, up to "
-        f"{_PAPER_MAP_SIGNAL_LIMIT} unresolved signals, at most "
+        f"{PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT} relationships per study, up to "
+        f"{PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT} unresolved signals, at most "
         f"{_PAPER_MAP_VARIED_FACTOR_LIMIT} factor assertions, at most "
         f"{PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT} unique `source_labels`, and up to 2 "
         "`warnings`, each at most 240 characters. Set output_saturated=true only if a "

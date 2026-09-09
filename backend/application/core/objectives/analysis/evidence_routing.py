@@ -14,7 +14,10 @@ from application.core.objectives import property_matching
 from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
 )
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.source_screening import (
+    FRAME_TABLE_ROW_LIMIT,
+    PaperAnalysisFrame,
+)
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     ResearchObjective,
@@ -27,15 +30,14 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_FRAME_TABLE_ROW_LIMIT = 3
-_ROUTE_PROMPT_TEXT_CHARS = 320
-_ROUTE_PROMPT_HEADER_LIMIT = 8
+ROUTE_PROMPT_TEXT_LIMIT = 320
+ROUTE_PROMPT_HEADER_LIMIT = 8
 _ROUTE_CANDIDATE_LIMIT = 40
 _ROUTE_TEXT_CANDIDATE_LIMIT = 8
 _ROUTE_TEXT_HINT_LIMIT = 3
 _ROUTE_TREE_TEXT_SECTION_LIMIT = 3
 _ROUTE_CONTEXT_CANDIDATE_LIMIT = 6
-_OBJECTIVE_STATE_TEXT_CHARS = 220
+OBJECTIVE_STATE_TEXT_LIMIT = 220
 _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES = {
     "current_experimental_evidence",
     "process_or_treatment",
@@ -1019,12 +1021,12 @@ def _route_prompt_current_source(
             "source_ref": str(candidate.get("source_ref") or ""),
             "frame_status": str(candidate.get("frame_status") or ""),
             "caption_text": str(candidate.get("caption_text") or "")[
-                :_ROUTE_PROMPT_TEXT_CHARS
+                :ROUTE_PROMPT_TEXT_LIMIT
             ],
             "heading_path": candidate.get("heading_path"),
             "column_headers": [
-                str(header)[:_OBJECTIVE_STATE_TEXT_CHARS]
-                for header in column_headers[:_ROUTE_PROMPT_HEADER_LIMIT]
+                str(header)[:OBJECTIVE_STATE_TEXT_LIMIT]
+                for header in column_headers[:ROUTE_PROMPT_HEADER_LIMIT]
                 if str(header).strip()
             ],
             "row_count": table_schema.get("row_count"),
@@ -1036,7 +1038,7 @@ def _route_prompt_current_source(
         "frame_status": str(candidate.get("frame_status") or ""),
         "section_label": candidate.get("section_label"),
         "block_type": candidate.get("block_type"),
-        "text_hint": str(candidate.get("text") or "")[:_ROUTE_PROMPT_TEXT_CHARS],
+        "text_hint": str(candidate.get("text") or "")[:ROUTE_PROMPT_TEXT_LIMIT],
     }
 
 
@@ -2744,7 +2746,7 @@ def _build_route_table_schema(table: Any) -> dict[str, Any]:
         "col_count": int(getattr(table, "col_count", 0) or 0),
         "sample_rows": [
             [str(cell) for cell in row]
-            for row in matrix[:_FRAME_TABLE_ROW_LIMIT]
+            for row in matrix[:FRAME_TABLE_ROW_LIMIT]
             if isinstance(row, (list, tuple))
         ],
     }

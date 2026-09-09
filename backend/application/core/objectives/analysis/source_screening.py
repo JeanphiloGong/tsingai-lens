@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_FRAME_TABLE_ROW_LIMIT = 3
+# One owner for the table-row window shared by framing and routing.
+FRAME_TABLE_ROW_LIMIT = 3
 _FRAME_SOURCE_UNIT_LIMIT = 8
 _FRAME_SECTION_CHUNK_CHARS = 2_400
 _FRAME_PRIOR_STUDY_LIMIT = 8
@@ -1682,11 +1683,11 @@ def _build_frame_table_source_units(
             for row in matrix
         ]
         row_chunks = [
-            serialized_rows[position : position + _FRAME_TABLE_ROW_LIMIT]
-            for position in range(0, len(serialized_rows), _FRAME_TABLE_ROW_LIMIT)
+            serialized_rows[position : position + FRAME_TABLE_ROW_LIMIT]
+            for position in range(0, len(serialized_rows), FRAME_TABLE_ROW_LIMIT)
         ] or [[]]
         for chunk_position, rows in enumerate(row_chunks, start=1):
-            row_start = (chunk_position - 1) * _FRAME_TABLE_ROW_LIMIT
+            row_start = (chunk_position - 1) * FRAME_TABLE_ROW_LIMIT
             units.append(
                 {
                     "source_unit_id": _frame_source_unit_id(

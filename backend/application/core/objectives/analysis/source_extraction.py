@@ -24,6 +24,8 @@ from pydantic import (
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
+    OBJECTIVE_STATE_TEXT_LIMIT,
+    ROUTE_PROMPT_TEXT_LIMIT,
     order_routes_for_extraction,
 )
 from application.core.objectives.analysis.diagnostics import (
@@ -65,18 +67,11 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_ROUTE_PROMPT_TEXT_CHARS = 320
-_ROUTE_PROMPT_HEADER_LIMIT = 8
 _OBJECTIVE_STATE_ITEM_LIMIT = 12
-_OBJECTIVE_STATE_TEXT_CHARS = 220
 # A Source block is normally one paragraph, but tables and figure captions can
 # carry longer result clauses.  Keep a generous bounded window so extraction
 # sees the whole local claim without sending an unbounded document section.
 _OBJECTIVE_EVIDENCE_TEXT_CHARS = 12_000
-# Keep the complete bounded Source block available to extraction.  A second,
-# smaller head-only limit silently removed result clauses that appeared later
-# in a paragraph, which is not a valid evidence-preserving reduction.
-_OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS = _OBJECTIVE_EVIDENCE_TEXT_CHARS
 _OBJECTIVE_CONTEXT_BUNDLE_MAX_SOURCES = 16
 _OBJECTIVE_CONTEXT_BUNDLE_MAX_CHARS = 40_000
 # Same-paper closure is a targeted research read, not a license to inspect an
@@ -6938,11 +6933,11 @@ def _objective_evidence_prompt_source(
             "document_id": source.get("document_id"),
             "page": source.get("page"),
             "caption_text": str(source.get("caption_text") or "")[
-                :_ROUTE_PROMPT_TEXT_CHARS
+                :ROUTE_PROMPT_TEXT_LIMIT
             ],
             "heading_path": source.get("heading_path"),
             "column_headers": [
-                str(value)[:_OBJECTIVE_STATE_TEXT_CHARS]
+                str(value)[:OBJECTIVE_STATE_TEXT_LIMIT]
                 for value in source.get("column_headers", []) or []
                 if str(value).strip()
             ],
@@ -6961,7 +6956,7 @@ def _objective_evidence_prompt_source(
             "block_type": source.get("block_type"),
             "heading_path": source.get("heading_path"),
             "text": str(source.get("text") or "")[
-                :_OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS
+                :_OBJECTIVE_EVIDENCE_TEXT_CHARS
             ],
         }
     return dict(source)

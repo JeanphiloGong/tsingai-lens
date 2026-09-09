@@ -116,6 +116,19 @@ come from the authoritative final turn rather than from partial model text. If
 the stream is interrupted, the browser reloads the durable trajectory before
 offering a retry.
 
+A failed approval response or an empty idempotent acknowledgement triggers a
+trajectory reload. The saved tool result, resource links, and current approval
+state are restored together. If both the decision response and the recovery
+read fail, the approval remains retryable using its original identity.
+An unresolved persisted tool request retains a result-confirmation indicator
+and Check result action beside its activity, including after conversation retry
+or page reload. The page reads the trajectory every three seconds until the
+result or an approval boundary is available. Read failures keep the confirmation
+state and retry action; they do not imply a scientific failure. The composer
+stays disabled while that result is unconfirmed, and recovery never resubmits a
+write. Leaving the session or account cancels its timer and request and ignores
+late results.
+
 The selected session ID and a small presentation-only history are stored under:
 
 ```text
@@ -144,7 +157,12 @@ Source handoff from the document reader. The pending Source is shown above the
 composer and can be removed. It is cleared after the complete persisted turn
 returns, or when recovery after an interrupted stream confirms that the sent
 message and its Source locators were persisted. If persistence cannot be
-confirmed, the pending Source remains available for retry. The durable user
+confirmed, the pending Source remains available for retry. This check also runs
+when returning to a conversation or reloading the page. A pending handoff records
+its submitted session, question, and preceding message so an older use of the
+same Source cannot consume a new submission. Selecting a Source again starts a
+new handoff. These submission markers stay in browser storage and are not sent
+as scientific context. The durable user
 message then owns the Source context. The browser
 sends the canonical locator kind (`text_window`, `table`, or `figure`) and a
 bounded quote. The backend resolves that locator against the immutable prepared

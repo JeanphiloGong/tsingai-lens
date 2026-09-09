@@ -305,17 +305,22 @@ function sourceContextStorageKey(userId: string, collectionId: string) {
 	return `lens.chatSourceContext.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}`;
 }
 
-export function storePendingChatSourceContext(userId: string, context: ChatSourceContext) {
+export function storePendingChatSourceContext(
+	userId: string,
+	context: ChatSourceContext,
+	submission?: { session_id: string; content: string; after_message_id: string | null }
+) {
 	if (typeof window === 'undefined') return;
 	window.sessionStorage.setItem(
 		sourceContextStorageKey(userId, context.collection_id),
-		JSON.stringify(context)
+		JSON.stringify({ ...context, submission })
 	);
 }
 
 export function readPendingChatSourceContext(
 	userId: string,
-	collectionId: string
+	collectionId: string,
+	persisted?: { sessionId: string; messages: ChatMessage[] }
 ): ChatSourceContext | null {
 	if (typeof window === 'undefined') return null;
 	try {
@@ -335,6 +340,36 @@ export function readPendingChatSourceContext(
 		) {
 			clearPendingChatSourceContext(userId, collectionId);
 			return null;
+		}
+		const submission = value.submission as Record<string, unknown> | undefined;
+		if (persisted && submission?.session_id === persisted.sessionId) {
+			const afterIndex =
+				submission.after_message_id === null
+					? -1
+					: persisted.messages.findIndex(
+							(message) => message.message_id === submission.after_message_id
+						);
+			const hasAnchor = submission.after_message_id === null || afterIndex >= 0;
+			const sent =
+				hasAnchor &&
+				persisted.messages
+					.slice(afterIndex + 1)
+					.some(
+						(message) =>
+							message.role === 'user' &&
+							message.content === submission.content &&
+							message.source_contexts.some(
+								(source) =>
+									source.collection_id === collectionId &&
+									source.document_id === value.document_id &&
+									source.source_kind === value.source_kind &&
+									source.source_ref === value.source_ref
+							)
+					);
+			if (sent) {
+				clearPendingChatSourceContext(userId, collectionId);
+				return null;
+			}
 		}
 		return {
 			resource_ref: {

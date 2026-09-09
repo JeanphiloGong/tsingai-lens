@@ -205,6 +205,9 @@ const translations: Record<Language, Translations> = {
 		researchAgent: {
 			title: 'Research Agent',
 			retrySession: 'Retry conversation',
+			awaitingResult: 'Awaiting the saved research result',
+			checkingResult: 'Checking the saved research result...',
+			checkResult: 'Check result',
 			launcher: {
 				eyebrow: 'Research Agent',
 				title: 'Choose a research workspace',
@@ -2809,6 +2812,9 @@ const translations: Record<Language, Translations> = {
 		researchAgent: {
 			title: '研究 Agent',
 			retrySession: '重试加载会话',
+			awaitingResult: '研究结果尚未确认',
+			checkingResult: '正在确认研究结果...',
+			checkResult: '检查结果',
 			launcher: {
 				eyebrow: '研究 Agent',
 				title: '选择研究工作区',

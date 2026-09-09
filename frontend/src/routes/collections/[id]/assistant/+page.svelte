@@ -12,6 +12,7 @@
 		fetchChatTrajectory,
 		appendChatProgress,
 		readPendingChatSourceContext,
+		storePendingChatSourceContext,
 		streamChatMessage,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
@@ -56,6 +57,10 @@
 	let loadedCollectionId = '';
 	let loadedUserId = '';
 	let failedSessionId: string | null = null;
+	let recoveringCallId: string | null = null;
+	let recoveryLoading = false;
+	let recoveryError = '';
+	let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
 
 	let sessionGeneration = 0;
 	let sessionController: AbortController | null = null;
@@ -64,6 +69,7 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		clearTimeout(recoveryTimer);
 		sessionController?.abort();
 	});
 
@@ -165,6 +171,10 @@
 	async function loadSession(requestedSessionId = '') {
 		const activeCollectionId = collectionId;
 		const generation = ++sessionGeneration;
+		clearTimeout(recoveryTimer);
+		recoveringCallId = null;
+		recoveryLoading = false;
+		recoveryError = '';
 		sessionController?.abort();
 		sessionController = null;
 		session = null;
@@ -220,10 +230,15 @@
 				messages = trajectory.items;
 				loadFeedback(trajectory.feedback);
 				pendingApproval = trajectory.pending_approval;
+				pendingSourceContext = readPendingChatSourceContext(userId, activeCollectionId, {
+					sessionId: nextSession.session_id,
+					messages
+				});
 			}
 			session = nextSession;
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
+			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
 			failedSessionId = requestedSessionId || readStoredSessionId();
@@ -233,6 +248,56 @@
 			pendingApproval = null;
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) loading = false;
+		}
+	}
+
+	function scheduleRecovery() {
+		clearTimeout(recoveryTimer);
+		const completed = new Set(messages.map((message) => message.tool_result?.tool_call_id));
+		recoveringCallId =
+			messages
+				.flatMap((message) => message.tool_calls)
+				.find(
+					(call) =>
+						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
+				)?.tool_call_id ?? null;
+		if (recoveringCallId && !destroyed) {
+			recoveryTimer = setTimeout(() => void refreshRecovery(), 3000);
+		}
+	}
+
+	async function refreshRecovery() {
+		if (!session || !recoveringCallId || recoveryLoading) return;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		const activeSession = session;
+		clearTimeout(recoveryTimer);
+		recoveryLoading = true;
+		try {
+			const trajectory = await fetchChatTrajectory(
+				activeSession.session_id,
+				sessionController?.signal
+			);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			messages = trajectory.items;
+			loadFeedback(trajectory.feedback);
+			pendingApproval = trajectory.pending_approval;
+			recoveryError = '';
+			error = '';
+			failedSessionId = null;
+			session = {
+				...activeSession,
+				updated_at: messages.at(-1)?.created_at ?? activeSession.updated_at
+			};
+			upsertHistory(session);
+		} catch (err) {
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			recoveryError = errorMessage(err);
+		} finally {
+			if (isCurrentSession(generation, ownerCollectionId)) {
+				recoveryLoading = false;
+				scheduleRecovery();
+			}
 		}
 	}
 
@@ -302,7 +367,7 @@
 
 	async function sendMessage(nextText = input.trim()) {
 		const text = nextText.trim();
-		if (!session || !text || sending || deciding || pendingApproval) return;
+		if (!session || !text || sending || deciding || pendingApproval || recoveringCallId) return;
 		const activeSession = session;
 		const activeCollectionId = collectionId;
 		const generation = sessionGeneration;
@@ -325,6 +390,13 @@
 		const streamingId = `local-stream-${Date.now()}`;
 		const createdAt = new Date().toISOString();
 		const sourceContexts = pendingSourceContext ? [pendingSourceContext] : [];
+		if (pendingSourceContext) {
+			storePendingChatSourceContext(userId, pendingSourceContext, {
+				session_id: activeSession.session_id,
+				content: text,
+				after_message_id: messages.at(-1)?.message_id ?? null
+			});
+		}
 		const optimisticMessage: ChatMessage = {
 			message_id: optimisticId,
 			session_id: activeSession.session_id,
@@ -388,21 +460,12 @@
 					.find((message) => message.role === 'user' && message.content === text);
 				if (!persistedMessage) {
 					input = text;
-				} else if (
-					sourceContexts.length &&
-					sourceContexts.every((source) =>
-						persistedMessage.source_contexts.some(
-							(saved) =>
-								saved.collection_id === source.collection_id &&
-								saved.document_id === source.document_id &&
-								saved.source_kind === source.source_kind &&
-								saved.source_ref === source.source_ref
-						)
-					)
-				) {
-					clearPendingChatSourceContext(userId, activeCollectionId);
-					pendingSourceContext = null;
 				}
+				pendingSourceContext = readPendingChatSourceContext(userId, activeCollectionId, {
+					sessionId: activeSession.session_id,
+					messages
+				});
+				scheduleRecovery();
 			} catch {
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = messages.filter(
@@ -460,24 +523,51 @@
 
 	async function decide(decision: 'approved' | 'rejected') {
 		if (!session || !pendingApproval || deciding) return;
+		const activeSession = session;
 		const generation = sessionGeneration;
 		const activeCollectionId = collectionId;
 		const call = pendingApproval;
 		deciding = true;
+		failedSessionId = null;
 		error = '';
 		notice = '';
+		let decisionError: unknown;
 		try {
 			const turn = await decideChatToolCall(
-				session.session_id,
+				activeSession.session_id,
 				call,
 				decision,
 				sessionController?.signal
-			);
+			).catch((err: unknown) => {
+				decisionError = err;
+				return null;
+			});
 			if (!isCurrentSession(generation, activeCollectionId)) return;
-			applyTurn(turn, [], call.name);
+			if (!turn || !turn.messages.length) {
+				// A lost response or idempotent acknowledgement needs the persisted result.
+				const trajectory = await fetchChatTrajectory(
+					activeSession.session_id,
+					sessionController?.signal
+				);
+				if (!isCurrentSession(generation, activeCollectionId)) return;
+				messages = trajectory.items;
+				loadFeedback(trajectory.feedback);
+				pendingApproval = trajectory.pending_approval;
+				upsertHistory(activeSession);
+				if (turn) applyTurn({ ...turn, pending_approval: pendingApproval }, [], call.name);
+				else if (
+					!messages.some((message) => message.tool_result?.tool_call_id === call.tool_call_id)
+				) {
+					error = errorMessage(decisionError);
+					failedSessionId = activeSession.session_id;
+				}
+			} else {
+				applyTurn(turn, [], call.name);
+			}
+			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
-			error = errorMessage(err);
+			error = errorMessage(decisionError ?? err);
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) deciding = false;
 		}
@@ -547,6 +637,10 @@
 			{pendingApproval}
 			{progress}
 			{progressHistory}
+			{recoveringCallId}
+			{recoveryLoading}
+			{recoveryError}
+			onRefreshRecovery={refreshRecovery}
 			{loading}
 			{sending}
 			{deciding}
@@ -560,7 +654,12 @@
 				{collectionId}
 				{input}
 				{sending}
-				disabled={!session || loading || sending || deciding || Boolean(pendingApproval)}
+				disabled={!session ||
+					loading ||
+					sending ||
+					deciding ||
+					Boolean(pendingApproval) ||
+					Boolean(recoveringCallId)}
 				{pendingSourceContext}
 				onInput={handleComposerInput}
 				onSend={sendMessage}

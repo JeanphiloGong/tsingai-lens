@@ -21,6 +21,10 @@
 	export let loading = false;
 	export let sending = false;
 	export let deciding = false;
+	export let recoveringCallId: string | null = null;
+	export let recoveryLoading = false;
+	export let recoveryError = '';
+	export let onRefreshRecovery: () => void = () => {};
 	export let ready = false;
 	export let onSend: (text: string) => void;
 	export let decide: (decision: 'approved' | 'rejected') => void;
@@ -176,7 +180,27 @@
 							{item}
 						/>{#each item.artifacts as artifact (artifact.toolCallId)}<ResearchArtifact
 								{artifact}
-							/>{/each}{/if}{/each}
+							/>{/each}
+						{#if item.operations.some((operation) => operation.toolCallId === recoveringCallId)}
+							<div class="recovery-status" data-testid="research-recovery" role="status">
+								<div>
+									<span
+										>{$t(
+											recoveryLoading
+												? 'researchAgent.checkingResult'
+												: 'researchAgent.awaitingResult'
+										)}</span
+									>
+									{#if recoveryError}<p class="recovery-error">{recoveryError}</p>{/if}
+								</div>
+								<IconButton
+									label={$t('researchAgent.checkResult')}
+									disabled={recoveryLoading}
+									onClick={onRefreshRecovery}>&#8635;</IconButton
+								>
+							</div>
+						{/if}
+					{/if}{/each}
 			{/if}
 
 			{#if pendingApproval}
@@ -194,6 +218,26 @@
 </div>
 
 <style>
+	.recovery-status {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin: 0 0 20px 48px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		overflow-wrap: anywhere;
+	}
+	.recovery-error {
+		margin: 4px 0 0;
+		color: var(--danger-text);
+	}
+	@media (max-width: 560px) {
+		.recovery-status {
+			margin-left: 0;
+		}
+	}
+
 	.timeline {
 		position: relative;
 		display: flex;

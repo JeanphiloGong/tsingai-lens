@@ -121,6 +121,61 @@ test.describe('page interaction audit', () => {
 			await page.screenshot({ path: join(screenshotDir, 'http-upload-recovered.png') });
 	});
 
+	for (const width of [390, 1440]) {
+		test(`keeps approval recovery beside the reply after reload at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			const initial = agentTurn('Create the reviewed LPBF research question', 4);
+			let approved = false;
+			let completed = false;
+			let decisions = 0;
+			await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) =>
+				route.fulfill(
+					json({
+						feedback: [],
+						pending_approval: approved ? null : initial.pending_approval,
+						items: completed
+							? [...initial.messages, ...approvedAgentTurn('call_write_1').messages]
+							: initial.messages
+					})
+				)
+			);
+			await page.route(
+				'**/api/v1/chat-sessions/chat_1/tool-calls/call_write_1/decision',
+				(route) => {
+					approved = true;
+					decisions += 1;
+					return route.abort('failed');
+				}
+			);
+			await page.goto('/collections/col_123/assistant');
+			await page.getByRole('button', { name: 'Approve and create', exact: true }).click();
+			await expect(page.getByTestId('research-recovery')).toBeVisible();
+			await page.reload();
+			const recovery = page.getByTestId('research-recovery');
+			await expect(recovery).toBeVisible();
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
+			const activityBox = await page.getByTestId('research-activity').boundingBox();
+			const recoveryBox = await recovery.boundingBox();
+			expect(recoveryBox!.y).toBeGreaterThanOrEqual(activityBox!.y + activityBox!.height);
+			expect(recoveryBox!.x + recoveryBox!.width).toBeLessThanOrEqual(width);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `approval-recovery-${width}.png`) });
+			completed = true;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(
+				page.getByText('The objective candidate was created for your review.', { exact: true })
+			).toBeVisible();
+			await expect(recovery).toHaveCount(0);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			expect(decisions).toBe(1);
+		});
+	}
+
 	test('signing out in another tab prevents late replies from restoring private history', async ({
 		page,
 		context

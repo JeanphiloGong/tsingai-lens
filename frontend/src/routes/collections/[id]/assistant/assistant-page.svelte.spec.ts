@@ -290,6 +290,234 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockReset();
 	});
 
+	it.each(['manual', 'automatic', 'read failure'])(
+		'keeps an in-flight approval recoverable until its result arrives: %s',
+		async (mode) => {
+			const call = pendingCall();
+			const request = message('request', 'assistant', '', {
+				tool_calls: [
+					{
+						tool_call_id: call.tool_call_id,
+						name: call.name,
+						arguments: call.arguments,
+						position: 0
+					}
+				]
+			});
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
+			const original = fetchMock.getMockImplementation()!;
+			let running = false;
+			let completed = false;
+			let readFails = false;
+			let decisions = 0;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input).endsWith('/decision')) {
+					running = true;
+					decisions += 1;
+					return Promise.reject(new TypeError('Connection lost'));
+				}
+				if (
+					running &&
+					requestPath(input).endsWith('/messages') &&
+					requestMethod(input, init) === 'GET'
+				) {
+					if (readFails) return Promise.reject(new TypeError('Recovery connection lost'));
+					return Promise.resolve(
+						jsonResponse({
+							feedback: [],
+							pending_approval: null,
+							items: completed
+								? [
+										request,
+										message('result', 'tool', '', {
+											tool_call_id: call.tool_call_id,
+											tool_result: baseToolResult(call.tool_call_id)
+										}),
+										message('answer', 'assistant', 'The approved research question was created.')
+									]
+								: [request]
+						})
+					);
+				}
+				return original(input, init);
+			});
+			render(Page);
+			await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+			await browserPage.getByRole('button', { name: 'Retry conversation', exact: true }).click();
+			await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
+			await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+			if (mode === 'read failure') {
+				readFails = true;
+				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+				await expect
+					.element(browserPage.getByText('Recovery connection lost', { exact: true }))
+					.toBeVisible();
+				await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+				readFails = false;
+			}
+			completed = true;
+			if (mode !== 'automatic')
+				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect
+				.element(
+					browserPage.getByText('The approved research question was created.', { exact: true })
+				)
+				.toBeVisible();
+			await expect.element(browserPage.getByTestId('research-recovery')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			expect(decisions).toBe(1);
+		}
+	);
+
+	it('aborts recovery and ignores its saved result after logout', async () => {
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [
+				{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }
+			]
+		});
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		installApi({ trajectory: { feedback: [], items: [request], pending_approval: null } });
+		render(Page);
+		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
+		const original = fetchMock.getMockImplementation()!;
+		let finish!: (response: Response) => void;
+		let signal: AbortSignal | null | undefined;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/messages')) {
+				signal = init?.signal;
+				return new Promise<Response>((resolve) => {
+					finish = resolve;
+				});
+			}
+			return original(input, init);
+		});
+		await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+		await logout().catch(() => undefined);
+		await expect.element(browserPage.getByTestId('research-recovery')).not.toBeInTheDocument();
+		expect(signal?.aborted).toBe(true);
+		finish(
+			jsonResponse({
+				feedback: [],
+				pending_approval: null,
+				items: [message('private_answer', 'assistant', 'Private recovered research result')]
+			})
+		);
+		await expect
+			.element(browserPage.getByText('Private recovered research result', { exact: true }))
+			.not.toBeInTheDocument();
+		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBeNull();
+	});
+
+	it.each([false, true])(
+		'recovers a saved approval after a lost response, trajectory unavailable initially: %s',
+		async (unavailable) => {
+			const call = pendingCall();
+			const request = message('approval_request', 'assistant', '', {
+				tool_calls: [
+					{
+						tool_call_id: call.tool_call_id,
+						name: call.name,
+						arguments: call.arguments,
+						position: 0
+					}
+				]
+			});
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
+			const original = fetchMock.getMockImplementation()!;
+			let decisions = 0;
+			let saved = false;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path.endsWith('/decision')) {
+					decisions += 1;
+					saved = true;
+					if (decisions === 1) return Promise.reject(new TypeError('Failed to fetch'));
+					return Promise.resolve(
+						jsonResponse({
+							status: 'completed',
+							messages: [],
+							pending_approval: null,
+							completion_reason: null,
+							warnings: [],
+							error_code: null
+						})
+					);
+				}
+				if (saved && path.endsWith('/messages') && requestMethod(input, init) === 'GET') {
+					if (unavailable && decisions === 1) return Promise.reject(new TypeError('Offline'));
+					return Promise.resolve(
+						jsonResponse({
+							feedback: [],
+							items: [
+								request,
+								message('saved_tool_result', 'tool', '', {
+									tool_call_id: call.tool_call_id,
+									tool_result: baseToolResult(call.tool_call_id)
+								}),
+								message('saved_write', 'assistant', 'The approved research question was created.')
+							],
+							pending_approval: null
+						})
+					);
+				}
+				return original(input, init);
+			});
+			render(Page);
+			const approve = browserPage.getByRole('button', { name: 'Approve and create', exact: true });
+			await approve.click();
+			if (unavailable) {
+				await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
+				await approve.click();
+			}
+			await expect
+				.element(
+					browserPage.getByText('The approved research question was created.', { exact: true })
+				)
+				.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+			await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+			expect(decisions).toBe(unavailable ? 2 : 1);
+		}
+	);
+
+	it('keeps an uncertain approval visible as an error until its saved result can be loaded', async () => {
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [
+				{
+					tool_call_id: call.tool_call_id,
+					name: call.name,
+					arguments: call.arguments,
+					position: 0
+				}
+			]
+		});
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
+		const original = fetchMock.getMockImplementation()!;
+		let running = false;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/decision')) {
+				running = true;
+				return Promise.reject(new TypeError('Connection lost'));
+			}
+			if (running && requestPath(input).endsWith('/messages'))
+				return Promise.resolve(
+					jsonResponse({ feedback: [], items: [request], pending_approval: null })
+				);
+			return original(input, init);
+		});
+		render(Page);
+		await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('Connection lost');
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry conversation', exact: true }))
+			.toBeEnabled();
+	});
+
 	it.each([true, false])(
 		'recovers a lost upload through the server, recovery available: %s',
 		async (available) => {
@@ -335,6 +563,148 @@ describe('collections/[id]/assistant Research Agent', () => {
 			}
 		}
 	);
+
+	it.each([true, false])(
+		'reconciles a sent Source after navigation, persisted: %s',
+		async (persisted) => {
+			const source = {
+				resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'LPBF study',
+				source_kind: 'text_window',
+				source_ref: 'results',
+				page: 3,
+				quote: 'The grain size decreased after heat treatment.',
+				heading_path: 'Results',
+				quote_truncated: false
+			};
+			sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', JSON.stringify(source));
+			const question = 'Explain this grain-size result';
+			installApi({
+				trajectory: {
+					feedback: [],
+					items: persisted
+						? [
+								message('saved_user', 'user', question, { source_contexts: [source] }),
+								message('saved_answer', 'assistant', 'Persisted answer after navigation')
+							]
+						: [],
+					pending_approval: null
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (
+					path === '/api/v1/chat-sessions' &&
+					requestBody(input, init)?.collection_id === 'col_456'
+				)
+					return Promise.resolve(
+						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 201)
+					);
+				if (path.endsWith('/messages') && requestMethod(input, init) === 'POST')
+					return Promise.resolve(
+						new Response(
+							new ReadableStream({
+								start(controller) {
+									controller.enqueue(
+										new TextEncoder().encode(
+											'event: text_delta\ndata: {"content":"Reading source"}\n\n'
+										)
+									);
+								}
+							}),
+							{ headers: { 'Content-Type': 'text/event-stream' } }
+						)
+					);
+				return original(input, init);
+			});
+			const composer = await renderReady();
+			await send(question, composer);
+			await expect
+				.element(browserPage.getByText('Reading source', { exact: true }))
+				.toBeInTheDocument();
+			setPage({
+				params: { id: 'col_456' },
+				url: new URL('http://localhost/collections/col_456/assistant')
+			});
+			await expect.element(composer).toBeEnabled();
+			setPage({
+				params: { id: 'col_123' },
+				url: new URL('http://localhost/collections/col_123/assistant')
+			});
+			await expect.element(composer).toBeEnabled();
+			const pendingSource = browserPage.getByTestId('pending-source-context');
+			if (persisted) {
+				await expect
+					.element(browserPage.getByText('Persisted answer after navigation'))
+					.toBeInTheDocument();
+				await expect.element(pendingSource).not.toBeInTheDocument();
+			} else {
+				await expect.element(pendingSource).toBeInTheDocument();
+			}
+		}
+	);
+
+	it('keeps a saved rating when approval recovery returns an older feedback snapshot', async () => {
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		const answer = message('answer', 'assistant', 'Review the test temperatures before comparing.');
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [
+				{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }
+			]
+		});
+		installApi({ trajectory: { items: [answer, request], pending_approval: call, feedback: [] } });
+		const original = fetchMock.getMockImplementation()!;
+		let finishFeedback!: (response: Response) => void;
+		let finishRecovery!: (response: Response) => void;
+		const saving = new Promise<Response>((resolve) => {
+			finishFeedback = resolve;
+		});
+		const recovering = new Promise<Response>((resolve) => {
+			finishRecovery = resolve;
+		});
+		let approvalSent = false;
+		let recoveryStarted = false;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path.endsWith('/feedback')) return saving;
+			if (path.endsWith('/decision')) {
+				approvalSent = true;
+				return Promise.reject(new TypeError('Lost approval response'));
+			}
+			if (approvalSent && path.endsWith('/messages')) {
+				recoveryStarted = true;
+				return recovering;
+			}
+			return original(input, init);
+		});
+		render(Page);
+		const helpful = browserPage.getByRole('button', { name: 'Helpful', exact: true });
+		await helpful.click();
+		await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+		await vi.waitFor(() => expect(recoveryStarted).toBe(true));
+		finishFeedback(
+			jsonResponse({
+				feedback_id: 'feedback-1',
+				message_id: answer.message_id,
+				session_id: session.session_id,
+				user_id: session.user_id,
+				rating: 'helpful',
+				reason: null,
+				comment: null,
+				response_digest: 'a'.repeat(64),
+				created_at: createdAt,
+				updated_at: createdAt
+			})
+		);
+		await expect.element(helpful).toHaveAttribute('aria-pressed', 'true');
+		finishRecovery(jsonResponse({ items: [answer], pending_approval: null, feedback: [] }));
+		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await expect.element(helpful).toHaveAttribute('aria-pressed', 'true');
+	});
 
 	it.each(['collection', 'account'])(
 		'aborts pending feedback and ignores its response after changing %s',
@@ -583,7 +953,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				await expect.element(composer).toHaveValue(question);
 				expect(
 					JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
-				).toEqual(source);
+				).toMatchObject(source);
 			}
 		}
 	);
@@ -1388,7 +1758,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 
-		await renderReady();
+		render(Page);
+		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
+		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
 
 		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
 		await expect

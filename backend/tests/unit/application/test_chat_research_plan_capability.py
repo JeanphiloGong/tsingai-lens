@@ -220,6 +220,8 @@ class _Model(_DiscoveryModel):
         }
 
     async def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None, timeout_seconds=180.0, max_output_tokens=16_384):
+        if context.research_review is not None:
+            return await super().respond(context=context, tool_specs=tool_specs)
         messages = context.messages
         assert messages
         if any(spec.name == "discover_research_tools" for spec in tool_specs):
@@ -545,6 +547,31 @@ async def test_agent_can_inspect_current_or_named_research_plan_revision() -> No
     assert {ref.resource_type for ref in historical.resource_refs} == {
         "research_plan"
     }
+
+
+@pytest.mark.parametrize("label_status", ["gold", "unreviewed"])
+async def test_checked_unsaved_plan_returns_existing_render_without_another_model_call(label_status) -> None:
+    proposal = ProposeResearchPlanCapability(
+        collection_service=_CollectionService(),
+        finding_feedback_service=_FindingFeedbackService(label_status=label_status),
+    )
+    model = _DiscoveryModel(
+        ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)),
+        TimeoutError("A redundant explanation would exceed the remaining deadline."),
+    )
+    chunks = []
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((proposal,))).run_turn(
+        context=AgentContext("chat-1", "user-1", "col-1"), previous_messages=(),
+        user_message="Propose a plan to test the conclusion. Do not save.", text_delta_callback=chunks.append,
+    )
+    assert result.status.value == "completed"
+    assert result.pending_approval is None
+    draft = next(item for item in result.tool_results if item.data.get("structured_plan"))
+    assert draft.data["content"] in result.messages[-1].content
+    assert "not been saved" in result.messages[-1].content
+    assert ("supporting conclusions still require researcher review" in result.messages[-1].content) == (label_status != "gold")
+    assert "".join(chunks) == result.messages[-1].content
+    assert isinstance(model.turns[0], TimeoutError)
 
 
 async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service() -> None:

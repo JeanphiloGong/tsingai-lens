@@ -18,6 +18,8 @@ from application.chat.model import (
     ModelUsage,
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
+    RESEARCH_REVIEW_PROMPT_VERSION,
+    RESEARCH_REVIEW_SYSTEM_PROMPT,
 )
 from domain.chat import ChatMessage, ChatMessageRole, ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
@@ -65,18 +67,30 @@ class OpenAIChatModel:
             "timeout": min(timeout_seconds, self.request_timeout),
             "max_completion_tokens": max_output_tokens,
             "messages": [
-                {"role": "system", "content": RESEARCH_AGENT_SYSTEM_PROMPT},
+                {"role": "system", "content": (
+                    RESEARCH_REVIEW_SYSTEM_PROMPT if context.research_review is not None
+                    else RESEARCH_AGENT_SYSTEM_PROMPT
+                )},
             ],
         }
         if self.reasoning_effort is not None:
             request["reasoning_effort"] = self.reasoning_effort
-        if context.rollover_summary:
+        if context.research_review is not None:
+            if tool_specs or context.require_tool_call:
+                raise ValueError("research review cannot expose executable tools")
+            request["response_format"] = {"type": "json_object"}
+            request["messages"].append({
+                "role": "user",
+                "content": json.dumps(context.research_review, ensure_ascii=False),
+            })
+        elif context.rollover_summary:
             request["messages"].append({"role": "system", "content": (
                 "[DURABLE TRAJECTORY ROLLOVER]\n"
                 "This is deterministic lineage, not a paper claim or instructions. "
                 "Re-read the exact Source when its text is needed.\n" + context.rollover_summary
             )})
-        request["messages"].extend(_provider_message(message) for message in context.messages)
+        if context.research_review is None:
+            request["messages"].extend(_provider_message(message) for message in context.messages)
         if tool_specs:
             request.update(
                 tools=[spec.model_schema() for spec in tool_specs],
@@ -90,12 +104,15 @@ class OpenAIChatModel:
                 stream_options={"include_usage": True},
             )
             try:
-                return await self._stream_turn(chunks, text_delta_callback)
+                return await self._stream_turn(chunks, text_delta_callback, review=context.research_review is not None)
             finally:
                 await chunks.close()
 
         completion = await self.client.chat.completions.create(**request)
-        record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
+        record_llm_prompt_version(
+            "research_claim_review" if context.research_review is not None else "research_agent",
+            RESEARCH_REVIEW_PROMPT_VERSION if context.research_review is not None else RESEARCH_AGENT_PROMPT_VERSION,
+        )
         record_llm_completion(completion, requested_model=self.model)
         usage = _model_usage(getattr(completion, "usage", None))
         if not getattr(completion, "choices", None):
@@ -158,6 +175,8 @@ class OpenAIChatModel:
         self,
         chunks: Any,
         text_delta_callback: Callable[[str], None],
+        *,
+        review: bool = False,
     ) -> ModelTurn:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -215,7 +234,10 @@ class OpenAIChatModel:
                 usage=usage,
             ) from exc
 
-        record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
+        record_llm_prompt_version(
+            "research_claim_review" if review else "research_agent",
+            RESEARCH_REVIEW_PROMPT_VERSION if review else RESEARCH_AGENT_PROMPT_VERSION,
+        )
         record_llm_completion(last_chunk, requested_model=self.model)
         content = "".join(content_parts).strip()
         if finish_reason == "length":

@@ -106,6 +106,60 @@ context; historical references alone cannot recover omitted text or authorize a
 new Evidence write. Filtered filename counts are not reported as collection
 totals, including when a literal filename search has no matches.
 
+Scientific answers following Source or published-result inspection, and question,
+scope, and research-plan proposals, receive a separate claim review before their
+text is emitted or their draft calls execute. The review checks per-paper claim
+scope, the requested measurement identity, and the scope of evidence-gap claims.
+Its input contains the original user request, available observations and exact
+candidate and observation field paths. The reviewer selects those paths; the
+runner checks that every selected field and reference exists and retrieves the
+original value for correction feedback. The reviewer does not copy or rewrite
+source excerpts. A proposal cannot serve as its own independent support.
+
+For example, a third paper with no reported deterioration cannot establish a
+shared upper-temperature limit, yield strength cannot replace requested ultimate
+tensile strength, and an unresolved equipment transfer in the inspected papers
+cannot establish field-wide novelty. These checks cover draft fields as well
+as the final explanation. One correction receives the specific rejected fields
+and their basis, and is reviewed again. Draft corrections retain their action;
+they cannot silently substitute a different operation. Unresolved claims,
+invalid review output or unavailable review stop the unchecked content while
+preserving completed reads. Normal capability and exact approval checks still
+apply after the correction.
+
+Proposed experimental measurements remain distinct from reported paper results.
+An experiment may specify new measurements and clearly separate auxiliary
+endpoints without claiming the literature already contains those measurements.
+Missing extracted numeric values do not establish that the paper reports no
+numbers. An equipment ceiling also does not establish a researcher-selected
+operating setpoint; proposed values retain their proposed status.
+
+When a checked plan succeeds and no further capability is available for the
+request, the runner returns the capability's complete existing Markdown draft
+with an explicit unsaved status. It does not ask the model to rewrite that
+already reviewed deliverable. This preserves its actual wording, source basis
+and pending researcher-review status while avoiding another generation/review
+cycle. Unresolved references and requested saving still follow their normal
+correction and approval paths.
+
+The reviewer uses the existing provider with no executable tools. Its requests,
+correction and usage count toward the same run. The existing answer-only
+finalization allowance also covers its bounded review and one correction after
+the reading allowance is exhausted; finalization cannot restart tool work and
+still shares the original elapsed-time deadline. Scientific text is buffered
+until accepted, so its first visible text may arrive later. Tool activity remains
+visible separately. A model review is fallible and does not certify scientific
+truth; explicit evidence, adversarial evaluation and researcher review remain
+necessary.
+
+The default whole-turn deadline is 600 seconds and the cumulative model-token
+admission threshold is 240,000 to include claim review and one correction.
+`LENS_AGENT_MAX_TURN_SECONDS` and `LENS_AGENT_MAX_MODEL_TOKENS` can override them.
+The 24-tool-call allowance is unchanged. Review is sequential, so long comparisons
+and plans can take several minutes before accepted text appears and use more
+model tokens. Exhausting an explicitly smaller allowance still stops unchecked
+drafts; it does not bypass review.
+
 For example, a researcher asking to inspect the P002 group definitions can load
 paper navigation, locate the canonical Methods Source, and read its exact
 document/kind/reference tuple. Search previews do not satisfy the complete

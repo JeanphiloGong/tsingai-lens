@@ -33,9 +33,9 @@ export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export DOCUMENT_PREPARATION_MAX_CONCURRENCY=10
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
-export LENS_AGENT_MAX_TURN_SECONDS=300
+export LENS_AGENT_MAX_TURN_SECONDS=600
 export LENS_AGENT_MAX_TOOL_CALLS=24
-export LENS_AGENT_MAX_MODEL_TOKENS=160000
+export LENS_AGENT_MAX_MODEL_TOKENS=240000
 export LENS_AGENT_NO_PROGRESS_LIMIT=2
 export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
 export LENS_AGENT_MAX_PARALLEL_READS=4
@@ -99,11 +99,15 @@ deadline.
 provider-reported input plus output usage, not an exact billing ceiling. Usage
 is known after a response, so the last admitted prompt can cross the threshold.
 An already returned answer is preserved with `resource_budget` and scope
-warnings when the threshold is reached, without an extra rewrite request.
+warnings when the threshold is reached, after any required scientific claim
+review. Scientific content is withheld if that review cannot finish.
 Normal output is capped at the smaller of the remaining reported-token
 allowance and `LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS`. One answer-only request may
 use its separate `LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS` allowance after
-normal tool/token/cycle work stops, provided time remains. These generated-token
+normal tool/token/cycle work stops, provided time remains. For scientific
+answers this also covers the claim review and at most one correction followed
+by another review; all usage is recorded and the original turn deadline still
+applies. Finalization cannot resume tools or execute an unchecked draft. These generated-token
 limits include reasoning tokens. A provider `length` finish reason is a
 truncated response, not a completed answer or executable tool request.
 

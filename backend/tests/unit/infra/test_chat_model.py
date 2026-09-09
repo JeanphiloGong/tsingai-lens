@@ -126,10 +126,40 @@ async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream
         assert "reasoning_effort" not in completions.calls[0]
 
 
+@pytest.mark.parametrize("stream", [False, True])
+async def test_research_review_uses_dedicated_json_task_without_tools_or_chat_instructions(stream):
+    from application.chat.model import RESEARCH_REVIEW_SYSTEM_PROMPT
+
+    client, completions = _client([_stream_chunk(content='{"checks": []}')] if stream
+                                  else _completion(content='{"checks": []}'))
+    context = ChatModelContext((_message(),), research_review={
+        "request": "Compare inspected papers.", "candidate": {"content": "All agree."},
+        "observations": [], "coverage": "Selected passages only.",
+    })
+    await OpenAIChatModel(client=client, model="test-model").respond(
+        context=context, tool_specs=(), text_delta_callback=(lambda _: None) if stream else None,
+    )
+    request = completions.calls[0]
+    assert request["messages"][0]["content"] == RESEARCH_REVIEW_SYSTEM_PROMPT
+    assert request["response_format"] == {"type": "json_object"}
+    assert "tools" not in request
+    assert "你好" not in str(request["messages"])
+
+
+async def test_research_review_rejects_executable_tools():
+    client, completions = _client(_completion(content="Unused"))
+    with pytest.raises(ValueError, match="cannot expose"):
+        await OpenAIChatModel(client=client).respond(
+            context=ChatModelContext((), research_review={}),
+            tool_specs=(ToolSpec(name="write", description="Write", risk=ToolRisk.WRITE, input_model=_NoArguments),),
+        )
+    assert completions.calls == []
+
+
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.6"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.7"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT

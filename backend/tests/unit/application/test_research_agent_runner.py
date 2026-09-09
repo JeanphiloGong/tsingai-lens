@@ -4,6 +4,7 @@ from domain.chat import ChatToolRequest
 
 from collections import deque
 import asyncio
+import json
 from dataclasses import replace
 from typing import Any, ClassVar
 
@@ -105,6 +106,14 @@ class _Model:
         timeout_seconds=180.0,
         max_output_tokens=16_384,
     ) -> ModelTurn:
+        if context.research_review is not None:
+            # Other suites isolate the execution policy; claim-review behavior
+            # has its own adversarial and provider-backed tests.
+            return ModelTurn(content=json.dumps({"checks": [
+                {"category": category, "verdict": "not_applicable", "candidate_path": "",
+                 "reason": "Scripted execution-policy fixture.", "basis": []}
+                for category in ("paper_scope", "measurement_identity", "gap_scope")
+            ]}))
         messages = context.messages
         assert messages
         names = tuple(item.name for item in tool_specs)
@@ -1816,7 +1825,8 @@ async def test_resource_budget_final_answer_has_time_to_summarize_large_trajecto
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert 30 < observed_timeouts[-1] <= observed_timeouts[0] <= 300
+    assert 30 < observed_timeouts[-1] <= AgentRunLimits().max_finalization_seconds
+    assert observed_timeouts[-1] <= observed_timeouts[0] <= AgentRunLimits().max_elapsed_seconds
 
 
 async def test_resource_budget_ledger_counts_complete_inspected_source_as_read() -> None:

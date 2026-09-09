@@ -15,6 +15,8 @@ class ChatModelContext:
     messages: tuple[ChatMessage, ...]
     rollover_summary: str = ""
     require_tool_call: bool = False
+    research_review: Mapping[str, Any] | None = None
+    active_user_message_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
@@ -111,7 +113,7 @@ class ChatContextBuilder:
         summary = self._rollover_summary(
             omitted, min(self.max_summary_chars, self.max_chars - char_count)
         )
-        return ChatModelContext(selected_messages, summary)
+        return ChatModelContext(selected_messages, summary, active_user_message_id=active_user_message_id)
 
     @staticmethod
     def _rollover_summary(messages: tuple[ChatMessage, ...], budget: int) -> str:

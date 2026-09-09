@@ -11,6 +11,7 @@ from hashlib import sha256
 import json
 import logging
 from math import isfinite
+import re
 from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
@@ -378,6 +379,7 @@ _PROCESS_TERMS = (
     "为什么慢",
     "哪里了",
     "progress",
+    "how far",
     "process status",
     "processing status",
     "analysis status",
@@ -416,6 +418,32 @@ _REVIEW_ACTION_TERMS = (
     "纠正",
     "质疑",
 )
+
+
+def _mentions_terms(text: str, terms: tuple[str, ...]) -> bool:
+    """Match English intent words without matching them inside another word."""
+    normalized_text = text.casefold()
+    for term in terms:
+        normalized = term.casefold().strip()
+        if not normalized:
+            continue
+        if re.search(r"[a-z0-9]", normalized):
+            pattern = rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])"
+            if re.search(pattern, normalized_text):
+                return True
+        elif normalized in normalized_text:
+            return True
+    return False
+
+
+def _has_explicit_immutable_write(text: str) -> bool:
+    return _mentions_terms(
+        text,
+        ("新版本", "new version", "immutable version"),
+    ) and _mentions_terms(
+        text,
+        ("保存", "创建", "记录", "写入", "save", "create", "record", "persist"),
+    )
 
 
 def _now_iso() -> str:
@@ -793,7 +821,7 @@ class ResearchAgentRunner:
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
                     )
-                    logger.warning(
+                    logger.exception(
                         "Research Agent model call failed model=%s "
                         "exception_type=%s",
                         model_name,
@@ -1012,7 +1040,7 @@ class ResearchAgentRunner:
             if turn.tool_calls or not turn.content:
                 raise ValueError("final answer must be answer-only")
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
+            logger.exception(
                 "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
             )
@@ -1100,6 +1128,7 @@ class ResearchAgentRunner:
         return tuple(requested)
 
     def _batch_error(self, requested, messages) -> tuple[str, str] | None:
+        successful_results = self._active_successful_results_by_name(messages)
         for call, handler in requested:
             if handler is None:
                 code = "capability_unavailable_for_turn" if self.capabilities.get(call.name) else "unknown_capability"
@@ -1108,17 +1137,35 @@ class ResearchAgentRunner:
                 return "capability_not_authorized", "The research capability is not authorized."
             try:
                 handler.spec.input_model.model_validate(call.arguments)
-            except ValidationError:
-                return "invalid_tool_arguments", "The research capability arguments are invalid."
-            if call.name == "inspect_published_finding":
-                allowed = self._published_finding_candidates(
-                    self._active_successful_results_by_name(messages)
+            except ValidationError as exc:
+                details = "; ".join(
+                    f"{'.'.join(str(part) for part in error['loc']) or 'arguments'} ({error['type']})"
+                    for error in exc.errors(include_input=False, include_url=False)[:8]
                 )
+                return "invalid_tool_arguments", f"Invalid research capability arguments: {details}."
+            if call.name == "inspect_published_finding":
+                allowed = self._published_finding_candidates(successful_results)
                 finding = (str(call.arguments.get("objective_id") or "").strip(), str(call.arguments.get("finding_id") or "").strip())
                 if allowed and finding not in allowed:
                     return "finding_reference_not_in_query", "Inspect a Finding identifier returned by the preceding query."
         if len(requested) > 1 and any(call.risk is not ToolRisk.READ for call, _ in requested):
             return "invalid_tool_batch", "Draft and write actions must be requested individually."
+        for call, _handler in requested:
+            if call.name not in {"create_evidence_draft", "create_evidence_version"}:
+                continue
+            source_identity = (
+                str(call.arguments.get("document_id") or "").strip(),
+                str(call.arguments.get("source_kind") or "").strip(),
+                str(call.arguments.get("source_ref") or "").strip(),
+            )
+            if not self._has_successful_exact_source_read(
+                successful_results,
+                (source_identity,),
+            ):
+                return (
+                    "source_read_incomplete",
+                    "Read the complete canonical Source before recording Evidence.",
+                )
         return None
 
     async def _execute_read_batch(self, context, requested, progress):
@@ -1164,7 +1211,7 @@ class ResearchAgentRunner:
         )
         user_text = str(latest_user.content if latest_user is not None else "").casefold()
         successful_results = self._active_successful_results_by_name(messages)
-        if any(phrase in user_text for phrase in _NO_TOOL_PHRASES):
+        if _mentions_terms(user_text, _NO_TOOL_PHRASES):
             allowed_names: set[str] = set()
         else:
             allowed_names = self._capability_names_for_intent(
@@ -1184,13 +1231,18 @@ class ResearchAgentRunner:
             and result.get("next_offset") is None
             for result in successful_results.get("browse_collection_papers", ())
         )
-        source_grounded_intent = any(
-            term in user_text for term in _SOURCE_GROUNDED_TERMS
+        source_grounded_intent = _mentions_terms(user_text, _SOURCE_GROUNDED_TERMS)
+        has_attached_source_context = bool(
+            latest_user is not None and latest_user.source_contexts
         )
         if source_grounded_intent and not successful_results.get(
             "browse_collection_papers"
-        ):
+        ) and not has_attached_source_context:
             allowed_names.intersection_update({"browse_collection_papers"})
+        elif source_grounded_intent and has_attached_source_context:
+            # The caller already supplied a canonical Source context; do not
+            # force a redundant collection survey before discussing it.
+            allowed_names.discard("browse_collection_papers")
         if completed_browse:
             allowed_names.discard("browse_collection_papers")
             allowed_names.discard("get_collection_context")
@@ -1210,7 +1262,7 @@ class ResearchAgentRunner:
         # not only the paper map. Once the map is complete, require a focused
         # Source search before allowing the model to answer or choose a broad
         # inspection path.
-        comparison_intent = any(term in user_text for term in _COMPARISON_TERMS)
+        comparison_intent = _mentions_terms(user_text, _COMPARISON_TERMS)
         if (
             (comparison_intent or source_grounded_intent)
             and successful_results.get("browse_collection_papers")
@@ -1226,7 +1278,7 @@ class ResearchAgentRunner:
         # required read before the Agent reports progress to the researcher.
         if (
             successful_results.get("get_collection_context")
-            and any(term in user_text for term in _PROCESS_TERMS)
+            and _mentions_terms(user_text, _PROCESS_TERMS)
             and not successful_results.get("inspect_research_process")
         ):
             allowed_names.intersection_update({"inspect_research_process"})
@@ -1246,7 +1298,7 @@ class ResearchAgentRunner:
             successful_results.get("query_published_findings")
             and finding_candidates
             and not successful_results.get("inspect_published_finding")
-            and not any(term in user_text for term in _PLAN_TERMS)
+            and not _mentions_terms(user_text, _PLAN_TERMS)
         ):
             remaining_candidates = tuple(
                 candidate
@@ -1260,8 +1312,9 @@ class ResearchAgentRunner:
         inspected_finding = bool(
             successful_results.get("inspect_published_finding")
         )
-        persist_requested = any(term in user_text for term in _PERSIST_TERMS) and not any(
-            phrase in user_text for phrase in _NO_WRITE_PHRASES
+        persist_requested = _mentions_terms(user_text, _PERSIST_TERMS) and (
+            not _mentions_terms(user_text, _NO_WRITE_PHRASES)
+            or _has_explicit_immutable_write(user_text)
         )
         proposed_plan = bool(successful_results.get("propose_research_plan"))
         proposed_plan_this_turn = any(
@@ -1277,19 +1330,20 @@ class ResearchAgentRunner:
         # A completed plan proposal belongs to the request that asked for it.
         # Do not let an older turn force its write capability onto a later,
         # unrelated review or reading request in the same Chat trajectory.
-        plan_revision_requested = any(
-            term in user_text for term in ("修改", "修订", "调整", "revise", "update")
+        plan_revision_requested = _mentions_terms(
+            user_text, ("修改", "修订", "调整", "revise", "update")
         )
-        plan_read_requested = any(term in user_text for term in _PLAN_READ_TERMS)
+        plan_read_requested = _mentions_terms(user_text, _PLAN_READ_TERMS)
         if (
             plan_read_requested
-            and any(term in user_text for term in _PLAN_TERMS)
+            and _mentions_terms(user_text, _PLAN_TERMS)
             and not persist_requested
             and not plan_revision_requested
         ):
             allowed_names = {"inspect_research_plans"}
         elif proposed_plan_this_turn:
             latest_plan = successful_results["propose_research_plan"][-1]
+            plan_calls = [call for call in calls if call.name == "propose_research_plan"]
             # An unlinked citation is a correctable draft input, not a finished plan.
             correctable_basis = (
                 latest_plan.get("draft_status") == "abstained"
@@ -1298,7 +1352,10 @@ class ResearchAgentRunner:
                 and not any(latest_plan.get(key) for key in (
                     "missing_finding_ids", "rejected_finding_ids", "failed_evidence_ids",
                 ))
-                and sum(call.name == "propose_research_plan" for call in calls) == 1
+                and (
+                    len(plan_calls) == 1
+                    or (len(plan_calls) == 2 and plan_calls[-1].error_code == "invalid_tool_arguments")
+                )
             )
             if correctable_basis:
                 allowed_names = {"propose_research_plan"}
@@ -1312,7 +1369,7 @@ class ResearchAgentRunner:
                 allowed_names = set()
         elif finding_draft_this_turn:
             allowed_names = set()
-        elif proposed_plan and any(term in user_text for term in _PLAN_TERMS) and persist_requested:
+        elif proposed_plan and _mentions_terms(user_text, _PLAN_TERMS) and persist_requested:
             allowed_names = {
                 "revise_research_plan"
                 if plan_revision_requested
@@ -1324,21 +1381,21 @@ class ResearchAgentRunner:
             and persist_requested
             and not successful_results.get("inspect_research_plans")
             and "inspect_research_plans" in registered_names
-            and any(term in user_text for term in _PLAN_TERMS)
+            and _mentions_terms(user_text, _PLAN_TERMS)
         ):
             allowed_names = {"inspect_research_plans"}
-        elif plan_revision_requested and persist_requested and any(
-            term in user_text for term in _PLAN_TERMS
+        elif plan_revision_requested and persist_requested and _mentions_terms(
+            user_text, _PLAN_TERMS
         ):
             allowed_names = {"revise_research_plan"}
-        elif inspected_finding and any(
-            phrase in user_text
-            for phrase in ("结论草案", "修订草案", "finding draft", "draft finding")
+        elif inspected_finding and _mentions_terms(
+            user_text,
+            ("结论草案", "修订草案", "finding draft", "draft finding"),
         ):
             allowed_names = {"create_finding_draft"}
-        elif inspected_finding and any(term in user_text for term in _PLAN_TERMS):
+        elif inspected_finding and _mentions_terms(user_text, _PLAN_TERMS):
             allowed_names = {"propose_research_plan"}
-        elif any(term in user_text for term in _PLAN_TERMS):
+        elif _mentions_terms(user_text, _PLAN_TERMS):
             assessed_quality = bool(
                 successful_results.get("assess_objective_quality")
             )
@@ -1643,7 +1700,7 @@ class ResearchAgentRunner:
         prior_tool_names: set[str | None],
     ) -> set[str]:
         def mentions(terms: tuple[str, ...]) -> bool:
-            return any(term in user_text for term in terms)
+            return _mentions_terms(user_text, terms)
 
         allowed: set[str] = set()
         paper_intent = mentions(_PAPER_TERMS)
@@ -1682,9 +1739,8 @@ class ResearchAgentRunner:
             # Reviewing a conclusion is a read first. Draft and mutation
             # capabilities are added only by their explicit action branches
             # below, so a question about a gap cannot expose write schemas.
-            paper_comparison = paper_intent and any(
-                term in user_text
-                for term in ("冲突", "相反", "不一致", "候选机制")
+            paper_comparison = paper_intent and _mentions_terms(
+                user_text, ("冲突", "相反", "不一致", "候选机制")
             )
             if finding_record_intent:
                 allowed.update(_FINDING_READ_CAPABILITIES)
@@ -1709,8 +1765,9 @@ class ResearchAgentRunner:
                 elif tool_name in _PROCESS_CAPABILITIES:
                     allowed.update(_PROCESS_CAPABILITIES)
 
-        persist_intent = mentions(_PERSIST_TERMS) and not any(
-            phrase in user_text for phrase in _NO_WRITE_PHRASES
+        persist_intent = mentions(_PERSIST_TERMS) and (
+            not mentions(_NO_WRITE_PHRASES)
+            or _has_explicit_immutable_write(user_text)
         )
         if persist_intent and objective_intent:
             allowed.add("create_objective_candidate")
@@ -1804,7 +1861,7 @@ class ResearchAgentRunner:
         if evidence_write_intent:
             allowed.add("create_evidence_version")
         if mentions(("发布分析", "保存分析")) or (
-            "publish" in user_text and "analysis" in user_text
+            mentions(("publish",)) and mentions(("analysis",))
         ):
             allowed.add("publish_agent_objective_analysis")
         return allowed
@@ -2004,7 +2061,7 @@ class ResearchAgentRunner:
                 else call.succeed(_now_iso())
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
+            logger.exception(
                 "Research capability failed tool=%s exception_type=%s",
                 call.name,
                 type(exc).__name__,

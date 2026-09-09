@@ -719,6 +719,55 @@ async def test_literature_based_opinion_fails_if_required_read_is_refused() -> N
     assert "will not present an unsupported" in result.messages[-1].content
 
 
+async def test_evidence_write_requires_a_complete_matching_source_read() -> None:
+    read = _Capability(
+        "read_source",
+        ToolRisk.READ,
+        _NoArguments,
+        result_data={
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+            "content_truncated": True,
+            "source_digest": "a" * 64,
+        },
+    )
+    write = _Capability("create_evidence_version", ToolRisk.WRITE, _NoArguments)
+    model = _Model(
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name="read_source",
+                    arguments={},
+                ),
+            )
+        ),
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name="create_evidence_version",
+                    arguments={},
+                ),
+            )
+        ),
+        ModelTurn(content="The source must be read completely before recording Evidence."),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read, write)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Read the source and save the Evidence.",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert write.executed_arguments == []
+    assert result.tool_results[-1].error_code == "source_read_incomplete"
+
+
 async def test_continuation_does_not_restore_finding_draft_capabilities() -> None:
     allowed = ResearchAgentRunner._capability_names_for_intent(
         "继续看一下",
@@ -2366,6 +2415,59 @@ def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> 
     assert "inspect_research_plans" in names
     assert "revise_research_plan" in names
     assert "create_research_plan" in names
+
+
+def test_explanation_does_not_enable_research_plan_capabilities() -> None:
+    names = ResearchAgentRunner._capability_names_for_intent(
+        "Please provide an explanation of this system.",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert not {
+        "query_published_findings",
+        "assess_objective_quality",
+        "inspect_research_plans",
+        "propose_research_plan",
+    }.intersection(names)
+
+
+def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None:
+    names = ResearchAgentRunner._capability_names_for_intent(
+        "不要修改旧 Finding，请创建一个新版本。",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert "create_finding_version" in names
+
+
+def test_attached_source_context_does_not_force_collection_browse() -> None:
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="可以根据这段来源回答。")),
+        capabilities=CapabilityRegistry(
+            (
+                _Capability("browse_collection_papers", ToolRisk.READ),
+                _Capability("search_sources", ToolRisk.READ),
+                _Capability("read_source", ToolRisk.READ),
+            )
+        ),
+    )
+    message = ChatMessage.user(
+        message_id="user-message",
+        session_id="chat-1",
+        content="根据这些论文中的原文判断这个结果。",
+        created_at="2026-01-01T00:00:00+00:00",
+        source_contexts=(object(),),  # type: ignore[arg-type]
+    )
+
+    names = {
+        spec.name
+        for spec in runner._tool_specs_for_decision([message], [])
+    }
+
+    assert "browse_collection_papers" not in names
+    assert "read_source" in names
 
 
 async def test_research_plan_read_request_requires_inspection_tool() -> None:

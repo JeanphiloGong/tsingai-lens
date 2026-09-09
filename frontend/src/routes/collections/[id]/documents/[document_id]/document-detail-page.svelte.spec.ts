@@ -1,3 +1,11 @@
+import { writable } from 'svelte/store';
+import { DOCUMENT_AGENT, type DocumentAgentState } from '../documentAgent';
+const agent = writable<DocumentAgentState>({
+	open: false,
+	papers: [],
+	sourceVersion: 0,
+	busy: false
+});
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
@@ -76,6 +84,7 @@ let scrollIntoViewMock: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewO
 
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
+		agent.set({ open: false, papers: [], sourceVersion: 0, busy: false });
 		sessionStorage.clear();
 		authState.set({
 			status: 'authenticated',
@@ -358,7 +367,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('hands a traceable parsed-paper Source to the collection research assistant', async () => {
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		const action = document.querySelector<HTMLAnchorElement>(
 			'[data-testid="ask-research-agent-source-results"]'
@@ -367,9 +376,10 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		action?.addEventListener('click', (event) => event.preventDefault(), { capture: true });
 		action?.click();
 
-		expect(action?.getAttribute('href')).toBe('/collections/col_123/assistant');
+		expect(action?.tagName).toBe('BUTTON');
 		expect(
 			JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? 'null')
+				.contexts[0]
 		).toEqual({
 			resource_ref: {
 				resource_type: 'source',
@@ -393,7 +403,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('hands an entire source-mapped table to the Agent as readable Markdown', async () => {
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		const action = document.querySelector<HTMLAnchorElement>(
 			'[data-testid="ask-research-agent-source-table-1"]'
@@ -405,9 +415,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		const context = JSON.parse(
 			sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? 'null'
 		);
-		expect(context.source_kind).toBe('table');
-		expect(context.source_ref).toBe('table-1');
-		expect(context.quote).toBe(
+		expect(context.contexts[0].source_kind).toBe('table');
+		expect(context.contexts[0].source_ref).toBe('table-1');
+		expect(context.contexts[0].quote).toBe(
 			'| Sample | Mechanical properties > Yield strength (MPa) | Mechanical properties > Elongation (%) |\n' +
 				'| --- | --- | --- |\n' +
 				'| as-SLM | 920 | 8.4 |\n' +
@@ -416,7 +426,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('renders the paper reading workbench without a synthetic local graph', async () => {
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByRole('link', { name: 'Lens' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
@@ -458,7 +468,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			destroy: vi.fn()
 		}));
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await browserPage.getByRole('tab', { name: 'PDF Preview' }).click();
 		await expect.element(browserPage.getByText('Parsed source fallback')).toBeInTheDocument();
@@ -471,7 +481,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('lets the user view parsed source text while the PDF is available', async () => {
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await browserPage.getByRole('tab', { name: 'PDF Preview' }).click();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
@@ -498,7 +508,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -513,7 +523,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -535,7 +545,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		const activeSource = browserPage.getByTestId('markdown-active-source');
@@ -556,7 +566,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -579,7 +589,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -596,7 +606,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -616,7 +626,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -640,7 +650,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -664,7 +674,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -700,7 +710,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -720,7 +730,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('2');

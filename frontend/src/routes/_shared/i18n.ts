@@ -224,6 +224,23 @@ const translations: Record<Language, Translations> = {
 			sidebarLabel: 'Research Agent sessions',
 			chatLabel: 'Collection Research Agent conversation',
 			newSession: 'New session',
+			paperScope: {
+				selected: '{count} papers selected',
+				select: 'Select {title}',
+				selectPage: 'Select this page',
+				clear: 'Clear selection',
+				remove: 'Remove {title}',
+				close: 'Back to papers',
+				messageLabel: 'Selected papers for this question:',
+				tooLong:
+					'The question and selected paper links are too long. Shorten the question or select fewer papers.',
+				selectBlock: 'Select source block',
+				blockLimit:
+					'Up to {count} source blocks per question. Remove a selected block to add another.',
+				related: 'Check related sections in these papers',
+				relatedRequest:
+					'Also inspect other relevant sections, tables and figure captions in the papers containing these selected blocks. Point out supporting, qualifying or conflicting passages with exact Source links. Distinguish what you read from unavailable or unread content; do not invent related passages.'
+			},
 			historyTitle: 'Conversation history',
 			showHistory: 'Show history',
 			hideHistory: 'Hide history',
@@ -2845,6 +2862,21 @@ const translations: Record<Language, Translations> = {
 			sidebarLabel: '研究 Agent 会话',
 			chatLabel: '集合研究 Agent 对话',
 			newSession: '新建会话',
+			paperScope: {
+				selected: '已选 {count} 篇论文',
+				select: '选择 {title}',
+				selectPage: '选择当前页',
+				clear: '清空选择',
+				remove: '移除 {title}',
+				close: '返回文献',
+				messageLabel: '本次问题选中的论文：',
+				tooLong: '问题和所选论文链接过长，请缩短问题或减少所选论文。',
+				selectBlock: '选择原文块',
+				blockLimit: '每次问题最多附带 {count} 个原文块，请先移除已选块再添加。',
+				related: '检查这些论文的其他相关部分',
+				relatedRequest:
+					'请同时检查这些已选块所在论文的其他相关段落、表格和图注，指出支持、限定或矛盾的内容，并附上精确的原文 Source 链接。区分已经读取、尚未读取和无法获取的内容，不要编造相关段落。'
+			},
 			historyTitle: '历史会话',
 			showHistory: '展开历史',
 			hideHistory: '收起历史',

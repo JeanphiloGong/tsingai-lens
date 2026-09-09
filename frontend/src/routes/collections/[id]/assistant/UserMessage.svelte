@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import type { ChatMessage, ChatSourceContext } from '../../../_shared/chatSessions';
 	import { formatTime } from './conversationPresentation';
+	import MessageContent from './MessageContent.svelte';
 	export let message: ChatMessage;
 	function sourceContextHref(source: ChatSourceContext): `/collections/${string}` {
 		const documentPath = `/collections/${source.collection_id}/documents/${source.document_id}`;
@@ -17,7 +18,7 @@
 	<div>
 		<time>{formatTime(message.created_at)}</time>
 		{#if message.source_contexts.length}
-			{#each message.source_contexts as source (`${source.document_id}:${source.source_ref}`)}
+			{#each message.source_contexts as source (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
 				<a class="message-source" href={resolve(sourceContextHref(source))}>
 					<strong>{source.document_title}</strong>
 					<small>
@@ -32,7 +33,7 @@
 				</a>
 			{/each}
 		{/if}
-		<p>{message.content}</p>
+		<div class="user-content"><MessageContent content={message.content} /></div>
 	</div>
 </article>
 
@@ -59,14 +60,14 @@
 		text-align: right;
 	}
 
-	.user-message p {
+	.user-content {
 		margin: 0;
 		padding: 12px 15px;
 		border-radius: 8px 8px 2px 8px;
 		background: var(--brand-soft);
 		font-size: 14px;
 		line-height: 22px;
-		white-space: pre-wrap;
+		white-space: normal;
 		overflow-wrap: anywhere;
 	}
 

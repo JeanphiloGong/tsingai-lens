@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
@@ -37,10 +36,12 @@
 	export let activeSourceSpanId = '';
 	export let activeSourceAnchor: SourceAnchor | null = null;
 	export let sourceJumpToken = 0;
-	export let collectionId = '';
+	import SourceSelection from './SourceSelection.svelte';
+	export let selectedSourceKeys: string[] = [];
+	export let selectionDisabled = false;
+	export let onToggleSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onAskSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onSelectSourceSpan: (sourceSpanId: string) => void = () => {};
-	$: assistantHref = resolve('/collections/[id]/assistant', { id: collectionId });
 
 	let thumbnailTab: 'source' | 'outline' = 'source';
 	let currentPage = 1;
@@ -812,12 +813,13 @@
 										<span>{paragraph.section || $t('workbench.sectionFallback')}</span>
 										<p>{paragraph.text}</p>
 									</button>
-									<a
-										class="parsed-source-agent-action"
-										href={assistantHref}
-										on:click={() => onAskSource(parsedSourceSelection(page.page_number, paragraph))}
-										>{$t('workbench.askResearchAgent')}</a
-									>
+									<SourceSelection
+										selection={parsedSourceSelection(page.page_number, paragraph)}
+										selectedKeys={selectedSourceKeys}
+										disabled={selectionDisabled}
+										onToggle={onToggleSource}
+										onAsk={onAskSource}
+									/>
 								</div>
 							{/each}
 						</section>
@@ -1515,26 +1517,6 @@
 		color: #334155;
 		font-size: 14px;
 		line-height: 22px;
-	}
-
-	.parsed-source-agent-action {
-		display: inline-flex;
-		min-height: 32px;
-		align-items: center;
-		padding: 0 10px;
-		border: 1px solid #bfdbfe;
-		border-radius: 6px;
-		background: #ffffff;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 700;
-		text-decoration: none;
-	}
-
-	.parsed-source-agent-action:hover,
-	.parsed-source-agent-action:focus-visible {
-		border-color: #2563eb;
-		background: #eff6ff;
 	}
 
 	.skeleton {

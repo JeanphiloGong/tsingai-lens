@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
 	import { tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
@@ -48,10 +47,12 @@
 	export let activeSourceRef = '';
 	export let activeSourceQuote = '';
 	export let activeSourceSpan: WorkbenchSourceSpan | null = null;
-	export let collectionId = '';
+	import SourceSelection from './SourceSelection.svelte';
+	export let selectedSourceKeys: string[] = [];
+	export let selectionDisabled = false;
+	export let onToggleSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onAskSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onShowPdf: () => void = () => {};
-	$: assistantHref = resolve('/collections/[id]/assistant', { id: collectionId });
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
 	$: title = markdown?.title || markdown?.source_filename || markdown?.document_id || '';
@@ -520,10 +521,6 @@
 			.join('\n');
 	}
 
-	function sourceActionTestId(selection: DocumentSourceSelection) {
-		return `ask-research-agent-source-${selection.source_ref.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-	}
-
 	function normalizeMatchKey(value: string | null | undefined) {
 		return cleanSourceText(value ?? '')
 			.replace(/\s+/g, ' ')
@@ -605,9 +602,13 @@
 					</div>
 					<div class="markdown-source-fallback__actions">
 						{#if activeFallbackSelection}
-							<a href={assistantHref} on:click={() => onAskSource(activeFallbackSelection)}
-								>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								selection={activeFallbackSelection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 						<button type="button" on:click={onShowPdf}>{$t('workbench.viewPdf')}</button>
 					</div>
@@ -676,12 +677,13 @@
 						{/if}
 						{node.text}
 						{#if selection}
-							<a
-								class="source-agent-action"
-								href={assistantHref}
-								data-testid={sourceActionTestId(selection)}
-								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								{selection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 					</p>
 				{:else if node.type === 'image'}
@@ -696,12 +698,13 @@
 					>
 						<img src={node.src} alt={node.alt} loading="lazy" />
 						{#if selection}
-							<a
-								class="source-agent-action"
-								href={assistantHref}
-								data-testid={sourceActionTestId(selection)}
-								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								{selection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 					</figure>
 				{:else if node.type === 'list'}
@@ -727,12 +730,13 @@
 								{/if}
 								{item.text}
 								{#if selection}
-									<a
-										class="source-agent-action"
-										href={assistantHref}
-										data-testid={sourceActionTestId(selection)}
-										on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-									>
+									<SourceSelection
+										{selection}
+										selectedKeys={selectedSourceKeys}
+										disabled={selectionDisabled}
+										onToggle={onToggleSource}
+										onAsk={onAskSource}
+									/>
 								{/if}
 							</li>
 						{/each}
@@ -772,12 +776,13 @@
 							</tbody>
 						</table>
 						{#if selection}
-							<a
-								class="source-agent-action"
-								href={assistantHref}
-								data-testid={sourceActionTestId(selection)}
-								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								{selection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 					</div>
 				{/if}
@@ -915,40 +920,6 @@
 		position: relative;
 	}
 
-	.source-agent-action {
-		display: inline-flex;
-		min-height: 28px;
-		align-items: center;
-		margin-left: 10px;
-		padding: 0 9px;
-		border: 1px solid #bfdbfe;
-		border-radius: 6px;
-		background: #ffffff;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-		text-decoration: none;
-		vertical-align: middle;
-	}
-
-	@media (hover: hover) {
-		.source-agent-action {
-			opacity: 0;
-		}
-
-		.markdown-node--selectable:hover > .source-agent-action,
-		.source-agent-action:focus-visible {
-			opacity: 1;
-		}
-	}
-
-	.source-agent-action:hover,
-	.source-agent-action:focus-visible {
-		border-color: #2563eb;
-		background: #eff6ff;
-	}
-
 	.markdown-reader__body .markdown-node--active {
 		border-radius: 8px;
 		outline: 2px solid #2563eb;
@@ -1014,8 +985,7 @@
 		gap: 8px;
 	}
 
-	.markdown-source-fallback__header button,
-	.markdown-source-fallback__header a {
+	.markdown-source-fallback__header button {
 		display: inline-flex;
 		min-height: 32px;
 		flex: 0 0 auto;

@@ -629,7 +629,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 				heading_path: 'Results',
 				quote_truncated: false
 			};
-			sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', JSON.stringify(source));
+			sessionStorage.setItem(
+				'lens.chatSourceContext.researcher_1:col_123',
+				JSON.stringify({ contexts: [source] })
+			);
 			const question = 'Explain this grain-size result';
 			installApi({
 				trajectory: {
@@ -940,7 +943,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 				heading_path: 'Results',
 				quote_truncated: false
 			};
-			sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', JSON.stringify(source));
+			sessionStorage.setItem(
+				'lens.chatSourceContext.researcher_1:col_123',
+				JSON.stringify({ contexts: [source] })
+			);
 			const question = 'Explain this grain-size result';
 			installApi({
 				trajectory: {
@@ -1003,7 +1009,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				await expect.element(composer).toHaveValue(question);
 				expect(
 					JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
-				).toMatchObject(source);
+				).toMatchObject({ contexts: [source] });
 			}
 		}
 	);
@@ -1386,7 +1392,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		};
 		sessionStorage.setItem(
 			'lens.chatSourceContext.researcher_1:col_123',
-			JSON.stringify(sourceContext)
+			JSON.stringify({ contexts: [sourceContext] })
 		);
 		installApi({
 			messageTurn: {
@@ -1449,20 +1455,24 @@ describe('collections/[id]/assistant Research Agent', () => {
 		sessionStorage.setItem(
 			'lens.chatSourceContext.researcher_1:col_123',
 			JSON.stringify({
-				resource_ref: {
-					resource_type: 'source',
-					resource_id: 'doc_1:results',
-					href: '/collections/col_123/documents/doc_1?source_ref=results'
-				},
-				collection_id: 'col_123',
-				document_id: 'doc_1',
-				document_title: 'Paper A',
-				source_kind: 'text_window',
-				source_ref: 'results',
-				page: 3,
-				quote: 'Conductivity improved to 12 mS/cm under EIS.',
-				heading_path: 'Results',
-				quote_truncated: false
+				contexts: [
+					{
+						resource_ref: {
+							resource_type: 'source',
+							resource_id: 'doc_1:results',
+							href: '/collections/col_123/documents/doc_1?source_ref=results'
+						},
+						collection_id: 'col_123',
+						document_id: 'doc_1',
+						document_title: 'Paper A',
+						source_kind: 'text_window',
+						source_ref: 'results',
+						page: 3,
+						quote: 'Conductivity improved to 12 mS/cm under EIS.',
+						heading_path: 'Results',
+						quote_truncated: false
+					}
+				]
 			})
 		);
 		installApi();

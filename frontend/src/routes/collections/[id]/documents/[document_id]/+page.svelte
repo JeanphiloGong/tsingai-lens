@@ -14,12 +14,64 @@
 		type SourceAnchor
 	} from '../../../../_shared/documents';
 	import {
-		storePendingChatSourceContext,
+		storePendingChatSourceContexts,
+		readPendingChatSourceContexts,
+		MAX_CHAT_SOURCE_CONTEXTS,
 		type ChatSourceContext
 	} from '../../../../_shared/chatSessions';
 	import { t } from '../../../../_shared/i18n';
 	import MarkdownPaperReader from './_components/MarkdownPaperReader.svelte';
 	import PaperReader from './_components/PaperReader.svelte';
+	import { getContext } from 'svelte';
+	import { DOCUMENT_AGENT, type DocumentAgent } from '../documentAgent';
+	const agent = getContext<DocumentAgent>(DOCUMENT_AGENT);
+	let selectedSources: ChatSourceContext[] = [];
+	let selectionError = '';
+	$: {
+		$agent.sourceVersion;
+		selectedSources = readPendingChatSourceContexts($authState.user?.user_id ?? '', collectionId);
+	}
+	$: selectedSourceKeys = selectedSources
+		.filter((source) => source.document_id === documentId)
+		.map((source) => `${source.source_kind}:${source.source_ref}`);
+
+	function toggleSource(selection: DocumentSourceSelection, open = false) {
+		if ($agent.busy) return;
+		const context = sourceContext(selection);
+		const userId = $authState.user?.user_id;
+		if (!context || !userId) return;
+		const exists = selectedSources.some(
+			(item) =>
+				item.document_id === context.document_id &&
+				item.source_kind === context.source_kind &&
+				item.source_ref === context.source_ref
+		);
+		if (!exists && selectedSources.length >= MAX_CHAT_SOURCE_CONTEXTS) {
+			selectionError = $t('researchAgent.paperScope.blockLimit', {
+				count: MAX_CHAT_SOURCE_CONTEXTS
+			});
+			return;
+		}
+		selectionError = '';
+		const next = exists
+			? open
+				? selectedSources
+				: selectedSources.filter(
+						(item) =>
+							!(
+								item.document_id === context.document_id &&
+								item.source_kind === context.source_kind &&
+								item.source_ref === context.source_ref
+							)
+					)
+			: [...selectedSources, context];
+		storePendingChatSourceContexts(userId, collectionId, next);
+		agent.update((state) => ({
+			...state,
+			open: open || state.open,
+			sourceVersion: state.sourceVersion + 1
+		}));
+	}
 
 	let model: DocumentWorkbenchModel | null = null;
 	let content: DocumentContentResponse | null = null;
@@ -144,12 +196,12 @@
 		readerMode = 'pdf-preview';
 	}
 
-	function handSourceToResearchAgent(selection: DocumentSourceSelection) {
+	function sourceContext(selection: DocumentSourceSelection): ChatSourceContext | null {
 		const userId = $authState.user?.user_id;
-		if (!browser || !model || !userId) return;
+		if (!browser || !model || !userId) return null;
 		const sourceRef = selection.source_ref.trim();
 		const sourceQuote = selection.quote.trim();
-		if (!sourceRef || !sourceQuote) return;
+		if (!sourceRef || !sourceQuote) return null;
 		const sourceUrl = new URL(
 			`/collections/${collectionId}/documents/${documentId}`,
 			window.location.origin
@@ -176,7 +228,7 @@
 			quote_truncated: sourceQuote.length > 6000,
 			source_digest: null
 		};
-		storePendingChatSourceContext(userId, context);
+		return context;
 	}
 
 	function positivePageParam(rawValue: string | null) {
@@ -265,8 +317,15 @@
 			</nav>
 			<strong>{model?.title ?? documentId}</strong>
 		</div>
-		<a class="btn btn--ghost btn--small" href={backHref()}>{$t('workbench.documents')}</a>
+		<button
+			class="btn btn--ghost btn--small"
+			type="button"
+			on:click={() => agent.update((state) => ({ ...state, open: true }))}
+			>{$t('workbench.askResearchAgent')}{#if selectedSources.length}
+				({selectedSources.length}){/if}</button
+		>
 	</header>
+	{#if selectionError}<p class="selection-error" role="alert">{selectionError}</p>{/if}
 
 	{#if loading && !model}
 		<main class="reader-state" aria-busy="true">{$t('workbench.loading')}</main>
@@ -302,8 +361,10 @@
 						activeSourceRef={requestedSourceRef}
 						activeSourceQuote={requestedSourceQuote}
 						activeSourceSpan={selectedSourceSpan}
-						{collectionId}
-						onAskSource={handSourceToResearchAgent}
+						onAskSource={(selection) => toggleSource(selection, true)}
+						onToggleSource={toggleSource}
+						{selectedSourceKeys}
+						selectionDisabled={$agent.busy}
 						onShowPdf={showPdfPreview}
 					/>
 				{:else}
@@ -316,8 +377,10 @@
 						activeSourceSpanId={selectedSourceSpanId}
 						activeSourceAnchor={selectedSourceAnchor}
 						{sourceJumpToken}
-						{collectionId}
-						onAskSource={handSourceToResearchAgent}
+						onAskSource={(selection) => toggleSource(selection, true)}
+						onToggleSource={toggleSource}
+						{selectedSourceKeys}
+						selectionDisabled={$agent.busy}
 						onSelectSourceSpan={selectSourceSpan}
 					/>
 				{/if}
@@ -341,6 +404,16 @@
 		grid-template-rows: 64px minmax(0, 1fr);
 		background: #f6f9fd;
 		color: #0f172a;
+	}
+	.selection-error {
+		position: absolute;
+		top: 64px;
+		inset-inline: 12px;
+		z-index: 10;
+		padding: 12px;
+		border: 1px solid var(--danger-border);
+		background: var(--danger-bg);
+		color: var(--danger-text);
 	}
 
 	.reader-header {
@@ -456,7 +529,10 @@
 		}
 
 		.reader-header > .btn {
-			display: none;
+			max-width: 100px;
+			white-space: normal;
+			font-size: 11px;
+			padding: 4px 8px;
 		}
 
 		.reader-main {

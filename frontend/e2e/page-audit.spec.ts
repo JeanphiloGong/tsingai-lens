@@ -38,6 +38,219 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [320, 768, 1024, 1440]) {
+		test(`asks across selected papers in a persistent split workspace at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			let created = 0;
+			const turns = new Map<string, ReturnType<typeof agentMessage>[]>();
+			await page.route('**/api/v1/chat-sessions', (route) => {
+				created += 1;
+				expect(route.request().postDataJSON().collection_id).toBe(collectionId);
+				return route.fulfill(
+					json({
+						session_id: `split_${created}`,
+						collection_id: collectionId,
+						user_id: 'user_1',
+						created_at: now(),
+						updated_at: now()
+					})
+				);
+			});
+			await page.route('**/api/v1/chat-sessions/*/messages', (route) => {
+				const id = new URL(route.request().url()).pathname.split('/').at(-2)!;
+				if (route.request().method() === 'GET')
+					return route.fulfill(
+						json({ items: turns.get(id) ?? [], feedback: [], pending_approval: null })
+					);
+				const body = route.request().postDataJSON();
+				expect(body.message).toContain('/documents/doc_1');
+				expect(body.message).toContain('/documents/doc_26');
+				expect(body.message).not.toContain('/documents/doc_2)');
+				const messages = [
+					agentMessage('selected_user', 'user', body.message),
+					agentMessage(
+						'selected_answer',
+						'assistant',
+						'Compare the heat-treatment conditions before combining these measurements.'
+					)
+				];
+				turns.set(id, messages);
+				return route.fulfill(
+					sseTurn({
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						pending_approval: null,
+						error_code: null,
+						warnings: []
+					})
+				);
+			});
+			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) => {
+				const offset = Number(new URL(route.request().url()).searchParams.get('offset') ?? 0);
+				const items = Array.from({ length: offset ? 1 : 25 }, (_, index) => ({
+					...documentProfile(),
+					document_id: `doc_${offset + index + 1}`,
+					title: `LPBF heat-treatment study ${offset + index + 1}`
+				}));
+				return route.fulfill(
+					json({
+						...documentProfiles(),
+						items,
+						count: items.length,
+						total: 26,
+						summary: { total_documents: 26, by_doc_type: {}, warnings: [] }
+					})
+				);
+			});
+			await page.goto(`/collections/${collectionId}/documents`);
+			await page
+				.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
+				.check();
+			await page.getByRole('button', { name: 'Next', exact: true }).click();
+			await page.getByRole('checkbox', { name: 'Select this page', exact: true }).check();
+			await page.getByRole('button', { name: 'Previous', exact: true }).click();
+			await expect(
+				page.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
+			).toBeChecked();
+			await page.getByRole('button', { name: 'Ask research assistant', exact: true }).click();
+			const panel = page.locator('.agent-pane');
+			await expect(panel.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(panel.getByTestId('selected-paper-context')).toContainText('2 papers selected');
+			await sendAgentMessage(page, 'Compare these selected papers');
+			await expect(
+				panel.getByText(
+					'Compare the heat-treatment conditions before combining these measurements.',
+					{ exact: true }
+				)
+			).toBeVisible();
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			if (width > 820) {
+				await expect(page.locator('.document-pane')).toBeVisible();
+				const left = (await page.locator('.document-pane').boundingBox())!;
+				const right = (await panel.boundingBox())!;
+				expect(left.x + left.width).toBeLessThanOrEqual(right.x + 1);
+			}
+			expect(await visibleElementsFitViewport(page, '.agent-pane .composer')).toBe(true);
+			await expect(
+				panel.getByText(
+					'Compare the heat-treatment conditions before combining these measurements.',
+					{ exact: true }
+				)
+			).toBeInViewport();
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `papers-agent-split-${width}.png`) });
+			await panel.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await expect(
+				page.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
+			).toBeChecked();
+			await page.getByRole('button', { name: 'Ask research assistant', exact: true }).click();
+			await expect(
+				panel.getByText(
+					'Compare the heat-treatment conditions before combining these measurements.',
+					{ exact: true }
+				)
+			).toBeVisible();
+			expect(created).toBe(1);
+			await panel.getByRole('button', { name: 'New session', exact: true }).click();
+			await expect(panel.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(panel.getByTestId('user-message')).toHaveCount(0);
+			await expect(panel.getByTestId('selected-paper-context')).toContainText('2 papers selected');
+			expect(created).toBe(2);
+			expect(errors).toEqual([]);
+		});
+	}
+
+	test('selects several source blocks and requests related passages without leaving the reader', async ({
+		page
+	}) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const errors: string[] = [];
+		page.on('pageerror', (error) => errors.push(error.message));
+		await page.route(
+			`**/api/v1/collections/${collectionId}/documents/${documentId}/markdown`,
+			(route) =>
+				route.fulfill(
+					json({
+						...documentMarkdown(),
+						source_map: [
+							...documentMarkdown().source_map,
+							{
+								...documentMarkdown().source_map[0],
+								markdown_anchor: 'block-results',
+								artifact_id: 'results',
+								block_id: 'results',
+								page: 3,
+								heading_path: 'Results'
+							}
+						]
+					})
+				)
+		);
+		let sent: Record<string, unknown> | null = null;
+		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+			if (route.request().method() === 'GET')
+				return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
+			sent = route.request().postDataJSON();
+			const messages = [
+				agentMessage('blocks_user', 'user', String(sent!.message), {
+					source_contexts: sent!.source_contexts as []
+				}),
+				agentMessage(
+					'blocks_answer',
+					'assistant',
+					'The [Results section](/collections/col_123/documents/doc_1?source_ref=results) also specifies the EIS measurement method.'
+				)
+			];
+			return route.fulfill(
+				sseTurn({
+					messages,
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					pending_approval: null,
+					error_code: null
+				})
+			);
+		});
+		await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+		const blocks = page.getByRole('checkbox', { name: 'Select source block', exact: true });
+		await expect(blocks).toHaveCount(2);
+		await blocks.nth(0).check();
+		await blocks.nth(1).check();
+		await page
+			.locator('.reader-header')
+			.getByRole('button', { name: /Ask research assistant/ })
+			.click();
+		const panel = page.locator('.agent-pane');
+		await expect(panel.getByTestId('pending-source-context')).toHaveCount(2);
+		await expect(
+			panel.getByRole('checkbox', { name: 'Check related sections in these papers' })
+		).toBeChecked();
+		await sendAgentMessage(page, 'Explain how these observations relate');
+		await expect(panel.getByRole('link', { name: 'Results section', exact: true })).toBeVisible();
+		expect(sent!.message).toContain('other relevant sections');
+		expect(
+			(sent!.source_contexts as { source_ref: string }[]).map((source) => source.source_ref)
+		).toEqual(['abstract', 'results']);
+		await expect(panel.getByTestId('pending-source-context')).toHaveCount(0);
+		await expect(blocks.nth(0)).not.toBeChecked();
+		await expect(page.locator('.document-reader-root')).toBeVisible();
+		await expect(page).toHaveURL(new RegExp(`/documents/${documentId}$`));
+		await page.mouse.move(0, 0);
+		if (screenshotDir)
+			await page.screenshot({ path: join(screenshotDir, 'source-blocks-agent-split.png') });
+		await panel.getByRole('link', { name: 'Results section', exact: true }).click();
+		await expect(page).toHaveURL(/source_ref=results/);
+		await expect(panel.getByRole('link', { name: 'Results section', exact: true })).toBeVisible();
+		expect(errors).toEqual([]);
+	});
+
+	for (const width of [320, 768, 1024, 1440]) {
 		test(`uses a compact conversation title and named Collection at ${width}px`, async ({
 			page
 		}) => {
@@ -566,18 +779,22 @@ test.describe('page interaction audit', () => {
 				sessionStorage.setItem(
 					'lens.chatSourceContext.user_1:col_123',
 					JSON.stringify({
-						resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
-						collection_id: 'col_123',
-						document_id: 'doc_1',
-						document_title:
-							'Effect of post-build heat treatment on the microstructure and tensile properties of LPBF alloys',
-						source_kind: 'text_window',
-						source_ref: 'results',
-						page: 3,
-						quote:
-							'The measured grain size and tensile strength depend on both processing conditions and subsequent heat treatment. Compare samples with equivalent measurement conditions.',
-						heading_path: 'Results and discussion',
-						quote_truncated: false
+						contexts: [
+							{
+								resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
+								collection_id: 'col_123',
+								document_id: 'doc_1',
+								document_title:
+									'Effect of post-build heat treatment on the microstructure and tensile properties of LPBF alloys',
+								source_kind: 'text_window',
+								source_ref: 'results',
+								page: 3,
+								quote:
+									'The measured grain size and tensile strength depend on both processing conditions and subsequent heat treatment. Compare samples with equivalent measurement conditions.',
+								heading_path: 'Results and discussion',
+								quote_truncated: false
+							}
+						]
 					})
 				)
 			);

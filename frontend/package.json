@@ -46,6 +46,7 @@
 		"vitest-browser-svelte": "^2.0.1"
 	},
 	"dependencies": {
+		"@lucide/svelte": "^1.43.0",
 		"@mdit/plugin-katex": "^0.25.2",
 		"katex": "^0.16.47",
 		"markdown-it": "^14.3.1",

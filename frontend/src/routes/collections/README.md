@@ -48,9 +48,11 @@ This node owns the Collection route family.
   shows deterministic Finding, Evidence, exact Source, paper, and coverage
   relationships without restoring the retired collection-wide Graph contract.
 - `collections/[id]/documents/*`
-  Parsed-paper reading and exact Source verification. A researcher may hand one
-  stable Source block to the same Collection's Agent for explanation or draft
-  formation; the handoff creates no Objective, Evidence, or Finding.
+  Parsed-paper reading and exact Source verification. Papers can be selected
+  across list pages, and up to 12 stable Source blocks can be selected for a
+  question. The Collection Agent opens alongside the list or reader and remains
+  mounted when collapsed. New session starts a separate Collection-bound
+  conversation. The handoff creates no Objective, Evidence, or Finding.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact

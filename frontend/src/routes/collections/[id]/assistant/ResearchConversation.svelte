@@ -7,13 +7,13 @@
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
-		clearPendingChatSourceContext,
+		clearPendingChatSourceContexts,
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
 		appendChatProgress,
-		readPendingChatSourceContext,
-		storePendingChatSourceContext,
+		readPendingChatSourceContexts,
+		storePendingChatSourceContexts,
 		streamChatMessage,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
@@ -31,6 +31,18 @@
 	import ConversationHeader from './ConversationHeader.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
+	import IconButton from '../../../_shared/IconButton.svelte';
+	import type { DocumentProfile } from '../../../_shared/documents';
+	import { Plus, History, X } from '@lucide/svelte';
+
+	export let embedded = false;
+	export let selectedPapers: Pick<DocumentProfile, 'document_id' | 'title'>[] = [];
+	export let onRemovePaper: (id: string) => void = () => {};
+	export let sourceContextVersion = 0;
+	export let onSourcesChanged: () => void = () => {};
+	export let onBusyChange: (busy: boolean) => void = () => {};
+	$: onBusyChange(sending || deciding || Boolean(recoveringCallId));
+	let showHistory = false;
 
 	type StoredChatSession = {
 		session_id: string;
@@ -54,7 +66,8 @@
 	let error = '';
 	let notice = '';
 	let input = '';
-	let pendingSourceContext: ChatSourceContext | null = null;
+	let pendingSourceContexts: ChatSourceContext[] = [];
+	let inspectRelated = embedded;
 	let loadedCollectionId = '';
 	let loadedUserId = '';
 	let failedSessionId: string | null = null;
@@ -86,10 +99,17 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
+	$: if (sourceContextVersion && userId && collectionId) {
+		pendingSourceContexts = readPendingChatSourceContexts(userId, collectionId);
+	}
 	$: collectionName = userId
 		? ($collections.find((item) => item.id === collectionId)?.name?.trim() ?? '')
 		: '';
-	$: conversationTitle = messages.find((message) => message.role === 'user')?.content.trim() ?? '';
+	$: conversationTitle =
+		messages
+			.find((message) => message.role === 'user')
+			?.content.trim()
+			.split('\n')[0] ?? '';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
@@ -197,14 +217,14 @@
 		notice = '';
 		pendingApproval = null;
 		progress = null;
-		pendingSourceContext = null;
+		pendingSourceContexts = [];
 		history = [];
 		if (!userId || !activeCollectionId) return;
 
 		const controller = new AbortController();
 		sessionController = controller;
 		loading = true;
-		pendingSourceContext = readPendingChatSourceContext(userId, activeCollectionId);
+		pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId);
 		history = readHistory();
 
 		try {
@@ -235,12 +255,13 @@
 				messages = trajectory.items;
 				loadFeedback(trajectory.feedback);
 				pendingApproval = trajectory.pending_approval;
-				pendingSourceContext = readPendingChatSourceContext(userId, activeCollectionId, {
+				pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId, {
 					sessionId: nextSession.session_id,
 					messages
 				});
 			}
 			session = nextSession;
+			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
 			scheduleRecovery();
@@ -371,8 +392,30 @@
 	}
 
 	async function sendMessage(nextText = input.trim()) {
-		const text = nextText.trim();
-		if (!session || !text || sending || deciding || pendingApproval || recoveringCallId) return;
+		const draft = nextText.trim();
+		if (
+			!session ||
+			!draft ||
+			loading ||
+			sending ||
+			deciding ||
+			pendingApproval ||
+			recoveringCallId
+		)
+			return;
+		const paperLinks = selectedPapers.map((paper) => {
+			const title = (paper.title || $t('collection.unknownName')).replace(/[\\[\]`*_\n\r]/g, ' ');
+			return `- [${title}](/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(paper.document_id)})`;
+		});
+		let text = paperLinks.length
+			? `${draft}\n\n${$t('researchAgent.paperScope.messageLabel')}\n${paperLinks.join('\n')}`
+			: draft;
+		if (pendingSourceContexts.length && inspectRelated)
+			text += `\n\n${$t('researchAgent.paperScope.relatedRequest')}`;
+		if (text.length > 12000) {
+			error = $t('researchAgent.paperScope.tooLong');
+			return;
+		}
 		const activeSession = session;
 		const activeCollectionId = collectionId;
 		const generation = sessionGeneration;
@@ -394,9 +437,9 @@
 		const optimisticId = `local-${Date.now()}`;
 		const streamingId = `local-stream-${Date.now()}`;
 		const createdAt = new Date().toISOString();
-		const sourceContexts = pendingSourceContext ? [pendingSourceContext] : [];
-		if (pendingSourceContext) {
-			storePendingChatSourceContext(userId, pendingSourceContext, {
+		const sourceContexts = [...pendingSourceContexts];
+		if (sourceContexts.length) {
+			storePendingChatSourceContexts(userId, activeCollectionId, sourceContexts, {
 				session_id: activeSession.session_id,
 				content: text,
 				after_message_id: messages.at(-1)?.message_id ?? null
@@ -450,8 +493,9 @@
 			flushText();
 			applyTurn(turn, [optimisticId, streamingId]);
 			if (sourceContexts.length) {
-				clearPendingChatSourceContext(userId, activeCollectionId);
-				pendingSourceContext = null;
+				clearPendingChatSourceContexts(userId, activeCollectionId);
+				pendingSourceContexts = [];
+				onSourcesChanged();
 			}
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
@@ -464,19 +508,20 @@
 					.slice(previousMessageCount)
 					.find((message) => message.role === 'user' && message.content === text);
 				if (!persistedMessage) {
-					input = text;
+					input = draft;
 				}
-				pendingSourceContext = readPendingChatSourceContext(userId, activeCollectionId, {
+				pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId, {
 					sessionId: activeSession.session_id,
 					messages
 				});
+				onSourcesChanged();
 				scheduleRecovery();
 			} catch {
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				messages = messages.filter(
 					(message) => ![optimisticId, streamingId].includes(message.message_id)
 				);
-				input = text;
+				input = draft;
 			}
 			error = errorMessage(err);
 		} finally {
@@ -486,6 +531,7 @@
 				sending = false;
 				progress = null;
 				progressHistory = [];
+
 			}
 		}
 	}
@@ -494,9 +540,10 @@
 		input = value;
 	}
 
-	function removePendingSourceContext() {
-		clearPendingChatSourceContext(userId, collectionId);
-		pendingSourceContext = null;
+	function removePendingSourceContexts(index: number) {
+		pendingSourceContexts = pendingSourceContexts.filter((_, candidate) => candidate !== index);
+		storePendingChatSourceContexts(userId, collectionId, pendingSourceContexts);
+		onSourcesChanged();
 	}
 
 	function applyTurn(
@@ -600,22 +647,60 @@
 	}
 </script>
 
-<section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
-	<ResearchSidebar
-		{collectionId}
-		{collectionName}
-		{history}
-		{activeSessionId}
-		{loading}
-		{sending}
-		{deciding}
-		onNewSession={startNewSession}
-		onSwitchSession={switchSession}
-		{formatHistoryTime}
-	/>
+<section
+	class="research-agent"
+	class:embedded
+	class:standalone={!embedded}
+	aria-label={$t('researchAgent.chatLabel')}
+>
+	{#if !embedded}
+		<ResearchSidebar
+			{collectionId}
+			{collectionName}
+			{history}
+			{activeSessionId}
+			{loading}
+			{sending}
+			{deciding}
+			onNewSession={startNewSession}
+			onSwitchSession={switchSession}
+			{formatHistoryTime}
+		/>
+	{/if}
 
 	<main class="conversation">
-		{#if conversationTitle || queryObjectiveId}
+		{#if embedded}
+			<div class="embedded-toolbar">
+				<IconButton
+					label={$t('researchAgent.newSession')}
+					disabled={loading || sending || deciding}
+					onClick={startNewSession}><Plus size={16} /></IconButton
+				>
+				<IconButton
+					label={$t('researchAgent.historyTitle')}
+					pressed={showHistory}
+					onClick={() => (showHistory = !showHistory)}><History size={16} /></IconButton
+				>
+				<span title={conversationTitle}
+					>{conversationTitle || $t('researchAgent.untitledSession')}</span
+				>
+			</div>
+			{#if showHistory}
+				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
+					{#each history as item (item.session_id)}
+						<button
+							type="button"
+							class:active={item.session_id === activeSessionId}
+							disabled={loading || sending || deciding}
+							on:click={() => {
+								void switchSession(item.session_id);
+								showHistory = false;
+							}}>{item.title}</button
+						>
+					{/each}
+				</nav>
+			{/if}
+		{:else if conversationTitle || queryObjectiveId}
 			<ConversationHeader title={conversationTitle} {collectionId} objectiveId={queryObjectiveId} />
 		{/if}
 
@@ -664,37 +749,72 @@
 					deciding ||
 					Boolean(pendingApproval) ||
 					Boolean(recoveringCallId)}
-				{pendingSourceContext}
+				{pendingSourceContexts}
+				hasExtraContext={selectedPapers.length > 0}
 				onInput={handleComposerInput}
 				onSend={sendMessage}
-				onRemovePendingSourceContext={removePendingSourceContext}
-			/>
+				onRemovePendingSourceContexts={removePendingSourceContexts}
+			>
+				{#if pendingSourceContexts.length}
+					<label class="related-sources"
+						><input
+							type="checkbox"
+							bind:checked={inspectRelated}
+							disabled={sending || deciding}
+						/>{$t('researchAgent.paperScope.related')}</label
+					>
+				{/if}
+				{#if selectedPapers.length}
+					<details class="paper-scope" open data-testid="selected-paper-context">
+						<summary
+							>{$t('researchAgent.paperScope.selected', { count: selectedPapers.length })}</summary
+						>
+						<ul>
+							{#each selectedPapers as paper (paper.document_id)}
+								<li>
+									<a
+										href={`/collections/${collectionId}/documents/${paper.document_id}`}
+										title={paper.title ?? ''}>{paper.title}</a
+									>
+									<IconButton
+										label={$t('researchAgent.paperScope.remove', { title: paper.title ?? '' })}
+										disabled={sending || deciding}
+										onClick={() => onRemovePaper(paper.document_id)}><X size={14} /></IconButton
+									>
+								</li>
+							{/each}
+						</ul>
+					</details>
+				{/if}
+			</MessageComposer>
 		{/key}
 	</main>
 </section>
 
 <style>
-	:global(.app-shell:has(.research-agent)) {
+	:global(.app-shell:has(.research-agent.standalone)) {
 		padding: 0;
 		overflow: hidden;
 		background: var(--bg-page);
 	}
 
-	:global(.app-shell:has(.research-agent) .site-header),
-	:global(.app-shell:has(.research-agent) .site-footer),
-	:global(.app-shell:has(.research-agent) .bg-grid),
-	:global(.collection-header:has(+ .collection-tabs + .collection-panel .research-agent)),
-	:global(.collection-tabs:has(+ .collection-panel .research-agent)) {
+	:global(.app-shell:has(.research-agent.standalone) .site-header),
+	:global(.app-shell:has(.research-agent.standalone) .site-footer),
+	:global(.app-shell:has(.research-agent.standalone) .bg-grid),
+	:global(
+		.collection-header:has(+ .collection-tabs + .collection-panel .research-agent.standalone)
+	),
+	:global(.collection-tabs:has(+ .collection-panel .research-agent.standalone)) {
 		display: none;
 	}
 
-	:global(.app-shell:has(.research-agent) .page) {
+	:global(.app-shell:has(.research-agent.standalone) .page) {
 		width: 100vw;
 		max-width: none;
 		margin: 0;
 	}
 
-	:global(.collection-panel:has(.research-agent)) {
+	:global(.collection-panel:has(.research-agent.standalone)) {
 		gap: 0;
 	}
 
@@ -775,5 +895,125 @@
 		.status {
 			width: calc(100% - 36px);
 		}
+	}
+
+	.research-agent.embedded {
+		position: relative;
+		inset: auto;
+		z-index: auto;
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
+		width: 100%;
+		height: 100%;
+		min-height: 0;
+	}
+	.embedded-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		min-height: 44px;
+		padding: 0 12px;
+		border-bottom: 1px solid var(--border-default);
+	}
+	.embedded-toolbar > span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.embedded-history {
+		position: absolute;
+		top: 44px;
+		inset-inline: 12px;
+		z-index: 5;
+		max-height: 45%;
+		overflow: auto;
+		padding: 8px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--surface-card);
+		box-shadow: var(--shadow-sm);
+	}
+	.embedded-history button {
+		display: block;
+		width: 100%;
+		border: 0;
+		padding: 10px;
+		text-align: left;
+		overflow-wrap: anywhere;
+		color: var(--text-primary);
+		background: transparent;
+		cursor: pointer;
+	}
+	.embedded-history button.active,
+	.embedded-history button:hover {
+		background: var(--bg-subtle);
+	}
+	.embedded :global(.message-scroll) {
+		padding-inline: 16px;
+	}
+	.embedded :global(.message-list) {
+		padding-top: 20px;
+		padding-bottom: 24px;
+	}
+	.embedded :global(.empty-state) {
+		margin-top: 24px;
+	}
+	.embedded :global(.welcome-eyebrow),
+	.embedded :global(.welcome-state > p:not(.welcome-eyebrow)) {
+		display: none;
+	}
+	.embedded :global(.empty-state h3) {
+		font-size: 16px;
+		margin-top: 12px;
+	}
+	.embedded :global(.suggestions) {
+		grid-template-columns: 1fr;
+	}
+	.embedded :global(.composer) {
+		width: calc(100% - 24px);
+		margin-inline: auto;
+	}
+	.embedded :global(.user-message > div) {
+		max-width: 94%;
+	}
+	.paper-scope {
+		padding: 8px 0;
+		font-size: 12px;
+	}
+	.related-sources {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 0;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.paper-scope summary {
+		cursor: pointer;
+		font-weight: 600;
+		color: var(--text-secondary);
+	}
+	.paper-scope ul {
+		list-style: none;
+		padding: 0;
+		margin: 4px 0 0;
+		max-height: 108px;
+		overflow: auto;
+	}
+	.paper-scope li {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.paper-scope a {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text-primary);
 	}
 </style>

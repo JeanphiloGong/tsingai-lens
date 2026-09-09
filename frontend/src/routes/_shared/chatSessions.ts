@@ -305,43 +305,55 @@ function sourceContextStorageKey(userId: string, collectionId: string) {
 	return `lens.chatSourceContext.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}`;
 }
 
-export function storePendingChatSourceContext(
+export const MAX_CHAT_SOURCE_CONTEXTS = 12;
+
+export function storePendingChatSourceContexts(
 	userId: string,
-	context: ChatSourceContext,
+	collectionId: string,
+	contexts: ChatSourceContext[],
 	submission?: { session_id: string; content: string; after_message_id: string | null }
 ) {
 	if (typeof window === 'undefined') return;
+	if (!contexts.length) {
+		clearPendingChatSourceContexts(userId, collectionId);
+		return;
+	}
 	window.sessionStorage.setItem(
-		sourceContextStorageKey(userId, context.collection_id),
-		JSON.stringify({ ...context, submission })
+		sourceContextStorageKey(userId, collectionId),
+		JSON.stringify({ contexts, submission })
 	);
 }
 
-export function readPendingChatSourceContext(
+export function readPendingChatSourceContexts(
 	userId: string,
 	collectionId: string,
 	persisted?: { sessionId: string; messages: ChatMessage[] }
-): ChatSourceContext | null {
-	if (typeof window === 'undefined') return null;
+): ChatSourceContext[] {
+	if (typeof window === 'undefined') return [];
 	try {
 		const raw = window.sessionStorage.getItem(sourceContextStorageKey(userId, collectionId));
 		const value = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
-		const resource = value?.resource_ref as Record<string, unknown> | undefined;
+		const contexts = value?.contexts as ChatSourceContext[] | undefined;
 		if (
-			!value ||
-			value.collection_id !== collectionId ||
-			resource?.resource_type !== 'source' ||
-			typeof resource.resource_id !== 'string' ||
-			typeof value.document_id !== 'string' ||
-			typeof value.document_title !== 'string' ||
-			typeof value.source_kind !== 'string' ||
-			typeof value.source_ref !== 'string' ||
-			typeof value.quote !== 'string'
+			!Array.isArray(contexts) ||
+			contexts.length > MAX_CHAT_SOURCE_CONTEXTS ||
+			contexts.some(
+				(item) =>
+					!item ||
+					item.collection_id !== collectionId ||
+					item.resource_ref?.resource_type !== 'source' ||
+					typeof item.resource_ref.resource_id !== 'string' ||
+					typeof item.document_id !== 'string' ||
+					typeof item.document_title !== 'string' ||
+					typeof item.source_kind !== 'string' ||
+					typeof item.source_ref !== 'string' ||
+					typeof item.quote !== 'string'
+			)
 		) {
-			clearPendingChatSourceContext(userId, collectionId);
-			return null;
+			clearPendingChatSourceContexts(userId, collectionId);
+			return [];
 		}
-		const submission = value.submission as Record<string, unknown> | undefined;
+		const submission = value?.submission as Record<string, unknown> | undefined;
 		if (persisted && submission?.session_id === persisted.sessionId) {
 			const afterIndex =
 				submission.after_message_id === null
@@ -358,24 +370,26 @@ export function readPendingChatSourceContext(
 						(message) =>
 							message.role === 'user' &&
 							message.content === submission.content &&
-							message.source_contexts.some(
-								(source) =>
-									source.collection_id === collectionId &&
-									source.document_id === value.document_id &&
-									source.source_kind === value.source_kind &&
-									source.source_ref === value.source_ref
+							contexts.every((context) =>
+								message.source_contexts.some(
+									(source) =>
+										source.collection_id === collectionId &&
+										source.document_id === context.document_id &&
+										source.source_kind === context.source_kind &&
+										source.source_ref === context.source_ref
+								)
 							)
 					);
 			if (sent) {
-				clearPendingChatSourceContext(userId, collectionId);
-				return null;
+				clearPendingChatSourceContexts(userId, collectionId);
+				return [];
 			}
 		}
-		return {
+		return contexts.map((value) => ({
 			resource_ref: {
 				resource_type: 'source',
-				resource_id: resource.resource_id,
-				href: typeof resource.href === 'string' ? resource.href : null
+				resource_id: value.resource_ref.resource_id,
+				href: typeof value.resource_ref.href === 'string' ? value.resource_ref.href : null
 			},
 			collection_id: collectionId,
 			document_id: value.document_id,
@@ -386,14 +400,14 @@ export function readPendingChatSourceContext(
 			quote: value.quote,
 			heading_path: typeof value.heading_path === 'string' ? value.heading_path : null,
 			quote_truncated: value.quote_truncated === true
-		};
+		}));
 	} catch {
-		clearPendingChatSourceContext(userId, collectionId);
-		return null;
+		clearPendingChatSourceContexts(userId, collectionId);
+		return [];
 	}
 }
 
-export function clearPendingChatSourceContext(userId: string, collectionId: string) {
+export function clearPendingChatSourceContexts(userId: string, collectionId: string) {
 	if (typeof window === 'undefined') return;
 	window.sessionStorage.removeItem(sourceContextStorageKey(userId, collectionId));
 }

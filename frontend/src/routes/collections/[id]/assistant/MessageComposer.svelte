@@ -10,10 +10,11 @@
 	export let input = '';
 	export let sending = false;
 	export let disabled = false;
-	export let pendingSourceContext: ChatSourceContext | null = null;
+	export let pendingSourceContexts: ChatSourceContext[] = [];
+	export let hasExtraContext = false;
 	export let onInput: (value: string) => void = () => {};
 	export let onSend: (nextText?: string) => void = () => {};
-	export let onRemovePendingSourceContext: () => void = () => {};
+	export let onRemovePendingSourceContexts: (index: number) => void = () => {};
 
 	let uploadInput: HTMLInputElement | null = null;
 
@@ -238,8 +239,9 @@
 		disabled={uploadLoading}
 		on:change={selectUploadFiles}
 	/>
-	{#if uploadItems.length || uploadError || pendingSourceContext}
+	{#if uploadItems.length || uploadError || pendingSourceContexts.length || hasExtraContext}
 		<div class="composer-context">
+			<slot />
 			{#if uploadItems.length}
 				<section class="upload-panel" aria-label={$t('researchAgent.upload.panelTitle')}>
 					<header>
@@ -290,29 +292,30 @@
 			{:else if uploadError}
 				<p class="upload-error upload-error--standalone" role="alert">{uploadError}</p>
 			{/if}
-			{#if pendingSourceContext}
+			{#each pendingSourceContexts as source, index (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
 				<div class="source-context-preview" data-testid="pending-source-context">
 					<div>
-						<strong>{pendingSourceContext.document_title}</strong>
+						<strong>{source.document_title}</strong>
 						<small>
-							{pendingSourceContext.heading_path ?? pendingSourceContext.source_kind}
-							{#if pendingSourceContext.page}
-								· {$t('workbench.pageLabel', { page: pendingSourceContext.page })}{/if}
+							{source.heading_path ?? source.source_kind}
+							{#if source.page}
+								· {$t('workbench.pageLabel', { page: source.page })}{/if}
 						</small>
-						{#if pendingSourceContext.quote_truncated}
+						{#if source.quote_truncated}
 							<small>{$t('researchAgent.sourceContext.truncated')}</small>
 						{/if}
-						<p>{pendingSourceContext.quote}</p>
+						<p>{source.quote}</p>
 					</div>
 					<button
 						type="button"
 						class="remove-source-context"
 						aria-label={$t('researchAgent.sourceContext.remove')}
 						title={$t('researchAgent.sourceContext.remove')}
-						on:click={onRemovePendingSourceContext}>×</button
+						{disabled}
+						on:click={() => onRemovePendingSourceContexts(index)}>×</button
 					>
 				</div>
-			{/if}
+			{/each}
 		</div>
 	{/if}
 	<div class="composer-row">

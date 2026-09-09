@@ -39,7 +39,7 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
   gold-draft URLs serve the corresponding collection exports.
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, streamed text
-  deltas, capability results, exact write decisions, and the one-item pending
+  deltas, capability results, exact write decisions, and the bounded pending
   Source handoff between a document reader and its Collection Agent.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans

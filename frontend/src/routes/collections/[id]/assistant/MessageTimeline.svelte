@@ -126,9 +126,9 @@
 		aria-label={$t('researchAgent.chatLabel')}
 		aria-live="polite"
 		aria-busy={loading || sending || deciding}
-		on:scroll={() => {
-			following =
-				scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight < 64;
+		on:scroll={(event) => {
+			const node = event.currentTarget;
+			following = node.scrollHeight - node.scrollTop - node.clientHeight < 64;
 		}}
 	>
 		<div class="message-list" bind:this={contentElement}>

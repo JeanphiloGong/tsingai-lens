@@ -152,9 +152,9 @@ that exact session. Only an explicit `404` removes the missing session and
 creates a replacement; network errors and other HTTP failures remain visible.
 
 The server trajectory is authoritative. Browser storage remembers which
-session to load, how to label it in the local history list, and one pending
-Source handoff from the document reader. The pending Source is shown above the
-composer and can be removed. It is cleared after the complete persisted turn
+session to load, how to label it in the local history list, and up to 12 pending
+Source blocks from the document reader. Pending blocks are shown above the
+composer and can be removed individually. They are cleared after the complete persisted turn
 returns, or when recovery after an interrupted stream confirms that the sent
 message and its Source locators were persisted. If persistence cannot be
 confirmed, the pending Source remains available for retry. This check also runs
@@ -227,7 +227,8 @@ The route follows the same message-first composition used by Open WebUI while
 keeping Lens-specific research boundaries explicit:
 
 - `+page.svelte` is the standalone route entry. `ResearchConversation.svelte`
-  owns session orchestration, streaming, approval state, and the conversation shell. It does not create a second browser API or persistence
+  owns session orchestration, streaming, and approval state for both that route
+  and the documents split workspace. It does not create a second browser API or persistence
   model. Each session load has a request generation and abort signal; collection
   changes, account changes, and unmounting invalidate pending reads, streams, and approval
   responses before they can update the current conversation or local history.
@@ -322,6 +323,30 @@ same Collection and preserves the document, Source kind/reference, page,
 heading, canonical return link, bounded quote, and any explicit shortened-quote
 state. The user reviews that
 context and writes the actual question before sending it.
+
+The Papers list supports individual selection and selecting the current page;
+selection survives pagination and filtering. The selected paper titles and
+canonical reader links are included in the question, so the selected scope is
+visible in the persisted message. Selecting papers does not imply that they
+have been read or establish a server-enforced tool scope.
+
+The documents layout owns the split workspace and its local selection state.
+On desktop, the paper list or reader remains beside the conversation; on narrow
+screens, closing the conversation returns to the mounted reading surface.
+Collapsing the panel keeps the same conversation and ongoing work mounted.
+New session creates a separate session in the same Collection and retains
+unsent selections; opening the panel alone resumes the current session.
+The standalone route and split panel both use `ResearchConversation.svelte`,
+which owns session loading, streaming, approvals, and recovery.
+
+Source checkboxes accumulate distinct blocks from the current Collection,
+including tables and figures. Duplicate locators cannot create duplicate
+attachments. The composer can request inspection of related sections in those
+papers; this option is enabled initially in the split workspace. Its explicit
+request becomes part of the saved question and asks for exact links, supporting
+or conflicting passages, and disclosure of unread or unavailable content.
+It is a research request, not a guarantee that relevant passages exist or that
+the model will find every one. New selection is disabled during an active turn.
 
 The selected Source is context, not Evidence. Opening the Agent creates no Core
 record, and Agent prose cannot become Evidence or a Finding without a later
@@ -454,7 +479,7 @@ The focused browser suite covers:
 11. a visible mobile composer across consecutive turns and reduced viewport
     height;
 12. text visible before the final persisted turn arrives.
-13. one document Source handed to the same Collection Agent, removable before
+13. multiple document Sources handed to the same Collection Agent, removable before
     submission and persisted only with the sent user message;
 14. exact published Finding and linked Evidence inspection before review;
 15. distinct feedback and curation approvals, including rejection without a

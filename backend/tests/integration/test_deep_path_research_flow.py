@@ -61,6 +61,7 @@ from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,
     _source,
 )
+from tests.unit.application.test_research_agent_runner import _Model
 
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
@@ -72,11 +73,11 @@ _P002_FIXTURE = (
 )
 
 
-class _QueuedModel:
+class _QueuedModel(_Model):
     """Deterministic model turns while the real Agent loop owns tool execution."""
 
     def __init__(self) -> None:
-        self.turns: deque[ModelTurn] = deque()
+        super().__init__()
 
     def queue_tool(self, name: str, arguments: dict[str, Any]) -> None:
         self.turns.extend(
@@ -85,13 +86,6 @@ class _QueuedModel:
                 ModelTurn(content=f"{name} completed."),
             )
         )
-
-    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
-        messages = context.messages
-        assert messages
-        assert self.turns
-        return self.turns.popleft()
-
 
 def _p002_source() -> SourceDocument:
     payload = json.loads(_P002_FIXTURE.read_text(encoding="utf-8"))
@@ -136,8 +130,9 @@ def _tool_result(turn: dict[str, Any]) -> ChatToolResult:
         for message in turn["messages"]
         if isinstance(message, ChatMessage) and message.tool_result is not None
     ]
-    assert len(results) == 1
-    return results[0]
+    domain_results = [result for result in results if "catalog_version" not in result.data]
+    assert len(domain_results) == 1
+    return domain_results[0]
 
 
 async def _run_tool(

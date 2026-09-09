@@ -79,9 +79,18 @@ class _ObjectiveArguments(BaseModel):
     objective_id: str
 
 
+class _RevisionArguments(_ObjectiveArguments):
+    parent_plan_id: str
+
+
 class _Model:
-    def __init__(self, *turns: ModelTurn | Exception) -> None:
+    # Script domain decisions; perform the actual discovery round trip when a
+    # scripted call needs a deferred schema. all_tool_spec_names includes both.
+    def __init__(self, *turns: ModelTurn | Exception, discover: tuple[str, ...] = ()) -> None:
         self.turns = deque(turns)
+        self.discover = discover
+        self.discovery_decisions: list[tuple[str, ...]] = []
+        self.all_tool_spec_names: list[tuple[str, ...]] = []
         self.tool_spec_names: list[tuple[str, ...]] = []
         self.contexts: list[tuple[ChatMessage, ...]] = []
         self.request_limits: list[tuple[float, int]] = []
@@ -97,9 +106,22 @@ class _Model:
     ) -> ModelTurn:
         messages = context.messages
         assert messages
+        names = tuple(item.name for item in tool_specs)
+        self.all_tool_spec_names.append(names)
+        catalog = next((spec for spec in tool_specs if spec.name == "discover_research_tools"), None)
+        next_turn = self.turns[0] if self.turns else None
+        requested = self.discover or (
+            tuple(call.name for call in next_turn.tool_calls)
+            if isinstance(next_turn, ModelTurn) else ()
+        )
+        missing = tuple(name for name in requested if name not in names and catalog and f"- {name} [" in catalog.description)
+        if missing:
+            self.discover = ()
+            self.discovery_decisions.append(missing)
+            return ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": list(missing)}),))
         self.contexts.append(messages)
         self.request_limits.append((timeout_seconds, max_output_tokens))
-        self.tool_spec_names.append(tuple(item.name for item in tool_specs))
+        self.tool_spec_names.append(tuple(name for name in names if name != "discover_research_tools"))
         turn = self.turns.popleft()
         if isinstance(turn, Exception):
             raise turn
@@ -249,7 +271,8 @@ async def test_identical_observations_finalize_without_losing_results(failed: bo
         capabilities=CapabilityRegistry((read,)),
     ).run_turn(context=_context(), previous_messages=(), user_message="Read collection papers.")
     assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
-    assert len(result.tool_results) == len(read.executed_arguments) == 3
+    assert len(result.tool_results) == 4
+    assert len(read.executed_arguments) == 3
     assert result.warnings
 
 
@@ -262,7 +285,7 @@ async def test_usage_exhaustion_records_unexecuted_intent_then_finalizes() -> No
     ).run_turn(context=_context(), previous_messages=(), user_message="Read collection papers.")
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
     assert read.executed_arguments == []
-    assert result.tool_results[0].error_code == "resource_budget"
+    assert result.tool_results[-1].error_code == "resource_budget"
 
 
 @pytest.mark.parametrize("tokens", [100, 120])
@@ -564,7 +587,8 @@ async def test_general_science_discussion_receives_no_capabilities() -> None:
 
 
 async def test_correction_request_that_says_do_not_publish_exposes_reads_but_no_writes() -> None:
-    model = _Model(ModelTurn(content="我会先回到原始来源核对 HIP 条件。"))
+    model = _Model(ModelTurn(content="我会先回到原始来源核对 HIP 条件。"),
+                   discover=("browse_collection_papers", "search_sources", "read_source"))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -610,7 +634,8 @@ async def test_correction_request_that_says_do_not_publish_exposes_reads_but_no_
 
 
 async def test_literature_screening_receives_only_collection_read_capabilities() -> None:
-    model = _Model(ModelTurn(content="我会先根据论文概览形成临时阅读清单。"))
+    model = _Model(ModelTurn(content="我会先根据论文概览形成临时阅读清单。"),
+                   discover=("get_collection_context", "browse_collection_papers"))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -698,6 +723,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
             ),)
         ),
         ModelTurn(content="已读取结果原文；目前只能对第一篇论文形成有依据的初步判断。"),
+        discover=("browse_collection_papers",),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -719,6 +745,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
 
     assert result.status is AgentRunStatus.COMPLETED
     assert [call.name for call in result.tool_calls] == [
+        "discover_research_tools",
         "browse_collection_papers",
         "search_sources",
         "read_source",
@@ -744,6 +771,7 @@ async def test_literature_based_opinion_fails_if_required_read_is_refused() -> N
         model=_Model(
             ModelTurn(content=unsupported_answer),
             ModelTurn(content=unsupported_answer),
+            discover=("browse_collection_papers",),
         ),
         capabilities=CapabilityRegistry(
             (_Capability("browse_collection_papers", ToolRisk.READ),)
@@ -838,7 +866,8 @@ async def test_standalone_status_query_does_not_expose_paper_browsing() -> None:
 
 
 async def test_research_plan_question_does_not_expose_finding_writes() -> None:
-    model = _Model(ModelTurn(content="我会先根据现有证据拟定研究方案草案。"))
+    model = _Model(ModelTurn(content="我会先根据现有证据拟定研究方案草案。"),
+                   discover=("propose_research_plan",))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -846,7 +875,7 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
                 _Capability(
                     name,
                     ToolRisk.READ
-                    if name != "create_research_plan"
+                    if name not in intent_policy.WRITE_CAPABILITIES
                     else ToolRisk.WRITE,
                 )
                 for name in (
@@ -883,7 +912,10 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
 
 
 async def test_finding_review_does_not_expose_mutation_capabilities_without_save_request() -> None:
-    model = _Model(ModelTurn(content="我会先核对结论、证据和适用边界。"))
+    model = _Model(ModelTurn(content="我会先核对结论、证据和适用边界。"),
+                   discover=("get_collection_context", "query_published_findings",
+                             "inspect_published_finding", "inspect_objective_analysis",
+                             "assess_objective_quality"))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -933,7 +965,9 @@ async def test_finding_review_does_not_expose_mutation_capabilities_without_save
 
 
 async def test_objective_status_question_does_not_expose_derivation() -> None:
-    model = _Model(ModelTurn(content="我会先查看现有研究目标和分析状态。"))
+    model = _Model(ModelTurn(content="我会先查看现有研究目标和分析状态。"),
+                   discover=("get_collection_context", "inspect_research_process",
+                             "inspect_objective_analysis"))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -962,9 +996,6 @@ async def test_objective_status_question_does_not_expose_derivation() -> None:
     assert model.tool_spec_names == [
         (
             "get_collection_context",
-            "browse_collection_papers",
-            "propose_objective_drafts",
-            "preview_research_scope",
             "inspect_research_process",
             "inspect_objective_analysis",
         )
@@ -1027,6 +1058,7 @@ async def test_status_question_retries_a_premature_answer_before_each_required_r
 
     assert result.status is AgentRunStatus.COMPLETED
     assert [call.name for call in result.tool_calls] == [
+        "discover_research_tools",
         "get_collection_context",
         "inspect_research_process",
         "inspect_objective_analysis",
@@ -1066,13 +1098,16 @@ async def test_filename_follow_up_keeps_paper_reads_without_exposing_writes() ->
     assert model.tool_spec_names == [
         ("browse_collection_papers",),
         ("browse_collection_papers",),
-        ("browse_collection_papers", "search_sources"),
+        (),
     ]
+    assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
     assert all("create_objective_candidate" not in names for names in model.tool_spec_names)
 
 
 async def test_objective_write_is_hidden_until_the_user_requests_persistence() -> None:
-    draft_model = _Model(ModelTurn(content="我可以先形成三个可审阅的问题草案。"))
+    draft_model = _Model(ModelTurn(content="我可以先形成三个可审阅的问题草案。"),
+                         discover=("get_collection_context", "browse_collection_papers",
+                                   "preview_research_scope", "propose_objective_drafts"))
     capabilities = CapabilityRegistry(
         (
             _Capability("get_collection_context", ToolRisk.READ),
@@ -1221,12 +1256,14 @@ async def test_read_capability_result_returns_to_the_model_before_final_answer()
         "assistant",
         "tool",
         "assistant",
+        "tool",
+        "assistant",
     ]
-    assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
-    assert result.tool_results[0].data["collection_id"] == "col-1"
+    assert result.tool_calls[1].status is ToolCallStatus.SUCCEEDED
+    assert result.tool_results[1].data["collection_id"] == "col-1"
     assert capability.executed_arguments == [{}]
-    assert capability.executed_call_ids == [result.tool_calls[0].tool_call_id]
-    assert result.tool_results[0].tool_call_id == result.tool_calls[0].tool_call_id
+    assert capability.executed_call_ids == [result.tool_calls[1].tool_call_id]
+    assert result.tool_results[1].tool_call_id == result.tool_calls[1].tool_call_id
 
 
 async def test_each_model_tool_decision_gets_a_unique_lens_call_identity() -> None:
@@ -1262,7 +1299,7 @@ async def test_each_model_tool_decision_gets_a_unique_lens_call_identity() -> No
         user_message="再读取一次",
     )
 
-    call_ids = [first.tool_calls[0].tool_call_id, second.tool_calls[0].tool_call_id]
+    call_ids = [first.tool_calls[-1].tool_call_id, second.tool_calls[-1].tool_call_id]
     assert call_ids[0] != call_ids[1]
     assert all(call_id.startswith("call_") for call_id in call_ids)
     assert capability.executed_call_ids == call_ids
@@ -1301,7 +1338,7 @@ async def test_draft_capability_executes_without_write_approval() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert result.tool_calls[0].risk is ToolRisk.DRAFT
+    assert result.tool_calls[-1].risk is ToolRisk.DRAFT
     assert capability.executed_arguments == [
         {"question": "energy input and ductility"}
     ]
@@ -1468,6 +1505,7 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
     assert [call.status for call in proposed.tool_calls] == [
         ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
+        ToolCallStatus.SUCCEEDED,
         ToolCallStatus.APPROVAL_REQUIRED,
     ]
     assert reader.executed_arguments == [{}]
@@ -1600,11 +1638,11 @@ async def test_invalid_arguments_do_not_execute_capability() -> None:
         user_message="帮我整理一下",
     )
 
-    assert result.tool_results[0].error_code == "invalid_tool_arguments"
+    assert result.tool_results[-1].error_code == "invalid_tool_arguments"
     assert capability.executed_arguments == []
 
 
-async def test_capability_exception_is_sanitized_before_returning_to_model() -> None:
+async def test_capability_exception_is_sanitized_before_returning_to_model(caplog) -> None:
     capability = _Capability(
         "get_collection_context",
         ToolRisk.READ,
@@ -1629,9 +1667,11 @@ async def test_capability_exception_is_sanitized_before_returning_to_model() -> 
         user_message="读取 collection",
     )
 
-    assert result.tool_results[0].error_code == "capability_execution_failed"
-    assert "password" not in result.tool_results[0].error_message
-    assert "do-not-expose" not in result.tool_results[0].error_message
+    assert result.tool_results[-1].error_code == "capability_execution_failed"
+    assert "password" not in result.tool_results[-1].error_message
+    assert "do-not-expose" not in result.tool_results[-1].error_message
+    assert "do-not-expose" not in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
 
 
 async def test_queued_capability_result_returns_to_model_as_a_successful_observation() -> None:
@@ -1690,7 +1730,7 @@ async def test_resource_budget_stops_repeated_tool_calls() -> None:
             ),
         ),
         capabilities=CapabilityRegistry((capability,)),
-        limits=AgentRunLimits(max_tool_calls=2),
+        limits=AgentRunLimits(max_tool_calls=3),
     )
 
     result = await runner.run_turn(
@@ -1700,7 +1740,7 @@ async def test_resource_budget_stops_repeated_tool_calls() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert len(result.tool_calls) == 2
+    assert len(result.tool_calls) == 3
     assert len(capability.executed_arguments) == 2
     assert result.messages[-1].role == "assistant"
     assert "step limit" not in result.messages[-1].content.lower()
@@ -1725,7 +1765,7 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
         capabilities=CapabilityRegistry(
             (_Capability("get_collection_context", ToolRisk.READ),)
         ),
-        limits=AgentRunLimits(max_tool_calls=1),
+        limits=AgentRunLimits(max_tool_calls=2),
     )
 
     result = await runner.run_turn(
@@ -1764,7 +1804,7 @@ async def test_resource_budget_final_answer_has_time_to_summarize_large_trajecto
         capabilities=CapabilityRegistry(
             (_Capability("get_collection_context", ToolRisk.READ),)
         ),
-        limits=AgentRunLimits(max_tool_calls=1),
+        limits=AgentRunLimits(max_tool_calls=2),
     )
 
     result = await runner.run_turn(
@@ -1824,11 +1864,12 @@ async def test_resource_budget_ledger_counts_complete_inspected_source_as_read()
             ),)
         ),
         ModelTurn(content="当前 collection 只有 4 篇；我精读了一个完整来源。"),
+        discover=("browse_collection_papers", "inspect_document_sources"),
     )
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry((browse, inspect)),
-        limits=AgentRunLimits(max_tool_calls=2),
+        limits=AgentRunLimits(max_tool_calls=3),
     )
 
     result = await runner.run_turn(
@@ -1918,7 +1959,7 @@ async def test_resource_budget_final_answer_keeps_latest_structured_draft() -> N
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry((propose,)),
-        limits=AgentRunLimits(max_tool_calls=1),
+        limits=AgentRunLimits(max_tool_calls=2),
     )
 
     result = await runner.run_turn(
@@ -1971,7 +2012,7 @@ async def test_complete_paper_browse_is_not_repeated_during_source_reading() -> 
 
     assert "browse_collection_papers" in model.tool_spec_names[0]
     assert "browse_collection_papers" not in model.tool_spec_names[1]
-    assert set(model.tool_spec_names[1]) == {"search_sources", "read_source"}
+    assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
 
 
 async def test_comparison_requires_source_search_after_paper_map() -> None:
@@ -2119,6 +2160,7 @@ async def test_exact_finding_inspection_narrows_next_step_to_research_plan_draft
             ),)
         ),
         ModelTurn(content="方案草案已形成，但尚未保存。"),
+        discover=("inspect_published_finding", "propose_research_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2199,6 +2241,7 @@ async def test_research_plan_progresses_once_through_required_evidence_reads() -
             ),)
         ),
         ModelTurn(content="方案草案已形成，但尚未保存或授权执行。"),
+        discover=("propose_research_plan",),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2263,6 +2306,7 @@ async def test_research_plan_can_abstain_when_no_published_finding_exists() -> N
                 "完成证据分析。"
             )
         ),
+        discover=("propose_research_plan",),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2339,7 +2383,6 @@ async def test_source_search_narrows_next_step_to_exact_source_readers() -> None
     assert result.status is AgentRunStatus.COMPLETED
     assert set(model.tool_spec_names[1]) == {
         "read_source",
-        "inspect_document_sources",
         "inspect_table",
     }
     assert "paper-1" in model.contexts[1][-1].content
@@ -2550,7 +2593,7 @@ async def test_document_identifier_request_can_execute_source_read() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert [call.name for call in result.tool_calls] == ["read_source"]
+    assert [call.name for call in result.tool_calls] == ["discover_research_tools", "read_source"]
     assert read.executed_arguments == [{"question": "P002 group definitions"}]
 
 
@@ -2591,7 +2634,6 @@ def test_actionable_english_plan_request_enables_plan_capabilities(
     ("request_text", "capability_name"),
     [
         ("Draft and save a plan", "create_research_plan"),
-        ("Revise the saved plan", "revise_research_plan"),
     ],
 )
 async def test_actionable_english_plan_request_reaches_write_approval(
@@ -2653,7 +2695,8 @@ def test_attached_source_context_does_not_force_collection_browse() -> None:
     }
 
     assert "browse_collection_papers" not in names
-    assert "read_source" in names
+    assert names == {"discover_research_tools"}
+    assert "read_source" in runner.capabilities.discovery.tools
 
 
 async def test_research_plan_read_request_requires_inspection_tool() -> None:
@@ -2666,6 +2709,7 @@ async def test_research_plan_read_request_requires_inspection_tool() -> None:
     model = _Model(
         ModelTurn(content="已有方案如下。"),
         ModelTurn(content="仍然可以直接回答。"),
+        discover=("inspect_research_plans",),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2683,7 +2727,8 @@ async def test_research_plan_read_request_requires_inspection_tool() -> None:
     assert inspect.executed_arguments == []
 
 
-async def test_research_plan_revision_reads_existing_plan_before_write() -> None:
+@pytest.mark.parametrize("user_request", ["查看已保存的研究方案并修订后保存", "Revise the saved plan"])
+async def test_research_plan_revision_reads_existing_plan_before_write(user_request: str) -> None:
     inspect = _Capability(
         "inspect_research_plans",
         ToolRisk.READ,
@@ -2693,7 +2738,7 @@ async def test_research_plan_revision_reads_existing_plan_before_write() -> None
             "plans": [{"plan_id": "plan-1"}],
         },
     )
-    revise = _Capability("revise_research_plan", ToolRisk.WRITE)
+    revise = _Capability("revise_research_plan", ToolRisk.WRITE, _RevisionArguments)
     model = _Model(
         ModelTurn(
             tool_calls=(
@@ -2705,19 +2750,25 @@ async def test_research_plan_revision_reads_existing_plan_before_write() -> None
         ),
         ModelTurn(
             tool_calls=(
-                ModelToolCall(name="revise_research_plan", arguments={}),
+                ModelToolCall(name="revise_research_plan", arguments={
+                    "objective_id": "objective-1", "parent_plan_id": "plan-1",
+                }),
             )
         ),
     )
     runner = ResearchAgentRunner(
         model=model,
-        capabilities=CapabilityRegistry((inspect, revise)),
+        capabilities=CapabilityRegistry((inspect, revise,
+            _Capability("assess_objective_quality", ToolRisk.READ),
+            _Capability("query_published_findings", ToolRisk.READ),
+            _Capability("propose_research_plan", ToolRisk.DRAFT),
+        )),
     )
 
     result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="查看已保存的研究方案并修订后保存",
+        user_message=user_request,
     )
 
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED

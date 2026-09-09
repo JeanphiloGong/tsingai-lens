@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
 import pytest
@@ -25,44 +24,10 @@ from infra.persistence.memory import (
 )
 from main import create_app
 from tests.support.chat_repository import MemoryChatRepository
+from tests.unit.application.test_research_agent_runner import _Model
 
 
 pytestmark = pytest.mark.anyio
-
-
-class _Model:
-    def __init__(self, *turns: ModelTurn) -> None:
-        self.turns = deque(turns)
-
-    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
-        messages = context.messages
-        assert messages
-        latest_user = next(
-            message
-            for message in reversed(messages)
-            if message.role == "user"
-        )
-        if latest_user.content == "Hello":
-            assert tool_specs == ()
-        elif "collection contain" in latest_user.content:
-            assert {item.name for item in tool_specs} == {"get_collection_context"}
-        elif any(
-            request.name == "create_objective_candidate"
-            for message in messages
-            for request in message.tool_calls
-        ) and any(
-            message.tool_result is not None
-            and message.tool_result.status in {"succeeded", "queued"}
-            for message in messages
-            if message.role == "tool"
-        ):
-            assert {item.name for item in tool_specs} == {"get_collection_context"}
-        else:
-            assert {item.name for item in tool_specs} == {
-                "get_collection_context",
-                "create_objective_candidate",
-            }
-        return self.turns.popleft()
 
 
 class _ObjectiveRepository:
@@ -247,10 +212,14 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         {"question": "How does energy input affect grain morphology?"}
     ]
     assert trajectory.json()["pending_approval"] is None
+    assert model.all_tool_spec_names[0] == ("discover_research_tools",)
+    assert "create_objective_candidate" not in model.all_tool_spec_names[-1]
     assert [item["role"] for item in trajectory.json()["items"]] == [
         "user",
         "assistant",
         "user",
+        "assistant",
+        "tool",
         "assistant",
         "tool",
         "assistant",

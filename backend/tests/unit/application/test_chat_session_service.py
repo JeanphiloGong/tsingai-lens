@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 import asyncio
 from hashlib import sha256
 from typing import Any
@@ -36,6 +35,7 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.source import SourceBlock, SourceDocument
+from tests.unit.application.test_research_agent_runner import _Model
 
 pytestmark = pytest.mark.anyio
 
@@ -49,28 +49,6 @@ class _Question(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str
-
-
-class _Model:
-    def __init__(self, *turns: ModelTurn) -> None:
-        self.turns = deque(turns)
-
-    async def respond(
-        self,
-        *,
-        context: tuple,
-        tool_specs: tuple,
-        text_delta_callback=None,  # noqa: ANN001
-        timeout_seconds=180.0,
-        max_output_tokens=16_384,
-    ) -> ModelTurn:
-        messages = context.messages
-        turn = self.turns.popleft()
-        if text_delta_callback is not None and turn.content:
-            for chunk in (turn.content[:2], turn.content[2:]):
-                if chunk:
-                    text_delta_callback(chunk)
-        return turn
 
 
 class _WriteCapability:
@@ -575,7 +553,10 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
         (("user", "assistant"), ("requested",), ()),
         (("user", "assistant"), ("running",), ()),
         (("user", "assistant", "tool"), ("succeeded",), ("succeeded",)),
-        (("user", "assistant", "tool", "assistant"), ("succeeded",), ("succeeded",)),
+        (("user", "assistant", "tool", "assistant"), ("succeeded", "requested"), ("succeeded",)),
+        (("user", "assistant", "tool", "assistant"), ("succeeded", "running"), ("succeeded",)),
+        (("user", "assistant", "tool", "assistant", "tool"), ("succeeded", "succeeded"), ("succeeded", "succeeded")),
+        (("user", "assistant", "tool", "assistant", "tool", "assistant"), ("succeeded", "succeeded"), ("succeeded", "succeeded")),
     ]
 
 
@@ -592,7 +573,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
 
         async def respond(self, **kwargs):
             self.calls += 1
-            if ending == "timeout" and self.calls == 2:
+            if ending == "timeout" and self.calls == 3:
                 try:
                     await asyncio.Event().wait()
                 finally:
@@ -628,9 +609,10 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
         assert result["completion_reason"] == "resource_budget"
         assert result["warnings"]
         assert "Paper B remains unread" in result["messages"][-1].content
-    assert model.calls == 2
+    assert model.calls == 3
     persisted = await service.list_messages_for_user(session.session_id, "user-1")
-    source_results = [message.tool_result for message in persisted if message.tool_result]
+    source_results = [message.tool_result for message in persisted
+                      if message.tool_result and message.tool_result.resource_refs]
     assert len(source_results) == 1
     assert source_results[0].data["complete_source"] is True
     assert source_results[0].data["content"] == sources.document.text
@@ -643,7 +625,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     )
     assert resumed["status"] == "completed"
     assert "Paper B" in resumed["messages"][-1].content
-    assert len(repository.results) == 1
+    assert len(repository.results) == 2
 
 
 async def test_chat_session_service_approves_exact_write_and_resumes() -> None:

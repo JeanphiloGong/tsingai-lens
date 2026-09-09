@@ -14,7 +14,8 @@ def anyio_backend():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("missing_control", [False, True])
-async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missing_control):
+@pytest.mark.parametrize("initial_schema_error", [False, True])
+async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missing_control, initial_schema_error):
     proposal = ProposeResearchPlanCapability(
         collection_service=_CollectionService(), finding_feedback_service=_FindingFeedbackService()
     )
@@ -24,7 +25,9 @@ async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missi
     del malformed["controls"]
     correction = (ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", malformed),)),) if missing_control else ()
     model = _Model(
+        *((ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", malformed),)),) if initial_schema_error else ()),
         ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", invalid),)),
+        ModelTurn(content="I will correct the Evidence selection before returning the plan."),
         *correction,
         ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)),
         ModelTurn(content="The provisional plan now cites only the selected finding's evidence."),
@@ -36,10 +39,10 @@ async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missi
         previous_messages=(), user_message="Draft a research plan with at most four samples per group; do not save.",
     )
     assert result.status.value == "completed"
-    assert len(result.tool_results) == (3 if missing_control else 2)
-    assert result.tool_results[0].data["draft_status"] == "abstained"
+    assert len(result.tool_results) == 3 + int(missing_control) + int(initial_schema_error)
+    assert result.tool_results[1 + int(initial_schema_error)].data["draft_status"] == "abstained"
     if missing_control:
-        assert result.tool_results[1].error_code == "invalid_tool_arguments"
-        assert "controls (missing)" in result.tool_results[1].error_message
+        assert result.tool_results[-2].error_code == "invalid_tool_arguments"
+        assert "controls (missing)" in result.tool_results[-2].error_message
     assert result.tool_results[-1].data["draft_id"]
     assert result.tool_results[-1].data["structured_plan"]

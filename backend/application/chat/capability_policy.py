@@ -86,6 +86,22 @@ def validate_batch(
                     ),
                     validated_arguments,
                 )
+        if call.name == "revise_research_plan":
+            inspected_plans = {
+                (str(result.get("objective_id") or ""), str(plan.get("plan_id") or ""))
+                for result in successful_results.get("inspect_research_plans", ())
+                for plan in ([result["plan"]] if result.get("plan") else result.get("plans", ()))
+                if isinstance(plan, Mapping)
+            }
+            parent = (
+                str(call.arguments.get("objective_id") or ""),
+                str(call.arguments.get("parent_plan_id") or ""),
+            )
+            if parent not in inspected_plans:
+                return (
+                    ("research_plan_not_inspected", "Read the exact saved research-plan revision before proposing a change."),
+                    validated_arguments,
+                )
     if len(requested) > 1 and any(call.risk is not ToolRisk.READ for call, _ in requested):
         return (
             ("invalid_tool_batch", "Draft and write actions must be requested individually."),
@@ -143,9 +159,8 @@ def select_tool_specs(
     user_text = str(latest_user.content if latest_user is not None else "").casefold()
     successful_results = active_successful_results_by_name(messages)
     if intent_policy.mentions_terms(user_text, intent_policy.NO_TOOL_PHRASES):
-        allowed_names: set[str] = set()
-    else:
-        allowed_names = intent_policy.capability_names_for_intent(
+        return ()
+    requested_names = intent_policy.capability_names_for_intent(
             user_text,
             has_source_context=bool(
                 latest_user is not None and latest_user.source_contexts
@@ -155,7 +170,37 @@ def select_tool_specs(
                 for message in messages
                 for request in message.tool_calls
             },
+    )
+    loaded_names = {
+        name
+        for result in successful_results.get("discover_research_tools", ())
+        if result.get("catalog_version") == capabilities.discovery.catalog_version
+        for name in result.get("loaded_tool_names", ())
+        if isinstance(name, str) and name in capabilities.discovery.tools
+    }
+    # Prerequisite readers are also loaded by the backend. Retain their schemas
+    # for later decisions in this request, just like explicitly discovered tools.
+    loaded_names.update(set(successful_results).intersection(capabilities.discovery.tools))
+    allowed_names = loaded_names | requested_names.intersection(intent_policy.WRITE_CAPABILITIES)
+    completed_writes = {
+        call.name
+        for call in calls
+        if call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.SUCCEEDED
+    }
+    completed_writes.update(inherited_completed_writes or ())
+    allowed_names.difference_update(completed_writes)
+    if (
+        "revise_research_plan" in allowed_names
+        and "inspect_research_plans" in registered_names
+        and not successful_results.get("inspect_research_plans")
+    ):
+        allowed_names.discard("revise_research_plan")
+    if not loaded_names and capabilities.discovery.tools:
+        return (
+            *(spec for spec in specs if spec.name in allowed_names),
+            capabilities.discovery.spec,
         )
+    mandatory_stage = False
 
     completed_browse = any(
         result.get("returned_paper_count", 0) > 0
@@ -169,7 +214,8 @@ def select_tool_specs(
     if source_grounded_intent and not successful_results.get(
         "browse_collection_papers"
     ) and not has_attached_source_context:
-        allowed_names.intersection_update({"browse_collection_papers"})
+        allowed_names = registered_names.intersection({"browse_collection_papers"})
+        mandatory_stage = True
     elif source_grounded_intent and has_attached_source_context:
         # The caller already supplied a canonical Source context; do not
         # force a redundant collection survey before discussing it.
@@ -185,10 +231,24 @@ def select_tool_specs(
     has_exact_source_read = has_successful_exact_source_read(
         successful_results, source_candidates
     )
+    # Recovery applies only until navigation succeeds again. An older failed
+    # reference must not waive inspection of newly located Sources.
+    last_source_navigation = max(
+        (
+            index for index, call in enumerate(calls)
+            if call.status is ToolCallStatus.SUCCEEDED
+            and call.name in {"search_sources", "inspect_document_sources"}
+        ),
+        default=-1,
+    )
+    failed_source_read = any(
+        call.status is ToolCallStatus.FAILED
+        and call.name in {"read_source", "inspect_table", "inspect_document_sources"}
+        for call in calls[last_source_navigation + 1:]
+    )
     if source_candidates and not has_exact_source_read:
-        allowed_names.intersection_update(
-            {"read_source", "inspect_table", "inspect_document_sources"}
-        )
+        if not failed_source_read:
+            return tuple(spec for spec in specs if spec.name in {"read_source", "inspect_table"})
 
     # A cross-paper comparison or support claim needs source-backed facts,
     # not only the paper map. Once the map is complete, require a focused
@@ -201,7 +261,8 @@ def select_tool_specs(
         and not successful_results.get("search_sources")
         and not has_exact_source_read
     ):
-        allowed_names.intersection_update({"search_sources"})
+        allowed_names = registered_names.intersection({"search_sources"})
+        mandatory_stage = True
 
     # Process status is only a paper-preparation view. If the collection
     # has a confirmed Objective, its canonical analysis state is the next
@@ -211,24 +272,23 @@ def select_tool_specs(
         and intent_policy.mentions_terms(user_text, intent_policy.PROCESS_TERMS)
         and not successful_results.get("inspect_research_process")
     ):
-        allowed_names.intersection_update({"inspect_research_process"})
+        allowed_names = registered_names.intersection({"inspect_research_process"})
+        mandatory_stage = True
     confirmed_objective_ids = _confirmed_objective_ids(successful_results)
     if (
         successful_results.get("inspect_research_process")
         and confirmed_objective_ids
         and not successful_results.get("inspect_objective_analysis")
     ):
-        allowed_names.intersection_update({"inspect_objective_analysis"})
+        allowed_names = registered_names.intersection({"inspect_objective_analysis"})
+        mandatory_stage = True
 
     # A published Finding summary is only a navigation result. Any
     # collection-level conclusion review must inspect one exact Finding
     # returned by that query before the model can judge its basis.
     finding_candidates = _published_finding_candidates(successful_results)
-    plan_intent = intent_policy.has_plan_intent(
-        user_text,
-        plan_terms=intent_policy.PLAN_TERMS,
-        plan_noun_terms=intent_policy.PLAN_NOUN_TERMS,
-        plan_action_terms=intent_policy.PLAN_ACTION_TERMS,
+    plan_intent = "propose_research_plan" in loaded_names or bool(
+        requested_names.intersection({"create_research_plan", "revise_research_plan"})
     )
     if (
         successful_results.get("query_published_findings")
@@ -241,14 +301,18 @@ def select_tool_specs(
             for candidate in finding_candidates
             if candidate not in _failed_finding_candidates(calls)
         )
-        allowed_names.intersection_update(
+        allowed_names = registered_names.intersection(
             {"inspect_published_finding"} if remaining_candidates else set()
         )
+        mandatory_stage = True
 
     inspected_finding = bool(
         successful_results.get("inspect_published_finding")
     )
-    persist_requested = intent_policy.mentions_terms(user_text, intent_policy.PERSIST_TERMS) and (
+    persist_requested = (
+        intent_policy.mentions_terms(user_text, intent_policy.PERSIST_TERMS)
+        or bool(requested_names.intersection({"create_research_plan", "revise_research_plan"}))
+    ) and (
         not intent_policy.mentions_terms(user_text, intent_policy.NO_WRITE_PHRASES)
         or intent_policy.has_explicit_immutable_write(user_text)
     )
@@ -271,6 +335,14 @@ def select_tool_specs(
     )
     plan_read_requested = intent_policy.mentions_terms(user_text, intent_policy.PLAN_READ_TERMS)
     if (
+        plan_revision_requested
+        and plan_intent
+        and "inspect_research_plans" in registered_names
+        and not successful_results.get("inspect_research_plans")
+    ):
+        allowed_names = {"inspect_research_plans"}
+        mandatory_stage = True
+    elif (
         plan_read_requested
         and plan_intent
         and not persist_requested
@@ -278,8 +350,16 @@ def select_tool_specs(
     ):
         allowed_names = {"inspect_research_plans"}
     elif proposed_plan_this_turn:
+        mandatory_stage = True
         latest_plan = successful_results["propose_research_plan"][-1]
         plan_calls = [call for call in calls if call.name == "propose_research_plan"]
+        # Schema errors before the first evaluated draft do not consume the
+        # separate opportunity to correct that draft's scientific references.
+        first_evaluated = next(
+            (index for index, call in enumerate(plan_calls) if call.status is ToolCallStatus.SUCCEEDED),
+            len(plan_calls),
+        )
+        plan_calls = plan_calls[first_evaluated:]
         # An unlinked citation is a correctable draft input, not a finished plan.
         correctable_basis = (
             latest_plan.get("draft_status") == "abstained"
@@ -305,6 +385,7 @@ def select_tool_specs(
             allowed_names = set()
     elif finding_draft_this_turn:
         allowed_names = set()
+        mandatory_stage = True
     elif proposed_plan and plan_intent and persist_requested:
         allowed_names = {
             "revise_research_plan"
@@ -341,9 +422,8 @@ def select_tool_specs(
             "query_published_findings",
         }
         if plan_prerequisites.issubset(registered_names):
-            allowed_names.discard("create_research_plan")
-            allowed_names.discard("propose_research_plan")
-            allowed_names.discard("inspect_published_finding")
+            allowed_names = plan_prerequisites | registered_names.intersection({"get_collection_context"})
+            mandatory_stage = True
             if successful_results.get("get_collection_context"):
                 allowed_names.discard("get_collection_context")
             if assessed_quality:
@@ -370,15 +450,17 @@ def select_tool_specs(
     # model continuation. A later user message starts a new decision turn
     # and may legitimately create another immutable version with the same
     # capability name.
-    completed_writes = {
-        call.name
-        for call in calls
-        if call.name in intent_policy.WRITE_CAPABILITIES
-        and call.status is ToolCallStatus.SUCCEEDED
-    }
-    completed_writes.update(inherited_completed_writes or ())
     allowed_names.difference_update(completed_writes)
-    return tuple(spec for spec in specs if spec.name in allowed_names)
+    selected = tuple(spec for spec in specs if spec.name in allowed_names)
+    if (
+        not mandatory_stage
+        and capabilities.discovery.tools
+        and (failed_source_read or required_tool_before_answer(
+            tuple(spec.name for spec in selected), successful_results=successful_results,
+        ) is None)
+    ):
+        return (*selected, capabilities.discovery.spec)
+    return selected
 
 
 def required_tool_before_answer(
@@ -418,6 +500,11 @@ def required_tool_before_answer(
         "propose_research_plan",
     }:
         if successful_results is not None and successful_results.get(required_tool):
+            if (
+                required_tool == "propose_research_plan"
+                and successful_results[required_tool][-1].get("draft_status") == "abstained"
+            ):
+                return required_tool
             return None
         return required_tool
     return None

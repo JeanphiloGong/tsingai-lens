@@ -30,7 +30,8 @@ Evidence, Finding, or Analysis record; it calls the Source and Core services.
 | Conversation and checkpointing | `session_service.py` | none |
 | Context selection | `context_builder.py` | none |
 | Model/tool loop | `agent_runner.py` | none; execution only |
-| Intent and tool permissions | `intent_policy.py` and `capability_policy.py` | approval only |
+| Tool discovery and execution prerequisites | `capabilities/tool_discovery.py` and `capability_policy.py` | approval only |
+| Explicit write requests | `intent_policy.py` | no execution authority |
 | Objective, Evidence, Finding data | `application/core/` | Core services |
 
 When adding a capability, define its typed input/output and approval risk first;
@@ -42,7 +43,9 @@ do not add scientific state to the Chat trajectory.
 authenticated user + collection
   -> ChatSessionService validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
-  -> ResearchAgentRunner exposes capabilities relevant to the intent
+  -> ResearchAgentRunner exposes short read/draft descriptions and explicit writes
+  -> ChatModel selects names through discover_research_tools when needed
+  -> Runner exposes the selected registered parameter schemas for this request
   -> ChatModel returns an answer, independent reads, or one draft/write call
   -> Runner checkpoints the complete ordered request before execution
   -> capabilities return paired observations or exact approval_required
@@ -59,10 +62,34 @@ approval, and execute only that approved call once. Rejection, provider
 failure, malformed model output, and resource limits remain technical trajectory
 outcomes; they are not scientific conclusions.
 
-Capability selection treats generic words such as "method" or "result" as
-ordinary conversation unless the request also identifies a paper, collection,
-Source, or another explicit research object. An attached canonical Source
-always counts as that context.
+Read and transient-draft discovery uses the model's interpretation of the
+request, including filenames, paper identifiers, and conversational references.
+It does not require words such as "paper" or "source" to unlock inspection.
+Greetings, general knowledge, and application explanations can finish without
+discovery. An explicit no-tools request exposes no capabilities.
+
+`discover_research_tools` is an ordinary typed function call, not a provider's
+native ToolSearch API. Its short catalog comes from registered read/draft
+handlers. It loads up to six named schemas per call and performs no scientific
+read, write, or approval. Successful results with the current catalog version
+load definitions only for the active user request. Automatically selected
+prerequisite readers remain available after execution in that request too.
+The next user request starts with a fresh catalog.
+
+For example, a researcher asking to inspect the P002 group definitions can load
+paper navigation, locate the canonical Methods Source, and read its exact
+document/kind/reference tuple. Search previews do not satisfy the complete
+Source prerequisite for Evidence. A failed read permits discovery of navigation
+tools for recovery or an honest failure explanation; it grants no Evidence
+authoring authority. Successful navigation restores the exact-read requirement
+for located Sources; an earlier failed reference cannot waive that requirement.
+Source handlers still validate Collection ownership.
+
+Discovery excludes writes. Explicit write selection, exact argument validation,
+and authenticated approval remain separate. Revising a saved plan additionally
+requires its exact Objective and parent plan ID in this request's successful
+inspection results; the runner checks this again after approval. A completed
+approved write is not offered again during its continuation.
 
 If an approved write fails, its continuation explains that failure without
 starting more capability work. A fresh user decision can inspect changed
@@ -118,12 +145,15 @@ review status of their supporting Findings and unverified feasibility checks.
   request timeout/output limits, reported usage (including invalid responses),
   and the Research Agent instructions. Implementations must propagate
   cancellation and close in-flight streams without background thread work.
-- `intent_policy.py`: owns request vocabulary and request-to-capability matching.
+- `intent_policy.py`: supplies explicit write-request vocabulary and research
+  prerequisite signals. Its legacy read-name groups do not grant read access.
   It has no model, persistence, or capability side effects.
-- `capability_policy.py`: selects tools from the request and completed
+- `capability_policy.py`: selects discovered tools from the request and completed
   observations, validates batches and exact Source prerequisites, and maps
   capability risk to automatic execution or exact user approval. The Runner
   consumes these decisions; it does not define a second permission path.
+- `capabilities/tool_discovery.py`: derives the short catalog from registered
+  read/draft handlers and validates selected names and catalog version.
 - `capabilities/`: contains the explicit typed capability registry and handlers
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
@@ -152,13 +182,15 @@ start with `intent_policy.py`. For prerequisite reads or approval, use
 `capability_policy.py`. Change `agent_runner.py` only when execution order,
 continuation, checkpointing, or stopping behavior must change.
 
-To add a capability, implement its typed handler under `capabilities/`, register
-it in the existing registry, and explicitly include it in the applicable policy.
+To add a capability, implement its typed handler under `capabilities/` and
+register it in the existing registry. Read/draft handlers enter the catalog
+automatically; writes need explicit request and approval policy.
 The handler calls the owning Source, Core, or Goal service. The Runner does not
 need a branch for each new capability. A read or draft returns an observation;
 an approved write may persist a scientific resource through its existing owner.
 
-Model failure, invalid tool arguments, rejected approval, and incomplete work
+Provider and capability exception logs contain sanitized metadata only, without
+exception text or tracebacks. Model failure, invalid tool arguments, rejected approval, and incomplete work
 are recorded in the trajectory. They never become Evidence or a negative
 scientific answer. After a turn stops, the next user message or exact approval
 decision starts its continuation through `ChatSessionService`.
@@ -168,7 +200,7 @@ decision starts its continuation through `ChatSessionService`.
 From `backend/`, run:
 
 ```bash
-.venv/bin/python -m pytest -q tests/unit/application/test_research_agent_runner.py tests/unit/application/test_chat_session_service.py tests/unit/routers/test_chat_sessions_api.py
+.venv/bin/python -m pytest -q tests/unit/application/test_research_tool_discovery.py tests/unit/application/test_research_agent_runner.py tests/unit/application/test_chat_session_service.py tests/unit/routers/test_chat_sessions_api.py
 ```
 
 Capability tests are under `tests/unit/application/test_chat_research_*.py`.

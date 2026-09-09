@@ -32,6 +32,7 @@ from application.core.objectives.finding_authoring_service import FindingAuthori
 from domain.core import ObjectiveFactSet, ResearchObjective
 from domain.source import SourceDocument
 from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from tests.unit.application.test_research_agent_runner import _Model
 
 
 pytestmark = pytest.mark.anyio
@@ -88,6 +89,14 @@ class _P002SourceRepository:
     ) -> SourceDocument | None:
         assert collection_id == "collection-p002"
         return self.document if document_id == self.document.document_id else None
+
+    async def read_documents(
+        self,
+        collection_id: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[SourceDocument, ...]:
+        assert collection_id == "collection-p002"
+        return (self.document,) if self.document.document_id in document_ids else ()
 
 
 class _P002FindingFeedbackService:
@@ -349,7 +358,7 @@ async def test_p002_agent_reads_real_conditions_table_and_preserves_direction() 
     }
 
 
-class _WriteModel:
+class _WriteModel(_Model):
     def __init__(self, arguments: dict) -> None:
         self.turns = deque(
             (
@@ -374,15 +383,7 @@ class _WriteModel:
             )
         )
 
-    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
-        messages = context.messages
-        assert messages
-        assert {item.name for item in tool_specs} == (
-            {"inspect_table", "create_evidence_version"}
-            if len(self.turns) in {2, 3}
-            else {"inspect_table"}
-        )
-        return self.turns.popleft()
+        super().__init__(*self.turns)
 
 
 async def test_p002_evidence_write_stays_approval_gated() -> None:

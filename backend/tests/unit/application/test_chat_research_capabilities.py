@@ -3,6 +3,7 @@ from __future__ import annotations
 from application.repositories.objective_repository import StoredObjective
 
 from collections import deque
+from tests.unit.application.test_research_agent_runner import _Model
 from dataclasses import replace
 from hashlib import sha256
 import json
@@ -678,21 +679,6 @@ class _AnalysisService:
             "analysis_version": 2,
             "finding": _canonical_finding_record(),
         }
-
-
-class _Model:
-    def __init__(self, *turns: ModelTurn) -> None:
-        self.turns = deque(turns)
-        self.contexts: list[tuple] = []
-
-    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
-        messages = context.messages
-        self.contexts.append(messages)
-        assert {item.name for item in tool_specs} == {
-            "get_collection_context",
-            "propose_objective_drafts",
-        }
-        return self.turns.popleft()
 
 
 def _context(tool_call_id: str = "call-1") -> CapabilityExecutionContext:
@@ -2222,20 +2208,8 @@ async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
     )
 
 
-class _ResearchProcessModel:
-    def __init__(self, *turns: ModelTurn) -> None:
-        self.turns = deque(turns)
-        self.contexts: list[tuple] = []
-
-    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
-        messages = context.messages
-        self.contexts.append(messages)
-        assert {item.name for item in tool_specs} == {"inspect_research_process"}
-        return self.turns.popleft()
-
-
 async def test_agent_continues_from_observable_research_process_result() -> None:
-    model = _ResearchProcessModel(
+    model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(name="inspect_research_process", arguments={}),)
         ),
@@ -2286,7 +2260,7 @@ async def test_agent_continues_from_observable_research_process_result() -> None
     )
 
     assert result.status.value == "completed"
-    assert result.tool_results[0].data["process"]["status"] == "processing"
+    assert result.tool_results[-1].data["process"]["status"] == "processing"
     assert result.messages[-1].content.startswith("The collection is screening")
     assert [message.role.value for message in model.contexts[-1][-2:]] == [
         "assistant",
@@ -3667,7 +3641,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
     authoring_service = _ObjectiveAuthoringService(objective)
     analysis_service = _ObjectiveAnalysisCapabilityService()
 
-    class ScenarioModel:
+    class ScenarioModel(_Model):
         def __init__(self) -> None:
             self.turns = deque(
                 (
@@ -3713,29 +3687,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                 )
             )
 
-        async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
-            messages = context.messages
-            assert messages
-            next_turn = self.turns[0]
-            expected = {
-                "preview_research_scope",
-                "create_objective_candidate",
-                "start_objective_analysis",
-                "inspect_objective_analysis",
-            }
-            if next_turn.tool_calls != ():
-                if next_turn.tool_calls[0].name == "start_objective_analysis":
-                    expected.remove("create_objective_candidate")
-                elif next_turn.tool_calls[0].name == "inspect_objective_analysis":
-                    expected.difference_update(
-                        {"create_objective_candidate", "start_objective_analysis"}
-                    )
-            else:
-                expected.difference_update(
-                    {"create_objective_candidate", "start_objective_analysis"}
-                )
-            assert {item.name for item in tool_specs} == expected
-            return self.turns.popleft()
+            super().__init__(*self.turns)
 
     runner = ResearchAgentRunner(
         model=ScenarioModel(),
@@ -3780,7 +3732,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
         ),
     )
 
-    scope = objective_proposal.tool_results[0]
+    scope = objective_proposal.tool_results[1]
     assert scope.data["support_is_evidence"] is False
     assert scope.data["suggested_scope"]["review_document_ids"] == ["paper-2"]
     assert objective_proposal.pending_approval.name == "create_objective_candidate"
@@ -3817,6 +3769,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
     assert analysis_service.read_calls == [("col-1", "objective-agent")]
     assert [result.status.value for result in completed.tool_results] == [
         "queued",
+        "succeeded",
         "succeeded",
     ]
     assert completed.tool_results[-1].data["analysis"]["status"] == "running"
@@ -3935,8 +3888,10 @@ async def test_agent_uses_collection_context_then_records_drafts_before_final_an
     assert [call.status.value for call in result.tool_calls] == [
         "succeeded",
         "succeeded",
+        "succeeded",
+        "succeeded",
     ]
-    assert result.tool_results[1].data["persistence"] == "transient_chat_result"
+    assert result.tool_results[-1].data["persistence"] == "transient_chat_result"
     assert result.messages[-1].content.startswith("I prepared")
     assert [message.role.value for message in model.contexts[-1][-2:]] == [
         "assistant",

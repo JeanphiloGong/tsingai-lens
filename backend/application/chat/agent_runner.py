@@ -685,7 +685,7 @@ class ResearchAgentRunner:
             if turn.tool_calls or not turn.content:
                 raise ValueError("final answer must be answer-only")
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
+            logger.warning(
                 "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
             )
@@ -963,7 +963,7 @@ class ResearchAgentRunner:
                 else call.succeed(_now_iso())
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
+            logger.warning(
                 "Research capability failed tool=%s exception_type=%s",
                 call.name,
                 type(exc).__name__,

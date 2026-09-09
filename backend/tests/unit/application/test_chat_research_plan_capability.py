@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import deque
+from tests.unit.application.test_research_agent_runner import _Model as _DiscoveryModel
 from types import SimpleNamespace
 
 import pytest
@@ -207,13 +207,13 @@ class _StaleExperimentPlanService(_ExperimentPlanService):
         raise ValueError("research plan sources are stale: concurrent update")
 
 
-class _Model:
+class _Model(_DiscoveryModel):
     def __init__(
         self,
         *turns: ModelTurn,
         expected_tools: set[str] | None = None,
     ) -> None:
-        self.turns = deque(turns)
+        super().__init__(*turns)
         self.expected_tools = expected_tools or {
             "propose_research_plan",
             "create_research_plan",
@@ -222,6 +222,11 @@ class _Model:
     async def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None, timeout_seconds=180.0, max_output_tokens=16_384):
         messages = context.messages
         assert messages
+        if any(spec.name == "discover_research_tools" for spec in tool_specs):
+            return await super().respond(context=context, tool_specs=tool_specs,
+                                         text_delta_callback=text_delta_callback,
+                                         timeout_seconds=timeout_seconds,
+                                         max_output_tokens=max_output_tokens)
         # Once the final approval write has completed, the runner deliberately
         # gives the model an answer-only turn so it cannot repeat that write.
         expected_tools = self.expected_tools
@@ -439,7 +444,7 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
     )
 
     assert proposed.status.value == "approval_required"
-    assert proposed.tool_results[0].data["persistence"] == "transient_chat_result"
+    assert proposed.tool_results[1].data["persistence"] == "transient_chat_result"
     assert proposed.pending_approval.name == "create_research_plan"
     assert plan_service.calls == []
 
@@ -461,7 +466,7 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
     assert plan_service.calls[0]["created_by_tool_call_id"] == (
         proposed.pending_approval.tool_call_id
     )
-    assert plan_service.calls[0]["structured_plan"] == proposed.tool_results[0].data[
+    assert plan_service.calls[0]["structured_plan"] == proposed.tool_results[1].data[
         "structured_plan"
     ]
 
@@ -556,7 +561,10 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
         "source_snapshots": _source_snapshots(),
     }
     runner = ResearchAgentRunner(
-        model=_Model(
+        model=_DiscoveryModel(
+            ModelTurn(tool_calls=(ModelToolCall(name="inspect_research_plans", arguments={
+                "objective_id": arguments["objective_id"], "plan_id": "exp-agent-1",
+            }),)),
             ModelTurn(
                 content="The revision is ready for approval.",
                 tool_calls=(ModelToolCall(
@@ -565,9 +573,10 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
                 ),),
             ),
             ModelTurn(content="The approved revision has been saved."),
-            expected_tools={"revise_research_plan"},
         ),
-        capabilities=CapabilityRegistry((capability,)),
+        capabilities=CapabilityRegistry((capability, InspectResearchPlansCapability(
+            collection_service=_CollectionService(), experiment_plan_service=plan_service,
+        ))),
     )
     context = AgentContext("chat-1", "user-1", "col-1")
 

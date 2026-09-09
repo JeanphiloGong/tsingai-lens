@@ -214,6 +214,7 @@ class DocumentPreparationService:
                 document_id,
                 status="processing",
             )
+            preparation_warnings: list[str] = []
             try:
                 source_document = await self.source_artifact_repository.read_document(
                     collection_id,
@@ -231,13 +232,23 @@ class DocumentPreparationService:
                         collection_id,
                         source_document,
                     )
-                    references = SourceReferenceExtractionService().extract(
-                        (source_document,)
-                    )
-                    await self.source_artifact_repository.replace_document_references(
-                        document_id,
-                        references,
-                    )
+                    try:
+                        references = SourceReferenceExtractionService().extract(
+                            (source_document,)
+                        )
+                        await self.source_artifact_repository.replace_document_references(
+                            document_id,
+                            references,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        warning = "Source reference extraction failed; Source remains available."
+                        preparation_warnings.append(warning)
+                        logger.warning(
+                            "Source reference extraction failed collection_id=%s document_id=%s",
+                            collection_id,
+                            document_id,
+                            exc_info=True,
+                        )
                     document = await self.collection_service.update_document_preparation(
                         collection_id,
                         document_id,
@@ -289,6 +300,7 @@ class DocumentPreparationService:
                         "unit": "document",
                         "message": "The document is ready for research scope selection.",
                     },
+                    warnings=preparation_warnings,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception(

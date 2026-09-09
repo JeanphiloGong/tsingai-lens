@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import logging
+from tempfile import SpooledTemporaryFile
 from typing import BinaryIO
 from urllib.parse import quote
 
@@ -24,11 +26,31 @@ from controllers.schemas.source.collection import (
 )
 
 router = APIRouter(prefix="/collections", tags=["collections"])
+logger = logging.getLogger(__name__)
+
+_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+
+
+class UploadTooLargeError(ValueError):
+    """Raised when an upload exceeds the ingestion resource limit."""
 
 
 def _stream_file(file: BinaryIO) -> Iterator[bytes]:
     while chunk := file.read(64 * 1024):
         yield chunk
+
+
+async def _read_upload_content(file: UploadFile) -> bytes:
+    """Read an upload in bounded chunks before handing it to ingestion."""
+    with SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as buffered:
+        total = 0
+        while chunk := await file.read(64 * 1024):
+            total += len(chunk)
+            if total > _MAX_UPLOAD_BYTES:
+                raise UploadTooLargeError("uploaded file exceeds the 256 MiB limit")
+            buffered.write(chunk)
+        buffered.seek(0)
+        return buffered.read()
 
 
 def _source_archive_error_detail(
@@ -134,7 +156,7 @@ async def upload_collection_document(
         await collection_service.get_collection_for_user(
             collection_id, await current_user_id(request)
         )
-        content = await file.read()
+        content = await _read_upload_content(file)
         record = await collection_service.add_document(
             collection_id=collection_id,
             filename=file.filename or "upload.bin",
@@ -143,10 +165,13 @@ async def upload_collection_document(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
+        logger.exception("File upload failed")
+        raise HTTPException(status_code=500, detail="File upload failed.") from exc
     return CollectionDocumentResponse(**record)
 
 

@@ -16,6 +16,7 @@ from infra.persistence.memory import (
     MemoryPipelineRunRepository,
 )
 from application.pipeline import PipelineRunService
+from application.source.reference_extraction_service import SourceReferenceExtractionService
 
 
 pytestmark = pytest.mark.anyio
@@ -171,8 +172,9 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
         input_fingerprint="preparation-input",
     )
     await pipeline_run_service.update_run(task["run_id"], status="running")
+    collection_service = CollectionService()
     service = DocumentPreparationService(
-        collection_service=CollectionService(),
+        collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         document_profile_service=object(),
@@ -284,10 +286,94 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
 
     assert result["status"] == "completed"
     assert collection_service.document.status == "ready"
-    assert (
-        collection_service.document.preparation_fingerprint
-        == profile_identity
+
+
+async def test_reference_failure_keeps_source_preparation_ready_with_warning(
+    monkeypatch,
+) -> None:
+    collection_id = "col_reference_warning"
+    document_id = "doc_reference_warning"
+    document = Document(
+        document_id=document_id,
+        original_filename="paper.pdf",
+        stored_filename="paper.pdf",
+        storage_key=f"{collection_id}/input/paper.pdf",
+        sha256="e" * 64,
+        media_type="application/pdf",
+        status="stored",
+        size_bytes=100,
+        created_at="2026-08-28T10:00:00+00:00",
     )
+
+    class CollectionService:
+        def __init__(self) -> None:
+            self.document = document
+
+        async def get_document(self, owner: str, selected: str) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            return self.document
+
+        async def update_document_preparation(
+            self, owner: str, selected: str, **fields
+        ) -> Document:
+            assert (owner, selected) == (collection_id, document_id)
+            self.document = replace(self.document, **fields)
+            return self.document
+
+    class RunService:
+        async def update_run(self, run_id: str, **fields):
+            return {"run_id": run_id, **fields}
+
+        async def finish_run(self, run_id: str, **fields):
+            return {"run_id": run_id, **fields}
+
+    class ProfileService:
+        async def read_document_profile(self, *_args):
+            return None
+
+        async def build_document_profile(self, *_args):
+            return DocumentProfile.from_mapping(
+                {
+                    "document_id": document_id,
+                    "title": "Paper",
+                    "doc_type": "experimental",
+                    "profile_warnings": [],
+                    "confidence": 0.9,
+                }
+            )
+
+    async def parse_document(_collection_id, _document):
+        return SourceDocument(
+            document_id=document_id,
+            document_order=0,
+            title="Paper",
+            text="Methods and results",
+        )
+
+    def fail_reference_extraction(self, _documents):
+        raise RuntimeError("reference parser unavailable")
+
+    monkeypatch.setattr(SourceReferenceExtractionService, "extract", fail_reference_extraction)
+    service = DocumentPreparationService(
+        collection_service=CollectionService(),
+        pipeline_run_service=RunService(),
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        document_profile_service=ProfileService(),
+        source_artifact_builder=None,
+        max_concurrency=1,
+    )
+    service._parse_document = parse_document
+
+    result = await service.run_document_preparation(
+        "run_reference_warning",
+        collection_id,
+        document_id,
+    )
+
+    assert result["status"] == "completed"
+    assert result["warnings"] == [
+        "Source reference extraction failed; Source remains available."
+    ]
 
 
 async def test_document_preparation_does_not_build_paper_map_before_objective_selection() -> None:

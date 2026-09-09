@@ -157,17 +157,33 @@ async def load_files(
         raise ValueError(f"No {file_type} files found in {config.storage.base_dir}")
 
     files_loaded = []
+    load_failures: list[dict[str, str]] = []
     for file, group in files:
         try:
             files_loaded.append(await loader(file, group))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Warning! Error loading file %s. Skipping...", file)
-            logger.warning("Error: %s", exc)
+            failure = {
+                "source_path": str(file),
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            }
+            load_failures.append(failure)
+            logger.warning(
+                "Source input could not be loaded source_path=%s error_type=%s",
+                file,
+                type(exc).__name__,
+                exc_info=True,
+            )
 
     logger.info(
         "Found %d %s files, loading %d", len(files), file_type, len(files_loaded)
     )
+    if not files_loaded:
+        raise RuntimeError(
+            f"All {len(load_failures)} {file_type} input files failed to load."
+        )
     result = pd.concat(files_loaded)
+    result.attrs["load_failures"] = load_failures
     logger.info("Total number of unfiltered %s rows: %d", file_type, len(result))
     return result
 

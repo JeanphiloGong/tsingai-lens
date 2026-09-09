@@ -26,6 +26,13 @@ async def run_workflow(
 
     logger.info("Final # of rows loaded: %s", len(output))
     context.stats.num_documents = len(output)
+    load_failures = output.attrs.get("load_failures") or []
+    if load_failures:
+        context.state["source_input_failures"] = list(load_failures)
+        logger.warning(
+            "Source input load completed with failures count=%s",
+            len(load_failures),
+        )
 
     await write_table_to_storage(output, "documents", context.output_storage)
 

@@ -34,6 +34,7 @@ from infra.source.runtime.workflows.create_source_artifacts import (
     create_source_artifacts,
 )
 from infra.source.runtime.workflows.create_table_cells import create_table_cells
+from infra.source.runtime.input import load_files
 
 
 def _source_bundle(document_id: str) -> SourceArtifactBundle:
@@ -97,6 +98,50 @@ def test_default_source_pipeline_uses_structure_first_handoff_workflow():
         "load_input_documents",
         "create_source_artifacts",
     ]
+
+
+@pytest.mark.anyio
+async def test_load_files_preserves_partial_input_failures_in_dataframe_metadata():
+    class Storage:
+        def find(self, *_args, **_kwargs):
+            return iter([("good.txt", {}), ("bad.txt", {})])
+
+    async def loader(path, _group):
+        if path == "bad.txt":
+            raise ValueError("invalid encoding")
+        return pd.DataFrame([{"id": "good", "text": "paper"}])
+
+    result = await load_files(
+        loader,
+        SimpleNamespace(file_pattern=r".*", file_filter=None, file_type="document", storage=SimpleNamespace(base_dir="inputs")),
+        Storage(),
+    )
+
+    assert result["id"].tolist() == ["good"]
+    assert result.attrs["load_failures"] == [
+        {
+            "source_path": "bad.txt",
+            "error_type": "ValueError",
+            "message": "invalid encoding",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_load_files_reports_when_every_input_fails():
+    class Storage:
+        def find(self, *_args, **_kwargs):
+            return iter([("bad.txt", {})])
+
+    async def loader(_path, _group):
+        raise ValueError("invalid encoding")
+
+    with pytest.raises(RuntimeError, match="All 1 document input files failed"):
+        await load_files(
+            loader,
+            SimpleNamespace(file_pattern=r".*", file_filter=None, file_type="document", storage=SimpleNamespace(base_dir="inputs")),
+            Storage(),
+        )
 
 
 @pytest.mark.anyio

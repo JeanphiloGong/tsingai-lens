@@ -60,6 +60,49 @@ def test_explicit_no_tools_disables_catalog():
     assert select_tool_specs(registry, [message], []) == ()
 
 
+@pytest.mark.parametrize("request_text", [
+    "Do not publish analysis; inspect it first.",
+    "Review this finding, do not save any changes.",
+    "Do not save evidence; check the source first.",
+    "Revise the saved plan as a draft, do not save changes.",
+    "Do not save a new version of this finding; review it first.",
+    "复核这个 Finding，不要保存任何修改。",
+    "不要发布分析，先检查。",
+    "先不要保存证据，读取原文。",
+    "Review the start analysis action; do not save any changes.",
+    "Inspect the confirm objective action, do not save anything.",
+])
+def test_no_write_request_excludes_all_persistence_tools(request_text):
+    from application.chat.intent_policy import WRITE_CAPABILITIES
+
+    registry = CapabilityRegistry((
+        _Capability("read_source", ToolRisk.READ),
+        *(_Capability(name, ToolRisk.WRITE) for name in sorted(WRITE_CAPABILITIES)),
+    ))
+    message = ChatMessage.user(message_id="u", session_id="chat-1", content=request_text, created_at="2026-09-09T00:00:00Z")
+    assert not {spec.name for spec in select_tool_specs(registry, [message], [])}.intersection(WRITE_CAPABILITIES)
+
+
+@pytest.mark.anyio
+async def test_no_save_plan_draft_does_not_reenable_writes_after_discovery():
+    create = _Capability("create_research_plan", ToolRisk.WRITE)
+    revise = _Capability("revise_research_plan", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="inspect_research_plans"),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="propose_research_plan"),)),
+        ModelTurn(content="The revised plan is ready for review and has not been saved."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
+        _Capability("inspect_research_plans", ToolRisk.READ, result_data={"objective_id": "o", "plans": [{"plan_id": "p"}]}),
+        _Capability("propose_research_plan", ToolRisk.DRAFT, result_data={"draft_status": "ready"}),
+        create, revise,
+    ))).run_turn(context=_context(), previous_messages=(), user_message="Revise the saved plan as a draft, do not save changes.")
+    assert result.status == "completed"
+    assert result.pending_approval is None
+    assert create.executed_arguments == revise.executed_arguments == []
+    assert all(not {"create_research_plan", "revise_research_plan"}.intersection(names) for names in model.all_tool_spec_names)
+
+
 def test_approved_write_is_not_reexposed_before_discovery():
     registry = CapabilityRegistry((
         _Capability("get_collection_context", ToolRisk.READ),

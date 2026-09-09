@@ -162,6 +162,10 @@ NO_WRITE_PHRASES = (
     "without publishing",
     "do not publish",
     "don't publish",
+    "不要创建",
+    "不创建",
+    "do not create",
+    "don't create",
 )
 PAPER_TERMS = (
     "论文",
@@ -422,6 +426,13 @@ REVIEW_ACTION_TERMS = (
 
 
 def has_explicit_immutable_write(text: str) -> bool:
+    # Keeping an old version immutable permits creating a new one, but never
+    # overrides an explicit prohibition on saving, creating, or publishing it.
+    if mentions_terms(text, tuple(
+        phrase for phrase in NO_WRITE_PHRASES
+        if not mentions_terms(phrase, ("修改", "modifying", "modify"))
+    )):
+        return False
     return mentions_terms(
         text,
         ("新版本", "new version", "immutable version"),
@@ -546,10 +557,11 @@ def capability_names_for_intent(
             elif tool_name in PROCESS_CAPABILITIES:
                 allowed.update(PROCESS_CAPABILITIES)
 
-    persist_intent = mentions(PERSIST_TERMS) and (
+    write_permitted = (
         not mentions(NO_WRITE_PHRASES)
         or has_explicit_immutable_write(user_text)
     )
+    persist_intent = mentions(PERSIST_TERMS) and write_permitted
     if persist_intent and objective_intent:
         allowed.add("create_objective_candidate")
     confirm_requested = mentions(
@@ -645,4 +657,6 @@ def capability_names_for_intent(
         mentions(("publish",)) and mentions(("analysis",))
     ):
         allowed.add("publish_agent_objective_analysis")
+    if not write_permitted:
+        allowed.difference_update(WRITE_CAPABILITIES)
     return allowed

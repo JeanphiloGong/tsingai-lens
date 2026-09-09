@@ -108,6 +108,14 @@ requires its exact Objective and parent plan ID in this request's successful
 inspection results; the runner checks this again after approval. A completed
 approved write is not offered again during its continuation.
 
+Explicit no-save/no-publish requests suppress all persistent capabilities,
+including feedback, Evidence, plan revision, and analysis publication, before
+schemas are offered. Discovery and transient drafts do not lift that limit.
+Keeping an old version unchanged can still allow an explicitly requested new
+immutable version; a prohibition on saving, creating, or publishing the new
+version takes precedence. Creating an Objective candidate, confirming it, and
+starting analysis remain separate approval decisions.
+
 If an approved write fails, its continuation explains that failure without
 starting more capability work. A fresh user decision can inspect changed
 Sources or propose a new exact approval; the failed action is not retried

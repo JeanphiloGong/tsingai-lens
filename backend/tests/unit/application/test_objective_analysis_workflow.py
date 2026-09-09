@@ -679,6 +679,63 @@ async def test_selected_document_builds_and_reuses_its_bound_paper_map() -> None
     assert refreshed[0].input_fingerprint != first[0].input_fingerprint
 
 
+@pytest.mark.parametrize(
+    ("coverage_status", "reason", "expected_rebuilds"),
+    [
+        ("extraction_failed", "provider_timeout", 1),
+        ("no_study_signal", "No experimental outcome in this Source.", 0),
+    ],
+)
+async def test_paper_map_retry_distinguishes_failed_reading_from_missing_science(
+    coverage_status, reason, expected_rebuilds,
+) -> None:
+    paper_map_service = _RecordingPaperMapService()
+    service, source_inputs = _paper_map_loading_service(paper_map_service)
+    document_inputs = (
+        PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
+    )
+    cached = PaperResearchMap.from_mapping(
+        {
+            "document_id": "paper-selected",
+            "doc_role": "experimental",
+            "map_status": "insufficient_map",
+            "map_limitations": ["missing_outcome"],
+            "input_fingerprint": paper_map_input_fingerprint(
+                "profile-fingerprint-v1"
+            ),
+            "map_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": "abstract-unit",
+                    "window_id": "overview",
+                    "source_kind": "block",
+                    "source_ref": "abstract",
+                    "status": coverage_status,
+                    "reason": reason,
+                }
+            ],
+        }
+    )
+    await service.paper_map_repository.replace("collection-test", cached)
+
+    recovered = await service.objective_input_service.load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=document_inputs,
+        source_inputs=source_inputs,
+    )
+    reused = await service.objective_input_service.load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=document_inputs,
+        source_inputs=source_inputs,
+    )
+
+    assert recovered[0].coverage_complete
+    assert reused == recovered
+    assert paper_map_service.document_ids == ["paper-selected"] * expected_rebuilds
+    assert recovered[0].input_fingerprint == cached.input_fingerprint
+    assert recovered[0].map_status == "insufficient_map"
+
+
 async def test_paper_map_rebuilds_when_its_scientific_logic_version_changes(
     monkeypatch,
 ) -> None:

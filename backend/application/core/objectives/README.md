@@ -128,6 +128,12 @@ Analysis. It also loads the matching Source documents, Profiles, document trees,
 and reusable Paper Maps; it does not form scientific claims or persist
 Objectives/Evidence.
 
+A stored Paper Map is reusable only when its input fingerprint and policy
+version match and its Source coverage contains no technical extraction failure.
+Another requested workflow rebuilds a technically failed map once through the
+normal bounded extraction path. Scientific insufficiency alone does not trigger
+a rebuild; a completed inspection may legitimately leave scope unresolved.
+
 Candidate formation identifies shared scientific themes while preserving each
 paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,

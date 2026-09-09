@@ -226,6 +226,7 @@ class ObjectiveInputService:
             != map_input_fingerprints[document_id]
             or maps_by_document_id[document_id].map_version
             != PAPER_RESEARCH_MAP_POLICY_VERSION
+            or not maps_by_document_id[document_id].coverage_complete
         )
         completed_map_count = 0
 

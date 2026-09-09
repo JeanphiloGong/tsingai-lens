@@ -1,11 +1,13 @@
 import { buildApiUrl, requestJson } from './api';
 
 export type DocumentType = 'experimental' | 'review' | 'mixed' | 'uncertain';
+export type ProfileStatus = 'completed' | 'extraction_failed';
 
 export type DocumentProfile = {
 	document_id: string;
 	title: string | null;
 	doc_type: DocumentType;
+	profile_status: ProfileStatus;
 	profile_warnings: string[];
 	confidence: number | null;
 	page_count: number | null;
@@ -18,6 +20,7 @@ export type DocumentProfilesResponse = {
 	summary: {
 		total_documents: number;
 		doc_type_counts: Record<DocumentType, number>;
+		technical_failure_count: number;
 		warnings: string[];
 	};
 	items: DocumentProfile[];
@@ -178,6 +181,10 @@ function normalizeProfile(value: unknown): DocumentProfile | null {
 		document_id: documentId,
 		title: optionalText(record.title),
 		doc_type: DOCUMENT_TYPES.has(rawType) ? rawType : 'uncertain',
+		profile_status:
+			String(record.profile_status ?? 'completed') === 'extraction_failed'
+				? 'extraction_failed'
+				: 'completed',
 		profile_warnings: stringList(record.profile_warnings),
 		confidence: nullableNumber(record.confidence),
 		page_count: nullableNumber(record.page_count)
@@ -400,6 +407,7 @@ export async function fetchDocumentProfiles(
 				mixed: finiteNumber(counts?.mixed),
 				uncertain: finiteNumber(counts?.uncertain)
 			},
+			technical_failure_count: finiteNumber(summary?.technical_failure_count),
 			warnings: stringList(summary?.warnings)
 		},
 		items

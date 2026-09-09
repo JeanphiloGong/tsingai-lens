@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Literal, Mapping
 
 from domain.shared.enums import (
     DOC_TYPE_EXPERIMENTAL,
@@ -12,6 +12,12 @@ from domain.shared.enums import (
 )
 
 
+ProfileStatus = Literal["completed", "extraction_failed"]
+PROFILE_STATUS_COMPLETED: ProfileStatus = "completed"
+PROFILE_STATUS_EXTRACTION_FAILED: ProfileStatus = "extraction_failed"
+PROFILE_EXTRACTION_FAILED_WARNING = "document_profile_extraction_failed"
+
+
 @dataclass(frozen=True)
 class DocumentProfile:
     document_id: str
@@ -19,6 +25,7 @@ class DocumentProfile:
     doc_type: str
     profile_warnings: tuple[str, ...]
     confidence: float
+    profile_status: ProfileStatus = PROFILE_STATUS_COMPLETED
     source_fingerprint: str | None = None
     profile_version: str | None = None
     profile_fingerprint: str | None = None
@@ -34,6 +41,10 @@ class DocumentProfile:
             doc_type=doc_type,
             profile_warnings=warnings,
             confidence=round(float(payload.get("confidence") or 0.0), 2),
+            profile_status=_normalize_profile_status(
+                payload.get("profile_status"),
+                warnings=warnings,
+            ),
             source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
             profile_version=_normalize_optional_text(payload.get("profile_version")),
             profile_fingerprint=_normalize_optional_text(
@@ -49,6 +60,7 @@ class DocumentProfile:
             "doc_type": self.doc_type,
             "profile_warnings": list(self.profile_warnings),
             "confidence": round(float(self.confidence), 2),
+            "profile_status": self.profile_status,
             "source_fingerprint": self.source_fingerprint,
             "profile_version": self.profile_version,
             "profile_fingerprint": self.profile_fingerprint,
@@ -61,12 +73,14 @@ class DocumentProfileSummary:
     total_documents: int
     by_doc_type: dict[str, int]
     warnings: tuple[str, ...]
+    technical_failure_count: int
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "total_documents": self.total_documents,
             "by_doc_type": dict(self.by_doc_type),
             "warnings": list(self.warnings),
+            "technical_failure_count": self.technical_failure_count,
         }
 
 
@@ -90,11 +104,21 @@ def summarize_document_profile_collection(
         )
     if by_doc_type.get(DOC_TYPE_UNCERTAIN, 0) > 0:
         warnings.append("Some documents remain uncertain and may need manual review.")
+    technical_failure_count = sum(
+        PROFILE_EXTRACTION_FAILED_WARNING in profile.profile_warnings
+        or profile.profile_status == PROFILE_STATUS_EXTRACTION_FAILED
+        for profile in normalized
+    )
+    if technical_failure_count:
+        warnings.append(
+            "Some document profiles failed technical extraction and need retry."
+        )
 
     return DocumentProfileSummary(
         total_documents=total_documents,
         by_doc_type=by_doc_type,
         warnings=tuple(warnings),
+        technical_failure_count=technical_failure_count,
     )
 
 
@@ -176,6 +200,20 @@ def _normalize_doc_type(
     return DOC_TYPE_UNCERTAIN
 
 
+def _normalize_profile_status(
+    value: Any,
+    *,
+    warnings: tuple[str, ...] = (),
+) -> ProfileStatus:
+    normalized = _normalize_label(value)
+    if (
+        normalized.replace(" ", "_") == PROFILE_STATUS_EXTRACTION_FAILED
+        or PROFILE_EXTRACTION_FAILED_WARNING in warnings
+    ):
+        return PROFILE_STATUS_EXTRACTION_FAILED
+    return PROFILE_STATUS_COMPLETED
+
+
 def _normalize_label(value: Any) -> str:
     text = _normalize_optional_text(value)
     if text is None:
@@ -186,5 +224,9 @@ def _normalize_label(value: Any) -> str:
 __all__ = [
     "DocumentProfile",
     "DocumentProfileSummary",
+    "PROFILE_EXTRACTION_FAILED_WARNING",
+    "PROFILE_STATUS_COMPLETED",
+    "PROFILE_STATUS_EXTRACTION_FAILED",
+    "ProfileStatus",
     "summarize_document_profile_collection",
 ]

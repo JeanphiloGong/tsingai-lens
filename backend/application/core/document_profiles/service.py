@@ -16,6 +16,8 @@ from application.core.document_profiles.extraction import (
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
     DocumentProfile,
+    PROFILE_STATUS_EXTRACTION_FAILED,
+    PROFILE_STATUS_COMPLETED,
     summarize_document_profile_collection,
 )
 from domain.ports import DocumentProfileRepository, SourceArtifactRepository
@@ -369,6 +371,7 @@ class DocumentProfileService:
                     "doc_type": DOC_TYPE_UNCERTAIN,
                     "profile_warnings": ["insufficient_content"],
                     "confidence": 0.0,
+                    "profile_status": PROFILE_STATUS_COMPLETED,
                 }
             ).to_record()
 
@@ -409,6 +412,7 @@ class DocumentProfileService:
                     "doc_type": DOC_TYPE_UNCERTAIN,
                     "profile_warnings": ["document_profile_extraction_failed"],
                     "confidence": 0.0,
+                    "profile_status": PROFILE_STATUS_EXTRACTION_FAILED,
                 }
             ).to_record()
         profile_warnings = list(extracted.profile_warnings)
@@ -421,6 +425,7 @@ class DocumentProfileService:
                 "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
                 "profile_warnings": profile_warnings,
                 "confidence": extracted.confidence,
+                "profile_status": PROFILE_STATUS_COMPLETED,
             }
         )
         return normalized.to_record()

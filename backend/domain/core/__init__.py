@@ -3,6 +3,10 @@
 from domain.core.document_profile import (
     DocumentProfile,
     DocumentProfileSummary,
+    PROFILE_EXTRACTION_FAILED_WARNING,
+    PROFILE_STATUS_COMPLETED,
+    PROFILE_STATUS_EXTRACTION_FAILED,
+    ProfileStatus,
     summarize_document_profile_collection,
 )
 from domain.core.evidence_backbone import (
@@ -81,6 +85,10 @@ __all__ = [
     "CharacterizationObservation",
     "DocumentProfile",
     "DocumentProfileSummary",
+    "PROFILE_EXTRACTION_FAILED_WARNING",
+    "PROFILE_STATUS_COMPLETED",
+    "PROFILE_STATUS_EXTRACTION_FAILED",
+    "ProfileStatus",
     "EVIDENCE_ORIGINS",
     "EVIDENCE_ATTRIBUTION_SCOPES",
     "EVIDENCE_RESULT_DIRECTIONS",

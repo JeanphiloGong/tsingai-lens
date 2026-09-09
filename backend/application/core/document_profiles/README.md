@@ -19,3 +19,8 @@ summaries derived from normalized Source artifacts.
 Document profiles describe document role and available content. They do not
 discover research Objectives, extract paper facts, synthesize Findings, or own
 HTTP and persistence implementations.
+
+`doc_type=uncertain` describes a completed but unresolved scientific
+classification. `profile_status=extraction_failed` describes a technical model
+failure; it must remain visible as a retryable warning and must not be treated
+as evidence that the document itself is scientifically uncertain.

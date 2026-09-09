@@ -25,8 +25,9 @@ from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EXTRACTION_MODE = "provider_parse"
-_SUPPORTED_EXTRACTION_MODES = {"json_text", "provider_parse"}
+_JSON_TEXT = "json_text"
+_DEFAULT_EXTRACTION_MODE = _JSON_TEXT
+_SUPPORTED_EXTRACTION_MODES = {_JSON_TEXT}
 _MAX_COMPLETION_TOKENS = 1024
 _REPAIR_OUTPUT_CHARS = 4000
 _TRACE_OUTPUT_PREVIEW_CHARS = 1000
@@ -107,8 +108,9 @@ class DocumentProfileExtractor:
                 attempts=attempts,
             )
             logger.exception(
-                "Document profile extraction failed mode=json_text model=%s "
+                "Document profile extraction failed mode=%s model=%s "
                 "elapsed_s=%.3f validated=false attempts=%s",
+                self.extraction_mode,
                 self.model,
                 elapsed_s,
                 json.dumps(attempts, ensure_ascii=True, separators=(",", ":")),
@@ -331,7 +333,7 @@ class DocumentProfileExtractor:
         if normalized in _SUPPORTED_EXTRACTION_MODES:
             return normalized
         logger.warning(
-            "Invalid CORE_LLM_EXTRACTION_MODE=%s; falling back to %s",
+            "Document profile extraction mode=%s is unsupported; falling back to %s",
             normalized,
             _DEFAULT_EXTRACTION_MODE,
         )

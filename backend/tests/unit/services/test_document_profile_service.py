@@ -372,6 +372,8 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     assert records["paper-failed"]["profile_warnings"] == [
         "document_profile_extraction_failed"
     ]
+    assert records["paper-failed"]["profile_status"] == "extraction_failed"
+    assert records["paper-success"]["profile_status"] == "completed"
     assert records["paper-success"]["doc_type"] == "experimental"
     failure_log = next(
         record.getMessage()

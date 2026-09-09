@@ -224,7 +224,12 @@ def select_tool_specs(
     # collection-level conclusion review must inspect one exact Finding
     # returned by that query before the model can judge its basis.
     finding_candidates = _published_finding_candidates(successful_results)
-    plan_intent = intent_policy.mentions_terms(user_text, intent_policy.PLAN_TERMS)
+    plan_intent = intent_policy.has_plan_intent(
+        user_text,
+        plan_terms=intent_policy.PLAN_TERMS,
+        plan_noun_terms=intent_policy.PLAN_NOUN_TERMS,
+        plan_action_terms=intent_policy.PLAN_ACTION_TERMS,
+    )
     if (
         successful_results.get("query_published_findings")
         and finding_candidates

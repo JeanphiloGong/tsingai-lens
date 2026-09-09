@@ -2501,6 +2501,59 @@ def test_paper_method_question_still_enables_source_reading() -> None:
     assert "read_source" in names
 
 
+def test_document_identifier_enables_direct_source_inspection() -> None:
+    names = intent_policy.capability_names_for_intent(
+        "Inspect the P002 group definitions",
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert {
+        "search_sources",
+        "read_source",
+        "inspect_document_sources",
+        "inspect_table",
+    }.intersection(names)
+
+
+async def test_document_identifier_request_can_execute_source_read() -> None:
+    read = _Capability(
+        "read_source",
+        ToolRisk.READ,
+        _QuestionArguments,
+        result_data={
+            "document_id": "P002",
+            "source_kind": "text_window",
+            "source_ref": "methods-1",
+            "content_truncated": False,
+            "source_digest": "a" * 64,
+        },
+    )
+    model = _Model(
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name="read_source",
+                    arguments={"question": "P002 group definitions"},
+                ),
+            )
+        ),
+        ModelTurn(content="P002 的 group definitions 已读取。"),
+    )
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Inspect the P002 group definitions",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert [call.name for call in result.tool_calls] == ["read_source"]
+    assert read.executed_arguments == [{"question": "P002 group definitions"}]
+
+
 def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
     names = intent_policy.capability_names_for_intent(
         "What is your plan?",
@@ -2515,6 +2568,54 @@ def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
         "propose_research_plan",
         "create_research_plan",
     }.intersection(names)
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    ["Draft and save a plan", "Revise the saved plan"],
+)
+def test_actionable_english_plan_request_enables_plan_capabilities(
+    request_text: str,
+) -> None:
+    names = intent_policy.capability_names_for_intent(
+        request_text,
+        has_source_context=False,
+        prior_tool_names=set(),
+    )
+
+    assert "propose_research_plan" in names
+    assert "inspect_research_plans" in names
+
+
+@pytest.mark.parametrize(
+    ("request_text", "capability_name"),
+    [
+        ("Draft and save a plan", "create_research_plan"),
+        ("Revise the saved plan", "revise_research_plan"),
+    ],
+)
+async def test_actionable_english_plan_request_reaches_write_approval(
+    request_text: str,
+    capability_name: str,
+) -> None:
+    write = _Capability(capability_name, ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(
+            tool_calls=(ModelToolCall(name=capability_name, arguments={}),)
+        )
+    )
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((write,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message=request_text,
+    )
+
+    assert result.status is AgentRunStatus.APPROVAL_REQUIRED
+    assert model.tool_spec_names == [(capability_name,)]
+    assert write.executed_arguments == []
 
 
 def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None:

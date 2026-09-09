@@ -22,6 +22,32 @@ def mentions_terms(text: str, terms: tuple[str, ...]) -> bool:
     return False
 
 
+def has_plan_intent(
+    text: str,
+    *,
+    plan_terms: tuple[str, ...],
+    plan_noun_terms: tuple[str, ...],
+    plan_action_terms: tuple[str, ...],
+) -> bool:
+    """Recognize a plan action without activating on a bare noun."""
+
+    if mentions_terms(text, plan_terms):
+        return True
+    return mentions_terms(text, plan_noun_terms) and mentions_terms(
+        text,
+        plan_action_terms,
+    )
+
+
+def has_document_reference(text: str) -> bool:
+    """Treat an explicit paper/document identifier as a reading anchor."""
+
+    return re.search(
+        r"(?<![a-z0-9])(?:p|paper|doc|document)[-_ ]?\d+[a-z0-9_-]*(?![a-z0-9])",
+        text.casefold(),
+    ) is not None
+
+
 COLLECTION_READ_CAPABILITIES = {
     "get_collection_context",
     "browse_collection_papers",
@@ -291,6 +317,31 @@ PLAN_TERMS = (
     "follow-up experiment",
     "follow up experiment",
 )
+PLAN_NOUN_TERMS = ("plan", "plans", "方案")
+PLAN_ACTION_TERMS = (
+    "draft",
+    "save",
+    "create",
+    "propose",
+    "revise",
+    "update",
+    "edit",
+    "modify",
+    "inspect",
+    "read",
+    "review",
+    "list",
+    "view",
+    "拟定",
+    "提出",
+    "保存",
+    "创建",
+    "修订",
+    "修改",
+    "查看",
+    "读取",
+    "列出",
+)
 PLAN_READ_TERMS = (
     "查看",
     "读取",
@@ -420,16 +471,25 @@ def capability_names_for_intent(
     generic_source_detail = mentions(
         ("method", "methods", "result", "results", "read", "inspect", "check")
     )
+    document_reference = has_document_reference(user_text)
     paper_intent = mentions(PAPER_TERMS) and (
         has_source_context or research_anchor
     )
     source_intent = mentions(SOURCE_DETAIL_TERMS) and (
-        has_source_context or research_anchor or not generic_source_detail
+        has_source_context
+        or research_anchor
+        or document_reference
+        or not generic_source_detail
     )
     objective_intent = mentions(OBJECTIVE_TERMS) or "整理" in user_text
     finding_intent = mentions(FINDING_TERMS)
     finding_record_intent = mentions(FINDING_RECORD_TERMS)
-    plan_intent = mentions(PLAN_TERMS)
+    plan_intent = has_plan_intent(
+        user_text,
+        plan_terms=PLAN_TERMS,
+        plan_noun_terms=PLAN_NOUN_TERMS,
+        plan_action_terms=PLAN_ACTION_TERMS,
+    )
     process_intent = mentions(PROCESS_TERMS)
     source_grounded_intent = mentions(SOURCE_GROUNDED_TERMS)
 

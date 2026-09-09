@@ -401,6 +401,55 @@ describe('collections/[id]/assistant Research Agent', () => {
 		}
 	);
 
+	it('finishes an active paper in its original collection without starting remaining uploads after navigation', async () => {
+		let finish!: (response: Response) => void;
+		const pending = new Promise<Response>((resolve) => {
+			finish = resolve;
+		});
+		installApi({
+			uploadDocument: () => pending,
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+		});
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (
+				requestPath(input) === '/api/v1/chat-sessions' &&
+				requestBody(input, init)?.collection_id === 'col_456'
+			) {
+				return Promise.resolve(
+					jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
+				);
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		const file = new File(['%PDF-1.7'], 'alloy-study.pdf', { type: 'application/pdf' });
+		await browserPage
+			.getByLabelText('Choose PDF papers')
+			.upload([file, new File(['%PDF-1.7 next'], 'next-study.pdf', { type: 'application/pdf' })]);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 2 papers' }).click();
+		setPage({
+			params: { id: 'col_456' },
+			url: new URL('http://localhost/collections/col_456/assistant')
+		});
+		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		finish(jsonResponse(uploadedDocument(file), 201));
+		await vi.waitFor(() =>
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					requestPath(input).endsWith('/col_123/documents/doc_upload_1/preparation')
+				)
+			).toBe(true)
+		);
+		await new Promise(requestAnimationFrame);
+		expect(
+			fetchMock.mock.calls.filter(([input]) => requestPath(input).endsWith('/documents'))
+		).toHaveLength(1);
+		await expect.element(browserPage.getByText('alloy-study.pdf')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Preparation queued')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Add papers' })).toBeEnabled();
+	});
+
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
 		installApi({
 			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 201),

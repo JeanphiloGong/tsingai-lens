@@ -149,8 +149,11 @@ keeping Lens-specific research boundaries explicit:
   history belong to the corresponding Assistant response; the header does
   not duplicate them with a Ready/Working badge.
 - `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
-  keyboard interaction. The route retains upload and message orchestration,
-  while the composer sends on Enter and preserves Shift+Enter for a newline.
+  collection-bound upload state and orchestration. It sends on Enter and preserves
+  Shift+Enter and IME composition. An upload already started finishes its
+  upload/preparation chain against the original collection. Navigation drops its
+  UI updates and stops the remaining batch from starting; it does not move papers
+  to the newly selected collection.
 - `MessageTimeline.svelte` owns history rendering and the conversation viewport.
 - `UserMessage.svelte` and `AssistantMessage.svelte` own role presentation.
   `MessageContent.svelte` owns escaped text formatting and the transient cursor;

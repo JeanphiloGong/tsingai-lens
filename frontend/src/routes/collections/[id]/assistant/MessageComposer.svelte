@@ -1,30 +1,17 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatSession, ChatSourceContext, ChatToolCall } from '../../../_shared/chatSessions';
+	import type { ChatSourceContext } from '../../../_shared/chatSessions';
 	import type { PaperUploadItem } from './messageComposer';
 
 	export let collectionId = '';
-	export let session: ChatSession | null = null;
 	export let input = '';
 	export let sending = false;
-	export let deciding = false;
-	export let pendingApproval: ChatToolCall | null = null;
+	export let disabled = false;
 	export let pendingSourceContext: ChatSourceContext | null = null;
-	export let uploadItems: PaperUploadItem[] = [];
-	export let uploadLoading = false;
-	export let uploadError = '';
-	export let uploadNotice = '';
-	export let uploadCandidates: PaperUploadItem[] = [];
-	export let uploadBusy = false;
-	export let uploadActionText = '';
 	export let onInput: (value: string) => void = () => {};
 	export let onSend: (nextText?: string) => void = () => {};
-	export let onSelectUploadFiles: (event: Event) => void = () => {};
-	export let onClearUploadItems: () => void = () => {};
-	export let onUploadPapers: () => void = () => {};
 	export let onRemovePendingSourceContext: () => void = () => {};
-	export let uploadStatus: (item: PaperUploadItem) => string = () => '';
 
 	let uploadInput: HTMLInputElement | null = null;
 
@@ -32,6 +19,182 @@
 		if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
 		event.preventDefault();
 		onSend();
+	}
+
+	import {
+		isDuplicateCollectionDocumentError,
+		uploadCollectionDocument
+	} from '../../../_shared/collectionDocuments';
+	import { prepareCollectionDocument } from '../../../_shared/pipelineRuns';
+	import { errorMessage } from '../../../_shared/api';
+	import { onDestroy } from 'svelte';
+	let uploadItems: PaperUploadItem[] = [];
+	let uploadLoading = false;
+	let uploadError = '';
+	let uploadNotice = '';
+	let uploadSequence = 0;
+	let uploadGeneration = 0;
+	let destroyed = false;
+	let uploadCollectionId = '';
+	onDestroy(() => {
+		destroyed = true;
+	});
+	$: uploadCandidates = uploadItems.filter((item) =>
+		['selected', 'upload_failed', 'preparation_failed'].includes(item.status)
+	);
+	$: uploadBusy =
+		uploadLoading || uploadItems.some((item) => ['uploading', 'preparing'].includes(item.status));
+	$: uploadActionText = getUploadActionText(uploadBusy, uploadCandidates);
+
+	$: if (collectionId !== uploadCollectionId) {
+		uploadCollectionId = collectionId;
+		uploadGeneration += 1;
+		uploadItems = [];
+		uploadLoading = false;
+		uploadError = '';
+		uploadNotice = '';
+		uploadSequence = 0;
+	}
+	function isPdf(file: File) {
+		return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+	}
+
+	function selectUploadFiles(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		const files = Array.from(target.files ?? []);
+		const validFiles = files.filter(isPdf);
+		uploadError =
+			validFiles.length === files.length ? '' : $t('researchAgent.upload.unsupportedFile');
+		uploadNotice = '';
+
+		const existing = new Set(
+			uploadItems.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`)
+		);
+		const selected = validFiles
+			.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))
+			.map((file) => ({
+				key: `upload-${uploadSequence++}`,
+				file,
+				status: 'selected' as const,
+				documentId: null,
+				error: ''
+			}));
+		uploadItems = [...uploadItems, ...selected];
+		target.value = '';
+	}
+
+	function updateUploadItem(key: string, patch: Partial<PaperUploadItem>) {
+		uploadItems = uploadItems.map((item) => (item.key === key ? { ...item, ...patch } : item));
+	}
+
+	async function uploadAndPrepareItem(
+		item: PaperUploadItem,
+		ownerCollectionId: string,
+		generation: number
+	) {
+		const update = (patch: Partial<PaperUploadItem>) => {
+			if (!destroyed && generation === uploadGeneration && ownerCollectionId === collectionId) {
+				updateUploadItem(item.key, patch);
+			}
+		};
+		let documentId = item.documentId;
+		if (!documentId) {
+			update({ status: 'uploading', error: '' });
+			try {
+				const uploaded = await uploadCollectionDocument(ownerCollectionId, item.file);
+				documentId = uploaded.document_id;
+				update({ status: 'preparing', documentId, error: '' });
+			} catch (err) {
+				if (isDuplicateCollectionDocumentError(err)) {
+					update({ status: 'already_uploaded', error: '' });
+					return 'already_uploaded';
+				}
+				update({
+					status: 'upload_failed',
+					error: errorMessage(err)
+				});
+				return 'failed';
+			}
+		} else {
+			update({ status: 'preparing', error: '' });
+		}
+
+		try {
+			await prepareCollectionDocument(ownerCollectionId, documentId);
+			update({ status: 'queued', documentId, error: '' });
+			return 'queued';
+		} catch (err) {
+			update({
+				status: 'preparation_failed',
+				documentId,
+				error: errorMessage(err)
+			});
+			return 'failed';
+		}
+	}
+
+	async function uploadPapers() {
+		if (!uploadCandidates.length || uploadLoading) return;
+		const ownerCollectionId = collectionId;
+		const generation = uploadGeneration;
+		const candidates = [...uploadCandidates];
+		uploadLoading = true;
+		uploadError = '';
+		uploadNotice = '';
+		let queuedCount = 0;
+		let alreadyUploadedCount = 0;
+		let failedCount = 0;
+		for (const item of candidates) {
+			if (destroyed || generation !== uploadGeneration || ownerCollectionId !== collectionId)
+				return;
+			const result = await uploadAndPrepareItem(item, ownerCollectionId, generation);
+			if (result === 'queued') queuedCount += 1;
+			if (result === 'already_uploaded') alreadyUploadedCount += 1;
+			if (result === 'failed') failedCount += 1;
+		}
+		if (destroyed || generation !== uploadGeneration || ownerCollectionId !== collectionId) return;
+		const notices = [];
+		if (queuedCount) notices.push($t('researchAgent.upload.queuedSummary', { count: queuedCount }));
+		if (alreadyUploadedCount)
+			notices.push(
+				$t('researchAgent.upload.alreadyUploadedSummary', { count: alreadyUploadedCount })
+			);
+		uploadNotice = notices.join(' ');
+		if (failedCount) {
+			uploadError = $t('researchAgent.upload.failedSummary', { count: failedCount });
+		}
+		uploadLoading = false;
+	}
+
+	function clearUploadItems() {
+		if (uploadLoading) return;
+		uploadItems = [];
+		uploadError = '';
+		uploadNotice = '';
+	}
+
+	function uploadStatus(item: PaperUploadItem) {
+		return $t(`researchAgent.upload.status.${item.status}`);
+	}
+
+	function getUploadActionText(busy: boolean, candidates: PaperUploadItem[]) {
+		if (busy) return $t('researchAgent.upload.uploading');
+		const retry =
+			candidates.length > 0 && candidates.every((item) => item.status.endsWith('_failed'));
+		if (retry) {
+			return $t(
+				candidates.length === 1
+					? 'researchAgent.upload.retryOne'
+					: 'researchAgent.upload.retryMany',
+				{ count: candidates.length }
+			);
+		}
+		return $t(
+			candidates.length === 1
+				? 'researchAgent.upload.uploadOne'
+				: 'researchAgent.upload.uploadMany',
+			{ count: candidates.length }
+		);
 	}
 </script>
 
@@ -44,7 +207,7 @@
 		accept=".pdf,application/pdf"
 		aria-label={$t('researchAgent.upload.choose')}
 		disabled={uploadLoading}
-		on:change={onSelectUploadFiles}
+		on:change={selectUploadFiles}
 	/>
 	{#if uploadItems.length}
 		<section class="upload-panel" aria-label={$t('researchAgent.upload.panelTitle')}>
@@ -57,7 +220,7 @@
 					type="button"
 					class="clear-uploads"
 					disabled={uploadLoading}
-					on:click={onClearUploadItems}
+					on:click={clearUploadItems}
 				>
 					{$t('researchAgent.upload.clear')}
 				</button>
@@ -86,7 +249,7 @@
 						class="upload-primary"
 						aria-label={uploadActionText}
 						disabled={uploadBusy}
-						on:click={onUploadPapers}
+						on:click={uploadPapers}
 					>
 						{uploadActionText}
 					</button>
@@ -137,7 +300,7 @@
 				rows="1"
 				value={input}
 				placeholder={$t('researchAgent.messagePlaceholder')}
-				disabled={!session || sending || deciding || Boolean(pendingApproval)}
+				{disabled}
 				on:input={(event) => onInput((event.currentTarget as HTMLTextAreaElement).value)}
 				on:keydown={handleComposerKeydown}
 			></textarea>
@@ -146,7 +309,7 @@
 				type="submit"
 				aria-label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
 				title={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-				disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
+				disabled={disabled || !input.trim()}
 			>
 				<span aria-hidden="true">↑</span>
 			</button>

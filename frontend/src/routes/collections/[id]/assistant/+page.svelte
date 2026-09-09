@@ -69,10 +69,6 @@
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (browser && collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
-		uploadItems = [];
-		uploadError = '';
-		uploadNotice = '';
-		uploadSequence = 0;
 		void loadSession();
 	}
 
@@ -428,162 +424,6 @@
 		if (Number.isNaN(date.getTime())) return '';
 		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
 	}
-
-	import {
-		isDuplicateCollectionDocumentError,
-		uploadCollectionDocument
-	} from '../../../_shared/collectionDocuments';
-
-	import { prepareCollectionDocument } from '../../../_shared/pipelineRuns';
-
-	import type { PaperUploadItem } from './messageComposer';
-
-	let uploadItems: PaperUploadItem[] = [];
-
-	let uploadLoading = false;
-
-	let uploadError = '';
-
-	let uploadNotice = '';
-
-	let uploadSequence = 0;
-
-	$: uploadCandidates = uploadItems.filter((item) =>
-		['selected', 'upload_failed', 'preparation_failed'].includes(item.status)
-	);
-
-	$: uploadBusy =
-		uploadLoading || uploadItems.some((item) => ['uploading', 'preparing'].includes(item.status));
-
-	$: uploadActionText = getUploadActionText(uploadBusy, uploadCandidates);
-
-	function isPdf(file: File) {
-		return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-	}
-
-	function selectUploadFiles(event: Event) {
-		const target = event.currentTarget as HTMLInputElement;
-		const files = Array.from(target.files ?? []);
-		const validFiles = files.filter(isPdf);
-		uploadError =
-			validFiles.length === files.length ? '' : $t('researchAgent.upload.unsupportedFile');
-		uploadNotice = '';
-
-		const existing = new Set(
-			uploadItems.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`)
-		);
-		const selected = validFiles
-			.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))
-			.map((file) => ({
-				key: `upload-${uploadSequence++}`,
-				file,
-				status: 'selected' as const,
-				documentId: null,
-				error: ''
-			}));
-		uploadItems = [...uploadItems, ...selected];
-		target.value = '';
-	}
-
-	function updateUploadItem(key: string, patch: Partial<PaperUploadItem>) {
-		uploadItems = uploadItems.map((item) => (item.key === key ? { ...item, ...patch } : item));
-	}
-
-	async function uploadAndPrepareItem(item: PaperUploadItem) {
-		let documentId = item.documentId;
-		if (!documentId) {
-			updateUploadItem(item.key, { status: 'uploading', error: '' });
-			try {
-				const uploaded = await uploadCollectionDocument(collectionId, item.file);
-				documentId = uploaded.document_id;
-				updateUploadItem(item.key, { status: 'preparing', documentId, error: '' });
-			} catch (err) {
-				if (isDuplicateCollectionDocumentError(err)) {
-					updateUploadItem(item.key, { status: 'already_uploaded', error: '' });
-					return 'already_uploaded';
-				}
-				updateUploadItem(item.key, {
-					status: 'upload_failed',
-					error: errorMessage(err)
-				});
-				return 'failed';
-			}
-		} else {
-			updateUploadItem(item.key, { status: 'preparing', error: '' });
-		}
-
-		try {
-			await prepareCollectionDocument(collectionId, documentId);
-			updateUploadItem(item.key, { status: 'queued', documentId, error: '' });
-			return 'queued';
-		} catch (err) {
-			updateUploadItem(item.key, {
-				status: 'preparation_failed',
-				documentId,
-				error: errorMessage(err)
-			});
-			return 'failed';
-		}
-	}
-
-	async function uploadPapers() {
-		if (!uploadCandidates.length || uploadLoading) return;
-		const candidates = [...uploadCandidates];
-		uploadLoading = true;
-		uploadError = '';
-		uploadNotice = '';
-		let queuedCount = 0;
-		let alreadyUploadedCount = 0;
-		let failedCount = 0;
-		for (const item of candidates) {
-			const result = await uploadAndPrepareItem(item);
-			if (result === 'queued') queuedCount += 1;
-			if (result === 'already_uploaded') alreadyUploadedCount += 1;
-			if (result === 'failed') failedCount += 1;
-		}
-		const notices = [];
-		if (queuedCount) notices.push($t('researchAgent.upload.queuedSummary', { count: queuedCount }));
-		if (alreadyUploadedCount)
-			notices.push(
-				$t('researchAgent.upload.alreadyUploadedSummary', { count: alreadyUploadedCount })
-			);
-		uploadNotice = notices.join(' ');
-		if (failedCount) {
-			uploadError = $t('researchAgent.upload.failedSummary', { count: failedCount });
-		}
-		uploadLoading = false;
-	}
-
-	function clearUploadItems() {
-		if (uploadLoading) return;
-		uploadItems = [];
-		uploadError = '';
-		uploadNotice = '';
-	}
-
-	function uploadStatus(item: PaperUploadItem) {
-		return $t(`researchAgent.upload.status.${item.status}`);
-	}
-
-	function getUploadActionText(busy: boolean, candidates: PaperUploadItem[]) {
-		if (busy) return $t('researchAgent.upload.uploading');
-		const retry =
-			candidates.length > 0 && candidates.every((item) => item.status.endsWith('_failed'));
-		if (retry) {
-			return $t(
-				candidates.length === 1
-					? 'researchAgent.upload.retryOne'
-					: 'researchAgent.upload.retryMany',
-				{ count: candidates.length }
-			);
-		}
-		return $t(
-			candidates.length === 1
-				? 'researchAgent.upload.uploadOne'
-				: 'researchAgent.upload.uploadMany',
-			{ count: candidates.length }
-		);
-	}
 </script>
 
 <svelte:head>
@@ -628,26 +468,13 @@
 
 		<MessageComposer
 			{collectionId}
-			{session}
 			{input}
 			{sending}
-			{deciding}
-			{pendingApproval}
+			disabled={!session || loading || sending || deciding || Boolean(pendingApproval)}
 			{pendingSourceContext}
-			{uploadItems}
-			{uploadLoading}
-			{uploadError}
-			{uploadNotice}
-			{uploadCandidates}
-			{uploadBusy}
-			{uploadActionText}
 			onInput={handleComposerInput}
 			onSend={sendMessage}
-			onSelectUploadFiles={selectUploadFiles}
-			onClearUploadItems={clearUploadItems}
-			onUploadPapers={uploadPapers}
 			onRemovePendingSourceContext={removePendingSourceContext}
-			{uploadStatus}
 		/>
 	</main>
 </section>

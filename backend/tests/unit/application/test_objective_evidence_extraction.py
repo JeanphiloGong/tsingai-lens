@@ -16,6 +16,7 @@ from application.core.objectives.analysis import (
     source_extraction,
     source_screening,
     source_validation,
+    table_repair,
 )
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
@@ -250,7 +251,7 @@ def test_research_objective_table_source_payload_includes_table_cells():
         }
     )
 
-    assert source_extraction._objective_table_source_needs_llm_structural_repair(
+    assert table_repair._objective_table_source_needs_llm_structural_repair(
         route=route,
         source={
             "table_matrix": [
@@ -11668,7 +11669,7 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -11754,7 +11755,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -11815,7 +11816,7 @@ def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
 
     with capture_analysis_diagnostics() as diagnostics:
         repaired_source, repair_error = (
-            source_extraction._repair_objective_table_source_if_needed(
+            table_repair.repair_table_source(
                 collection_id="col-test",
                 route=route,
                 source=source,
@@ -11888,7 +11889,7 @@ def test_research_objective_table_repair_rejects_reordered_source_labels():
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -11935,7 +11936,7 @@ def test_research_objective_table_repair_rejects_invented_label_tokens():
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -11962,7 +11963,7 @@ def test_research_objective_table_repair_accepts_cross_row_uncertainty_rebinding
     ]
 
     assert (
-        source_extraction._objective_table_repair_preserves_result_number_sequences(
+        table_repair._objective_table_repair_preserves_result_number_sequences(
             original_matrix=original_matrix,
             repaired_matrix=repaired_matrix,
         )
@@ -12011,7 +12012,7 @@ def test_research_objective_table_repair_accepts_multiple_parser_fragment_merges
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -12109,7 +12110,7 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
 
     with capture_analysis_diagnostics() as diagnostics:
         repaired_source, repair_error = (
-            source_extraction._repair_objective_table_source_if_needed(
+            table_repair.repair_table_source(
                 collection_id="col-test",
                 route=route,
                 source=source,
@@ -12125,7 +12126,7 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
         "schema_version": "objective_table_repair_attestation.v1",
         "raw_matrix_sha256": sha256(
             json.dumps(
-                source_extraction._canonical_objective_table_matrix(
+                table_repair._canonical_objective_table_matrix(
                     source=source,
                     matrix=source["table_matrix"],
                 ),
@@ -12246,7 +12247,7 @@ def test_research_objective_table_repair_recovers_complete_p004_table_4_sequence
     class P004RepairExtractor:
         def repair_table_matrix(self, _payload):
             numeric_columns = [
-                source_extraction._objective_column_numeric_tokens(
+                table_repair._objective_column_numeric_tokens(
                     original_matrix,
                     column_index,
                 )
@@ -12290,7 +12291,7 @@ def test_research_objective_table_repair_recovers_complete_p004_table_4_sequence
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -12302,9 +12303,9 @@ def test_research_objective_table_repair_recovers_complete_p004_table_4_sequence
     repaired_matrix = repaired_source["table_matrix"]
     assert repaired_matrix[0] == headers
     assert [row[0] for row in repaired_matrix[1:]] == specimen_labels
-    assert source_extraction._objective_column_numeric_tokens(
+    assert table_repair._objective_column_numeric_tokens(
         repaired_matrix, 2
-    ) == source_extraction._objective_column_numeric_tokens(original_matrix, 2)
+    ) == table_repair._objective_column_numeric_tokens(original_matrix, 2)
     assert repaired_matrix[2][2] == "441.5 ( +/- 15.0)"
     assert repaired_matrix[-1][2] == "221.3 ( +/- 9.3)"
 
@@ -12323,7 +12324,7 @@ def test_research_objective_table_repair_rejects_lost_p004_uncertainty():
     ]
 
     assert not (
-        source_extraction._objective_table_repair_preserves_result_number_sequences(
+        table_repair._objective_table_repair_preserves_result_number_sequences(
             original_matrix=original_matrix,
             repaired_matrix=repaired_matrix,
         )

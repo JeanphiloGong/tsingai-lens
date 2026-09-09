@@ -271,7 +271,6 @@ class ResearchObjectiveService:
             )
         return interrupted_count
 
-    # define a method that admits and schedules automatic objective discovery
     async def start_objective_discovery(
         self,
         collection_id: str,
@@ -285,7 +284,6 @@ class ResearchObjectiveService:
         Returns:
             dict[str, Any]: return the processing status
         """
-        # validate and freeze the selected inputs
         document_inputs = await self.resolve_prepared_document_inputs(
             collection_id,
             document_ids,
@@ -451,7 +449,6 @@ class ResearchObjectiveService:
             raise RuntimeError("Objective Discovery run service is not configured")
         return self.pipeline_run_service
 
-    # define a helper that calculate the fingerprint of the objective discovery
     @staticmethod
     def _objective_discovery_fingerprint(
         document_inputs: tuple[PreparedDocumentInput, ...],
@@ -485,7 +482,6 @@ class ResearchObjectiveService:
         except Exception:  # noqa: BLE001
             logger.exception("Objective Discovery run crashed after scheduling")
 
-    # define a main method for turning a completed collection build into candidate research objectives
     async def discover_and_replace_objective_candidates(
         self,
         collection_id: str,
@@ -1540,8 +1536,6 @@ class ResearchObjectiveService:
         await gather(*(build_map(document_id) for document_id in stale_document_ids))
         return tuple(maps_by_document_id[document_id] for document_id in document_ids)
 
-    # Define a helper that loads one exact prepared-document selection and
-    # prepares the data structures shared by Objective discovery and analysis.
     async def _load_objective_source_inputs(
         self,
         collection_id: str,
@@ -1563,13 +1557,7 @@ class ResearchObjectiveService:
             raise ValueError(
                 "prepared document input is stale; select the current document state"
             )
-        # load document profile
         try:
-            # Profiles answer paper-level class ification questions
-            # 1. Is this an experimental paper?
-            # 2. Is it a review?
-            # 3. Was parsing uncertain?
-            # 4. What is the profile confidence
             profiles: tuple[DocumentProfile, ...] = await self.document_profile_service.read_document_profiles(
                 collection_id,
                 tuple(item.document_id for item in document_inputs),
@@ -1581,14 +1569,7 @@ class ResearchObjectiveService:
         }:
             raise ResearchObjectivesNotReadyError(collection_id)
 
-        # Load parsed documents
         try:
-            # Each SourceDocument contains the parsed paper and its Source objects:
-            # 1.blocks
-            # 2.tables
-            # 3.table rows
-            # 4.table cells
-            # 5.figures
             documents = await self._load_source_documents(
                 collection_id,
                 document_inputs=document_inputs,
@@ -1689,7 +1670,6 @@ class ResearchObjectiveService:
             ),
         )
 
-    # define a method that converts a user-provided list of documents IDs into the exact prepared-document records that a research operation is allowed to consume
     async def resolve_prepared_document_inputs(
         self,
         collection_id: str,
@@ -1700,30 +1680,23 @@ class ResearchObjectiveService:
             collection_id: the identifies the literature collection
             document_ids: the explicit scope selected for the operation
         """
-        # reject an empty selection
         if not document_ids:
             raise ValueError("Objective discovery requires at least one document")
 
-        # reject duplicate IDs
         if len(document_ids) != len(set(document_ids)):
             raise ValueError("Objective discovery document IDs must be unique")
 
-        # create a mutable local result list
         inputs: list[PreparedDocumentInput] = []
 
-        # process every selected document
         for document_id in document_ids:
-            # load the current document record
             document = await self.collection_service.get_document(
                 collection_id,
                 document_id,
             )
 
-            # require preparation completion
             if document.status != "ready" or not document.preparation_fingerprint:
                 raise ResearchObjectivesNotReadyError(collection_id)
 
-            # capture a prepared input snapshot
             inputs.append(
                 PreparedDocumentInput(
                     document_id=document_id,
@@ -1731,7 +1704,6 @@ class ResearchObjectiveService:
                 )
             )
 
-        # return an immutable ordered tuple
         return tuple(inputs)
 
 

@@ -83,7 +83,6 @@ class CollectionService:
         except ValueError as exc:
             raise OSError("figure object verification failed") from exc
 
-    # define a method for creating a document collection
     async def create_collection(
         self,
         name: str,
@@ -129,7 +128,6 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
 
-    # define a method that return a single document record
     async def get_document(
         self,
         collection_id: str,

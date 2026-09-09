@@ -12,6 +12,7 @@ from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from domain.core import PaperResearchMap, PreparedDocumentInput, ResearchObjective
+from domain.core.research_objective import PaperResearchRelationship, PaperResearchScope
 
 
 class _GroupingExtractor:
@@ -88,6 +89,30 @@ def test_relationship_groups_preserve_complete_study_relationship_records():
             "paper_confidence": 0.91,
             "warnings": [],
         }
+    ]
+
+
+def test_grouping_uses_existing_domain_objects_without_reparsing(monkeypatch):
+    maps = tuple(
+        _paper_map(
+            document_id=f"paper-{index}",
+            relationship_id=f"relationship-{index}",
+            material_scope=("Ti-6Al-4V",),
+        )
+        for index in range(6)
+    )
+
+    def reject_reparse(*_args, **_kwargs):
+        raise AssertionError("Grouping must use the existing typed research objects")
+
+    monkeypatch.setattr(PaperResearchScope, "from_mapping", reject_reparse)
+    monkeypatch.setattr(PaperResearchRelationship, "from_mapping", reject_reparse)
+
+    groups = ObjectiveCandidateService()._build_relationship_groups(maps)
+
+    assert len(groups) == 1
+    assert [item["relationship"]["relationship_id"] for item in groups[0]] == [
+        f"relationship-{index}" for index in range(6)
     ]
 
 

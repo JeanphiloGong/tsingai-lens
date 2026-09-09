@@ -149,6 +149,10 @@ support, structured-result coverage, relationship count, and confidence. A
 researcher can still create another Objective manually from any map
 relationship; the bounded list only controls the first review surface.
 
+Grouping compares the existing typed scopes and relationships from the
+inventory. It serializes the resulting groups only after compatibility and
+material-ambiguity decisions, without reparsing domain objects for every pair.
+
 The resulting `seed_document_ids` record the papers whose mapped relationships
 caused the question to be formed. They are question provenance, not the complete
 set of papers that should enter deep Objective analysis.

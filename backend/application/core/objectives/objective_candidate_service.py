@@ -309,32 +309,24 @@ class ObjectiveCandidateService:
         maps_by_document_id = {
             paper_map.document_id: paper_map for paper_map in paper_maps
         }
-        records = sorted(
-            (
-                self._relationship_record(
-                    maps_by_document_id[document_id],
-                    study,
-                    relationship,
-                )
-                for document_id, study, relationship in inventory.values()
-                if self._objective_seed_rejection_reason(study, relationship) is None
-            ),
-            key=self._record_relationship_id,
+        eligible_ids = sorted(
+            relationship_id
+            for relationship_id, (_, study, relationship) in inventory.items()
+            if self._objective_seed_rejection_reason(study, relationship) is None
         )
-        records_by_id = {
-            self._record_relationship_id(record): record for record in records
-        }
         base_groups: list[list[str]] = []
-        for record in records:
-            relationship_id = self._record_relationship_id(record)
+        for relationship_id in eligible_ids:
+            _, study, relationship = inventory[relationship_id]
             compatible_group = next(
                 (
                     group
                     for group in base_groups
                     if all(
-                        self._record_compatibility(
-                            record,
-                            records_by_id[other_id],
+                        self._relationship_compatibility(
+                            study,
+                            relationship,
+                            inventory[other_id][1],
+                            inventory[other_id][2],
                         )
                         is _Compatibility.COMPATIBLE
                         for other_id in group
@@ -353,7 +345,14 @@ class ObjectiveCandidateService:
         )
 
         return [
-            [records_by_id[relationship_id] for relationship_id in group]
+            [
+                self._relationship_record(
+                    maps_by_document_id[inventory[relationship_id][0]],
+                    inventory[relationship_id][1],
+                    inventory[relationship_id][2],
+                )
+                for relationship_id in group
+            ]
             for group in sorted(base_groups, key=lambda group: tuple(group))
         ]
 
@@ -418,44 +417,6 @@ class ObjectiveCandidateService:
             "paper_confidence": paper_map.confidence,
             "warnings": list(paper_map.warnings),
         }
-
-    @staticmethod
-    def _record_relationship_id(record: Mapping[str, Any]) -> str:
-        relationship = record.get("relationship")
-        if not isinstance(relationship, Mapping):
-            return ""
-        return str(relationship.get("relationship_id") or "")
-
-    @classmethod
-    def _record_compatibility(
-        cls,
-        left: Mapping[str, Any],
-        right: Mapping[str, Any],
-    ) -> _Compatibility:
-        left_study = left.get("study")
-        right_study = right.get("study")
-        left_relationship = left.get("relationship")
-        right_relationship = right.get("relationship")
-        if not all(
-            isinstance(item, Mapping)
-            for item in (
-                left_study,
-                right_study,
-                left_relationship,
-                right_relationship,
-            )
-        ):
-            return _Compatibility.INCOMPATIBLE
-        return cls._relationship_compatibility(
-            PaperResearchScope.from_mapping(
-                {**dict(left_study), "relationships": [dict(left_relationship)]}
-            ),
-            PaperResearchRelationship.from_mapping(left_relationship),
-            PaperResearchScope.from_mapping(
-                {**dict(right_study), "relationships": [dict(right_relationship)]}
-            ),
-            PaperResearchRelationship.from_mapping(right_relationship),
-        )
 
     @classmethod
     def _relationship_compatibility(

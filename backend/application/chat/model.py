@@ -332,11 +332,13 @@ class ModelResponseError(RuntimeError):
         reason: str,
         retryable: bool = True,
         partial_content: bool = False,
+        usage: ModelUsage | None = None,
     ) -> None:
         super().__init__(message)
         self.reason = str(reason).strip() or "invalid_response"
         self.retryable = bool(retryable)
         self.partial_content = bool(partial_content)
+        self.usage = usage
 
 
 @dataclass(frozen=True)
@@ -366,12 +368,14 @@ class ModelTurn:
 
 
 class ChatModel(Protocol):
-    def respond(
+    async def respond(
         self,
         *,
         context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
+        timeout_seconds: float = 180.0,
+        max_output_tokens: int = 16_384,
     ) -> ModelTurn: ...
 
 

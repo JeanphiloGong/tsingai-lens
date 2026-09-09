@@ -36,7 +36,7 @@ async def test_cycle_trace_records_the_actual_terminal_outcome(ending, caplog) -
             pytest.fail("A traced approval must not execute the write")
 
     class Model:
-        def respond(self, *, context, tool_specs):
+        async def respond(self, *, context, tool_specs, timeout_seconds=180.0, max_output_tokens=16_384):
             if ending == "model_unavailable":
                 raise RuntimeError("private-provider-detail")
             if ending == "approval_required":

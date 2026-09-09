@@ -171,6 +171,9 @@ def _parse_agent_run_limits() -> AgentRunLimits:
         "max_consecutive_no_progress": "LENS_AGENT_NO_PROGRESS_LIMIT",
         "emergency_max_model_cycles": "LENS_AGENT_EMERGENCY_MAX_CYCLES",
         "max_parallel_reads": "LENS_AGENT_MAX_PARALLEL_READS",
+        "max_model_output_tokens": "LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS",
+        "max_finalization_seconds": "LENS_AGENT_MAX_FINALIZATION_SECONDS",
+        "max_finalization_output_tokens": "LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS",
     }.items():
         default = getattr(defaults, field_name)
         try:

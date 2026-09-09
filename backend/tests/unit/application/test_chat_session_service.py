@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+import asyncio
 from hashlib import sha256
 from typing import Any
 
@@ -9,9 +10,11 @@ from pydantic import BaseModel, ConfigDict
 
 from application.chat import (
     AgentContext,
+    AgentRunLimits,
     CapabilityRegistry,
     ModelToolCall,
     ModelTurn,
+    ModelUsage,
     ResearchAgentRunner,
     ToolSpec,
 )
@@ -21,6 +24,7 @@ from application.chat.session_service import (
     ChatSessionService,
     ChatSourceContextError,
 )
+from application.chat.capabilities.document_sources import ReadSourceCapability
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -51,12 +55,14 @@ class _Model:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(
+    async def respond(
         self,
         *,
         context: tuple,
         tool_specs: tuple,
         text_delta_callback=None,  # noqa: ANN001
+        timeout_seconds=180.0,
+        max_output_tokens=16_384,
     ) -> ModelTurn:
         messages = context.messages
         turn = self.turns.popleft()
@@ -519,7 +525,8 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn() -> 
     )
     events = [event async for event in stream]
 
-    assert events[0:2] == [
+    assert events[0]["type"] == "progress"
+    assert [event for event in events if event["type"] == "text_delta"] == [
         {"type": "text_delta", "content": "逐段"},
         {"type": "text_delta", "content": "回复"},
     ]
@@ -570,6 +577,73 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
         (("user", "assistant", "tool"), ("succeeded",), ("succeeded",)),
         (("user", "assistant", "tool", "assistant"), ("succeeded",), ("succeeded",)),
     ]
+
+
+@pytest.mark.parametrize("ending", ["timeout", "budget"])
+async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending: str) -> None:
+    repository = _Repository()
+    sources = _SourceArtifactRepository()
+    collection = _CollectionService()
+    read = ReadSourceCapability(collection_service=collection, source_artifact_repository=sources)
+    cancelled = asyncio.Event()
+
+    class Model(_Model):
+        calls = 0
+
+        async def respond(self, **kwargs):
+            self.calls += 1
+            if ending == "timeout" and self.calls == 2:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            return await super().respond(**kwargs)
+
+    model = Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={
+            "document_id": "doc-1", "source_kind": "text_window", "source_ref": "results",
+        }),)),
+        ModelTurn(content="Paper A reports 12 mS/cm under EIS. Paper B remains unread; comparison is unresolved.",
+                  usage=ModelUsage(80, 20, 100)),
+    )
+    runner = ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((read,)),
+        limits=AgentRunLimits(max_elapsed_seconds=0.05, max_model_tokens=100),
+    )
+    service = ChatSessionService(repository=repository, collection_service=collection,
+                                 source_artifact_repository=sources, runner=runner)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    stream = await service.stream_message_for_user(
+        session.session_id, "user-1",
+        message="Read the exact Source in paper A, then paper B, to compare their EIS conductivity measurements.",
+    )
+    events = [event async for event in stream]
+    result = events[-1]["turn"]
+    assert result["status"] == ("failed" if ending == "timeout" else "completed")
+    if ending == "timeout":
+        assert result["error_code"] == "provider_timeout"
+        assert cancelled.is_set()
+        assert not any(event["type"] == "text_delta" for event in events)
+    else:
+        assert result["completion_reason"] == "resource_budget"
+        assert result["warnings"]
+        assert "Paper B remains unread" in result["messages"][-1].content
+    assert model.calls == 2
+    persisted = await service.list_messages_for_user(session.session_id, "user-1")
+    source_results = [message.tool_result for message in persisted if message.tool_result]
+    assert len(source_results) == 1
+    assert source_results[0].data["complete_source"] is True
+    assert source_results[0].data["content"] == sources.document.text
+    assert source_results[0].resource_refs[0].resource_type == "source"
+
+    model.turns.clear()
+    model.turns.append(ModelTurn(content="Paper B has not yet been inspected. Its Source must be read next."))
+    resumed = await service.post_message_for_user(
+        session.session_id, "user-1", message="Without tools, summarize what is still unread.",
+    )
+    assert resumed["status"] == "completed"
+    assert "Paper B" in resumed["messages"][-1].content
+    assert len(repository.results) == 1
 
 
 async def test_chat_session_service_approves_exact_write_and_resumes() -> None:

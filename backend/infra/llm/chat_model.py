@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any, Callable, Mapping
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from application.chat.capabilities import ToolSpec
 from application.chat.context_builder import ChatModelContext
@@ -38,26 +38,31 @@ class OpenAIChatModel:
             or os.getenv("LLM_MODEL")
             or "gpt-4o-mini"
         ).strip()
+        self.request_timeout = _env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0)
         if client is not None:
-            self.client = client
+            self.client = client.with_options(max_retries=0)
         else:
-            self.client = OpenAI(
+            self.client = AsyncOpenAI(
                 api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
                 base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
-                timeout=_env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0),
-                max_retries=_env_int("LLM_MAX_RETRIES", 2),
+                timeout=self.request_timeout,
+                max_retries=0,
             )
 
-    def respond(
+    async def respond(
         self,
         *,
         context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
+        timeout_seconds: float = 180.0,
+        max_output_tokens: int = 16_384,
     ) -> ModelTurn:
         request: dict[str, Any] = {
             "model": self.model,
             "temperature": 0.2,
+            "timeout": min(timeout_seconds, self.request_timeout),
+            "max_completion_tokens": max_output_tokens,
             "messages": [
                 {"role": "system", "content": RESEARCH_AGENT_SYSTEM_PROMPT},
             ],
@@ -76,27 +81,38 @@ class OpenAIChatModel:
                 parallel_tool_calls=all(spec.risk is ToolRisk.READ for spec in tool_specs),
             )
         if text_delta_callback is not None:
-            chunks = self.client.chat.completions.create(
+            chunks = await self.client.chat.completions.create(
                 **request,
                 stream=True,
                 stream_options={"include_usage": True},
             )
-            return self._stream_turn(chunks, text_delta_callback)
+            try:
+                return await self._stream_turn(chunks, text_delta_callback)
+            finally:
+                await chunks.close()
 
-        completion = self.client.chat.completions.create(**request)
+        completion = await self.client.chat.completions.create(**request)
         record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
         record_llm_completion(completion, requested_model=self.model)
+        usage = _model_usage(getattr(completion, "usage", None))
         if not getattr(completion, "choices", None):
             raise _invalid_response(
                 "research model returned no choices",
                 reason="empty_response",
+                usage=usage,
             )
         message = completion.choices[0].message
         tool_calls = tuple(getattr(message, "tool_calls", None) or ())
         content = str(getattr(message, "content", None) or "").strip()
+        if getattr(completion.choices[0], "finish_reason", None) == "length":
+            raise _invalid_response(
+                "research model exhausted its output allowance",
+                reason="output_token_limit", retryable=False,
+                partial_content=bool(content), usage=usage,
+            )
         if not tool_calls:
             try:
-                return ModelTurn(content=content, usage=_model_usage(getattr(completion, "usage", None)))
+                return ModelTurn(content=content, usage=usage)
             except ValueError as exc:
                 raise _invalid_response(
                     "research model returned no usable content",
@@ -105,22 +121,26 @@ class OpenAIChatModel:
                         if getattr(message, "reasoning_content", None)
                         else "empty_response"
                     ),
+                    usage=usage,
                 ) from exc
 
         parsed = []
-        for raw_call in tool_calls:
-            if getattr(raw_call, "type", "function") != "function":
-                raise _invalid_response("unsupported tool call", reason="unsupported_tool_call", partial_content=bool(content))
-            function = getattr(raw_call, "function", None)
-            parsed.append(_parse_call(
-                str(getattr(function, "name", None) or ""),
-                str(getattr(function, "arguments", None) or "{}"),
-                partial_content=bool(content),
-            ))
-        return ModelTurn(content=content, tool_calls=tuple(parsed),
-                         usage=_model_usage(getattr(completion, "usage", None)))
+        try:
+            for raw_call in tool_calls:
+                if getattr(raw_call, "type", "function") != "function":
+                    raise _invalid_response("unsupported tool call", reason="unsupported_tool_call", partial_content=bool(content))
+                function = getattr(raw_call, "function", None)
+                parsed.append(_parse_call(
+                    str(getattr(function, "name", None) or ""),
+                    str(getattr(function, "arguments", None) or "{}"),
+                    partial_content=bool(content),
+                ))
+        except ModelResponseError as exc:
+            exc.usage = usage
+            raise
+        return ModelTurn(content=content, tool_calls=tuple(parsed), usage=usage)
 
-    def _stream_turn(
+    async def _stream_turn(
         self,
         chunks: Any,
         text_delta_callback: Callable[[str], None],
@@ -130,14 +150,16 @@ class OpenAIChatModel:
         parts_by_index: dict[int, tuple[list[str], list[str]]] = {}
         last_chunk = None
         usage = None
+        finish_reason = None
         try:
-            for chunk in chunks:
+            async for chunk in chunks:
                 last_chunk = chunk
                 if getattr(chunk, "usage", None) is not None:
                     usage = _model_usage(chunk.usage)
                 choices = tuple(getattr(chunk, "choices", None) or ())
                 if not choices:
                     continue
+                finish_reason = getattr(choices[0], "finish_reason", None) or finish_reason
                 delta = choices[0].delta
                 content = str(getattr(delta, "content", None) or "")
                 if content:
@@ -168,18 +190,26 @@ class OpenAIChatModel:
                     tool_argument_parts.append(
                         str(getattr(function, "arguments", None) or "")
                     )
-        except ModelResponseError:
+        except ModelResponseError as exc:
+            exc.usage = usage
             raise
         except (TypeError, ValueError) as exc:
             raise _invalid_response(
                 "research model returned an invalid streamed response",
                 reason="invalid_stream",
                 partial_content=bool(content_parts),
+                usage=usage,
             ) from exc
 
         record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
         record_llm_completion(last_chunk, requested_model=self.model)
         content = "".join(content_parts).strip()
+        if finish_reason == "length":
+            raise _invalid_response(
+                "research model exhausted its output allowance",
+                reason="output_token_limit", retryable=False,
+                partial_content=bool(content), usage=usage,
+            )
         if not parts_by_index:
             if not content:
                 raise _invalid_response(
@@ -189,6 +219,7 @@ class OpenAIChatModel:
                         if reasoning_parts
                         else "empty_response"
                     ),
+                    usage=usage,
                 )
             try:
                 return ModelTurn(content=content, usage=usage)
@@ -196,15 +227,20 @@ class OpenAIChatModel:
                 raise _invalid_response(
                     "research model returned no usable streamed content",
                     reason="empty_response",
+                    usage=usage,
                 ) from exc
 
-        return ModelTurn(
-            content=content, usage=usage,
-            tool_calls=tuple(
-                _parse_call("".join(names), "".join(arguments) or "{}", partial_content=bool(content))
-                for _, (names, arguments) in sorted(parts_by_index.items())
-            ),
-        )
+        try:
+            return ModelTurn(
+                content=content, usage=usage,
+                tool_calls=tuple(
+                    _parse_call("".join(names), "".join(arguments) or "{}", partial_content=bool(content))
+                    for _, (names, arguments) in sorted(parts_by_index.items())
+                ),
+            )
+        except ModelResponseError as exc:
+            exc.usage = usage
+            raise
 
 
 def _parse_call(name: str, raw_arguments: str, *, partial_content: bool) -> ModelToolCall:
@@ -234,11 +270,15 @@ def _invalid_response(
     *,
     reason: str,
     partial_content: bool = False,
+    retryable: bool = True,
+    usage: ModelUsage | None = None,
 ) -> ModelResponseError:
     return ModelResponseError(
         message,
         reason=reason,
         partial_content=partial_content,
+        retryable=retryable,
+        usage=usage,
     )
 
 
@@ -301,11 +341,3 @@ def _env_float(name: str, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        value = int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-    return value if value >= 0 else default

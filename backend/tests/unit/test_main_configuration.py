@@ -17,14 +17,22 @@ def test_agent_limits_accept_environment(
 ) -> None:
     monkeypatch.setenv("LENS_AGENT_MAX_TOOL_CALLS", "12")
     monkeypatch.setenv("LENS_AGENT_MAX_TURN_SECONDS", "12.5")
+    monkeypatch.setenv("LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS", "2048")
+    monkeypatch.setenv("LENS_AGENT_MAX_FINALIZATION_SECONDS", "3.5")
+    monkeypatch.setenv("LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS", "512")
     assert _parse_agent_run_limits().max_tool_calls == 12
     assert _parse_agent_run_limits().max_elapsed_seconds == 12.5
+    assert _parse_agent_run_limits().max_model_output_tokens == 2048
+    assert _parse_agent_run_limits().max_finalization_seconds == 3.5
+    assert _parse_agent_run_limits().max_finalization_output_tokens == 512
 
 
 ENV_NAMES = (
     "LENS_AGENT_MAX_TURN_SECONDS", "LENS_AGENT_MAX_TOOL_CALLS",
     "LENS_AGENT_MAX_MODEL_TOKENS", "LENS_AGENT_NO_PROGRESS_LIMIT",
     "LENS_AGENT_EMERGENCY_MAX_CYCLES", "LENS_AGENT_MAX_PARALLEL_READS",
+    "LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS", "LENS_AGENT_MAX_FINALIZATION_SECONDS",
+    "LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS",
 )
 
 

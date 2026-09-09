@@ -3,7 +3,10 @@ from __future__ import annotations
 from application.chat import ChatModelContext
 
 from types import SimpleNamespace
+import asyncio
 
+import httpx
+from openai import AsyncOpenAI
 import pytest
 from pydantic import BaseModel, ConfigDict
 
@@ -19,29 +22,60 @@ from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ToolRis
 from infra.llm.chat_model import OpenAIChatModel
 
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 class _NoArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class _Stream:
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            yield chunk
+
+    async def close(self):
+        self.closed = True
 
 
 class _Completions:
     def __init__(self, response) -> None:  # noqa: ANN001
         self.response = response
         self.calls: list[dict] = []
+        self.stream = None
 
-    def create(self, **kwargs):  # noqa: ANN003, ANN201
+    async def create(self, **kwargs):  # noqa: ANN003, ANN201
         self.calls.append(kwargs)
+        if kwargs.get("stream"):
+            self.stream = _Stream(self.response)
+            return self.stream
         return self.response
 
 
 def _client(response):  # noqa: ANN001, ANN202
     completions = _Completions(response)
-    return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions), options={})
+    def with_options(**kwargs):
+        client.options.update(kwargs)
+        return client
+    client.with_options = with_options
+    return client, completions
 
 
-def _completion(*, content: str | None = None, tool_calls: list | None = None):
+def _completion(*, content: str | None = None, tool_calls: list | None = None,
+                finish_reason: str = "stop"):
     message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=message)],
+        choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
         model="test-model",
         usage=None,
     )
@@ -52,10 +86,12 @@ def _stream_chunk(
     content: str | None = None,
     tool_calls: list | None = None,
     usage=None,  # noqa: ANN001
+    finish_reason=None,
 ):
     delta = SimpleNamespace(content=content, tool_calls=tool_calls or [])
     return SimpleNamespace(
-        choices=[SimpleNamespace(delta=delta)] if content is not None or tool_calls else [],
+        choices=[SimpleNamespace(delta=delta, finish_reason=finish_reason)]
+        if content is not None or tool_calls or finish_reason else [],
         model="test-model",
         usage=usage,
     )
@@ -148,11 +184,11 @@ def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:
     assert model.model == "global-model"
 
 
-def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
+async def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
     client, completions = _client(_completion(content="你好，我可以帮助分析文献。"))
     model = OpenAIChatModel(client=client, model="test-model")
 
-    turn = model.respond(context=ChatModelContext((_message(),)), tool_specs=())
+    turn = await model.respond(context=ChatModelContext((_message(),)), tool_specs=())
 
     assert turn.content == "你好，我可以帮助分析文献。"
     assert turn.tool_calls == ()
@@ -163,7 +199,7 @@ def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_provider_usage_includes_usage_only_stream_chunk(stream: bool) -> None:
+async def test_provider_usage_includes_usage_only_stream_chunk(stream: bool) -> None:
     usage = SimpleNamespace(prompt_tokens=120, completion_tokens=30, total_tokens=150)
     response = _completion(content="Done")
     response.usage = usage
@@ -171,7 +207,7 @@ def test_provider_usage_includes_usage_only_stream_chunk(stream: bool) -> None:
         [_stream_chunk(content="Done"), _stream_chunk(usage=usage)] if stream else response
     )
 
-    turn = OpenAIChatModel(client=client, model="test-model").respond(
+    turn = await OpenAIChatModel(client=client, model="test-model").respond(
         context=ChatModelContext((_message(),)), tool_specs=(),
         text_delta_callback=(lambda _text: None) if stream else None,
     )
@@ -179,12 +215,81 @@ def test_provider_usage_includes_usage_only_stream_chunk(stream: bool) -> None:
     assert turn.usage == ModelUsage(120, 30, 150)
 
 
-def test_rollover_is_a_separate_system_message_without_mutating_history() -> None:
+@pytest.mark.parametrize("stream", [False, True])
+async def test_model_request_enforces_output_timeout_and_no_hidden_retries(stream: bool) -> None:
+    client, completions = _client([_stream_chunk(content="Done")] if stream else _completion(content="Done"))
+    await OpenAIChatModel(client=client, model="test-model").respond(
+        context=ChatModelContext((_message(),)), tool_specs=(),
+        timeout_seconds=4.5, max_output_tokens=500,
+        text_delta_callback=(lambda _: None) if stream else None,
+    )
+
+    assert completions.calls[0]["max_completion_tokens"] == 500
+    assert completions.calls[0]["timeout"] == 4.5
+    assert client.options["max_retries"] == 0
+    if stream:
+        assert completions.stream.closed
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_length_limited_answer_is_not_a_complete_model_turn(stream: bool) -> None:
+    usage = SimpleNamespace(prompt_tokens=120, completion_tokens=30, total_tokens=150)
+    response = _completion(content="Paper A reports", finish_reason="length")
+    response.usage = usage
+    client, completions = _client(
+        [_stream_chunk(content="Paper A reports"), _stream_chunk(finish_reason="length"),
+         _stream_chunk(usage=usage)] if stream else response
+    )
+    with pytest.raises(ModelResponseError) as error:
+        await OpenAIChatModel(client=client, model="test-model").respond(
+            context=ChatModelContext((_message(),)), tool_specs=(),
+            text_delta_callback=(lambda _: None) if stream else None,
+        )
+    assert error.value.reason == "output_token_limit"
+    assert not error.value.retryable
+    assert error.value.usage == ModelUsage(120, 30, 150)
+    if stream:
+        assert completions.stream.closed
+
+
+async def test_cancelled_openai_stream_closes_the_underlying_http_response() -> None:
+    started = asyncio.Event()
+    closed = asyncio.Event()
+
+    class StalledBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            started.set()
+            await asyncio.Event().wait()
+            yield b""  # pragma: no cover
+
+        async def aclose(self):
+            closed.set()
+
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, headers={"content-type": "text/event-stream"}, stream=StalledBody(),
+    ))
+    async with httpx.AsyncClient(transport=transport) as http:
+        async with AsyncOpenAI(api_key="test-only", http_client=http) as client:
+            model = OpenAIChatModel(client=client, model="test-model")
+            task = asyncio.create_task(model.respond(
+                context=ChatModelContext((_message(),)), tool_specs=(),
+                text_delta_callback=lambda _: None,
+            ))
+            try:
+                await asyncio.wait_for(started.wait(), timeout=2)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            assert closed.is_set()
+
+
+async def test_rollover_is_a_separate_system_message_without_mutating_history() -> None:
     messages = (_message(),)
     context = ChatModelContext(messages, '{"entries":[{"source_ref":"methods-1"}]}')
     client, completions = _client(_completion(content="Re-read the Source."))
 
-    OpenAIChatModel(client=client, model="test-model").respond(context=context, tool_specs=())
+    await OpenAIChatModel(client=client, model="test-model").respond(context=context, tool_specs=())
 
     provider_messages = completions.calls[0]["messages"]
     assert [item["role"] for item in provider_messages] == ["system", "system", "user"]
@@ -194,7 +299,7 @@ def test_rollover_is_a_separate_system_message_without_mutating_history() -> Non
     assert messages[0].content == "你好"
 
 
-def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence() -> None:
+async def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence() -> None:
     client, completions = _client(_completion(content="This passage reports one measured result."))
     model = OpenAIChatModel(client=client, model="test-model")
     message = ChatMessage.user(
@@ -224,7 +329,7 @@ def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence()
         ),
     )
 
-    model.respond(context=ChatModelContext((message,)), tool_specs=())
+    await model.respond(context=ChatModelContext((message,)), tool_specs=())
 
     provider_content = completions.calls[0]["messages"][1]["content"]
     assert "USER-SELECTED SOURCE CONTEXT" in provider_content
@@ -235,7 +340,7 @@ def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence()
     assert provider_content.endswith("What does this passage support?")
 
 
-def test_openai_chat_model_parses_one_typed_tool_call() -> None:
+async def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     tool_call = SimpleNamespace(
         id="call-1",
         type="function",
@@ -253,7 +358,7 @@ def test_openai_chat_model_parses_one_typed_tool_call() -> None:
         input_model=_NoArguments,
     )
 
-    turn = model.respond(context=ChatModelContext((_message(),)), tool_specs=(spec,))
+    turn = await model.respond(context=ChatModelContext((_message(),)), tool_specs=(spec,))
 
     assert turn.tool_calls != ()
     assert turn.tool_calls[0].name == "get_collection_context"
@@ -263,7 +368,7 @@ def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     assert request["tools"][0]["function"]["name"] == "get_collection_context"
 
 
-def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
+async def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
     client, completions = _client(
         iter(
             (
@@ -280,7 +385,7 @@ def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
     model = OpenAIChatModel(client=client, model="test-model")
     deltas: list[str] = []
 
-    turn = model.respond(
+    turn = await model.respond(
         context=ChatModelContext((_message(),)),
         tool_specs=(),
         text_delta_callback=deltas.append,
@@ -295,7 +400,7 @@ def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
     assert request["stream_options"] == {"include_usage": True}
 
 
-def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
+async def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
     first = SimpleNamespace(
         index=0,
         id="provider-call-0",
@@ -318,7 +423,7 @@ def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
     )
     model = OpenAIChatModel(client=client, model="test-model")
 
-    turn = model.respond(
+    turn = await model.respond(
         context=ChatModelContext((_message(),)),
         tool_specs=(),
         text_delta_callback=lambda _content: None,
@@ -329,7 +434,7 @@ def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
     assert turn.tool_calls[0].arguments == {}
 
 
-def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
+async def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
     first = SimpleNamespace(
         id="call-1",
         type="function",
@@ -343,7 +448,7 @@ def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
     client, _completions = _client(_completion(tool_calls=[first, second]))
     model = OpenAIChatModel(client=client, model="test-model")
 
-    turn = model.respond(context=ChatModelContext((_message(),)), tool_specs=())
+    turn = await model.respond(context=ChatModelContext((_message(),)), tool_specs=())
 
     assert turn.tool_calls != ()
     assert turn.tool_calls[0].name == "preview_research_scope"
@@ -352,7 +457,7 @@ def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
     assert turn.tool_calls[1].arguments == {"outcomes": ["strength"]}
 
 
-def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() -> None:
+async def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() -> None:
     first = SimpleNamespace(
         index=0,
         id="call-1",
@@ -376,7 +481,7 @@ def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() ->
     )
     model = OpenAIChatModel(client=client, model="test-model")
 
-    turn = model.respond(
+    turn = await model.respond(
         context=ChatModelContext((_message(),)),
         tool_specs=(),
         text_delta_callback=lambda _content: None,
@@ -389,7 +494,7 @@ def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() ->
     assert turn.tool_calls[1].arguments == {"outcomes": ["strength"]}
 
 
-def test_openai_chat_model_rejects_non_object_tool_arguments() -> None:
+async def test_openai_chat_model_rejects_non_object_tool_arguments() -> None:
 
     invalid = SimpleNamespace(
         id="call-3",
@@ -400,19 +505,19 @@ def test_openai_chat_model_rejects_non_object_tool_arguments() -> None:
     model = OpenAIChatModel(client=client, model="test-model")
 
     with pytest.raises(ModelResponseError, match="invalid tool arguments") as exc_info:
-        model.respond(context=ChatModelContext((_message(),)), tool_specs=())
+        await model.respond(context=ChatModelContext((_message(),)), tool_specs=())
 
     assert exc_info.value.reason == "invalid_tool_arguments"
 
 
-def test_openai_chat_model_marks_empty_stream_as_invalid_response() -> None:
+async def test_openai_chat_model_marks_empty_stream_as_invalid_response() -> None:
     client, _completions = _client(
         iter((_stream_chunk(usage=SimpleNamespace(total_tokens=0)),))
     )
     model = OpenAIChatModel(client=client, model="test-model")
 
     with pytest.raises(ModelResponseError) as exc_info:
-        model.respond(
+        await model.respond(
             context=ChatModelContext((_message(),)),
             tool_specs=(),
             text_delta_callback=lambda _content: None,
@@ -422,7 +527,7 @@ def test_openai_chat_model_marks_empty_stream_as_invalid_response() -> None:
     assert exc_info.value.partial_content is False
 
 
-def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_response() -> None:
+async def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_response() -> None:
     class BrokenStream:
         def __iter__(self):
             raise ValueError("invalid provider stream")
@@ -432,7 +537,7 @@ def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_response
     model = OpenAIChatModel(client=client, model="test-model")
 
     with pytest.raises(ModelResponseError) as exc_info:
-        model.respond(
+        await model.respond(
             context=ChatModelContext((_message(),)),
             tool_specs=(),
             text_delta_callback=lambda _content: None,
@@ -440,3 +545,4 @@ def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_response
 
     assert exc_info.value.reason == "invalid_stream"
     assert exc_info.value.partial_content is False
+    assert _completions.stream.closed

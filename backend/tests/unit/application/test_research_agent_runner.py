@@ -4,7 +4,6 @@ from domain.chat import ChatToolRequest
 
 from collections import deque
 import asyncio
-from threading import Event
 from dataclasses import replace
 from typing import Any
 
@@ -73,17 +72,21 @@ class _Model:
         self.turns = deque(turns)
         self.tool_spec_names: list[tuple[str, ...]] = []
         self.contexts: list[tuple[ChatMessage, ...]] = []
+        self.request_limits: list[tuple[float, int]] = []
 
-    def respond(
+    async def respond(
         self,
         *,
         context: tuple,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback=None,  # noqa: ANN001
+        timeout_seconds=180.0,
+        max_output_tokens=16_384,
     ) -> ModelTurn:
         messages = context.messages
         assert messages
         self.contexts.append(messages)
+        self.request_limits.append((timeout_seconds, max_output_tokens))
         self.tool_spec_names.append(tuple(item.name for item in tool_specs))
         turn = self.turns.popleft()
         if isinstance(turn, Exception):
@@ -219,35 +222,190 @@ async def test_usage_exhaustion_records_unexecuted_intent_then_finalizes() -> No
     assert result.tool_results[0].error_code == "resource_budget"
 
 
-async def test_timed_out_model_cannot_emit_text_after_finalization() -> None:
-    started, release, finished = Event(), Event(), Event()
-
-    class SlowModel:
-        def respond(self, *, context, tool_specs, text_delta_callback=None):
-            if not started.is_set():
-                started.set()
-                release.wait(timeout=2)
-                if text_delta_callback:
-                    text_delta_callback("Late text from the timed-out request.")
-                finished.set()
-                return ModelTurn(content="Late answer")
-            if text_delta_callback:
-                text_delta_callback("Only current evidence is available.")
-            return ModelTurn(content="Only current evidence is available.")
-
-    deltas = []
-    try:
-        result = await ResearchAgentRunner(
-            model=SlowModel(), capabilities=CapabilityRegistry(()),
-            limits=AgentRunLimits(max_elapsed_seconds=0.05),
-        ).run_turn(context=_context(), previous_messages=(), user_message="Hello",
-                   text_delta_callback=deltas.append)
-    finally:
-        release.set()
-        await asyncio.to_thread(finished.wait, 2)
+@pytest.mark.parametrize("tokens", [100, 120])
+async def test_usage_exhaustion_preserves_final_text_without_another_request(tokens: int) -> None:
+    model = _Model(ModelTurn(content="Only the first paper was inspected.",
+                             usage=ModelUsage(80, tokens - 80, tokens)))
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry(()),
+        limits=AgentRunLimits(max_model_tokens=100),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Summarize the inspected scope.")
 
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
-    assert deltas == ["Only current evidence is available."]
+    assert result.messages[-1].content == "Only the first paper was inspected."
+    assert result.warnings
+    assert len(model.contexts) == 1
+
+
+async def test_query_rewording_without_new_observations_reaches_no_progress() -> None:
+    class SourceRead(_Capability):
+        async def execute(self, context, arguments):
+            result = await super().execute(context, arguments)
+            return replace(result, resource_refs=(ChatResourceRef("source", "doc-1:methods-1"),))
+
+    read = SourceRead("test_source", ToolRisk.READ, _QuestionArguments,
+                      result_data={"source_ref": "methods-1", "text": "LPBF Ti-6Al-4V."})
+    model = _Model(
+        *(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name, arguments={"question": query}),))
+          for query in ("alloy", "material", "composition")),
+        ModelTurn(content="The same Methods passage was inspected; results remain unread."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Compare the two papers' alloy conditions.",
+    )
+
+    assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
+    assert len(result.tool_results) == 3
+    assert result.warnings
+
+
+async def test_distinct_empty_searches_do_not_collapse_into_repeated_source_reads() -> None:
+    read = _Capability("test_source", ToolRisk.READ, _QuestionArguments, result_data={"matches": []})
+    model = _Model(
+        *(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name, arguments={"question": query}),))
+          for query in ("annealing", "stress relief", "HIP")),
+        ModelTurn(content="These searches found no prepared Source; this is not scientific absence."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Inspect the papers' post-processing conditions.",
+    )
+    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
+
+
+async def test_new_source_pages_and_revised_source_content_remain_progress() -> None:
+    class SourceRead(_Capability):
+        async def execute(self, context, arguments):
+            result = await super().execute(context, arguments)
+            return replace(result, data={"source_ref": "methods-1", "text": arguments.question})
+
+    read = SourceRead("test_source", ToolRisk.READ, _QuestionArguments)
+    model = _Model(
+        *(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name, arguments={"question": page}),))
+          for page in ("LPBF Ti-6Al-4V", "Annealed at 800 C", "Corrected: annealed at 900 C")),
+        ModelTurn(content="The corrected heat treatment was inspected."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Compare heat treatments.",
+    )
+    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
+    assert len(result.tool_results) == 3
+
+
+async def test_timed_out_model_is_cancelled_without_starting_finalization() -> None:
+    cancelled = asyncio.Event()
+
+    class SlowModel:
+        calls = 0
+
+        async def respond(self, *, context, tool_specs, text_delta_callback=None,
+                          timeout_seconds=180.0, max_output_tokens=16_384):
+            self.calls += 1
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    model = SlowModel()
+    deltas = []
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry(()),
+        limits=AgentRunLimits(max_elapsed_seconds=0.02),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Hello",
+               text_delta_callback=deltas.append)
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "provider_timeout"
+    assert model.calls == 1
+    assert cancelled.is_set()
+    assert deltas == []
+
+
+async def test_finalization_uses_remaining_time_and_its_own_output_limit(monkeypatch) -> None:
+    now = [0.0]
+    monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
+    read = _Capability("test_source", ToolRisk.READ)
+
+    class Model(_Model):
+        async def respond(self, **kwargs):
+            turn = await super().respond(**kwargs)
+            now[0] = 45.0
+            return turn
+
+    model = Model(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)),
+                  ModelTurn(content="Only inspected sources support this answer."))
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((read,)),
+        limits=AgentRunLimits(max_elapsed_seconds=60, max_tool_calls=1,
+                             max_finalization_output_tokens=500),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
+
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert model.request_limits[-1] == (15.0, 500)
+
+
+async def test_finalization_timeout_cancels_the_only_summary_request() -> None:
+    read = _Capability("test_source", ToolRisk.READ)
+    cancelled = asyncio.Event()
+
+    class Model(_Model):
+        async def respond(self, **kwargs):
+            if self.contexts:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            return await super().respond(**kwargs)
+
+    model = Model(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)))
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((read,)),
+        limits=AgentRunLimits(max_tool_calls=1, max_finalization_seconds=0.02),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
+
+    assert result.error_code == "final_answer_unavailable"
+    assert cancelled.is_set()
+    assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
+
+
+async def test_read_deadline_preserves_successes_without_starting_a_summary() -> None:
+    cancelled = asyncio.Event()
+
+    class SourceRead(_Capability):
+        async def execute(self, context, arguments):
+            if arguments.question == "paper-b":
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            return await super().execute(context, arguments)
+
+    read = SourceRead("test_source", ToolRisk.READ, _QuestionArguments)
+    model = _Model(ModelTurn(tool_calls=tuple(
+        ModelToolCall(name=read.spec.name, arguments={"question": paper}) for paper in ("paper-a", "paper-b")
+    )))
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((read,)),
+        limits=AgentRunLimits(max_elapsed_seconds=0.02),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
+
+    assert result.error_code == "final_answer_unavailable"
+    assert cancelled.is_set()
+    assert len(model.contexts) == 1
+    assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
+    assert result.tool_results[1].error_code == "capability_timeout"
+
+
+async def test_invalid_response_usage_reduces_the_retry_output_allowance() -> None:
+    model = _Model(
+        ModelResponseError("empty", reason="empty_response", usage=ModelUsage(20, 10, 30)),
+        ModelTurn(content="The comparison remains unresolved.", usage=ModelUsage(40, 30, 70)),
+    )
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry(()), limits=AgentRunLimits(max_model_tokens=100),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Summarize what is known.")
+
+    assert [limit for _, limit in model.request_limits] == [100, 70]
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
 
 
 async def test_retries_count_toward_emergency_ceiling_and_finalization_can_fail() -> None:
@@ -1524,7 +1682,7 @@ async def test_resource_budget_final_answer_has_time_to_summarize_large_trajecto
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert observed_timeouts[-1] == pytest.approx(300)
+    assert 30 < observed_timeouts[-1] <= observed_timeouts[0] <= 300
 
 
 async def test_resource_budget_ledger_counts_complete_inspected_source_as_read() -> None:

@@ -364,7 +364,7 @@ class _WriteModel:
             )
         )
 
-    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         assert messages
         assert {item.name for item in tool_specs} == (

@@ -501,7 +501,7 @@ class _StartResearchProcessModel:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         assert messages
         if self.turns[0].tool_calls != ():
@@ -680,7 +680,7 @@ class _Model:
         self.turns = deque(turns)
         self.contexts: list[tuple] = []
 
-    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         self.contexts.append(messages)
         assert {item.name for item in tool_specs} == {
@@ -1265,7 +1265,7 @@ async def test_agent_records_finding_feedback_only_after_exact_approval() -> Non
                 )
             )
 
-        def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
             messages = context.messages
             assert messages
             if self.turns[0].tool_calls != ():
@@ -1804,7 +1804,7 @@ async def test_agent_publishes_authored_finding_only_after_exact_approval() -> N
                 )
             )
 
-        def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
             messages = context.messages
             assert messages
             if self.turns[0].tool_calls != ():
@@ -2219,7 +2219,7 @@ class _ResearchProcessModel:
         self.turns = deque(turns)
         self.contexts: list[tuple] = []
 
-    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         self.contexts.append(messages)
         assert {item.name for item in tool_specs} == {"inspect_research_process"}
@@ -2966,7 +2966,7 @@ class _ObjectiveAnalysisModel:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         assert messages
         if self.turns[0].tool_calls != ():
@@ -3717,7 +3717,7 @@ async def test_researcher_question_follows_scope_two_approvals_and_canonical_ana
                 )
             )
 
-        def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+        async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
             messages = context.messages
             assert messages
             next_turn = self.turns[0]

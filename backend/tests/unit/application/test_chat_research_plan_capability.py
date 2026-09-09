@@ -219,7 +219,7 @@ class _Model:
             "create_research_plan",
         }
 
-    def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None):
+    async def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None, timeout_seconds=180.0, max_output_tokens=16_384):
         messages = context.messages
         assert messages
         # Once the final approval write has completed, the runner deliberately

@@ -34,7 +34,7 @@ class _Model:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, context: tuple, tool_specs: tuple) -> ModelTurn:
+    async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         assert messages
         latest_user = next(

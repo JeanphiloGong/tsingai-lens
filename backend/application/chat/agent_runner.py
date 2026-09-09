@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asyncio import Semaphore, gather, to_thread, wait_for
+from asyncio import Semaphore, gather, wait_for
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -11,7 +11,6 @@ from hashlib import sha256
 import json
 import logging
 from math import isfinite
-from threading import Event
 from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
@@ -22,9 +21,10 @@ from application.chat.capabilities import (
     AgentContext,
     CapabilityExecutionContext,
     CapabilityRegistry,
+    ToolSpec,
 )
-from application.chat.context_builder import ChatContextBuilder
-from application.chat.model import ChatModel, ModelResponseError, ModelUsage
+from application.chat.context_builder import ChatContextBuilder, ChatModelContext
+from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -66,7 +66,9 @@ _FINAL_ANSWER_INSTRUCTION = (
     "If the researcher requested more papers than the collection contains, state "
     "the actual collection total and do not invent missing or unread papers."
 )
-_FINAL_ANSWER_TIMEOUT_SECONDS = 300.0
+_INCOMPLETE_SCOPE_WARNING = (
+    "The answer covers only inspected Sources; unread or failed work remains unresolved."
+)
 
 _COLLECTION_READ_CAPABILITIES = {
     "get_collection_context",
@@ -440,12 +442,15 @@ class AgentRunLimits:
     max_consecutive_no_progress: int = 2
     emergency_max_model_cycles: int = 64
     max_parallel_reads: int = 4
+    max_model_output_tokens: int = 16_384
+    max_finalization_seconds: float = 300.0
+    max_finalization_output_tokens: int = 8_192
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
             if isinstance(value, bool) or not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-            if name != "max_elapsed_seconds" and not isinstance(value, int):
+            if not name.endswith("_seconds") and not isinstance(value, int):
                 raise ValueError(f"{name} must be an integer")
 
 
@@ -453,7 +458,7 @@ class AgentRunLimits:
 class _RunProgress:
     limits: AgentRunLimits
     progress_callback: Callable[[dict[str, Any]], None] | None = None
-    started_at: float = field(default_factory=monotonic)
+    started_at: float = field(default_factory=lambda: monotonic())
     model_cycles: int = 0
     model_tokens: int = 0
     prompt_tokens: int = 0
@@ -487,19 +492,28 @@ class _RunProgress:
             self.unreported_model_calls += 1
 
     def observe(self, call: ChatToolCall, result: ChatToolResult) -> None:
+        data = dict(result.data)
+        has_source_observation = (
+            result.status is ToolResultStatus.SUCCEEDED
+            and any(ref.resource_type == "source" for ref in result.resource_refs)
+        )
+        # Source navigation echoes the query; changing its wording is not new content.
+        if has_source_observation and call.name in {"search_sources", "inspect_document_sources", "inspect_table"}:
+            data.pop("query", None)
         payload = {
-            "tool": call.name, "arguments": dict(call.arguments),
-            "status": result.status.value, "data": dict(result.data),
+            "tool": call.name,
+            "status": result.status.value, "data": data,
             "resource_refs": sorted(
                 (ref.resource_type, ref.resource_id, ref.href or "")
                 for ref in result.resource_refs
             ),
             "error_code": result.error_code,
+            "warnings": result.warnings,
         }
+        if not has_source_observation:
+            # Distinct failed or empty searches must keep their requested scope.
+            payload["arguments"] = dict(call.arguments)
         digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        self.consecutive_no_progress = (
-            self.consecutive_no_progress + 1 if digest in self.seen_observations else 0
-        )
         self.seen_observations.add(digest)
         self.resource_refs.update((ref.resource_type, ref.resource_id) for ref in result.resource_refs)
 
@@ -722,39 +736,16 @@ class ResearchAgentRunner:
                                 budget_exhausted=False,
                             ),
                         )
-                    model_arguments: dict[str, Any] = {
-                        "context": self.context_builder.for_model(
+                    turn = await self._respond(
+                        self.context_builder.for_model(
                             decision_messages, active_user_message_id=next(
                                 message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                             ),
                         ),
-                        "tool_specs": tool_specs,
-                    }
-                    accepting_text = Event()
-                    accepting_text.set()
-                    if text_delta_callback is not None:
-                        def emit_current_text(text: str, active: Event = accepting_text) -> None:
-                            if active.is_set():
-                                text_delta_callback(text)
-                        model_arguments["text_delta_callback"] = emit_current_text
-                    progress.model_cycles += 1
-                    try:
-                        turn = await wait_for(
-                            to_thread(self.model.respond, **model_arguments),
-                            timeout=progress.remaining_seconds(),
-                        )
-                    finally:
-                        # Cancelling the await cannot stop a synchronous provider thread.
-                        accepting_text.clear()
-                    progress.record_model_usage(turn.usage)
+                        tool_specs, progress, text_delta_callback,
+                    )
                     progress.trace(context, phase="model", capability_names=tool_names,
                                    requested_count=len(turn.tool_calls))
-                except TimeoutError:
-                    return await self._finalize_with_current_evidence(
-                        AgentCompletionReason.RESOURCE_BUDGET,
-                        progress, context, messages, calls, results,
-                        checkpoint=checkpoint, text_delta_callback=text_delta_callback,
-                    )
                 except ModelResponseError as exc:
                     model_name = str(
                         getattr(self.model, "model", None)
@@ -881,12 +872,14 @@ class ResearchAgentRunner:
                 break
 
             if not turn.tool_calls:
+                reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
                 messages.append(self._assistant(context, turn.content))
                 await self._checkpoint(checkpoint, messages, calls, results)
-                progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
+                progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True)
                 return self._result(
                     AgentRunStatus.COMPLETED, messages, calls, results,
-                    completion_reason=AgentCompletionReason.MODEL_ANSWER,
+                    completion_reason=reason,
+                    warnings=(_INCOMPLETE_SCOPE_WARNING,) if reason is not AgentCompletionReason.MODEL_ANSWER else (),
                 )
 
             requested = self._requested_calls(
@@ -943,6 +936,46 @@ class ResearchAgentRunner:
                     checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                 )
 
+    async def _respond(
+        self,
+        model_context: ChatModelContext,
+        tool_specs: tuple[ToolSpec, ...],
+        progress: _RunProgress,
+        text_delta_callback: Callable[[str], None] | None,
+        *,
+        finalizing: bool = False,
+    ) -> ModelTurn:
+        timeout = progress.remaining_seconds()
+        output_limit = min(
+            self.limits.max_model_output_tokens,
+            self.limits.max_model_tokens - progress.model_tokens,
+        )
+        if finalizing:
+            timeout = min(timeout, self.limits.max_finalization_seconds)
+            output_limit = self.limits.max_finalization_output_tokens
+        if timeout <= 0:
+            raise TimeoutError("research turn deadline reached")
+        arguments: dict[str, Any] = {
+            "context": model_context,
+            "tool_specs": tool_specs,
+            "timeout_seconds": timeout,
+            "max_output_tokens": output_limit,
+        }
+        if text_delta_callback is not None:
+            arguments["text_delta_callback"] = text_delta_callback
+        progress.model_cycles += 1
+        try:
+            turn = await wait_for(self.model.respond(**arguments), timeout=timeout)
+        except ModelResponseError as exc:
+            progress.record_model_usage(exc.usage)
+            raise
+        except BaseException:
+            # Cancellation may prevent the provider's usage trailer from arriving.
+            progress.record_model_usage(None)
+            raise
+        progress.record_model_usage(turn.usage)
+        return turn
+
     async def _finalize_with_current_evidence(
         self,
         reason: AgentCompletionReason,
@@ -968,33 +1001,14 @@ class ResearchAgentRunner:
             "Research Agent final answer reason=%s tools=none", reason.value,
         )
         try:
-            model_arguments: dict[str, Any] = {
-                "context": self.context_builder.for_model(
+            turn = await self._respond(
+                self.context_builder.for_model(
                     (*messages, instruction), active_user_message_id=next(
                         message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                     ),
                 ),
-                "tool_specs": (),
-            }
-            accepting_text = Event()
-            accepting_text.set()
-            if text_delta_callback is not None:
-                def emit_final_text(text: str) -> None:
-                    if accepting_text.is_set():
-                        text_delta_callback(text)
-                model_arguments["text_delta_callback"] = emit_final_text
-            progress.model_cycles += 1
-            try:
-                turn = await wait_for(
-                    to_thread(self.model.respond, **model_arguments),
-                    timeout=min(
-                        _FINAL_ANSWER_TIMEOUT_SECONDS,
-                        max(30.0, self.limits.max_elapsed_seconds),
-                    ),
-                )
-            finally:
-                accepting_text.clear()
-            progress.record_model_usage(turn.usage)
+                (), progress, text_delta_callback, finalizing=True,
+            )
             if turn.tool_calls or not turn.content:
                 raise ValueError("final answer must be answer-only")
         except Exception as exc:  # noqa: BLE001
@@ -1012,7 +1026,7 @@ class ResearchAgentRunner:
         return self._result(
             AgentRunStatus.COMPLETED, messages, calls, results,
             completion_reason=reason,
-            warnings=("The answer covers only inspected Sources; unread or failed work remains unresolved.",),
+            warnings=(_INCOMPLETE_SCOPE_WARNING,),
         )
 
     def _answer_instruction(
@@ -1275,7 +1289,20 @@ class ResearchAgentRunner:
         ):
             allowed_names = {"inspect_research_plans"}
         elif proposed_plan_this_turn:
-            if persist_requested:
+            latest_plan = successful_results["propose_research_plan"][-1]
+            # An unlinked citation is a correctable draft input, not a finished plan.
+            correctable_basis = (
+                latest_plan.get("draft_status") == "abstained"
+                and bool(latest_plan.get("missing_evidence_ids"))
+                and bool(latest_plan.get("available_evidence_ids"))
+                and not any(latest_plan.get(key) for key in (
+                    "missing_finding_ids", "rejected_finding_ids", "failed_evidence_ids",
+                ))
+                and sum(call.name == "propose_research_plan" for call in calls) == 1
+            )
+            if correctable_basis:
+                allowed_names = {"propose_research_plan"}
+            elif persist_requested:
                 allowed_names = {
                     "revise_research_plan"
                     if plan_revision_requested

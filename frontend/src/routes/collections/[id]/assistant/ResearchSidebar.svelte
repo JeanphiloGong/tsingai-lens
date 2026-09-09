@@ -9,6 +9,7 @@
 	};
 
 	export let collectionId = '';
+	export let collectionName = '';
 	export let history: SessionSummary[] = [];
 	export let activeSessionId = '';
 	export let loading = false;
@@ -46,7 +47,7 @@
 			class="mobile-history-toggle"
 			type="button"
 			aria-expanded={mobileHistoryOpen}
-			aria-controls="assistant-history assistant-collection-context"
+			aria-controls="assistant-history"
 			on:click={() => (mobileHistoryOpen = !mobileHistoryOpen)}
 		>
 			<span aria-hidden="true">☰</span>
@@ -84,14 +85,15 @@
 		</div>
 	</section>
 
-	<div
-		id="assistant-collection-context"
-		class="collection-context"
-		class:mobile-open={mobileHistoryOpen}
-	>
+	<div id="assistant-collection-context" class="collection-context">
 		<span>
 			<small>{$t('researchAgent.currentCollection')}</small>
-			<strong>{collectionId}</strong>
+			<a
+				class="collection-name"
+				href={resolve('/collections/[id]', { id: collectionId })}
+				title={collectionName || $t('collection.unknownName')}
+				>{collectionName || $t('collection.unknownName')}</a
+			>
 		</span>
 	</div>
 </aside>
@@ -316,11 +318,17 @@
 		font-weight: 500;
 	}
 
-	.collection-context strong {
+	.collection-name {
 		overflow: hidden;
 		color: var(--text-primary);
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		text-decoration: none;
+	}
+
+	.collection-name:hover {
+		color: var(--brand-primary);
+		text-decoration: underline;
 	}
 
 	@media (max-width: 820px) {
@@ -370,29 +378,35 @@
 			margin-top: 0;
 		}
 
-		.history,
-		.collection-context {
+		.history {
 			display: none;
 		}
 
 		.history.mobile-open,
-		.collection-context.mobile-open {
+		.collection-context {
 			grid-column: 1 / -1;
 		}
 
 		.history.mobile-open {
 			display: flex;
 			max-height: min(26dvh, 180px);
-			grid-row: 3;
+			grid-row: 4;
 			margin-top: 4px;
 			padding-top: 12px;
 			border-top: 1px solid var(--border-default);
 		}
 
-		.collection-context.mobile-open {
+		.collection-context {
 			display: grid;
-			grid-row: 4;
-			padding-top: 12px;
+			grid-row: 3;
+			padding: 0 8px;
+			border-top: 0;
+		}
+
+		.collection-context span {
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: center;
+			gap: 8px;
 		}
 	}
 </style>

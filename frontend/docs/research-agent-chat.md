@@ -217,10 +217,15 @@ keeping Lens-specific research boundaries explicit:
   and callbacks from the route; it does not load or persist sessions. On small
   screens the history rail is collapsed behind an explicit toggle so session
   switching remains available without consuming the conversation viewport.
-- `ConversationHeader.svelte` owns the conversation title, current collection,
-  and optional Objective link. Runtime status, elapsed time, and progress
-  history belong to the corresponding Assistant response; the header does
-  not duplicate them with a Ready/Working badge.
+  Collection context stays visible on mobile and displays the name from the
+  shared Collection store loaded by the parent layout. Missing names use the
+  existing untitled label; identifiers remain in navigation URLs. Long names
+  are truncated with the full name available on hover.
+- `ConversationHeader.svelte` is a compact toolbar showing the conversation's
+  first question and optional Objective link. An empty conversation without an
+  Objective has no toolbar. It does not repeat the Research Agent brand or the
+  Collection context. Runtime status, elapsed time, and progress history belong
+  to the corresponding Assistant response.
 - `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
   collection-bound upload state and orchestration. It sends on Enter, preserves
   Shift+Enter and IME composition, and grows the textarea up to a bounded height.

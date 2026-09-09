@@ -2,6 +2,7 @@ import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { authState, fetchCurrentSession, login, logout } from '../../../_shared/auth';
+import { collections } from '../../../_shared/collections';
 
 import type {
 	ChatMessage,
@@ -279,6 +280,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
 		localStorage.clear();
 		sessionStorage.clear();
+		collections.set([]);
 		authState.set({
 			status: 'authenticated',
 			user: { user_id: session.user_id, email: 'researcher@example.test' }
@@ -288,6 +290,54 @@ describe('collections/[id]/assistant Research Agent', () => {
 			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
+	});
+
+	it('uses the current Collection name as metadata arrives and keeps empty conversations unframed', async () => {
+		installApi();
+		await renderReady();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Untitled collection', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123');
+		expect(document.querySelector('.conversation-header')).toBeNull();
+		collections.set([
+			{ id: 'col_other', collection_id: 'col_other', name: 'Other research', documents: [] },
+			{ id: 'col_123', collection_id: 'col_123', name: '316L LPBF comparison', documents: [] }
+		]);
+		await expect
+			.element(browserPage.getByRole('link', { name: '316L LPBF comparison', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123');
+		collections.update((items) =>
+			items.map((item) => (item.id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
+		);
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
+			.toBeVisible();
+	});
+
+	it('uses the saved question as the compact title and preserves the Objective link', async () => {
+		const question = 'Compare the heat-treatment conditions across these LPBF papers';
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/collections/col_123/assistant?objective_id=obj_1')
+		});
+		installApi({
+			trajectory: {
+				feedback: [],
+				items: [message('question', 'user', question)],
+				pending_approval: null
+			}
+		});
+		await renderReady();
+		await expect
+			.element(browserPage.getByRole('heading', { name: question, exact: true }))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open selected objective', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1');
+		expect(document.querySelector('.conversation-header')?.textContent).not.toContain(
+			'Research Agent'
+		);
 	});
 
 	it.each(['manual', 'automatic', 'read failure'])(

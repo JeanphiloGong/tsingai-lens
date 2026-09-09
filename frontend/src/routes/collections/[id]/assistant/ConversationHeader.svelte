@@ -4,14 +4,12 @@
 
 	export let collectionId = '';
 	export let objectiveId = '';
+	export let title = '';
 </script>
 
 <header class="conversation-header">
 	<div class="conversation-header-inner">
-		<div class="conversation-heading">
-			<h2>{$t('researchAgent.title')}</h2>
-			<p>{$t('researchAgent.headerPrefix')} <strong>{collectionId}</strong></p>
-		</div>
+		{#if title}<h2 {title}>{title}</h2>{/if}
 		{#if objectiveId}
 			<a
 				class="objective-link"
@@ -29,42 +27,41 @@
 <style>
 	.conversation-header {
 		display: flex;
+		flex: 0 0 auto;
 		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
-		min-height: 76px;
-		padding: 14px 32px;
-		border-bottom: 1px solid var(--border-default);
-		background: var(--surface-card);
+		min-height: 44px;
+		padding: 8px 32px;
+		box-sizing: border-box;
 	}
 
 	.conversation-header-inner {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: 12px;
 		width: min(100%, 900px);
 		margin: 0 auto;
 	}
 
-	.conversation-heading {
-		min-width: 0;
-	}
-
 	.conversation-header h2 {
+		flex: 1;
+		min-width: 0;
 		margin: 0;
-		font-size: 18px;
-		line-height: 26px;
-	}
-
-	.conversation-header p {
-		margin: 3px 0 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		color: var(--text-secondary);
-		font-size: 13px;
+		font-size: 14px;
+		font-weight: 500;
+		line-height: 20px;
 	}
 
 	.objective-link {
+		margin-left: auto;
+		max-width: 100%;
+		overflow-wrap: anywhere;
 		color: var(--brand-primary);
+		font-size: 12px;
 		font-weight: 700;
 		text-decoration: none;
 		transition: color 140ms ease;
@@ -78,20 +75,6 @@
 		.conversation-header {
 			padding-left: 18px;
 			padding-right: 18px;
-		}
-	}
-
-	@media (max-width: 560px) {
-		.conversation-header {
-			align-items: flex-start;
-			flex-direction: column;
-			gap: 6px;
-		}
-
-		.conversation-header-inner {
-			align-items: flex-start;
-			flex-direction: column;
-			gap: 8px;
 		}
 	}
 </style>

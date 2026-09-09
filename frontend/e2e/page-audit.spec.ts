@@ -37,6 +37,83 @@ test.describe('page interaction audit', () => {
 		await mockApis(page);
 	});
 
+	for (const width of [320, 768, 1024, 1440]) {
+		test(`uses a compact conversation title and named Collection at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const name = '316L LPBF processing, heat treatment and microstructure comparison literature';
+			const question =
+				'Compare the heat-treatment conditions and reported grain sizes across these LPBF papers';
+			const answer =
+				'Compare alloy state, heat treatment and grain-size measurements before combining results.';
+			let messages: ReturnType<typeof agentMessage>[] = [];
+			const pageErrors: string[] = [];
+			page.on('pageerror', (error) => pageErrors.push(error.message));
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: messages, feedback: [], pending_approval: null }));
+				messages = [
+					agentMessage('question', 'user', question),
+					agentMessage('answer', 'assistant', answer)
+				];
+				const turn = {
+					messages,
+					status: 'completed',
+					completion_reason: 'model_answer',
+					pending_approval: null,
+					error_code: null,
+					warnings: []
+				};
+				return route.fulfill(sseTurn(turn));
+			});
+			await page.route(
+				(url) =>
+					['/api/v1/collections', `/api/v1/collections/${collectionId}`].includes(url.pathname),
+				(route) => {
+					const record = { ...collection(), name };
+					return route.fulfill(
+						json(
+							new URL(route.request().url()).pathname.endsWith(collectionId)
+								? record
+								: { items: [record] }
+						)
+					);
+				}
+			);
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(page.locator('.conversation-header')).toHaveCount(0);
+			const context = page.locator('#assistant-collection-context');
+			const nameLink = context.getByRole('link', { name, exact: true });
+			await expect(nameLink).toBeVisible();
+			await expect(nameLink).toHaveAttribute('title', name);
+			await expect(nameLink).toHaveAttribute('href', `/collections/${collectionId}`);
+			await expect(context).not.toContainText(collectionId);
+			await sendAgentMessage(page, question);
+			await expect(page.getByText(answer, { exact: true })).toBeVisible();
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			const toolbar = page.locator('.conversation-header');
+			await expect(toolbar.getByRole('heading', { name: question, exact: true })).toBeVisible();
+			await expect(toolbar).not.toContainText('Research Agent');
+			expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(48);
+			expect(
+				(await nameLink.boundingBox())!.x + (await nameLink.boundingBox())!.width
+			).toBeLessThanOrEqual(width);
+			await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `research-agent-named-collection-${width}.png`)
+				});
+			await page.goto(`/collections/${collectionId}/assistant?objective_id=${objectiveId}`);
+			await expect(
+				page.getByRole('link', { name: 'Open selected objective', exact: true })
+			).toHaveAttribute('href', `/collections/${collectionId}/objectives/${objectiveId}`);
+			expect(pageErrors).toEqual([]);
+		});
+	}
+
 	test('waits for a delayed logout before completing a new sign-in', async ({ page }) => {
 		let finish!: () => void;
 		const completion = new Promise<void>((resolve) => {
@@ -106,13 +183,11 @@ test.describe('page interaction audit', () => {
 		expect(
 			await page.evaluate(() => ({ secure: isSecureContext, subtle: typeof crypto.subtle }))
 		).toEqual({ secure: false, subtle: 'undefined' });
-		await page
-			.getByLabel('Choose PDF papers')
-			.setInputFiles({
-				name: 'LPBF-study.pdf',
-				mimeType: 'application/pdf',
-				buffer: Buffer.from('%PDF-1.7')
-			});
+		await page.getByLabel('Choose PDF papers').setInputFiles({
+			name: 'LPBF-study.pdf',
+			mimeType: 'application/pdf',
+			buffer: Buffer.from('%PDF-1.7')
+		});
 		await page.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true }).click();
 		await page.getByRole('button', { name: 'Retry failed paper', exact: true }).click();
 		await expect(page.getByText('Preparation queued', { exact: true })).toBeVisible();
@@ -778,7 +853,9 @@ test.describe('page interaction audit', () => {
 		await expect(historyToggle).toBeVisible();
 		await historyToggle.click();
 		await expect(page.getByText('Current collection')).toBeVisible();
-		await expect(page.getByLabel('Research Agent sessions').getByText(collectionId)).toBeVisible();
+		await expect(
+			page.getByLabel('Research Agent sessions').getByText(collection().name, { exact: true })
+		).toBeVisible();
 		await page.getByRole('button', { name: 'Hide history' }).click();
 		const mobileLayout = await page.evaluate(() => {
 			const inputElement = document.querySelector<HTMLTextAreaElement>('.composer textarea');
@@ -981,7 +1058,7 @@ test.describe('page interaction audit', () => {
 		try {
 			await page.goto(`/collections/${collectionId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
-			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
+			await expect(page.locator('.conversation-header')).toHaveCount(0);
 			await sendAgentMessage(page, 'Track this');
 			await expect(page.getByTestId('research-progress')).toHaveCount(1);
 			await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();

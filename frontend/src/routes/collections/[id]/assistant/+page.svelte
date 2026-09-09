@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
 	import { authState } from '../../../_shared/auth';
+	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
 		clearPendingChatSourceContext,
@@ -85,6 +86,10 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
+	$: collectionName = userId
+		? ($collections.find((item) => item.id === collectionId)?.name?.trim() ?? '')
+		: '';
+	$: conversationTitle = messages.find((message) => message.role === 'user')?.content.trim() ?? '';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: activeSessionId = session?.session_id ?? '';
@@ -602,6 +607,7 @@
 <section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
 	<ResearchSidebar
 		{collectionId}
+		{collectionName}
 		{history}
 		{activeSessionId}
 		{loading}
@@ -613,7 +619,9 @@
 	/>
 
 	<main class="conversation">
-		<ConversationHeader {collectionId} objectiveId={queryObjectiveId} />
+		{#if conversationTitle || queryObjectiveId}
+			<ConversationHeader title={conversationTitle} {collectionId} objectiveId={queryObjectiveId} />
+		{/if}
 
 		{#if error}
 			<div class="status status-error" role="alert">

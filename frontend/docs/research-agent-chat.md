@@ -135,6 +135,12 @@ keeping Lens-specific research boundaries explicit:
 - `+page.svelte` owns session orchestration, streaming, approval state, and
   the route shell. It does not create a second browser API or persistence
   model.
+- `ResearchSidebar.svelte` owns collection navigation, session history, and
+  the responsive desktop/mobile navigation rail. It receives presentation data
+  and callbacks from the route; it does not load or persist sessions.
+- `ConversationHeader.svelte` owns the current collection/session status and
+  optional Objective link. This keeps responsive header layout and status
+  animation local to the header instead of coupling it to the message stream.
 - `conversationPresentation.ts` converts the durable trajectory into ordered
   message, activity, and artifact items. This keeps grouping and display
   policy out of the transport callbacks.

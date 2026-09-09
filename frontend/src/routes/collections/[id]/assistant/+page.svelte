@@ -33,6 +33,8 @@
 		type ChatPresentationItem,
 		type ToolActivityOperation
 	} from './conversationPresentation';
+	import ConversationHeader from './ConversationHeader.svelte';
+	import ResearchSidebar from './ResearchSidebar.svelte';
 
 	type StoredChatSession = {
 		session_id: string;
@@ -1319,82 +1321,24 @@
 </svelte:head>
 
 <section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
-	<aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
-		<div class="sidebar-top">
-			<a class="back-workspace" href={resolve('/collections/[id]', { id: collectionId })}>
-				<span aria-hidden="true">←</span>
-				{$t('researchAgent.backToWorkspace')}
-			</a>
-			<div class="brand">
-				<span class="brand-mark" aria-hidden="true">L</span>
-				<h1>{$t('researchAgent.title')}</h1>
-			</div>
-		</div>
-
-		<button
-			class="new-session"
-			type="button"
-			disabled={loading || sending || deciding}
-			on:click={startNewSession}
-		>
-			<span class="new-session-icon" aria-hidden="true">+</span>
-			<span>{$t('researchAgent.newSession')}</span>
-		</button>
-
-		<section class="history" aria-label={$t('researchAgent.historyTitle')}>
-			<h2>{$t('researchAgent.historyTitle')}</h2>
-			<div class="history-list">
-				{#each history as item (item.session_id)}
-					<button
-						class="history-item"
-						class:active={item.session_id === activeSessionId}
-						type="button"
-						disabled={loading || sending || deciding}
-						on:click={() => switchSession(item.session_id)}
-					>
-						<span class="history-title">{item.title}</span>
-						<time>{formatHistoryTime(item.updated_at)}</time>
-					</button>
-				{:else}
-					<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>
-				{/each}
-			</div>
-		</section>
-
-		<div class="collection-context">
-			<span>
-				<small>{$t('researchAgent.currentCollection')}</small>
-				<strong>{collectionId}</strong>
-			</span>
-		</div>
-	</aside>
+	<ResearchSidebar
+		{collectionId}
+		{history}
+		{activeSessionId}
+		{loading}
+		{sending}
+		{deciding}
+		onNewSession={startNewSession}
+		onSwitchSession={switchSession}
+		{formatHistoryTime}
+	/>
 
 	<main class="conversation">
-		<header class="conversation-header">
-			<div class="conversation-header-inner">
-				<div class="conversation-heading">
-					<div class="conversation-title-row">
-						<h2>{$t('researchAgent.title')}</h2>
-						<span class="session-state" class:working={sending || deciding}>
-							<span class="session-state-dot" aria-hidden="true"></span>
-							{$t(sending || deciding ? 'researchAgent.working' : 'researchAgent.ready')}
-						</span>
-					</div>
-					<p>{$t('researchAgent.headerPrefix')} <strong>{collectionId}</strong></p>
-				</div>
-				{#if queryObjectiveId}
-					<a
-						class="objective-link"
-						href={resolve('/collections/[id]/objectives/[objective_id]', {
-							id: collectionId,
-							objective_id: queryObjectiveId
-						})}
-					>
-						{$t('researchAgent.objectiveScope')}
-					</a>
-				{/if}
-			</div>
-		</header>
+		<ConversationHeader
+			{collectionId}
+			objectiveId={queryObjectiveId}
+			working={sending || deciding}
+		/>
 
 		{#if error}
 			<div class="status status-error" role="alert">{error}</div>
@@ -2005,7 +1949,7 @@
 		inset: 0;
 		z-index: 60;
 		display: grid;
-		grid-template-columns: 280px minmax(0, 1fr);
+		grid-template-columns: 256px minmax(0, 1fr);
 		width: 100vw;
 		height: 100vh;
 		height: 100dvh;
@@ -2015,56 +1959,6 @@
 		overflow: hidden;
 	}
 
-	.sidebar {
-		display: flex;
-		min-height: 0;
-		flex-direction: column;
-		padding: 12px;
-		border-right: 1px solid var(--border-default);
-		background: var(--bg-subtle);
-	}
-
-	.sidebar-top {
-		display: grid;
-		gap: 8px;
-	}
-
-	.back-workspace {
-		display: inline-flex;
-		align-items: center;
-		align-self: flex-start;
-		gap: 7px;
-		min-height: 32px;
-		padding: 0 8px;
-		border-radius: 8px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-		text-decoration: none;
-		transition:
-			background-color 140ms ease,
-			color 140ms ease;
-	}
-
-	.back-workspace span {
-		font-size: 18px;
-		line-height: 1;
-	}
-
-	.back-workspace:hover {
-		background: var(--surface-card);
-		color: var(--brand-primary);
-	}
-
-	.brand {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px 8px 12px;
-		border-bottom: 1px solid var(--border-default);
-	}
-
-	.brand-mark,
 	.assistant-mark {
 		display: grid;
 		place-items: center;
@@ -2072,58 +1966,6 @@
 		border: 1px solid var(--brand-border);
 		color: var(--brand-primary);
 		font-weight: 800;
-	}
-
-	.brand-mark {
-		width: 32px;
-		height: 32px;
-		border-radius: 9px;
-	}
-
-	.brand h1 {
-		margin: 0;
-		font-size: 15px;
-		line-height: 20px;
-	}
-
-	.new-session {
-		display: inline-flex;
-		align-items: center;
-		justify-content: flex-start;
-		gap: 9px;
-		min-height: 40px;
-		margin-top: 12px;
-		padding: 0 10px;
-		border: 1px solid transparent;
-		border-radius: 10px;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		font-weight: 700;
-		cursor: pointer;
-		transition:
-			background-color 140ms ease,
-			border-color 140ms ease,
-			transform 140ms ease;
-	}
-
-	.new-session-icon {
-		display: grid;
-		place-items: center;
-		width: 24px;
-		height: 24px;
-		border-radius: 7px;
-		background: var(--brand-soft);
-		color: var(--brand-primary);
-		font-size: 18px;
-		font-weight: 400;
-		line-height: 1;
-	}
-
-	.new-session:hover:not(:disabled) {
-		border-color: var(--brand-border);
-		background: var(--brand-soft);
-		color: var(--brand-primary);
-		transform: translateY(-1px);
 	}
 
 	.approve:hover:not(:disabled),
@@ -2134,7 +1976,6 @@
 		transform: translateY(-1px);
 	}
 
-	.new-session:active:not(:disabled),
 	.send-message:active:not(:disabled),
 	.upload-primary:active:not(:disabled) {
 		transform: translateY(0);
@@ -2145,92 +1986,6 @@
 		opacity: 0.55;
 	}
 
-	.history {
-		display: flex;
-		min-height: 0;
-		flex: 1;
-		flex-direction: column;
-		margin-top: 22px;
-	}
-
-	.history h2 {
-		margin: 0 8px 8px;
-		color: var(--text-secondary);
-		font-size: 10px;
-		line-height: 18px;
-		text-transform: uppercase;
-	}
-
-	.history-list {
-		display: grid;
-		gap: 4px;
-		overflow-y: auto;
-	}
-
-	.history-item {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 8px;
-		min-height: 38px;
-		padding: 7px 9px;
-		border: 1px solid transparent;
-		border-radius: 9px;
-		background: transparent;
-		color: var(--text-primary);
-		text-align: left;
-		cursor: pointer;
-		transition:
-			background-color 140ms ease,
-			border-color 140ms ease;
-	}
-
-	.history-item:hover,
-	.history-item.active {
-		border-color: var(--brand-border);
-		background: var(--brand-soft);
-	}
-
-	.history-title {
-		overflow: hidden;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-		font-size: 13px;
-	}
-
-	.history-item time,
-	.empty-history {
-		color: var(--text-tertiary);
-		font-size: 11px;
-	}
-
-	.collection-context {
-		display: grid;
-		gap: 10px;
-		padding-top: 16px;
-		border-top: 1px solid var(--border-default);
-		font-size: 12px;
-		font-weight: 700;
-	}
-
-	.collection-context span {
-		display: grid;
-		gap: 2px;
-		min-width: 0;
-	}
-
-	.collection-context small {
-		color: var(--text-secondary);
-		font-weight: 500;
-	}
-
-	.collection-context strong {
-		overflow: hidden;
-		color: var(--text-primary);
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
 	.conversation {
 		display: flex;
 		flex-direction: column;
@@ -2239,82 +1994,6 @@
 		background: var(--bg-page);
 	}
 
-	.conversation-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
-		min-height: 76px;
-		padding: 14px 32px;
-		border-bottom: 1px solid var(--border-default);
-		background: var(--surface-card);
-	}
-
-	.conversation-header-inner {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
-		width: min(100%, 900px);
-		margin: 0 auto;
-	}
-
-	.conversation-heading {
-		min-width: 0;
-	}
-
-	.conversation-title-row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		flex-wrap: wrap;
-	}
-
-	.conversation-header h2 {
-		margin: 0;
-		font-size: 18px;
-		line-height: 26px;
-	}
-
-	.conversation-header p {
-		margin: 3px 0 0;
-		color: var(--text-secondary);
-		font-size: 13px;
-	}
-
-	.session-state {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 3px 7px;
-		border: 1px solid var(--border-default);
-		border-radius: 999px;
-		color: var(--text-tertiary);
-		font-size: 10px;
-		font-weight: 700;
-		line-height: 1;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.session-state.working {
-		border-color: var(--warning-border);
-		color: var(--warning-text);
-	}
-
-	.session-state-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--success-text);
-	}
-
-	.session-state.working .session-state-dot {
-		background: var(--warning-text);
-		animation: state-pulse 1.4s ease-in-out infinite;
-	}
-
-	.objective-link,
 	.resource-links a {
 		color: var(--brand-primary);
 		font-weight: 700;
@@ -2322,7 +2001,6 @@
 		transition: color 140ms ease;
 	}
 
-	.objective-link:hover,
 	.resource-links a:hover {
 		text-decoration: underline;
 	}
@@ -2728,8 +2406,7 @@
 			transition-duration: 0.01ms !important;
 		}
 
-		.stream-cursor,
-		.session-state-dot {
+		.stream-cursor {
 			animation: none;
 		}
 	}
@@ -3651,46 +3328,6 @@
 			grid-template-rows: auto minmax(0, 1fr);
 		}
 
-		.sidebar {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			grid-template-rows: auto auto;
-			align-items: center;
-			gap: 12px;
-			padding: 12px 16px;
-			border-right: 0;
-			border-bottom: 1px solid var(--border-default);
-		}
-
-		.sidebar-top {
-			grid-column: 1;
-			grid-row: 1 / span 2;
-		}
-
-		.back-workspace {
-			grid-column: 1;
-			grid-row: 1;
-		}
-
-		.brand {
-			grid-column: 1;
-			grid-row: 2;
-			margin-top: 0;
-		}
-
-		.new-session {
-			grid-column: 2;
-			grid-row: 1 / span 2;
-			margin: 0;
-			padding: 0 12px;
-		}
-
-		.history,
-		.collection-context {
-			display: none;
-		}
-
-		.conversation-header,
 		.message-scroll,
 		.composer {
 			padding-left: 18px;
@@ -3716,18 +3353,6 @@
 		.progress-metrics {
 			justify-content: flex-start;
 			margin-left: 17px;
-		}
-
-		.conversation-header {
-			align-items: flex-start;
-			flex-direction: column;
-			gap: 6px;
-		}
-
-		.conversation-header-inner {
-			align-items: flex-start;
-			flex-direction: column;
-			gap: 8px;
 		}
 
 		.suggestions {

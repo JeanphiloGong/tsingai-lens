@@ -459,7 +459,7 @@ class ResearchAgentRunner:
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
                     )
-                    logger.exception(
+                    logger.warning(
                         "Research Agent model call failed model=%s "
                         "exception_type=%s",
                         model_name,

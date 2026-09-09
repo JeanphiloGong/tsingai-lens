@@ -2893,7 +2893,7 @@ async def test_repeated_invalid_model_response_is_distinguished_from_unavailable
     assert "invalid response" in result.messages[-1].content
 
 
-async def test_unexpected_model_failure_remains_model_unavailable() -> None:
+async def test_unexpected_model_failure_remains_model_unavailable(caplog) -> None:
     runner = ResearchAgentRunner(
         model=_Model(RuntimeError("provider connection failed")),
         capabilities=CapabilityRegistry(
@@ -2909,3 +2909,5 @@ async def test_unexpected_model_failure_remains_model_unavailable() -> None:
 
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_unavailable"
+    assert "provider connection failed" not in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text

@@ -165,6 +165,9 @@ across the complete loaded list, then paginates matching results five at a time.
 Workflow-state filtering distinguishes pending, active, published, and failed
 analysis; changing a filter resets to the first page so no matching Objective is
 hidden by a stale page position.
+Leaving the Objective list stops its status polling. Late reads cannot restart
+polling or fetch further result snapshots after the page has been destroyed;
+the persisted analysis continues independently on the server.
 The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;

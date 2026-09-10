@@ -47,6 +47,7 @@
 	let error = '';
 	let loadedCollectionId = '';
 	let analysisPollTimer: ReturnType<typeof setTimeout> | null = null;
+	let disposed = false;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectives = objectiveList?.objectives ?? [];
@@ -99,7 +100,10 @@
 		void loadObjectives();
 	}
 
-	onDestroy(clearAnalysisPoll);
+	onDestroy(() => {
+		disposed = true;
+		clearAnalysisPoll();
+	});
 
 	function clearAnalysisPoll() {
 		if (analysisPollTimer) clearTimeout(analysisPollTimer);
@@ -108,11 +112,13 @@
 
 	function scheduleAnalysisPoll() {
 		clearAnalysisPoll();
+		if (disposed) return;
 		if (!Object.values(analysisStates).some(isAnalysisProcessing)) return;
 		analysisPollTimer = setTimeout(() => void pollActiveAnalyses(), ANALYSIS_POLL_DELAY_MS);
 	}
 
 	async function pollActiveAnalyses() {
+		if (disposed) return;
 		const objectiveIds = Object.entries(analysisStates)
 			.filter(([, analysis]) => isAnalysisProcessing(analysis))
 			.map(([objectiveId]) => objectiveId);
@@ -121,9 +127,12 @@
 			const snapshots = await Promise.all(
 				objectiveIds.map((objectiveId) => fetchObjectiveAnalysisStatus(collectionId, objectiveId))
 			);
+			if (disposed) return;
 			for (const snapshot of snapshots) {
 				if (snapshot.status === 'succeeded' || snapshot.status === 'failed') {
-					applyAnalysisSnapshot(await fetchObjectiveAnalysis(collectionId, snapshot.objective_id));
+					const analysis = await fetchObjectiveAnalysis(collectionId, snapshot.objective_id);
+					if (disposed) return;
+					applyAnalysisSnapshot(analysis);
 				} else {
 					applyAnalysisStatus(snapshot);
 				}
@@ -175,8 +184,11 @@
 		loading = true;
 		error = '';
 		try {
-			objectiveList = await fetchCollectionObjectives(collectionId);
+			const listing = await fetchCollectionObjectives(collectionId);
+			if (disposed) return;
+			objectiveList = listing;
 			await refreshActiveAnalysisStates();
+			if (disposed) return;
 			scopesByObjective = {};
 			selectedDocumentIdsByObjective = {};
 			objectivePage = 0;
@@ -213,7 +225,7 @@
 				}
 			})
 		);
-		analysisStates = Object.fromEntries(states);
+		if (!disposed) analysisStates = Object.fromEntries(states);
 	}
 
 	function analysisStatus(objective: ObjectiveSummary) {

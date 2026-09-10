@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { DocumentSourceSelection } from '../../../../../_shared/documents';
 	import { t } from '../../../../../_shared/i18n';
-	import { Check, MessageSquare } from '@lucide/svelte';
+	import { MessageSquare } from '@lucide/svelte';
 	export let selection: DocumentSourceSelection;
 	export let selectedKeys: string[] = [];
 	export let disabled = false;
@@ -19,7 +19,6 @@
 		aria-label={$t('researchAgent.paperScope.selectBlock')}
 		on:click={() => onToggle(selection)}
 	></button>
-	<span class="selection-mark" aria-hidden="true"><Check size={15} /></span>
 	<button
 		class="ask-source"
 		type="button"
@@ -47,17 +46,6 @@
 		padding: 0;
 		overflow: hidden;
 		clip-path: inset(50%);
-	}
-	.selection-mark {
-		display: grid;
-		place-items: center;
-		width: 20px;
-		height: 24px;
-		color: var(--brand-primary);
-		visibility: hidden;
-	}
-	[data-selected='true'] .selection-mark {
-		visibility: visible;
 	}
 	.ask-source {
 		display: inline-grid;
@@ -94,8 +82,8 @@
 		background: var(--bg-subtle);
 	}
 	:global(.source-selectable:has(.source-selection[data-selected='true'])) {
-		background: var(--brand-soft);
-		box-shadow: -4px 0 0 var(--brand-primary);
+		background: color-mix(in srgb, var(--brand-soft) 65%, transparent);
+		box-shadow: -2px 0 0 var(--brand-primary);
 	}
 	:global(.source-selectable:has(.keyboard-selection:focus-visible)) {
 		outline: 2px solid var(--brand-primary);

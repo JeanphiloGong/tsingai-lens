@@ -355,6 +355,12 @@ const translations: Record<Language, Translations> = {
 			},
 			sourceContext: {
 				remove: 'Remove source context',
+				clear: 'Clear all passages',
+				count: '{count} passages',
+				single: '1 passage',
+				cited: '{count} cited passages',
+				citedSingle: '1 cited passage',
+				passage: 'Source passage',
 				truncated: 'Excerpt shortened · open the Source for the complete content'
 			},
 			suggestions: {
@@ -3037,6 +3043,12 @@ const translations: Record<Language, Translations> = {
 			},
 			sourceContext: {
 				remove: '移除原文上下文',
+				clear: '清空已选原文',
+				count: '{count} 段原文',
+				single: '1 段原文',
+				cited: '引用 {count} 处原文',
+				citedSingle: '引用 1 处原文',
+				passage: '原文段落',
 				truncated: '摘录已缩短 · 完整内容请打开原文'
 			},
 			suggestions: {

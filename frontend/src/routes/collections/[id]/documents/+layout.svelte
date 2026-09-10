@@ -12,7 +12,15 @@
 		type ChatSourceContext
 	} from '../../../_shared/chatSessions';
 	import IconButton from '../../../_shared/IconButton.svelte';
-	import { X, Library, Columns2, PanelLeft, MessageSquare, ListChecks } from '@lucide/svelte';
+	import {
+		X,
+		ListX,
+		Library,
+		Columns2,
+		PanelLeft,
+		MessageSquare,
+		ListChecks
+	} from '@lucide/svelte';
 	import ResearchConversation from '../assistant/ResearchConversation.svelte';
 	import DocumentReader from './[document_id]/DocumentReader.svelte';
 	import DocumentTabs from './DocumentTabs.svelte';
@@ -79,6 +87,7 @@
 		$agent.sourceVersion;
 		selectedSources = readPendingChatSourceContexts(userId, collectionId);
 	}
+	$: if (!selectedSources.length) showSelection = false;
 	$: if ($agent.open) mountedAgent = true;
 	$: if ($agent.open !== wasOpen && panel) {
 		wasOpen = $agent.open;
@@ -160,6 +169,11 @@
 			collectionId,
 			selectedSources.filter((_, candidate) => candidate !== index)
 		);
+		sourcesChanged();
+	}
+	function clearSources() {
+		if ($agent.busy) return;
+		storePendingChatSourceContexts(userId, collectionId, []);
 		sourcesChanged();
 	}
 	async function focusComposer(node: HTMLElement) {
@@ -287,8 +301,15 @@
 					<IconButton
 						label={$t('researchAgent.workspace.reviewSelection')}
 						pressed={showSelection}
+						disabled={!selectedSources.length}
 						onClick={() => (showSelection = !showSelection)}><ListChecks size={17} /></IconButton
 					>
+					{#if selectedSources.length}<span
+							class="selection-count"
+							aria-label={$t('researchAgent.workspace.selectedBlocks', {
+								count: selectedSources.length
+							})}>{selectedSources.length}</span
+						>{/if}
 					<IconButton
 						label={$t('workbench.askResearchAgent')}
 						pressed={$agent.open}
@@ -305,11 +326,19 @@
 						>{$t('researchAgent.workspace.selectedBlocks', {
 							count: selectedSources.length
 						})}</strong
-					><IconButton
-						label={$t('researchAgent.workspace.reviewSelection')}
-						pressed={true}
-						onClick={() => (showSelection = false)}><X size={16} /></IconButton
 					>
+					<div class="selection-actions">
+						<IconButton
+							label={$t('researchAgent.sourceContext.clear')}
+							disabled={$agent.busy}
+							onClick={clearSources}><ListX size={15} /></IconButton
+						>
+						<IconButton
+							label={$t('researchAgent.workspace.reviewSelection')}
+							pressed={true}
+							onClick={() => (showSelection = false)}><X size={16} /></IconButton
+						>
+					</div>
 				</header>
 				<ul>
 					{#each selectedSources as source, index (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
@@ -437,6 +466,18 @@
 </div>
 
 <style>
+	.selection-count {
+		margin-left: -8px;
+		min-width: 16px;
+		font-size: 11px;
+		font-variant-numeric: tabular-nums;
+		color: var(--brand-primary);
+	}
+	.selection-actions {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
 	:global(.app-shell:has(.document-workspace.expanded) .site-header),
 	:global(.app-shell:has(.document-workspace.expanded) .site-footer),
 	:global(.collection-header:has(~ .collection-panel .document-workspace.expanded)),

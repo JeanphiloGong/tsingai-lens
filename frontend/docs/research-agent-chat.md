@@ -432,14 +432,19 @@ locators, PDF page navigation, and fit-width rendering are scoped to each reader
 Opened tabs, selected question context, and completed Agent reads remain distinct:
 opening a paper does not add it to a question or claim the Agent inspected it.
 The selection disclosure reviews and removes pending passages from all open or
-closed paper tabs. Sent context remains in the user message, while actual Agent
+closed paper tabs and closes automatically when the selection becomes empty.
+The composer groups pending passages by paper into compact, initially collapsed
+attachments. Expanding a paper reveals its excerpts, page/section links, and
+individual removal controls; a clear action removes the whole pending selection.
+Sent context remains in the user message behind an initially collapsed passage
+count, while actual Agent
 reads remain observable through the conversation's capability results and Source
 links. An unavailable paper shows an error and retry in its own pane; other open
 papers and the conversation remain available.
 
 Clicking a source-mapped paragraph, list item, table, or figure toggles that
-whole block in the pending question context. Selected blocks use a background,
-edge marker, and check mark; there is no separate checkbox or selection mode.
+whole block in the pending question context. Selected blocks use a subtle
+background and edge marker; there is no separate checkbox or selection mode.
 The native selection button remains available to keyboard and assistive-technology
 users, with focus shown around its block. Dragging to copy text and clicking a
 link or another control do not toggle the block. Duplicate locators cannot create
@@ -449,6 +454,14 @@ request becomes part of the saved question and asks for exact links, supporting
 or conflicting passages, and disclosure of unread or unavailable content.
 It is a research request, not a guarantee that relevant passages exist or that
 the model will find every one. New selection is disabled during an active turn.
+
+Once the server acknowledges a question, pending attachments and reader selection
+marks disappear without waiting for the research answer. The submission's Source
+recovery record remains until a saved user message confirms persistence; a local
+optimistic message is not sufficient confirmation. Returning to a running session
+does not restore sent attachments to the composer. If recovery confirms the
+question was not saved and is no longer running, its passages become an editable
+draft again. Unsent drafts do not expire merely because their disclosure is closed.
 
 The selected Source is context, not Evidence. Opening the Agent creates no Core
 record, and Agent prose cannot become Evidence or a Finding without a later

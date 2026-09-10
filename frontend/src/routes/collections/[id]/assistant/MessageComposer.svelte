@@ -3,6 +3,7 @@
 	import { t } from '../../../_shared/i18n';
 	import { authState } from '../../../_shared/auth';
 	import IconButton from '../../../_shared/IconButton.svelte';
+	import { ChevronDown, Quote, X, ArrowUpRight } from '@lucide/svelte';
 	import type { ChatSourceContext } from '../../../_shared/chatSessions';
 	import type { PaperUploadItem } from './messageComposer';
 
@@ -15,6 +16,15 @@
 	export let onInput: (value: string) => void = () => {};
 	export let onSend: (nextText?: string) => void = () => {};
 	export let onRemovePendingSourceContexts: (index: number) => void = () => {};
+	export let onClearPendingSourceContexts: () => void = () => {};
+	$: sourceGroups = Array.from(
+		new Set(pendingSourceContexts.map((source) => source.document_id))
+	).map((documentId) => ({
+		documentId,
+		items: pendingSourceContexts
+			.map((source, index) => ({ source, index }))
+			.filter(({ source }) => source.document_id === documentId)
+	}));
 
 	let uploadInput: HTMLInputElement | null = null;
 
@@ -292,30 +302,62 @@
 			{:else if uploadError}
 				<p class="upload-error upload-error--standalone" role="alert">{uploadError}</p>
 			{/if}
-			{#each pendingSourceContexts as source, index (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
-				<div class="source-context-preview" data-testid="pending-source-context">
-					<div>
-						<strong>{source.document_title}</strong>
-						<small>
-							{source.heading_path ?? source.source_kind}
-							{#if source.page}
-								· {$t('workbench.pageLabel', { page: source.page })}{/if}
-						</small>
-						{#if source.quote_truncated}
-							<small>{$t('researchAgent.sourceContext.truncated')}</small>
-						{/if}
-						<p>{source.quote}</p>
+			{#if sourceGroups.length}
+				<div class="source-attachments" data-testid="pending-source-attachments">
+					<div class="source-groups">
+						{#each sourceGroups as group (group.documentId)}
+							<details class="source-group">
+								<summary title={group.items[0].source.document_title}>
+									<Quote size={14} />
+									<span class="source-title">{group.items[0].source.document_title}</span>
+									<span class="source-count"
+										>{$t(
+											group.items.length === 1
+												? 'researchAgent.sourceContext.single'
+												: 'researchAgent.sourceContext.count',
+											{ count: group.items.length }
+										)}</span
+									>
+									<ChevronDown size={14} />
+								</summary>
+								<ul>
+									{#each group.items as { source, index } (`${source.source_kind}:${source.source_ref}`)}
+										<li data-testid="pending-source-context">
+											<div>
+												<a
+													href={`${resolve('/collections/[id]/documents/[document_id]', { id: collectionId, document_id: source.document_id })}?source_ref=${encodeURIComponent(source.source_ref)}`}
+												>
+													<span
+														>{source.heading_path ||
+															$t('researchAgent.sourceContext.passage')}{#if source.page}
+															· {$t('workbench.pageLabel', { page: source.page })}{/if}</span
+													>
+													<ArrowUpRight size={13} />
+												</a>
+												<p>{source.quote}</p>
+												{#if source.quote_truncated}<small
+														>{$t('researchAgent.sourceContext.truncated')}</small
+													>{/if}
+											</div>
+											<IconButton
+												label={$t('researchAgent.sourceContext.remove')}
+												{disabled}
+												onClick={() => onRemovePendingSourceContexts(index)}
+												><X size={14} /></IconButton
+											>
+										</li>
+									{/each}
+								</ul>
+							</details>
+						{/each}
 					</div>
-					<button
-						type="button"
-						class="remove-source-context"
-						aria-label={$t('researchAgent.sourceContext.remove')}
-						title={$t('researchAgent.sourceContext.remove')}
+					<IconButton
+						label={$t('researchAgent.sourceContext.clear')}
 						{disabled}
-						on:click={() => onRemovePendingSourceContexts(index)}>×</button
+						onClick={onClearPendingSourceContexts}><X size={15} /></IconButton
 					>
 				</div>
-			{/each}
+			{/if}
 		</div>
 	{/if}
 	<div class="composer-row">
@@ -554,58 +596,111 @@
 		background: var(--brand-primary-hover);
 	}
 
-	.source-context-preview {
+	.source-attachments {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 12px;
+		align-items: start;
+		gap: 6px;
 		width: min(100%, 900px);
 		margin: 0 auto;
-		padding: 10px 12px;
-		border: 1px solid var(--brand-border);
-		border-radius: 6px;
-		background: var(--brand-soft);
 	}
-
-	.source-context-preview > div {
+	.source-groups {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: start;
+		gap: 6px;
 		min-width: 0;
 	}
-
-	.source-context-preview strong,
-	.source-context-preview small {
-		display: block;
+	.source-group {
+		min-width: 0;
+		max-width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--surface-card);
 	}
-
-	.source-context-preview small {
-		margin-top: 2px;
-		color: var(--text-tertiary);
+	.source-group[open] {
+		width: 100%;
 	}
-
-	.source-context-preview p {
-		display: -webkit-box;
-		margin: 5px 0 0;
-		overflow: hidden;
+	.source-group summary {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 34px;
+		padding: 4px 8px;
+		list-style: none;
+		font-size: 12px;
 		color: var(--text-secondary);
+		cursor: pointer;
+	}
+	.source-group summary::-webkit-details-marker {
+		display: none;
+	}
+	.source-group summary:hover {
+		background: var(--bg-subtle);
+	}
+	.source-group summary:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+	.source-group summary :global(svg) {
+		flex-shrink: 0;
+	}
+	.source-group[open] summary > :global(svg:last-child) {
+		transform: rotate(180deg);
+	}
+	.source-title {
+		min-width: 0;
+		max-width: 220px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text-primary);
+	}
+	.source-count {
+		flex-shrink: 0;
+		font-size: 11px;
+	}
+	.source-group ul {
+		list-style: none;
+		margin: 0;
+		padding: 0 10px;
+		max-height: 200px;
+		overflow-y: auto;
+	}
+	.source-group li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 6px;
+		padding: 10px 0;
+		border-top: 1px solid var(--border-default);
+	}
+	.source-group li > div {
+		min-width: 0;
+	}
+	.source-group a {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		color: var(--brand-primary);
+		font-size: 12px;
+		text-decoration: none;
+	}
+	.source-group a :global(svg) {
+		flex-shrink: 0;
+	}
+	.source-group a:hover {
+		text-decoration: underline;
+	}
+	.source-group p {
+		margin: 6px 0 0;
 		font-size: 12px;
 		line-height: 18px;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 3;
-		line-clamp: 3;
-	}
-
-	.remove-source-context {
-		width: 30px;
-		height: 30px;
-		min-width: 30px;
-		min-height: 30px;
-		align-self: start;
-		padding: 0;
-		border: 1px solid var(--border-default);
-		border-radius: 50%;
-		background: var(--surface-card);
+		overflow-wrap: anywhere;
 		color: var(--text-secondary);
-		font-size: 20px;
-		font-weight: 400;
-		line-height: 1;
+	}
+	.source-group small {
+		color: var(--text-secondary);
+		font-size: 11px;
 	}
 
 	.sr-only {

@@ -153,11 +153,20 @@
 	}
 
 	function refreshPendingSources() {
-		pendingSourceContexts = readPendingChatSourceContexts(
+		const contexts = readPendingChatSourceContexts(
 			userId,
 			collectionId,
-			session ? { sessionId: session.session_id, messages } : undefined
+			session
+				? {
+						sessionId: session.session_id,
+						messages: messages.filter((message) => !message.message_id.startsWith('local-'))
+					}
+				: undefined
 		);
+		pendingSourceContexts = running || (sending && !submitting) ? [] : contexts;
+		if (session && !sending && !running && contexts.length) {
+			storePendingChatSourceContexts(userId, collectionId, contexts);
+		}
 	}
 
 	function historyStorageKey() {
@@ -656,6 +665,11 @@
 			if (!submitting) return;
 			submitting = false;
 			upsertHistory(activeSession);
+			if (!isRevision && sourceContexts.length) {
+				// Keep the recovery record until a saved user message confirms the handoff.
+				pendingSourceContexts = [];
+				onSourcesChanged();
+			}
 		};
 		try {
 			const turn = await streamChatMessage(
@@ -723,6 +737,10 @@
 			if (isCurrentSession(generation, activeCollectionId)) {
 				sending = false;
 				submitting = false;
+				if (!isRevision) {
+					refreshPendingSources();
+					onSourcesChanged();
+				}
 				progress = null;
 				progressHistory = [];
 				if (isRevision) {
@@ -748,6 +766,12 @@
 	function removePendingSourceContexts(index: number) {
 		pendingSourceContexts = pendingSourceContexts.filter((_, candidate) => candidate !== index);
 		storePendingChatSourceContexts(userId, collectionId, pendingSourceContexts);
+		onSourcesChanged();
+	}
+
+	function clearPendingSources() {
+		pendingSourceContexts = [];
+		clearPendingChatSourceContexts(userId, collectionId);
 		onSourcesChanged();
 	}
 
@@ -1008,6 +1032,7 @@
 				onInput={handleComposerInput}
 				onSend={sendMessage}
 				onRemovePendingSourceContexts={removePendingSourceContexts}
+				onClearPendingSourceContexts={clearPendingSources}
 			>
 				{#if pendingSourceContexts.length}
 					<label class="related-sources"

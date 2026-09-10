@@ -389,7 +389,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					error_code: null
 				});
 			});
-			render(Conversation, { embedded });
+			const view = render(Conversation, { embedded });
 			const composer = browserPage.getByRole('textbox', { name: 'Message', exact: true });
 			const newSession = browserPage.getByRole('button', { name: 'New session', exact: true });
 			await expect.element(composer).toBeEnabled();
@@ -402,6 +402,16 @@ describe('collections/[id]/assistant Research Agent', () => {
 				)
 			);
 			await expect.element(newSession).toBeEnabled();
+			await view.rerender({ sourceContextVersion: 1 });
+			await expect
+				.element(browserPage.getByTestId('pending-source-attachments'))
+				.not.toBeInTheDocument();
+			expect(
+				JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
+			).toMatchObject({
+				contexts: [source],
+				submission: { session_id: 'chat_1' }
+			});
 			await newSession.click();
 			await expect.element(composer).toBeEnabled();
 			expect(created).toBe(2);
@@ -417,7 +427,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 			await browserPage.getByRole('button', { name: /Compare the heat treatments/ }).click();
 			await expect.element(composer).toBeDisabled();
 			await expect.element(newSession).toBeEnabled();
-			await expect.element(browserPage.getByTestId('pending-source-context')).toBeVisible();
+			await expect
+				.element(browserPage.getByTestId('pending-source-attachments'))
+				.not.toBeInTheDocument();
 			completed = true;
 			await expect.element(browserPage.getByText('Original research completed')).toBeVisible();
 			await expect.element(composer).toBeEnabled();
@@ -1123,9 +1135,13 @@ describe('collections/[id]/assistant Research Agent', () => {
 				expect(requestBody(posts[1][0], posts[1][1])).not.toHaveProperty('source_contexts');
 			} else {
 				await expect.element(composer).toHaveValue(question);
+				await expect.element(browserPage.getByTestId('pending-source-attachments')).toBeVisible();
 				expect(
 					JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
 				).toMatchObject({ contexts: [source] });
+				expect(
+					JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
+				).not.toHaveProperty('submission');
 			}
 		}
 	);
@@ -1531,6 +1547,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 		const composer = await renderReady();
 		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText(sourceContext.quote)).not.toBeVisible();
+		await browserPage.getByText('Paper A', { exact: true }).click();
 		await expect
 			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
 			.toBeInTheDocument();
@@ -1567,6 +1585,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('It reports a measured conductivity result.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText(sourceContext.quote)).not.toBeVisible();
+		await browserPage.getByText('1 cited passage', { exact: true }).click();
+		await expect.element(browserPage.getByText(sourceContext.quote)).toBeVisible();
+		await expect
+			.element(browserPage.getByRole('link', { name: /Paper A/ }))
+			.toHaveAttribute('href', sourceContext.resource_ref.href);
 		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
 	});
 
@@ -1597,6 +1621,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi();
 
 		await renderReady();
+		await browserPage.getByText('Paper A', { exact: true }).click();
 		await browserPage.getByRole('button', { name: 'Remove source context' }).click();
 
 		await expect.element(browserPage.getByText('Paper A', { exact: true })).not.toBeInTheDocument();

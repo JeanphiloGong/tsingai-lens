@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { Pencil, ChevronLeft, ChevronRight, RotateCcw } from '@lucide/svelte';
+	import { Pencil, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Quote } from '@lucide/svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import { resolve } from '$app/paths';
@@ -73,20 +73,36 @@
 	<div class:editing>
 		<time>{formatTime(message.created_at)}</time>
 		{#if message.source_contexts.length}
-			{#each message.source_contexts as source (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
-				<a class="message-source" href={resolve(sourceContextHref(source))}>
-					<strong>{source.document_title}</strong>
-					<small>
-						{source.heading_path ?? source.source_kind}
-						{#if source.page}
-							· {$t('workbench.pageLabel', { page: source.page })}{/if}
-					</small>
-					{#if source.quote_truncated}
-						<small>{$t('researchAgent.sourceContext.truncated')}</small>
-					{/if}
-					<span>{source.quote}</span>
-				</a>
-			{/each}
+			<details class="message-sources">
+				<summary
+					><Quote size={14} /><span
+						>{$t(
+							message.source_contexts.length === 1
+								? 'researchAgent.sourceContext.citedSingle'
+								: 'researchAgent.sourceContext.cited',
+							{
+								count: message.source_contexts.length
+							}
+						)}</span
+					><ChevronDown size={14} /></summary
+				>
+				<div class="message-source-list">
+					{#each message.source_contexts as source (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
+						<a class="message-source" href={resolve(sourceContextHref(source))}>
+							<strong>{source.document_title}</strong>
+							<small>
+								{source.heading_path ?? source.source_kind}
+								{#if source.page}
+									· {$t('workbench.pageLabel', { page: source.page })}{/if}
+							</small>
+							{#if source.quote_truncated}
+								<small>{$t('researchAgent.sourceContext.truncated')}</small>
+							{/if}
+							<span>{source.quote}</span>
+						</a>
+					{/each}
+				</div>
+			</details>
 		{/if}
 		{#if editing}
 			<form on:submit|preventDefault={saveEdit} aria-busy={saving}>
@@ -246,17 +262,54 @@
 		overflow-wrap: anywhere;
 	}
 
+	.message-sources {
+		margin-bottom: 6px;
+	}
+	.message-sources summary {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 6px;
+		min-height: 32px;
+		padding: 4px 0;
+		list-style: none;
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.message-sources summary::-webkit-details-marker {
+		display: none;
+	}
+	.message-sources summary:hover {
+		color: var(--text-primary);
+	}
+	.message-sources summary:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+	.message-sources summary :global(svg) {
+		flex-shrink: 0;
+	}
+	.message-sources[open] summary > :global(svg:last-child) {
+		transform: rotate(180deg);
+	}
+	.message-source-list {
+		max-height: 300px;
+		overflow-y: auto;
+	}
 	.message-source {
 		display: grid;
 		gap: 3px;
 		margin-bottom: 7px;
 		padding: 10px 12px;
-		border: 1px solid var(--border-default);
-		border-radius: 6px;
-		background: var(--surface-card);
+		border-left: 2px solid var(--border-strong);
 		color: var(--text-primary);
 		text-align: left;
 		text-decoration: none;
+		overflow-wrap: anywhere;
+	}
+	.message-source:hover {
+		background: var(--bg-subtle);
 	}
 
 	.message-source small {
@@ -264,14 +317,9 @@
 	}
 
 	.message-source span {
-		display: -webkit-box;
-		overflow: hidden;
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 3;
-		line-clamp: 3;
 	}
 
 	@media (max-width: 560px) {

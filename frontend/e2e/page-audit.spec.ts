@@ -824,106 +824,148 @@ test.describe('page interaction audit', () => {
 		});
 	}
 
-	test('selects several source blocks and requests related passages without leaving the reader', async ({
-		page
-	}) => {
-		await page.setViewportSize({ width: 1440, height: 900 });
-		const errors: string[] = [];
-		page.on('pageerror', (error) => errors.push(error.message));
-		await page.route(
-			`**/api/v1/collections/${collectionId}/documents/${documentId}/markdown`,
-			(route) =>
-				route.fulfill(
-					json({
-						...documentMarkdown(),
-						source_map: [
-							...documentMarkdown().source_map,
-							{
-								...documentMarkdown().source_map[0],
-								markdown_anchor: 'block-results',
-								artifact_id: 'results',
-								block_id: 'results',
-								page: 3,
-								heading_path: 'Results'
-							}
-						]
-					})
-				)
-		);
-		let sent: Record<string, unknown> | null = null;
-		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
-			if (route.request().method() === 'GET')
-				return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
-			sent = route.request().postDataJSON();
-			const messages = [
-				agentMessage('blocks_user', 'user', String(sent!.message), {
-					source_contexts: sent!.source_contexts as []
-				}),
-				agentMessage(
-					'blocks_answer',
-					'assistant',
-					'The [Results section](/collections/col_123/documents/doc_1?source_ref=results) also specifies the EIS measurement method.'
-				)
-			];
-			return route.fulfill(
-				sseTurn({
-					messages,
-					status: 'completed',
-					completion_reason: 'model_answer',
-					warnings: [],
-					pending_approval: null,
-					error_code: null
-				})
+	for (const width of [390, 1440]) {
+		test(`selects several source blocks and requests related passages at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.route(
+				`**/api/v1/collections/${collectionId}/documents/${documentId}/markdown`,
+				(route) =>
+					route.fulfill(
+						json({
+							...documentMarkdown(),
+							source_map: [
+								...documentMarkdown().source_map,
+								{
+									...documentMarkdown().source_map[0],
+									markdown_anchor: 'block-results',
+									artifact_id: 'results',
+									block_id: 'results',
+									page: 3,
+									heading_path: 'Results'
+								}
+							]
+						})
+					)
 			);
+			let sent: Record<string, unknown> | null = null;
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
+				sent = route.request().postDataJSON();
+				const messages = [
+					agentMessage('blocks_user', 'user', String(sent!.message), {
+						source_contexts: sent!.source_contexts as []
+					}),
+					agentMessage(
+						'blocks_answer',
+						'assistant',
+						'The [Results section](/collections/col_123/documents/doc_1?source_ref=results) also specifies the EIS measurement method.'
+					)
+				];
+				return route.fulfill(
+					sseTurn({
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			});
+			await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+			const blocks = page.locator('.source-selectable');
+			await expect(blocks).toHaveCount(2);
+			await expect(page.locator('.source-selection input[type="checkbox"]')).toHaveCount(0);
+			const firstBlock = (await blocks.nth(0).boundingBox())!;
+			await page.mouse.move(firstBlock.x + 4, firstBlock.y + 10);
+			await page.mouse.down();
+			await page.mouse.move(firstBlock.x + 140, firstBlock.y + 10, { steps: 8 });
+			await page.mouse.up();
+			expect(
+				await page.evaluate(() => window.getSelection()?.toString().length ?? 0)
+			).toBeGreaterThan(0);
+			const keyboardSelection = blocks.nth(0).getByRole('button', { name: 'Select source block' });
+			await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'false');
+			await page.evaluate(() => window.getSelection()?.removeAllRanges());
+			await keyboardSelection.focus();
+			await keyboardSelection.press('Space');
+			await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'true');
+			await blocks.nth(1).click();
+			await page
+				.locator('.reader-header')
+				.getByRole('button', { name: /Ask research assistant/ })
+				.click();
+			const panel = page.locator('.agent-pane');
+			await expect(panel.getByTestId('pending-source-context')).toHaveCount(2);
+			const group = panel.locator('.source-group');
+			await expect(group).toHaveCount(1);
+			await expect(group).not.toHaveAttribute('open', '');
+			await expect(panel.getByTestId('pending-source-context').first()).not.toBeVisible();
+			await expect(group.locator('summary')).toContainText('2 passages');
+			await expectNoHorizontalOverflow(page);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `source-attachments-${width}.png`) });
+			await group.locator('summary').click();
+			await expect(panel.getByTestId('pending-source-context').first()).toBeVisible();
+			await panel
+				.getByTestId('pending-source-context')
+				.last()
+				.getByRole('button', { name: 'Remove source context' })
+				.click();
+			await expect(panel.getByTestId('pending-source-context')).toHaveCount(1);
+			await panel.getByRole('button', { name: 'Clear all passages' }).click();
+			await expect(panel.getByTestId('pending-source-attachments')).toHaveCount(0);
+			if (width <= 820) await panel.getByRole('button', { name: 'Back to papers' }).click();
+			await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'false');
+			await blocks.nth(0).click();
+			await blocks.nth(1).click();
+			if (width <= 820)
+				await page
+					.locator('.reader-header')
+					.getByRole('button', { name: /Ask research assistant/ })
+					.click();
+			await expect(
+				panel.getByRole('checkbox', { name: 'Check related sections in these papers' })
+			).toBeChecked();
+			await sendAgentMessage(page, 'Explain how these observations relate');
+			await expect(panel.getByRole('link', { name: 'Results section', exact: true })).toBeVisible();
+			expect(sent!.message).toContain('other relevant sections');
+			expect(
+				(sent!.source_contexts as { source_ref: string }[]).map((source) => source.source_ref)
+			).toEqual(['abstract', 'results']);
+			await expect(panel.getByTestId('pending-source-context')).toHaveCount(0);
+			await expect(panel.locator('.message-sources')).not.toHaveAttribute('open', '');
+			await expect(panel.locator('.message-source').first()).not.toBeVisible();
+			await panel.locator('.message-sources summary').click();
+			await expect(panel.locator('.message-source')).toHaveCount(2);
+			await expect(panel.locator('.message-source').first()).toBeVisible();
+			await expect(panel.locator('.message-source').last()).toHaveAttribute(
+				'href',
+				/source_ref=results/
+			);
+			await panel.locator('.message-sources summary').click();
+			await expect(
+				blocks.nth(0).getByRole('button', { name: 'Select source block', includeHidden: true })
+			).toHaveAttribute('aria-pressed', 'false');
+			if (width > 820) await expect(page.locator('.document-reader-root')).toBeVisible();
+			await expect(page).toHaveURL(new RegExp(`/documents/${documentId}$`));
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `source-citations-${width}.png`) });
+			await panel.getByRole('link', { name: 'Results section', exact: true }).click();
+			await expect(page).toHaveURL(/source_ref=results/);
+			if (width > 820)
+				await expect(
+					panel.getByRole('link', { name: 'Results section', exact: true })
+				).toBeVisible();
+			expect(errors).toEqual([]);
 		});
-		await page.goto(`/collections/${collectionId}/documents/${documentId}`);
-		const blocks = page.locator('.source-selectable');
-		await expect(blocks).toHaveCount(2);
-		await expect(page.locator('.source-selection input[type="checkbox"]')).toHaveCount(0);
-		const firstBlock = (await blocks.nth(0).boundingBox())!;
-		await page.mouse.move(firstBlock.x + 4, firstBlock.y + 10);
-		await page.mouse.down();
-		await page.mouse.move(firstBlock.x + 140, firstBlock.y + 10, { steps: 8 });
-		await page.mouse.up();
-		expect(
-			await page.evaluate(() => window.getSelection()?.toString().length ?? 0)
-		).toBeGreaterThan(0);
-		const keyboardSelection = blocks.nth(0).getByRole('button', { name: 'Select source block' });
-		await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'false');
-		await page.evaluate(() => window.getSelection()?.removeAllRanges());
-		await keyboardSelection.focus();
-		await keyboardSelection.press('Space');
-		await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'true');
-		await blocks.nth(1).click();
-		await page
-			.locator('.reader-header')
-			.getByRole('button', { name: /Ask research assistant/ })
-			.click();
-		const panel = page.locator('.agent-pane');
-		await expect(panel.getByTestId('pending-source-context')).toHaveCount(2);
-		await expect(
-			panel.getByRole('checkbox', { name: 'Check related sections in these papers' })
-		).toBeChecked();
-		await sendAgentMessage(page, 'Explain how these observations relate');
-		await expect(panel.getByRole('link', { name: 'Results section', exact: true })).toBeVisible();
-		expect(sent!.message).toContain('other relevant sections');
-		expect(
-			(sent!.source_contexts as { source_ref: string }[]).map((source) => source.source_ref)
-		).toEqual(['abstract', 'results']);
-		await expect(panel.getByTestId('pending-source-context')).toHaveCount(0);
-		await expect(
-			blocks.nth(0).getByRole('button', { name: 'Select source block' })
-		).toHaveAttribute('aria-pressed', 'false');
-		await expect(page.locator('.document-reader-root')).toBeVisible();
-		await expect(page).toHaveURL(new RegExp(`/documents/${documentId}$`));
-		await page.mouse.move(0, 0);
-		if (screenshotDir)
-			await page.screenshot({ path: join(screenshotDir, 'source-blocks-agent-split.png') });
-		await panel.getByRole('link', { name: 'Results section', exact: true }).click();
-		await expect(page).toHaveURL(/source_ref=results/);
-		await expect(panel.getByRole('link', { name: 'Results section', exact: true })).toBeVisible();
-		expect(errors).toEqual([]);
-	});
+	}
 
 	for (const width of [320, 768, 1024, 1440]) {
 		test(`uses a compact conversation title and named Collection at ${width}px`, async ({
@@ -1525,7 +1567,7 @@ test.describe('page interaction audit', () => {
 			await context.evaluate((element) => {
 				element.scrollTop = element.scrollHeight;
 			});
-			await expect(page.getByTestId('pending-source-context')).toBeInViewport();
+			await expect(page.getByTestId('pending-source-attachments')).toBeInViewport();
 			await expectNoHorizontalOverflow(page);
 			if (screenshotDir)
 				await page.screenshot({

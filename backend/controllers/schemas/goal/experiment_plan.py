@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from application.goal.research_plan_contract import ResearchPlanStructure
 
 
 ExperimentPlanStatus = Literal["draft", "ready_for_review", "archived"]
@@ -22,6 +24,7 @@ class ExperimentPlanCreateRequest(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=400)
     content: str = Field(..., min_length=1, max_length=20000)
+    structured_plan: ResearchPlanStructure | None = None
 
 
 class ExperimentPlanUpdateRequest(BaseModel):
@@ -29,9 +32,16 @@ class ExperimentPlanUpdateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(..., min_length=1, max_length=400)
-    content: str = Field(..., min_length=1, max_length=20000)
-    status: ExperimentPlanStatus = "draft"
+    title: str | None = Field(default=None, min_length=1, max_length=400)
+    content: str | None = Field(default=None, min_length=1, max_length=20000)
+    status: ExperimentPlanStatus | None = None
+    structured_plan: ResearchPlanStructure | None = None
+
+    @model_validator(mode="after")
+    def require_one_change(self) -> "ExperimentPlanUpdateRequest":
+        if self.title is None and self.content is None and self.status is None and self.structured_plan is None:
+            raise ValueError("experiment plan PATCH requires at least one field")
+        return self
 
 
 class ExperimentPlanResponse(BaseModel):
@@ -47,6 +57,10 @@ class ExperimentPlanResponse(BaseModel):
     created_by: str | None = None
     created_at: str
     updated_at: str
+    plan_version: int = Field(default=1, ge=1)
+    parent_plan_id: str | None = None
+    structured_plan: dict[str, Any] | None = None
+    updated_by: str | None = None
 
 
 class ExperimentPlanListResponse(BaseModel):

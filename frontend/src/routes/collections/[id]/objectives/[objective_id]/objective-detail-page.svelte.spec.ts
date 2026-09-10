@@ -267,7 +267,7 @@ function installPublishedResponses(
 						title: 'Annealing response of LPBF 316L',
 						source_filename: 'annealing-316l.pdf',
 						doc_type: 'experimental',
-						parsing_warnings: [],
+						profile_warnings: [],
 						confidence: 0.95
 					}
 				],
@@ -307,7 +307,8 @@ function installPublishedResponses(
 }
 
 describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
+		await browserPage.viewport(1280, 900);
 		setPage({
 			params: { id: 'col_123', objective_id: 'obj_1' },
 			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
@@ -513,7 +514,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('正在显示已发布的 v1；重试 v2 失败。'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Evidence extraction failed.')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Evidence analysis did not complete.'))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('模型 model-1')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('模型 model-2')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText(finding.statement).first()).toBeInTheDocument();
@@ -591,6 +594,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 
 		render(Page);
+		await browserPage.getByText('Export results', { exact: true }).click();
 		await browserPage.getByLabelText('标注状态').selectOptions('gold');
 		await browserPage.getByLabelText('数据用途').selectOptions('training_ready');
 		await browserPage.getByRole('button', { name: '导出 JSON' }).click();
@@ -683,10 +687,17 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
+		const coverage = browserPage.getByRole('group', { name: 'Evidence coverage' });
+		await expect.element(coverage).not.toHaveAttribute('open');
 		await expect
-			.element(browserPage.getByRole('heading', { name: '证据覆盖' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('3 条原文记录 · 2 条结果')).toBeInTheDocument();
+			.element(browserPage.getByText('缺少样品状态，不能判断是否可以比较。'))
+			.not.toBeVisible();
+		await expect
+			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
+			.toBeVisible();
+		await browserPage.getByText(/^Evidence coverage/).click();
+		await expect.element(coverage).toHaveAttribute('open');
+		await expect.element(browserPage.getByText('3 source records · 2 results')).toBeVisible();
 		await expect
 			.element(browserPage.getByText('需要补充上下文', { exact: true }))
 			.toBeInTheDocument();
@@ -701,7 +712,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: '查看原文' }))
+			.element(browserPage.getByRole('link', { name: 'Open source' }))
 			.toHaveAttribute(
 				'href',
 				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=gap-1&source_ref=results-7&quote=Yield+strength+increased+after+treatment.&page=7'
@@ -917,6 +928,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 						published_analysis: analysisState('succeeded', 2)
 					})
 				);
+			}
+			if (current.path.endsWith('/objectives/obj_1/analysis/status')) {
+				return jsonResponse(analysisState('succeeded', 2));
 			}
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
 				const version = Number(params.get('analysis_version'));

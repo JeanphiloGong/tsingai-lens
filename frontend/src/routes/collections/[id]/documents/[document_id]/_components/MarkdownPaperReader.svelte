@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
 	import { tick } from 'svelte';
+	import { Download } from '@lucide/svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
 		DocumentMarkdownResponse,
@@ -48,25 +48,24 @@
 	export let activeSourceRef = '';
 	export let activeSourceQuote = '';
 	export let activeSourceSpan: WorkbenchSourceSpan | null = null;
-	export let collectionId = '';
+	export let sourceJumpToken = 0;
+	let readerRoot: HTMLElement;
+	import SourceSelection from './SourceSelection.svelte';
+	import { selectableSource } from './sourceSelection';
+	export let selectedSourceKeys: string[] = [];
+	export let selectionDisabled = false;
+	export let onToggleSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onAskSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onShowPdf: () => void = () => {};
-	$: assistantHref = resolve('/collections/[id]/assistant', { id: collectionId });
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
 	$: title = markdown?.title || markdown?.source_filename || markdown?.document_id || '';
 	$: metadata = [
 		markdown?.source_filename
 			? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}`
-			: '',
-		markdown?.parser ? `${$t('workbench.parserLabel')}: ${markdown.parser}` : '',
-		markdown?.source_map.length
-			? `${$t('workbench.sourceMapLabel')}: ${markdown.source_map.length}`
 			: ''
 	].filter(Boolean);
-	$: selectedEvidenceQuote = cleanSourceText(
-		activeSourceQuote || activeSourceSpan?.quote || activeSourceSpan?.target.quote || ''
-	);
+	$: selectedEvidenceQuote = cleanSourceText(activeSourceQuote);
 	$: activeNodeKey = activeMarkdownNodeKey(
 		nodes,
 		activeSourceRef,
@@ -90,9 +89,11 @@
 				} satisfies DocumentSourceSelection)
 			: null;
 	$: if (activeNodeKey) {
+		sourceJumpToken;
 		void scrollActiveNodeIntoView(activeNodeKey);
 	}
 	$: if (activeFallback) {
+		sourceJumpToken;
 		void scrollActiveElementIntoView('[data-testid="markdown-active-source-fallback"]');
 	}
 
@@ -520,10 +521,6 @@
 			.join('\n');
 	}
 
-	function sourceActionTestId(selection: DocumentSourceSelection) {
-		return `ask-research-agent-source-${selection.source_ref.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-	}
-
 	function normalizeMatchKey(value: string | null | undefined) {
 		return cleanSourceText(value ?? '')
 			.replace(/\s+/g, ' ')
@@ -548,7 +545,7 @@
 		await tick();
 		for (let attempt = 0; attempt < 3; attempt += 1) {
 			await nextAnimationFrame();
-			const target = document.querySelector<HTMLElement>(selector);
+			const target = readerRoot?.querySelector<HTMLElement>(selector);
 			if (!target) continue;
 			target.scrollIntoView({ block: 'center', behavior: 'auto' });
 		}
@@ -559,10 +556,17 @@
 	}
 </script>
 
-<section class="markdown-reader" aria-label={$t('workbench.markdownReaderLabel')}>
+<section
+	class="markdown-reader"
+	bind:this={readerRoot}
+	aria-label={$t('workbench.markdownReaderLabel')}
+>
 	<header class="markdown-reader__header">
 		<div>
-			<h1>{title}</h1>
+			{#if !nodes.some((node) => node.type === 'heading' && node.level === 1 && node.text === title)}<h1
+				>
+					{title}
+				</h1>{/if}
 			{#if metadata.length}
 				<div class="markdown-reader__meta">
 					{#each metadata as item, index}
@@ -575,9 +579,12 @@
 			{/if}
 		</div>
 		<div class="markdown-reader__actions">
-			<button type="button" on:click={onShowPdf}>{$t('workbench.pdfPreview')}</button>
 			{#if sourceFileUrl}
-				<a href={sourceFileUrl}>{$t('workbench.downloadSource')}</a>
+				<a
+					href={sourceFileUrl}
+					aria-label={$t('workbench.downloadSource')}
+					title={$t('workbench.downloadSource')}><Download size={17} /></a
+				>
 			{/if}
 		</div>
 	</header>
@@ -586,6 +593,11 @@
 		{#if activeFallback}
 			<aside
 				class="markdown-source-fallback"
+				use:selectableSource={{
+					selection: activeFallbackSelection,
+					disabled: selectionDisabled,
+					onToggle: onToggleSource
+				}}
 				data-testid="markdown-active-source-fallback"
 				aria-label={$t('workbench.selectedSourceBlockLabel')}
 				aria-current="location"
@@ -605,9 +617,13 @@
 					</div>
 					<div class="markdown-source-fallback__actions">
 						{#if activeFallbackSelection}
-							<a href={assistantHref} on:click={() => onAskSource(activeFallbackSelection)}
-								>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								selection={activeFallbackSelection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 						<button type="button" on:click={onShowPdf}>{$t('workbench.viewPdf')}</button>
 					</div>
@@ -662,6 +678,11 @@
 				{:else if node.type === 'paragraph'}
 					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<p
+						use:selectableSource={{
+							selection,
+							disabled: selectionDisabled,
+							onToggle: onToggleSource
+						}}
 						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
@@ -676,18 +697,24 @@
 						{/if}
 						{node.text}
 						{#if selection}
-							<a
-								class="source-agent-action"
-								href={assistantHref}
-								data-testid={sourceActionTestId(selection)}
-								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								{selection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 					</p>
 				{:else if node.type === 'image'}
 					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<figure
 						class="markdown-figure"
+						use:selectableSource={{
+							selection,
+							disabled: selectionDisabled,
+							onToggle: onToggleSource
+						}}
 						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
@@ -696,12 +723,13 @@
 					>
 						<img src={node.src} alt={node.alt} loading="lazy" />
 						{#if selection}
-							<a
-								class="source-agent-action"
-								href={assistantHref}
-								data-testid={sourceActionTestId(selection)}
-								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								{selection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 					</figure>
 				{:else if node.type === 'list'}
@@ -710,6 +738,11 @@
 							{@const itemKey = markdownListItemKey(node, index, item, itemIndex)}
 							{@const selection = sourceSelection(item.sourceMap, item.text)}
 							<li
+								use:selectableSource={{
+									selection,
+									disabled: selectionDisabled,
+									onToggle: onToggleSource
+								}}
 								class:markdown-node--selectable={Boolean(selection)}
 								class:markdown-node--active={activeNodeKey === itemKey}
 								aria-current={activeNodeKey === itemKey ? 'location' : undefined}
@@ -727,12 +760,13 @@
 								{/if}
 								{item.text}
 								{#if selection}
-									<a
-										class="source-agent-action"
-										href={assistantHref}
-										data-testid={sourceActionTestId(selection)}
-										on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-									>
+									<SourceSelection
+										{selection}
+										selectedKeys={selectedSourceKeys}
+										disabled={selectionDisabled}
+										onToggle={onToggleSource}
+										onAsk={onAskSource}
+									/>
 								{/if}
 							</li>
 						{/each}
@@ -741,6 +775,11 @@
 					{@const selection = sourceSelection(node.sourceMap, sourceQuote(node))}
 					<div
 						class="markdown-table-wrapper"
+						use:selectableSource={{
+							selection,
+							disabled: selectionDisabled,
+							onToggle: onToggleSource
+						}}
 						class:markdown-node--selectable={Boolean(selection)}
 						class:markdown-node--active={activeNodeKey === nodeKey}
 						aria-current={activeNodeKey === nodeKey ? 'location' : undefined}
@@ -772,12 +811,13 @@
 							</tbody>
 						</table>
 						{#if selection}
-							<a
-								class="source-agent-action"
-								href={assistantHref}
-								data-testid={sourceActionTestId(selection)}
-								on:click={() => onAskSource(selection)}>{$t('workbench.askResearchAgent')}</a
-							>
+							<SourceSelection
+								{selection}
+								selectedKeys={selectedSourceKeys}
+								disabled={selectionDisabled}
+								onToggle={onToggleSource}
+								onAsk={onAskSource}
+							/>
 						{/if}
 					</div>
 				{/if}
@@ -805,12 +845,17 @@
 
 	.markdown-reader__header {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		padding: 18px 22px;
+		padding: 8px 16px;
 		border-bottom: 1px solid #e2e8f0;
 		background: #ffffff;
+	}
+
+	.markdown-reader__header > div:first-child {
+		min-width: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.markdown-reader__header h1 {
@@ -824,7 +869,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
-		margin-top: 6px;
+		margin-top: 0;
 		color: #64748b;
 		font-size: 12px;
 		line-height: 18px;
@@ -832,21 +877,20 @@
 
 	.markdown-reader__actions {
 		display: flex;
-		flex-wrap: wrap;
+		flex-shrink: 0;
 		justify-content: flex-end;
 		gap: 8px;
 	}
 
-	.markdown-reader__actions button,
 	.markdown-reader__actions a {
 		display: inline-flex;
 		min-height: 34px;
 		align-items: center;
 		padding: 0 12px;
-		border: 1px solid #dbeafe;
-		border-radius: 8px;
-		background: #eff6ff;
-		color: #1d4ed8;
+		border: 0;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--text-secondary);
 		font-size: 13px;
 		font-weight: 700;
 		text-decoration: none;
@@ -856,7 +900,7 @@
 	.markdown-reader__body {
 		min-width: 0;
 		overflow: auto;
-		padding: 28px clamp(22px, 5vw, 72px) 56px;
+		padding: 24px 28px 56px;
 		color: #1e293b;
 	}
 
@@ -913,40 +957,6 @@
 
 	.markdown-node--selectable {
 		position: relative;
-	}
-
-	.source-agent-action {
-		display: inline-flex;
-		min-height: 28px;
-		align-items: center;
-		margin-left: 10px;
-		padding: 0 9px;
-		border: 1px solid #bfdbfe;
-		border-radius: 6px;
-		background: #ffffff;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-		text-decoration: none;
-		vertical-align: middle;
-	}
-
-	@media (hover: hover) {
-		.source-agent-action {
-			opacity: 0;
-		}
-
-		.markdown-node--selectable:hover > .source-agent-action,
-		.source-agent-action:focus-visible {
-			opacity: 1;
-		}
-	}
-
-	.source-agent-action:hover,
-	.source-agent-action:focus-visible {
-		border-color: #2563eb;
-		background: #eff6ff;
 	}
 
 	.markdown-reader__body .markdown-node--active {
@@ -1014,8 +1024,7 @@
 		gap: 8px;
 	}
 
-	.markdown-source-fallback__header button,
-	.markdown-source-fallback__header a {
+	.markdown-source-fallback__header button {
 		display: inline-flex;
 		min-height: 32px;
 		flex: 0 0 auto;
@@ -1137,15 +1146,5 @@
 	.markdown-reader__empty h2,
 	.markdown-reader__empty p {
 		margin: 0;
-	}
-
-	@media (max-width: 720px) {
-		.markdown-reader__header {
-			display: grid;
-		}
-
-		.markdown-reader__actions {
-			justify-content: flex-start;
-		}
 	}
 </style>

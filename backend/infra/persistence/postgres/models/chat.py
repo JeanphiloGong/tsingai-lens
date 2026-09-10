@@ -45,6 +45,12 @@ class ChatSessionRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    root_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    parent_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    fork_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    fork_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fork_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_snapshot: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
 
 
 class ChatMessageRow(Base):
@@ -69,11 +75,6 @@ class ChatMessageRow(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tool_call_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    tool_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    tool_arguments: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT,
-        nullable=True,
-    )
     source_contexts: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_DOCUMENT,
         nullable=False,
@@ -81,6 +82,41 @@ class ChatMessageRow(Base):
         server_default="[]",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ChatMessageFeedbackRow(Base):
+    __tablename__ = "chat_message_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "message_id", name="uq_chat_message_feedback_user_message"),
+        CheckConstraint("rating IN ('helpful', 'not_helpful')", name="rating_valid"),
+        CheckConstraint(
+            "reason IS NULL OR (rating = 'not_helpful' AND "
+            "reason IN ('incorrect', 'incomplete', 'unclear', 'other'))",
+            name="reason_valid",
+        ),
+        CheckConstraint("comment IS NULL OR length(comment) <= 2000", name="comment_length"),
+        CheckConstraint("length(response_digest) = 64", name="digest_length"),
+        CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
+    )
+
+    feedback_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    message_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("auth_users.user_id", ondelete="CASCADE"), nullable=False,
+    )
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ChatToolCallRow(Base):
@@ -97,8 +133,10 @@ class ChatToolCallRow(Base):
         ),
         UniqueConstraint(
             "assistant_message_id",
-            name="uq_chat_tool_calls_assistant_message",
+            "position",
+            name="uq_chat_tool_calls_assistant_position",
         ),
+        CheckConstraint("position >= 0", name="position_non_negative"),
     )
 
     tool_call_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -114,6 +152,7 @@ class ChatToolCallRow(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
     arguments: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     arguments_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     risk: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -136,35 +175,23 @@ class ChatToolCallRow(Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-
-
-class ChatToolResultRow(Base):
-    __tablename__ = "chat_tool_results"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('succeeded', 'queued', 'failed')",
-            name="status_valid",
-        ),
+    result_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    result_data: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
     )
-
-    tool_call_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("chat_tool_calls.tool_call_id", ondelete="CASCADE"),
-        primary_key=True,
+    result_resource_refs: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    data: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    resource_refs: Mapped[list[dict[str, Any]]] = mapped_column(
-        _JSON_DOCUMENT, nullable=False
+    result_warnings: Mapped[list[str] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
     )
-    warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    result_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 __all__ = [
+    "ChatMessageFeedbackRow",
     "ChatMessageRow",
     "ChatSessionRow",
     "ChatToolCallRow",
-    "ChatToolResultRow",
 ]

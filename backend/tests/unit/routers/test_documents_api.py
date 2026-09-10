@@ -11,11 +11,15 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from tests.support.collection_service import build_test_collection_service
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
+)
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
+from application.source.source_archive_service import SourceArchiveService
 from controllers.core import documents as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
@@ -48,6 +52,7 @@ async def _store_document_profiles(
 ) -> None:
     for row in profiles:
         await document_profile_service.document_profile_repository.replace(
+            collection_id,
             DocumentProfile.from_mapping(row)
         )
 
@@ -88,6 +93,10 @@ def _document_request(document_services):
         app=SimpleNamespace(
             state=SimpleNamespace(
                 collection_service=collection_service,
+                source_archive_service=SourceArchiveService(
+                    repository=collection_service.repository,
+                    object_store=collection_service.object_store,
+                ),
                 document_profile_service=document_profile_service,
                 document_markdown_service=document_markdown_service,
             )
@@ -149,29 +158,23 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(do
         [
             {
                 "document_id": "paper-1",
-                "collection_id": collection_id,
                 "title": "Laser paper one",
-                "source_filename": "one.pdf",
                 "doc_type": "experimental",
-                "parsing_warnings": ["classification_uncertain"],
+                "profile_warnings": ["classification_uncertain"],
                 "confidence": 0.91,
             },
             {
                 "document_id": "paper-2",
-                "collection_id": collection_id,
                 "title": "Laser paper two",
-                "source_filename": "two.pdf",
                 "doc_type": "experimental",
-                "parsing_warnings": [],
+                "profile_warnings": [],
                 "confidence": 0.89,
             },
             {
                 "document_id": "paper-3",
-                "collection_id": collection_id,
                 "title": "Unrelated review",
-                "source_filename": "review.pdf",
                 "doc_type": "review",
-                "parsing_warnings": ["insufficient_content"],
+                "profile_warnings": ["insufficient_content"],
                 "confidence": 0.8,
             },
         ],
@@ -208,11 +211,9 @@ async def test_document_profile_route_returns_single_profile(document_services):
         [
             {
                 "document_id": "paper-1",
-                "collection_id": collection_id,
                 "title": "Single Paper",
-                "source_filename": "paper.txt",
                 "doc_type": "experimental",
-                "parsing_warnings": [],
+                "profile_warnings": [],
                 "confidence": 0.91,
             }
         ],
@@ -224,7 +225,6 @@ async def test_document_profile_route_returns_single_profile(document_services):
         )
 
     assert payload.document_id == "paper-1"
-    assert payload.collection_id == collection_id
     assert payload.title == "Single Paper"
 
 
@@ -246,11 +246,9 @@ async def test_document_profile_route_normalizes_invalid_profile_status_values(
         [
             {
                 "document_id": "paper-1",
-                "collection_id": collection_id,
                 "title": "Single Paper",
-                "source_filename": "paper.txt",
                 "doc_type": "research_article",
-                "parsing_warnings": [],
+                "profile_warnings": [],
                 "confidence": 0.91,
             }
         ],
@@ -309,11 +307,9 @@ async def test_document_content_route_uses_stable_block_locator(
         [
             {
                 "document_id": "paper-1",
-                "collection_id": collection_id,
                 "title": "Locator Paper",
-                "source_filename": "paper-1.pdf",
                 "doc_type": "experimental",
-                "parsing_warnings": [],
+                "profile_warnings": [],
                 "confidence": 0.91,
             }
         ],
@@ -440,7 +436,9 @@ async def test_document_source_route_streams_current_collection_document(documen
     record = await collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
     payload = b"%PDF-1.4\nfixture\n"
-    documents = await collection_service.import_normalized_batch(
+    documents = await build_test_source_import_service(
+        collection_service
+    ).import_normalized_batch(
         collection_id,
         NormalizedImportBatch(
             documents=(
@@ -471,66 +469,6 @@ async def test_document_source_route_streams_current_collection_document(documen
     assert response.body == payload
     assert response.media_type == "application/pdf"
     assert response.headers["content-disposition"].startswith("inline;")
-
-
-async def test_document_source_route_resolves_profile_document_id_by_source_filename(
-    document_services,
-):
-    (
-        collection_service,
-        document_profile_service,
-        _markdown_service,
-    ) = document_services
-    record = await collection_service.create_collection(
-        name="Profile Source File Collection"
-    )
-    collection_id = record["collection_id"]
-    payload = b"%PDF-1.4\nprofile fixture\n"
-    await _store_document_profiles(
-        document_profile_service,
-        collection_id,
-        [
-            {
-                "document_id": "profile-hash-doc",
-                "collection_id": collection_id,
-                "title": "Profile Paper",
-                "source_filename": "paper.pdf",
-                "doc_type": "experimental",
-                "parsing_warnings": [],
-                "confidence": 0.91,
-            }
-        ],
-    )
-    await collection_service.import_normalized_batch(
-        collection_id,
-        NormalizedImportBatch(
-            documents=(
-                NormalizedImportDocument(
-                    source_document_id="srcdoc-from-upload",
-                    origin_channel="upload",
-                    original_filename="paper.pdf",
-                    stored_filename="stored-paper.pdf",
-                    media_type="application/pdf",
-                    storage_payload_base64=base64.b64encode(payload).decode("ascii"),
-                ),
-            ),
-            text_units=(),
-            source_metadata=NormalizedImportSourceMetadata(
-                channel="upload",
-                adapter_name="upload",
-                ingested_at="2026-07-19T00:00:00+00:00",
-            ),
-        ),
-    )
-
-    response = await documents_controller.get_collection_document_source(
-            collection_id,
-            "profile-hash-doc",
-            _document_request(document_services),
-        )
-
-    assert response.body == payload
-    assert response.media_type == "application/pdf"
 
 
 async def test_document_source_route_returns_404_when_document_is_missing(

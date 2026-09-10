@@ -71,8 +71,7 @@ async function mockPaperReaderApis(
 						content: payload.message,
 						created_at: '2026-08-31T00:00:01+00:00',
 						tool_call_id: null,
-						tool_name: null,
-						tool_arguments: null,
+						tool_calls: [],
 						tool_result: null,
 						source_contexts: sourceContexts
 					},
@@ -83,8 +82,7 @@ async function mockPaperReaderApis(
 						content: 'This passage reports a measured conductivity result.',
 						created_at: '2026-08-31T00:00:02+00:00',
 						tool_call_id: null,
-						tool_name: null,
-						tool_arguments: null,
+						tool_calls: [],
 						tool_result: null,
 						source_contexts: []
 					}
@@ -283,7 +281,7 @@ test('a selected document Source reaches the same Collection Agent without a Cor
 			{
 				collection_id: collectionId,
 				document_id: documentId,
-				source_kind: 'paragraph',
+				source_kind: 'text_window',
 				source_ref: 'results',
 				page: 3,
 				quote: 'Conductivity improved to 12 mS/cm under EIS.'

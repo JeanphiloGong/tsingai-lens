@@ -59,7 +59,10 @@ async def test_memory_collection_repository_round_trips_current_aggregate() -> N
         updated_at=document.created_at,
         documents=(document,),
     )
-    assert await repository.list_collections("user_demo") == (stored,)
+    summary, = await repository.list_collections("user_demo")
+    assert summary.collection_id == stored.collection_id
+    assert summary.documents[0].document_id == document.document_id
+    assert not hasattr(summary.documents[0], "storage_key")
     assert await repository.list_collections("user_other") == ()
 
 

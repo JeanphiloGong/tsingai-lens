@@ -7,7 +7,8 @@ from typing import Any, Mapping
 
 from domain.core import Finding, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
-from domain.ports import FindingReviewRepository, ObjectiveRepository
+from application.repositories.finding_review_repository import FindingReviewRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 
 DATASET_SCHEMA_VERSION = "objective_finding_dataset.v2"

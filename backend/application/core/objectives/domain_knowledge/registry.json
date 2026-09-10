@@ -1,0 +1,72 @@
+{
+  "version": "objective-domain-knowledge.v2",
+  "purpose": "recall_only",
+  "missing_values": [
+    "",
+    "missing",
+    "n/a",
+    "none",
+    "not available",
+    "not reported",
+    "not specified",
+    "null",
+    "uncertain",
+    "unknown",
+    "不详",
+    "未知",
+    "未报告",
+    "未说明"
+  ],
+  "materials": [
+    {
+      "id": "ti-6al-4v",
+      "canonical": "Ti-6Al-4V",
+      "specificity": "exact",
+      "aliases": [
+        "ti-6al-4v",
+        "ti6al4v",
+        "tial6v4",
+        "tial6v4 alloy",
+        "tc4"
+      ]
+    },
+    {
+      "id": "316l",
+      "canonical": "316L stainless steel",
+      "specificity": "exact",
+      "aliases": [
+        "316l",
+        "316 l",
+        "ss316l",
+        "ss 316l",
+        "aisi 316l",
+        "316l stainless steel",
+        "stainless steel 316l"
+      ]
+    },
+    {
+      "id": "17-4ph",
+      "canonical": "17-4PH stainless steel",
+      "specificity": "exact",
+      "aliases": [
+        "17-4ph",
+        "17 4ph",
+        "17-4ph stainless steel"
+      ]
+    },
+    {
+      "id": "titanium-alloy",
+      "canonical": "titanium alloy",
+      "specificity": "broad",
+      "aliases": ["titanium alloy"],
+      "covers": ["ti-6al-4v"]
+    },
+    {
+      "id": "stainless-steel",
+      "canonical": "stainless steel",
+      "specificity": "broad",
+      "aliases": ["stainless steel"],
+      "covers": ["316l", "17-4ph"]
+    }
+  ]
+}

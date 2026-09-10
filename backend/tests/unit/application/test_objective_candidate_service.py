@@ -12,6 +12,7 @@ from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from domain.core import PaperResearchMap, PreparedDocumentInput, ResearchObjective
+from domain.core.research_objective import PaperResearchRelationship, PaperResearchScope
 
 
 class _GroupingExtractor:
@@ -91,6 +92,30 @@ def test_relationship_groups_preserve_complete_study_relationship_records():
     ]
 
 
+def test_grouping_uses_existing_domain_objects_without_reparsing(monkeypatch):
+    maps = tuple(
+        _paper_map(
+            document_id=f"paper-{index}",
+            relationship_id=f"relationship-{index}",
+            material_scope=("Ti-6Al-4V",),
+        )
+        for index in range(6)
+    )
+
+    def reject_reparse(*_args, **_kwargs):
+        raise AssertionError("Grouping must use the existing typed research objects")
+
+    monkeypatch.setattr(PaperResearchScope, "from_mapping", reject_reparse)
+    monkeypatch.setattr(PaperResearchRelationship, "from_mapping", reject_reparse)
+
+    groups = ObjectiveCandidateService()._build_relationship_groups(maps)
+
+    assert len(groups) == 1
+    assert [item["relationship"]["relationship_id"] for item in groups[0]] == [
+        f"relationship-{index}" for index in range(6)
+    ]
+
+
 def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
     skims = (
         _paper_map(
@@ -128,6 +153,31 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
     ]
 
 
+def test_material_context_conflicts_are_strict_but_unknown_labels_remain_reviewable():
+    service = ObjectiveCandidateService()
+
+    assert service._context_collection_compatibility(
+        ("nickel foam",),
+        ("nickel alloy",),
+    ).value == "possible"
+    assert service._context_collection_compatibility(
+        ("titanium alloy",),
+        ("Ti-6Al-4V",),
+    ).value == "possible"
+    assert service._context_collection_compatibility(
+        ("titanium alloy",),
+        ("stainless steel",),
+    ).value == "possible"
+    assert service._context_collection_compatibility(
+        ("316L stainless steel",),
+        ("17-4PH stainless steel",),
+    ).value == "incompatible"
+    assert service._context_collection_compatibility(
+        ("316L stainless steel", "17-4PH stainless steel"),
+        ("316L stainless steel",),
+    ).value == "possible"
+
+
 def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     skims = (
         _paper_map(
@@ -147,6 +197,27 @@ def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     )
 
     assert groups == [("relationship-known", "relationship-missing")]
+
+
+def test_broad_material_is_not_treated_as_missing_or_rewritten_to_one_grade():
+    paper_maps = (
+        _paper_map(
+            document_id="paper-broad",
+            relationship_id="relationship-broad",
+            material_scope=("titanium alloy",),
+        ),
+        _paper_map(
+            document_id="paper-specific",
+            relationship_id="relationship-specific",
+            material_scope=("Ti-6Al-4V",),
+        ),
+    )
+
+    groups = _group_relationship_ids(
+        ObjectiveCandidateService()._build_relationship_groups(paper_maps)
+    )
+
+    assert groups == [("relationship-broad",), ("relationship-specific",)]
 
 
 def test_missing_material_and_one_known_anchor_build_cross_paper_objective():

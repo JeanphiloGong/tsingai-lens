@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import replace
+from hashlib import sha256
+import json
+import re
 from typing import Any
 
 from application.core.objectives import property_matching
@@ -16,6 +20,9 @@ from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     _objective_missing_context_fields,
 )
+from application.core.objectives.analysis.source_validation import (
+    _objective_source_explicitly_links_variable_to_result,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import (
     ObjectiveAnalysis,
@@ -29,7 +36,7 @@ from domain.source import SourceDocumentTree
 
 # Selected Source coverage replaces framing-wide mandatory coverage. Rebuild
 # persisted document checkpoints so reruns cannot replay the old disposition.
-OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v3"
+OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v11"
 
 
 _CONTRIBUTION_SUMMARY_CHARS = 320
@@ -116,6 +123,7 @@ def materialize_evidence(
             evidence_records=evidence_records,
             inspection_source_refs=inspection_source_refs,
             document_trees_by_document_id=document_trees_by_document_id or {},
+            emit_parity_snapshot=True,
         )
     target_axes = property_matching.objective_outcomes(objective)
     record_analysis_diagnostic(
@@ -202,6 +210,116 @@ def _source_identity_records(
     ]
 
 
+def _researcher_decision_packet_audit(
+    evidence_records: tuple[ObjectiveEvidence, ...],
+) -> dict[str, Any]:
+    """Bind the exact downstream Evidence packet without logging paper text."""
+
+    packet_records = [evidence.to_record() for evidence in evidence_records]
+    encoded_packet = json.dumps(
+        packet_records,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    ordered_source_refs: list[dict[str, Any]] = []
+    seen_locators: set[str] = set()
+    locator_fields = (
+        "page",
+        "row_index",
+        "col_index",
+        "start_row",
+        "end_row",
+        "start_col",
+        "end_col",
+        "cell_id",
+    )
+
+    def add_locator(locator: Mapping[str, Any]) -> None:
+        source_kind, source_ref = _source_identity(
+            locator.get("source_kind"),
+            locator.get("source_ref"),
+        )
+        if not source_ref:
+            return
+        identity = {
+            "source_kind": source_kind,
+            "source_ref": source_ref,
+            **{
+                field: locator[field]
+                for field in locator_fields
+                if locator.get(field) not in (None, "")
+            },
+        }
+        key = json.dumps(
+            _identity_value(identity),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        if key in seen_locators:
+            return
+        seen_locators.add(key)
+        ordered_source_refs.append(identity)
+
+    for evidence in evidence_records:
+        primary_kind, primary_ref = _source_identity(
+            evidence.source_kind,
+            evidence.source_ref,
+        )
+        primary_locators = tuple(
+            locator
+            for locator in evidence.related_source_refs
+            if _source_identity(
+                locator.get("source_kind"),
+                locator.get("source_ref"),
+            )
+            == (primary_kind, primary_ref)
+            and any(
+                locator.get(field) not in (None, "")
+                for field in locator_fields[1:]
+            )
+        )
+        if primary_locators:
+            for locator in primary_locators:
+                add_locator(locator)
+        else:
+            add_locator(
+                {
+                    "source_kind": primary_kind,
+                    "source_ref": primary_ref,
+                    "page": evidence.page_numbers[0]
+                    if evidence.page_numbers
+                    else None,
+                }
+            )
+        for locator in evidence.related_source_refs:
+            if locator in primary_locators:
+                continue
+            add_locator(locator)
+
+    visible_sources = ordered_source_refs[:_SOURCE_COVERAGE_REF_LIMIT]
+    visible_evidence_ids = [
+        evidence.evidence_id
+        for evidence in evidence_records[:_SOURCE_COVERAGE_REF_LIMIT]
+    ]
+    return {
+        "decision_packet_sha256": sha256(encoded_packet).hexdigest(),
+        "decision_packet_evidence_count": len(evidence_records),
+        "decision_packet_evidence_ids": visible_evidence_ids,
+        "decision_packet_evidence_ids_truncated": (
+            len(evidence_records) > len(visible_evidence_ids)
+        ),
+        "decision_packet_source_count": len(ordered_source_refs),
+        "decision_packet_source_refs": visible_sources,
+        "decision_packet_source_refs_truncated": (
+            len(ordered_source_refs) > len(visible_sources)
+        ),
+    }
+
+
 def _objective_result_missing_field_families(
     *,
     objective: ResearchObjective,
@@ -222,6 +340,7 @@ def _record_source_coverage_ledger(
     evidence_records: tuple[ObjectiveEvidence, ...],
     inspection_source_refs: Mapping[str, set[tuple[str, str]]] | None = None,
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
+    emit_parity_snapshot: bool = False,
 ) -> None:
     """Record post-binding Source coverage without treating candidates as facts.
 
@@ -238,6 +357,7 @@ def _record_source_coverage_ledger(
 
     document_trees_by_document_id = document_trees_by_document_id or {}
     inspection_source_refs = inspection_source_refs or {}
+    ledger_records: list[dict[str, Any]] = []
     for frame in frames:
         document_evidence = tuple(evidence_by_document.get(frame.document_id, ()))
         frame_source_scope = _frame_source_scope_refs(
@@ -315,61 +435,196 @@ def _record_source_coverage_ledger(
         closure_complete = bool(result_evidence) and not (
             missing_fields or uninspected_sources or critical_failed_evidence
         )
-        record_analysis_diagnostic(
+        failed_source_refs = {
+            _source_identity(item.source_kind, item.source_ref)
+            for item in failed_evidence
+        }
+        ledger = {
+            "trace_type": "objective_source_coverage_ledger",
+            "collection_id": collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": analysis.analysis_version,
+            "document_id": frame.document_id,
+            "paper_role": frame.paper_role,
+            "candidate_source_count": len(candidate_sources),
+            "relevant_source_count": len(relevant_sources),
+            "routed_source_count": len(routed_sources),
+            "inspected_source_count": len(inspected_sources),
+            "result_source_count": len(
+                {
+                    _source_identity(item.source_kind, item.source_ref)
+                    for item in result_evidence
+                }
+            ),
+            "context_source_count": len(
+                {
+                    _source_identity(item.source_kind, item.source_ref)
+                    for item in context_evidence
+                }
+            ),
+            "technical_failure_count": len(failed_evidence),
+            "uninspected_source_count": len(uninspected_sources),
+            "result_count": len(result_evidence),
+            "source_grounded_result_count": source_grounded_result_count,
+            "closed_result_count": closed_result_count,
+            "incomplete_result_count": len(result_evidence) - closed_result_count,
+            "missing_field_families": missing_fields,
+            "coverage_complete": bool(routed_sources) and not uninspected_sources,
+            "closure_complete": closure_complete,
+            "closure_basis": "post_materialization_same_paper_binding",
+            "result_source_refs": _source_identity_records(
+                {
+                    _source_identity(item.source_kind, item.source_ref)
+                    for item in result_evidence
+                }
+            ),
+            "context_source_refs": _source_identity_records(
+                {
+                    _source_identity(item.source_kind, item.source_ref)
+                    for item in context_evidence
+                }
+            ),
+            "uninspected_source_refs": _source_identity_records(uninspected_sources),
+            "candidate_source_refs": _source_identity_records(candidate_sources),
+            "relevant_source_refs": _source_identity_records(relevant_sources),
+            "inspected_source_refs": _source_identity_records(inspected_sources),
+            "technical_failure_source_refs": _source_identity_records(
+                failed_source_refs
+            ),
+            "technical_failure_details": [
+                {
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "reason": item.failure_reason,
+                }
+                for item in failed_evidence
+            ],
+            **_researcher_decision_packet_audit(document_evidence),
+        }
+        record_analysis_diagnostic(ledger)
+        ledger_records.append(ledger)
+    if emit_parity_snapshot:
+        _record_researcher_information_parity_snapshot(
+            collection_id=collection_id,
+            analysis=analysis,
+            objective=objective,
+            ledger_records=tuple(ledger_records),
+        )
+
+
+def _record_researcher_information_parity_snapshot(
+    *,
+    collection_id: str,
+    analysis: ObjectiveAnalysis,
+    objective: ResearchObjective,
+    ledger_records: tuple[Mapping[str, Any], ...],
+) -> None:
+    """Summarize whether the run exposed the context a researcher needs.
+
+    This is deliberately an internal audit record.  Candidate Sources are
+    navigation inputs, inspected Sources are the actual reading trajectory,
+    and closure is only true after grounded result binding.  The snapshot
+    makes those distinctions explicit without changing a scientific result or
+    promoting a technical failure to a paper conclusion.
+    """
+
+    papers: list[dict[str, Any]] = []
+    for ledger in ledger_records:
+        missing_fields = {
+            str(value).strip()
+            for value in ledger.get("missing_field_families") or ()
+            if str(value).strip()
+        }
+        result_count = int(ledger.get("result_count") or 0)
+        technical_failure_count = int(ledger.get("technical_failure_count") or 0)
+        closure_complete = bool(ledger.get("closure_complete"))
+        if technical_failure_count:
+            disposition = "extraction_failed"
+        elif not result_count:
+            disposition = "no_grounded_evidence"
+        elif missing_fields or not closure_complete:
+            disposition = "needs_context"
+        elif not bool(ledger.get("coverage_complete")):
+            disposition = "needs_context"
+        else:
+            disposition = "decision_ready"
+
+        field_coverage = {
+            "material": "material" not in missing_fields and result_count > 0,
+            "variables": "variable" not in missing_fields and result_count > 0,
+            "comparison": "comparison" not in missing_fields and result_count > 0,
+            "outcome": result_count > 0,
+            "process": "process" not in missing_fields and result_count > 0,
+            "sample": "sample" not in missing_fields and result_count > 0,
+            "test": "test" not in missing_fields and result_count > 0,
+        }
+        technical_failures = [
+            dict(value)
+            for value in ledger.get("technical_failure_details") or ()
+            if isinstance(value, Mapping)
+            and str(value.get("source_ref") or "").strip()
+        ]
+        packet_audit = {
+            key: ledger[key]
+            for key in (
+                "decision_packet_sha256",
+                "decision_packet_evidence_count",
+                "decision_packet_evidence_ids",
+                "decision_packet_evidence_ids_truncated",
+                "decision_packet_source_count",
+                "decision_packet_source_refs",
+                "decision_packet_source_refs_truncated",
+            )
+            if key in ledger
+        }
+        papers.append(
             {
-                "trace_type": "objective_source_coverage_ledger",
-                "collection_id": collection_id,
-                "objective_id": objective.objective_id,
-                "analysis_version": analysis.analysis_version,
-                "document_id": frame.document_id,
-                "paper_role": frame.paper_role,
-                "candidate_source_count": len(candidate_sources),
-                "relevant_source_count": len(relevant_sources),
-                "routed_source_count": len(routed_sources),
-                "inspected_source_count": len(inspected_sources),
-                "result_source_count": len(
-                    {
-                        _source_identity(item.source_kind, item.source_ref)
-                        for item in result_evidence
-                    }
+                "document_id": str(ledger.get("document_id") or ""),
+                "paper_role": str(ledger.get("paper_role") or ""),
+                "visible_source_refs": list(ledger.get("candidate_source_refs") or ()),
+                "inspected_source_refs": list(ledger.get("inspected_source_refs") or ()),
+                "uninspected_candidate_refs": list(
+                    ledger.get("uninspected_source_refs") or ()
                 ),
-                "context_source_count": len(
-                    {
-                        _source_identity(item.source_kind, item.source_ref)
-                        for item in context_evidence
-                    }
-                ),
-                "technical_failure_count": len(failed_evidence),
-                "uninspected_source_count": len(uninspected_sources),
-                "result_count": len(result_evidence),
-                "source_grounded_result_count": source_grounded_result_count,
-                "closed_result_count": closed_result_count,
-                "incomplete_result_count": len(result_evidence) - closed_result_count,
-                "missing_field_families": missing_fields,
-                "coverage_complete": bool(routed_sources) and not uninspected_sources,
+                "field_coverage": field_coverage,
+                "missing_field_families": sorted(missing_fields),
+                "technical_failures": technical_failures,
+                "result_count": result_count,
+                "closed_result_count": int(ledger.get("closed_result_count") or 0),
                 "closure_complete": closure_complete,
-                "closure_basis": "post_materialization_same_paper_binding",
-                "result_source_refs": _source_identity_records(
-                    {
-                        _source_identity(item.source_kind, item.source_ref)
-                        for item in result_evidence
-                    }
-                ),
-                "context_source_refs": _source_identity_records(
-                    {
-                        _source_identity(item.source_kind, item.source_ref)
-                        for item in context_evidence
-                    }
-                ),
-                "uninspected_source_refs": _source_identity_records(uninspected_sources),
-                "technical_failure_source_refs": _source_identity_records(
-                    {
-                        _source_identity(item.source_kind, item.source_ref)
-                        for item in failed_evidence
-                    }
-                ),
+                "final_disposition": disposition,
+                **packet_audit,
             }
         )
+
+    has_decision_ready = any(item["final_disposition"] == "decision_ready" for item in papers)
+    has_grounded_result = any(int(item["result_count"]) > 0 for item in papers)
+    has_technical_failure = any(item["technical_failures"] for item in papers)
+    if has_decision_ready:
+        final_disposition = "decision_ready"
+    elif has_grounded_result:
+        final_disposition = "needs_context"
+    elif has_technical_failure:
+        final_disposition = "extraction_failed"
+    else:
+        final_disposition = "no_grounded_evidence"
+
+    record_analysis_diagnostic(
+        {
+            "trace_type": "researcher_information_parity",
+            "collection_id": collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": analysis.analysis_version,
+            "objective": objective.question,
+            "papers": papers,
+            "paper_count": len(papers),
+            "final_disposition": final_disposition,
+            "scientific_conclusion_allowed": final_disposition == "decision_ready",
+            "technical_failure_count": sum(
+                len(item["technical_failures"]) for item in papers
+            ),
+        }
+    )
 
 
 def _record_material_scope_exclusions(
@@ -520,6 +775,253 @@ def _objective_evidence_matches_target_property(
         unit.reported_result.outcome,
         target_axes,
     )
+
+
+def rebind_persisted_evidence(
+    *,
+    collection_id: str,
+    analysis: ObjectiveAnalysis,
+    objective: ResearchObjective,
+    evidence_records: tuple[ObjectiveEvidence, ...],
+    blocks_by_document_id: Mapping[str, list[Any]],
+    tables_by_document_id: Mapping[str, list[Any]],
+    figures_by_document_id: Mapping[str, list[Any]],
+) -> tuple[ObjectiveEvidence, ...]:
+    """Reapply current Objective scope to a reusable Evidence checkpoint.
+
+    A document checkpoint stores source-local scientific facts so a retry does
+    not need another model call.  It must not, however, freeze the Objective
+    axis interpretation that happened when the checkpoint was first written.
+    Rebinding therefore reruns the deterministic Source-backed canonicalization
+    against the current Objective and immutable Source artifacts.  If an old
+    locator can no longer be resolved, the original fact is retained with the
+    new analysis version; missing proof is safer than silently inventing a new
+    binding.
+    """
+
+    rebound: list[ObjectiveEvidence] = []
+    for evidence in evidence_records:
+        versioned_original = evidence
+        if evidence.analysis_version != analysis.analysis_version:
+            versioned_original = replace(
+                evidence,
+                analysis_version=analysis.analysis_version,
+            )
+        if evidence.selection_status == "failed":
+            rebound.append(versioned_original)
+            continue
+
+        payload = evidence.to_record()
+        source_refs = [dict(ref) for ref in evidence.related_source_refs]
+        primary_identity = _source_identity(evidence.source_kind, evidence.source_ref)
+        if not any(
+            _source_identity(ref.get("source_kind"), ref.get("source_ref"))
+            == primary_identity
+            for ref in source_refs
+            if isinstance(ref, Mapping)
+        ):
+            source_refs.insert(
+                0,
+                {
+                    "source_kind": evidence.source_kind,
+                    "source_ref": evidence.source_ref,
+                    "source_excerpt": evidence.source_excerpt,
+                },
+            )
+        payload["source_refs"] = source_refs
+        payload["evidence_anchor_ids"] = list(evidence.anchor_ids)
+        draft = ExtractedEvidenceDraft.from_mapping(payload)
+        source_excerpts_by_locator = _source_excerpts_by_locator(
+            draft,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+        )
+        try:
+            canonical = _canonical_objective_evidence_axes(
+                draft,
+                objective=objective,
+                source_excerpts_by_locator=source_excerpts_by_locator,
+            )
+        except ValueError as exc:
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_source_axis_rebind_failed",
+                    "collection_id": collection_id,
+                    "objective_id": objective.objective_id,
+                    "analysis_version": analysis.analysis_version,
+                    "document_id": evidence.document_id,
+                    "evidence_id": evidence.evidence_id,
+                    "reason": f"ValueError: {exc}"[:1000],
+                    "disposition": "preserved_source_fact",
+                }
+            )
+            rebound.append(versioned_original)
+            continue
+
+        updated = evidence.to_record()
+        updated["analysis_version"] = analysis.analysis_version
+        updated["changed_variables"] = [
+            item.to_record() for item in canonical.changed_variables
+        ]
+        updated["comparison"] = (
+            canonical.comparison.to_record() if canonical.comparison is not None else None
+        )
+        updated["reported_result"] = (
+            canonical.reported_result.to_record()
+            if canonical.reported_result is not None
+            else None
+        )
+        updated["attribution_scope"] = canonical.attribution_scope
+        updated["selection_reason"] = canonical.selection_reason
+        updated["resolution_status"] = canonical.resolution_status
+        updated["failure_reason"] = canonical.failure_reason
+        # Keep every previously persisted locator and add any locator supplied
+        # by the immutable Source store.  The Source lineage remains the same
+        # scientific claim, even when its Objective axis is rebound.
+        updated["related_source_refs"] = _merge_source_reference_records(
+            evidence.related_source_refs,
+            canonical.source_refs,
+        )
+        try:
+            rebound.append(ObjectiveEvidence.from_mapping(updated))
+        except ValueError as exc:
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_source_axis_rebind_failed",
+                    "collection_id": collection_id,
+                    "objective_id": objective.objective_id,
+                    "analysis_version": analysis.analysis_version,
+                    "document_id": evidence.document_id,
+                    "evidence_id": evidence.evidence_id,
+                    "reason": f"ValueError: {exc}"[:1000],
+                    "disposition": "preserved_source_fact",
+                }
+            )
+            rebound.append(versioned_original)
+    return tuple(rebound)
+
+
+def rebind_persisted_contribution(
+    *,
+    contribution: PaperContribution,
+    analysis: ObjectiveAnalysis,
+    objective: ResearchObjective,
+    evidence_records: tuple[ObjectiveEvidence, ...],
+) -> PaperContribution:
+    """Recompute contribution accounting from the rebound Evidence set.
+
+    A document checkpoint stores both Evidence and its paper-level summary.
+    Objective-axis binding is deterministic and may change when a later
+    analysis version resolves a Source-defined factor.  Reusing the old
+    contribution unchanged would then publish contradictory state (for
+    example, comparable Evidence alongside ``no_comparable_evidence``).
+    Route counts and warnings remain checkpoint facts; only fields derived
+    from the Evidence records are projected again.
+    """
+
+    document_evidence = tuple(
+        evidence
+        for evidence in evidence_records
+        if evidence.document_id == contribution.document_id
+    )
+    payload = contribution.to_record()
+    # Older document checkpoints predate the coverage ledger and legitimately
+    # contain none of its accounting fields.  Do not manufacture a partially
+    # populated ledger while rebinding those records: the domain model accepts
+    # the legacy shape, whereas a mixture of old ``None`` values and newly
+    # derived counts is invalid and would turn a recoverable retry into a
+    # failed analysis.
+    coverage_fields = (
+        "evidence_disposition",
+        "routed_source_count",
+        "extracted_source_count",
+        "comparable_evidence_count",
+        "failed_source_count",
+    )
+    if not all(payload.get(field) is not None for field in coverage_fields):
+        payload["analysis_version"] = analysis.analysis_version
+        return PaperContribution.from_mapping(payload)
+
+    comparable_count = sum(
+        FindingSynthesisService.is_synthesizable_result_evidence(
+            objective,
+            evidence,
+        )
+        for evidence in document_evidence
+    )
+    evidence_status_counts = tuple(
+        sorted(Counter(evidence.evidence_status for evidence in document_evidence).items())
+    )
+
+    payload["analysis_version"] = analysis.analysis_version
+    payload["comparable_evidence_count"] = comparable_count
+    payload["evidence_status_counts"] = {
+        status: count for status, count in evidence_status_counts
+    }
+
+    # A checkpoint with no route or incomplete coverage carries information
+    # that cannot be inferred from its Evidence records.  Only re-project the
+    # comparable/no-comparable pair whose meaning is entirely Evidence-based.
+    if contribution.evidence_disposition in {
+        "no_comparable_evidence",
+        "comparable_evidence",
+    }:
+        if comparable_count:
+            payload["evidence_disposition"] = "comparable_evidence"
+            failed_count = contribution.failed_source_count or 0
+            payload["evidence_disposition_reason"] = (
+                f"{failed_count} selected source(s) failed extraction; "
+                "comparable Evidence survived."
+                if failed_count
+                else None
+            )
+        else:
+            payload["evidence_disposition"] = "no_comparable_evidence"
+            payload["evidence_disposition_reason"] = (
+                contribution.evidence_disposition_reason
+                or "Selected sources produced no comparable direct result for this Objective."
+            )
+
+    rebound = PaperContribution.from_mapping(payload)
+    record_analysis_diagnostic(
+        {
+            "trace_type": "objective_contribution_rebind",
+            "collection_id": contribution.collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": analysis.analysis_version,
+            "document_id": contribution.document_id,
+            "previous_disposition": contribution.evidence_disposition,
+            "new_disposition": rebound.evidence_disposition,
+            "previous_comparable_evidence_count": contribution.comparable_evidence_count,
+            "new_comparable_evidence_count": rebound.comparable_evidence_count,
+            "evidence_status_counts": dict(evidence_status_counts),
+        }
+    )
+    return rebound
+
+
+def _merge_source_reference_records(
+    existing: tuple[dict[str, Any], ...],
+    incoming: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for reference in (*existing, *incoming):
+        if not isinstance(reference, Mapping):
+            continue
+        identity = json.dumps(
+            _identity_value(dict(reference)),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(dict(reference))
+    return tuple(merged)
 
 
 def _analysis_contributions(
@@ -725,6 +1227,15 @@ def _analysis_contributions(
                 uninspected_source_count=uninspected_source_count,
                 evidence_disposition_reason=evidence_reason,
                 evidence_status_counts=evidence_status_counts,
+                inspected_source_refs=tuple(
+                    {
+                        "source_kind": source_kind,
+                        "source_ref": source_ref,
+                        "source_digest": None,
+                    }
+                    for source_kind, source_ref in sorted(inspected_source_refs)
+                    if source_kind in {"text_window", "table", "figure"}
+                ),
             )
         )
     return tuple(contributions)
@@ -811,11 +1322,19 @@ def _analysis_evidence_records(
 ) -> tuple[ObjectiveEvidence, ...]:
     records: list[ObjectiveEvidence] = []
     seen_evidence_ids: set[str] = set()
+    scientific_fact_indexes: dict[str, int] = {}
     for source_draft in drafts:
+        source_excerpts_by_locator = _source_excerpts_by_locator(
+            source_draft,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+        )
         try:
             draft = _canonical_objective_evidence_axes(
                 source_draft,
                 objective=objective,
+                source_excerpts_by_locator=source_excerpts_by_locator,
             )
         except ValueError as exc:
             payload = source_draft.to_record()
@@ -924,6 +1443,7 @@ def _analysis_evidence_records(
             ),
             failure_reason=draft.failure_reason,
             confidence=draft.confidence,
+            related_source_refs_explicit=True,
         )
         context_gaps = _objective_missing_context_fields(candidate, objective)
         if candidate.selection_status == "extracted" and context_gaps:
@@ -950,8 +1470,174 @@ def _analysis_evidence_records(
                 f"{gap_note}"
             ).strip()
             candidate = ObjectiveEvidence.from_mapping(payload)
-        records.append(candidate)
+        # Model retries and same-paper rereads can return the same fact with a
+        # different generated id or a differently worded context expansion.
+        # Evidence identity follows the source-grounded claim, not the provider
+        # attempt.  Context-only Sources retain their context in the identity,
+        # because one table or Methods Source may contain several independent
+        # condition facts; a result Source instead coalesces equivalent reads
+        # and keeps the richer record plus the unioned lineage.
+        scientific_identity = _scientific_fact_identity(candidate)
+        duplicate_index = scientific_fact_indexes.get(scientific_identity)
+        if duplicate_index is None:
+            scientific_fact_indexes[scientific_identity] = len(records)
+            records.append(candidate)
+            continue
+        records[duplicate_index] = _merge_duplicate_evidence(
+            records[duplicate_index],
+            candidate,
+        )
     return tuple(records)
+
+
+def _scientific_fact_identity(evidence: ObjectiveEvidence) -> str:
+    """Return a stable identity for one Source-local scientific fact.
+
+    Route reasons, generated ids, excerpts from related Sources, confidence,
+    and same-paper context wording are not fact identity.  For context-only
+    records the structured context is retained so distinct facts from one
+    Source do not collapse into one row.
+    """
+
+    variables = sorted(
+        (
+            _identity_value(variable.name),
+            _identity_value(variable.baseline_value),
+            _identity_value(variable.target_value),
+            _identity_value(variable.unit),
+        )
+        for variable in evidence.changed_variables
+    )
+    result = evidence.reported_result.to_record() if evidence.reported_result else None
+    comparison = evidence.comparison.to_record() if evidence.comparison else None
+    payload: dict[str, Any] = {
+        "document_id": _identity_value(evidence.document_id),
+        "source_kind": _identity_value(_source_identity(evidence.source_kind, "")[0]),
+        "source_ref": _identity_value(
+            _source_identity(evidence.source_kind, evidence.source_ref)[1]
+        ),
+        "evidence_role": _identity_value(evidence.evidence_role),
+        "changed_variables": variables,
+        "comparison": _identity_value(comparison),
+        "reported_result": _identity_value(result),
+        "attribution_scope": _identity_value(evidence.attribution_scope),
+    }
+    source_local_slots = sorted(
+        {
+            json.dumps(
+                _identity_value(
+                    {
+                        field: locator[field]
+                        for field in (
+                            "row_index",
+                            "col_index",
+                            "start_row",
+                            "end_row",
+                            "start_col",
+                            "end_col",
+                            "cell_id",
+                        )
+                        if locator.get(field) not in (None, "")
+                    }
+                ),
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+            for locator in evidence.related_source_refs
+            if _source_identity(
+                locator.get("source_kind"),
+                locator.get("source_ref"),
+            )
+            == _source_identity(evidence.source_kind, evidence.source_ref)
+            and any(
+                locator.get(field) not in (None, "")
+                for field in (
+                    "row_index",
+                    "col_index",
+                    "start_row",
+                    "end_row",
+                    "start_col",
+                    "end_col",
+                    "cell_id",
+                )
+            )
+        }
+    )
+    if source_local_slots:
+        payload["source_local_slots"] = source_local_slots
+    if evidence.reported_result is None:
+        payload["scientific_context"] = _identity_value(
+            evidence.scientific_context.to_record()
+        )
+    return json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _identity_value(value: Any) -> Any:
+    """Normalize labels for identity without changing persisted Evidence."""
+
+    if isinstance(value, str):
+        return " ".join(value.split()).casefold()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _identity_value(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_identity_value(item) for item in value]
+    if isinstance(value, set):
+        return sorted(_identity_value(item) for item in value)
+    return value
+
+
+def _merge_duplicate_evidence(
+    existing: ObjectiveEvidence,
+    candidate: ObjectiveEvidence,
+) -> ObjectiveEvidence:
+    """Keep one fact while preserving the strongest record and all locators."""
+
+    preferred = max(
+        (existing, candidate),
+        key=lambda item: (
+            item.selection_status == "extracted",
+            item.resolution_status == "resolved",
+            item.comparison is not None and item.comparison.comparable,
+            sum(
+                len(getattr(item.scientific_context, section))
+                for section in ("material", "sample", "process", "test")
+            ),
+            item.confidence,
+        ),
+    )
+    related_source_refs: list[dict[str, Any]] = []
+    seen_locators: set[str] = set()
+    for item in (existing, candidate):
+        for locator in item.related_source_refs:
+            identity = json.dumps(
+                _identity_value(locator),
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+            if identity in seen_locators:
+                continue
+            seen_locators.add(identity)
+            related_source_refs.append(dict(locator))
+    payload = preferred.to_record()
+    payload["evidence_id"] = existing.evidence_id
+    payload["related_source_refs"] = related_source_refs
+    payload["anchor_ids"] = list(
+        dict.fromkeys((*existing.anchor_ids, *candidate.anchor_ids))
+    )
+    return ObjectiveEvidence.from_mapping(payload)
 
 
 def _recover_source_explicit_objective_factors(
@@ -991,6 +1677,13 @@ def _recover_source_explicit_objective_factors(
         if property_matching.source_text_mentions_objective_variable(
             source_excerpt,
             objective_variable,
+        )
+        and _objective_source_explicitly_links_variable_to_result(
+            variable=objective_variable,
+            outcome=result.outcome,
+            result_text=result.result_text,
+            source_text=source_excerpt,
+            source={"source_kind": source_kind},
         )
     )
     if not mentioned_factors:
@@ -1057,14 +1750,53 @@ def _canonical_objective_evidence_axes(
     draft: ExtractedEvidenceDraft,
     *,
     objective: ResearchObjective,
+    source_excerpts_by_locator: Mapping[tuple[str, str], str] | None = None,
 ) -> ExtractedEvidenceDraft:
     if draft.selection_status == "failed":
         return draft
 
     payload = draft.to_record()
+    recorded_source_bindings: set[tuple[str, str]] = set()
 
     def canonical(value: Any, axes: tuple[str, ...]) -> tuple[str, str | None]:
         resolved = property_matching.resolve_objective_axis(value, axes)
+        if resolved is None and axes is objective.variables:
+            resolved = _resolve_source_defined_objective_axis(
+                draft,
+                source_label=value,
+                objective_axes=axes,
+                source_excerpts_by_locator=source_excerpts_by_locator,
+            )
+            source_key = _text(value)
+            if resolved is not None and (source_key, resolved) not in recorded_source_bindings:
+                recorded_source_bindings.add((source_key, resolved))
+                record_analysis_diagnostic(
+                    {
+                        "trace_type": "objective_source_axis_binding",
+                        "collection_id": objective.collection_id,
+                        "objective_id": objective.objective_id,
+                        "document_id": draft.document_id,
+                        "evidence_id": draft.evidence_id,
+                        "source_axis": source_key,
+                        "objective_axis": resolved,
+                        "binding_basis": "same_paper_source_definition",
+                        "source_refs": [
+                            {
+                                "source_kind": _source_identity(
+                                    ref.get("source_kind"),
+                                    ref.get("source_ref"),
+                                )[0],
+                                "source_ref": _source_identity(
+                                    ref.get("source_kind"),
+                                    ref.get("source_ref"),
+                                )[1],
+                            }
+                            for ref in draft.source_refs
+                            if isinstance(ref, Mapping)
+                            and _source_ref_supports_axis_binding(ref)
+                        ],
+                    }
+                )
         return resolved or str(value or "").strip(), resolved
 
     canonical_variables: list[dict[str, Any]] = []
@@ -1131,6 +1863,188 @@ def _canonical_objective_evidence_axes(
     return ExtractedEvidenceDraft.from_mapping(payload)
 
 
+def _resolve_source_defined_objective_axis(
+    draft: ExtractedEvidenceDraft,
+    *,
+    source_label: Any,
+    objective_axes: tuple[str, ...],
+    source_excerpts_by_locator: Mapping[tuple[str, str], str] | None = None,
+) -> str | None:
+    """Resolve a source-specific factor only from an explicit paper mapping.
+
+    A model may use a narrower label than the confirmed Objective (for example,
+    a temperature field for an intervention described as platform preheating).
+    Vocabulary can suggest that relationship, but it cannot establish it.  We
+    therefore require one same-paper Source bundle that:
+
+    * is explicitly marked as supporting a changed variable or comparison axis;
+    * names exactly one Objective axis in the Source text; and
+    * contains both comparison endpoints (or the extracted endpoint values).
+
+    This is deliberately generic.  It does not know a material, process, group
+    label, or domain synonym.  The Source remains the authority and the
+    original model label is retained when the proof is absent or ambiguous.
+    """
+
+    if not objective_axes or not draft.source_refs or draft.comparison is None:
+        return None
+
+    comparison = draft.comparison
+    endpoint_values = (
+        comparison.baseline_label,
+        comparison.target_label,
+    )
+    if any(not _text(value) for value in endpoint_values):
+        endpoint_values = (
+            next(
+                (
+                    variable.baseline_value
+                    for variable in draft.changed_variables
+                    if variable.baseline_value not in (None, "")
+                ),
+                None,
+            ),
+            next(
+                (
+                    variable.target_value
+                    for variable in draft.changed_variables
+                    if variable.target_value not in (None, "")
+                ),
+                None,
+            ),
+        )
+    if any(value in (None, "") for value in endpoint_values):
+        return None
+    if _source_axis_endpoint_key(endpoint_values[0]) == _source_axis_endpoint_key(
+        endpoint_values[1]
+    ):
+        return None
+
+    source_excerpts_by_locator = source_excerpts_by_locator or {}
+    supported_texts = tuple(
+        source_text
+        for ref in draft.source_refs
+        if isinstance(ref, Mapping)
+        and _source_ref_supports_axis_binding(ref)
+        if (
+            source_text := _text(ref.get("source_excerpt"))
+            or _text(
+                source_excerpts_by_locator.get(
+                    _source_identity(
+                        ref.get("source_kind"),
+                        ref.get("source_ref"),
+                    )
+                )
+            )
+        )
+    )
+    if not supported_texts:
+        return None
+    combined_text = "\n".join(supported_texts)
+    candidates = tuple(
+        axis
+        for axis in objective_axes
+        if property_matching.source_text_mentions_axis(combined_text, axis)
+        and any(
+            property_matching.source_text_mentions_axis(text, axis)
+            and _source_text_mentions_value(text, endpoint_values[0])
+            and _source_text_mentions_value(text, endpoint_values[1])
+            for text in supported_texts
+        )
+    )
+    if len(candidates) != 1:
+        return None
+
+    # Keep the source label in the proof record.  This prevents a broad
+    # Objective theme from silently replacing a precise factor merely because
+    # both happen to occur in the same paper.
+    source_label_text = _text(source_label)
+    if not source_label_text:
+        return None
+    if not any(
+        _source_text_mentions_value(text, source_label_text)
+        or property_matching.source_text_mentions_axis(text, source_label_text)
+        for text in supported_texts
+    ):
+        # A derived field can be absent from the prose when the paper defines
+        # the comparison directly by group labels.  In that case the explicit
+        # Objective axis plus both endpoints is sufficient; no guessed alias is
+        # introduced.
+        pass
+    return candidates[0]
+
+
+def _source_excerpts_by_locator(
+    draft: ExtractedEvidenceDraft,
+    *,
+    blocks_by_document_id: Mapping[str, list[Any]],
+    tables_by_document_id: Mapping[str, list[Any]],
+    figures_by_document_id: Mapping[str, list[Any]],
+) -> dict[tuple[str, str], str]:
+    """Resolve model-owned locators against the immutable prepared document."""
+
+    excerpts: dict[tuple[str, str], str] = {}
+    for ref in draft.source_refs:
+        if not isinstance(ref, Mapping):
+            continue
+        source_kind, source_ref = _source_identity(
+            ref.get("source_kind"),
+            ref.get("source_ref"),
+        )
+        if not source_ref:
+            continue
+        supplied_excerpt = _text(ref.get("source_excerpt"))
+        if supplied_excerpt:
+            excerpts[(source_kind, source_ref)] = supplied_excerpt
+            continue
+        located = _source_excerpt_for_locator(
+            document_id=draft.document_id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+        )
+        if located is not None and (excerpt := _text(located.get("source_excerpt"))):
+            excerpts[(source_kind, source_ref)] = excerpt
+    return excerpts
+
+
+def _source_ref_supports_axis_binding(ref: Mapping[str, Any]) -> bool:
+    supports = {
+        _text(value)
+        for value in ref.get("supports", ())
+        if _text(value)
+    }
+    return bool(
+        supports
+        & {
+            "changed_variables",
+            "comparison.axis_names",
+            "condition_join",
+        }
+    )
+
+
+def _source_axis_endpoint_key(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _source_text_mentions_value(text: str, value: Any) -> bool:
+    """Match a Source endpoint without treating it as a substring accident."""
+
+    value_text = " ".join(str(value or "").strip().split())
+    source_text = " ".join(str(text or "").split())
+    if not value_text or not source_text:
+        return False
+    pattern = re.escape(value_text).replace(r"\ ", r"\s+")
+    return re.search(
+        rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])",
+        source_text,
+        flags=re.IGNORECASE,
+    ) is not None
+
+
 def _canonical_evidence_source(
     draft: ExtractedEvidenceDraft,
     *,
@@ -1138,6 +2052,24 @@ def _canonical_evidence_source(
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
 ) -> dict[str, Any] | None:
+    primary_kind = (
+        "text_window"
+        if draft.source_kind in {"block", "text"}
+        else draft.source_kind
+    )
+    primary = _source_excerpt_for_locator(
+        document_id=draft.document_id,
+        source_kind=primary_kind,
+        source_ref=draft.source_ref,
+        blocks_by_document_id=blocks_by_document_id,
+        tables_by_document_id=tables_by_document_id,
+        figures_by_document_id=figures_by_document_id,
+    )
+    if primary is not None:
+        primary = {
+            **primary,
+            "source_ref": draft.source_ref,
+        }
     candidates = [
         *[dict(value) for value in draft.source_refs],
         {
@@ -1147,8 +2079,8 @@ def _canonical_evidence_source(
     ]
     related: list[dict[str, Any]] = []
     seen_locators: set[tuple[Any, ...]] = set()
-    excerpts: list[str] = []
-    primary: dict[str, Any] | None = None
+    table_excerpts_by_locator: dict[tuple[str, str], list[str]] = {}
+    table_fact_excerpts_by_locator: dict[tuple[str, str], list[str]] = {}
     for candidate in candidates:
         source_kind = _text(candidate.get("source_kind"))
         source_ref = _text(candidate.get("source_ref"))
@@ -1193,25 +2125,85 @@ def _canonical_evidence_source(
         if locator_key not in seen_locators and not is_bare_duplicate:
             seen_locators.add(locator_key)
             related.append(locator)
+        candidate_excerpt = _text(candidate.get("source_excerpt"))
+        if normalized_kind == "table" and candidate_excerpt:
+            table_excerpts = table_excerpts_by_locator.setdefault(
+                (normalized_kind, source_ref),
+                [],
+            )
+            if candidate_excerpt not in table_excerpts:
+                table_excerpts.append(candidate_excerpt)
+            supports = {
+                str(value).strip()
+                for value in candidate.get("supports", ())
+                if str(value).strip()
+            }
+            if candidate.get("col_index") is not None or not any(
+                value.startswith("scientific_context.") for value in supports
+            ):
+                fact_excerpts = table_fact_excerpts_by_locator.setdefault(
+                    (normalized_kind, source_ref),
+                    [],
+                )
+                if candidate_excerpt not in fact_excerpts:
+                    fact_excerpts.append(candidate_excerpt)
         if located is None:
             continue
-        if primary is None:
+        supports_paged_context = (
+            draft.reported_result is None
+            and draft.comparison is None
+            and not draft.changed_variables
+            and any(
+                str(value).startswith("scientific_context.")
+                for value in candidate.get("supports", ())
+            )
+        )
+        if (
+            primary is not None
+            and not primary.get("page")
+            and located.get("page")
+            and normalized_kind == "text_window"
+            and supports_paged_context
+        ):
+            # Imported filenames help screening but are not an inspectable
+            # scientific passage. Once the same fact is grounded in a paged
+            # Abstract or Methods Source, that passage owns the durable jump.
             primary = {
+                **located,
                 "source_kind": located["source_kind"],
                 "source_ref": source_ref,
                 "page": located["page"],
             }
-        excerpt = _text(candidate.get("source_excerpt"))
-        if not excerpt and not excerpts:
-            excerpt = located["source_excerpt"]
-        if excerpt and excerpt not in excerpts:
-            excerpts.append(excerpt)
-    if primary is None or not excerpts:
+            continue
+        if primary is None:
+            primary = {
+                **located,
+                "source_kind": located["source_kind"],
+                "source_ref": source_ref,
+                "page": located["page"],
+            }
+    if primary is None:
         return None
+    source_excerpt = primary["source_excerpt"]
+    if primary["source_kind"] == "table":
+        primary_table_key = (primary["source_kind"], primary["source_ref"])
+        primary_table_excerpts = table_fact_excerpts_by_locator.get(
+            primary_table_key,
+            [],
+        ) or table_excerpts_by_locator.get(
+            primary_table_key,
+            [],
+        )
+        if primary_table_excerpts:
+            source_excerpt = "\n".join(primary_table_excerpts)[:12_000]
+    # One Evidence locator names one inspectable primary Source. Same-paper
+    # methods, other tables, figures, and row bindings remain explicit lineage
+    # in related_source_refs; concatenating them here would make the excerpt
+    # look like text from a Source that never contained it.
     return {
         "source_kind": primary["source_kind"],
         "source_ref": primary["source_ref"],
-        "source_excerpt": "\n".join(excerpts)[:12_000],
+        "source_excerpt": source_excerpt,
         "page_numbers": ((primary["page"],) if primary["page"] else ()),
         "related_source_refs": tuple(related),
     }

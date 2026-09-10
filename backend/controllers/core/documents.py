@@ -12,7 +12,7 @@ from application.core.document_profiles.service import (
     DocumentNotFoundError,
     DocumentProfilesNotReadyError,
 )
-from application.source.collection_service import (
+from application.source.source_archive_service import (
     DocumentSourceUnavailableError,
 )
 from application.source.document_markdown_service import (
@@ -126,7 +126,7 @@ async def list_collection_document_profiles(
         str,
         Query(
             max_length=200,
-            description="Case-insensitive title or source filename search",
+            description="Case-insensitive profile-title search",
         ),
     ] = "",
     doc_type: Annotated[
@@ -135,7 +135,7 @@ async def list_collection_document_profiles(
     ] = None,
     has_warnings: Annotated[
         bool | None,
-        Query(description="Optional parsing-warning presence filter"),
+        Query(description="Optional profile-warning presence filter"),
     ] = None,
 ) -> DocumentProfileListResponse:
     try:
@@ -271,21 +271,11 @@ async def get_collection_document_source(
     document_id: str,
     request: Request,
 ) -> Response:
-    document_profile_service = request.app.state.document_profile_service
-    source_filename: str | None = None
     try:
-        profile = await document_profile_service.get_document_profile(
-            collection_id, document_id
-        )
-        source_filename = profile.get("source_filename")
-    except (DocumentNotFoundError, DocumentProfilesNotReadyError):
-        source_filename = None
-
-    try:
-        payload = await request.app.state.collection_service.resolve_document_source_file(
+        payload = await request.app.state.source_archive_service.resolve_document_source_file(
             collection_id,
             document_id,
-            source_filename=source_filename,
+            source_filename=None,
         )
     except DocumentSourceUnavailableError as exc:
         raise HTTPException(

@@ -104,13 +104,13 @@ async def test_export_trace_writes_current_source_and_objective_views(
     await source_repository.replace_document("col-test", source_document)
     profile_repository = MemoryDocumentProfileRepository()
     await profile_repository.replace(
+        "col-test",
         DocumentProfile.from_mapping(
             {
                 "document_id": "paper-1",
-                "collection_id": "col-test",
                 "title": "Trace Paper",
                 "doc_type": "experimental",
-                "parsing_warnings": [],
+                "profile_warnings": [],
                 "confidence": 0.9,
             }
         )

@@ -10,10 +10,26 @@ from domain.chat import (
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ChatToolRequest,
     ChatToolResult,
     ToolCallStatus,
     ToolRisk,
 )
+
+
+def test_ordered_requests_round_trip_and_reject_gaps_and_duplicates() -> None:
+    first = ChatToolRequest("call-1", "read_source", {"document_id": "paper-1"}, 0)
+    second = ChatToolRequest("call-2", "read_source", {"document_id": "paper-2"}, 1)
+    message = ChatMessage.assistant_tool_calls(
+        message_id="msg-1", session_id="chat-1", content="",
+        created_at="2026-09-08T00:00:00+00:00", tool_calls=(first, second),
+    )
+    assert ChatMessage.from_mapping(message.to_record()) == message
+    for bad in (replace(second, position=2), replace(second, tool_call_id="call-1")):
+        with pytest.raises(ValueError):
+            replace(message, tool_calls=(first, bad))
+    with pytest.raises(ValueError):
+        replace(message, tool_call_id="call-1")
 
 
 def test_chat_session_round_trips_immutable_owner_and_collection() -> None:
@@ -194,11 +210,12 @@ def test_user_message_round_trips_traceable_source_context() -> None:
         collection_id="col-1",
         document_id="doc-1",
         document_title="Paper A",
-        source_kind="paragraph",
+        source_kind="text_window",
         source_ref="results",
         page=3,
         quote="Conductivity improved to 12 mS/cm under EIS.",
         heading_path="Results",
+        source_digest="a" * 64,
     )
     message = ChatMessage.user(
         message_id="msg-source",
@@ -212,6 +229,24 @@ def test_user_message_round_trips_traceable_source_context() -> None:
     assert message.source_contexts == (source_context,)
 
 
+def test_source_context_rejects_an_invalid_source_digest() -> None:
+    with pytest.raises(ValueError, match="SHA-256"):
+        ChatSourceContext(
+            resource_ref=ChatResourceRef(
+                resource_type="source",
+                resource_id="doc-1:results",
+            ),
+            collection_id="col-1",
+            document_id="doc-1",
+            document_title="Paper A",
+            source_kind="text_window",
+            source_ref="results",
+            page=3,
+            quote="Conductivity improved to 12 mS/cm under EIS.",
+            source_digest="not-a-digest",
+        )
+
+
 def test_source_context_requires_a_matching_stable_source_reference() -> None:
     with pytest.raises(ValueError, match="resource identity"):
         ChatSourceContext(
@@ -222,7 +257,7 @@ def test_source_context_requires_a_matching_stable_source_reference() -> None:
             collection_id="col-1",
             document_id="doc-1",
             document_title="Paper A",
-            source_kind="paragraph",
+            source_kind="text_window",
             source_ref="results",
             page=3,
             quote="Conductivity improved to 12 mS/cm under EIS.",

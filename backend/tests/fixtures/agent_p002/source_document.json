@@ -1,0 +1,52 @@
+{
+  "fixture_name": "P002 real Source excerpt for Research Agent parity",
+  "source_provenance": "Real P002 excerpts retained from the local expert gold paper and its Source replay. This fixture is intentionally limited to the Methods condition definition and Table 2 values needed by the Agent inspection path.",
+  "paper_id": "P002",
+  "document_id": "doc_ef59d1f3a006",
+  "title": "Effect of Preheating Build Platform on Microstructure and Mechanical Properties of Additively Manufactured 316L Stainless Steel",
+  "document_order": 1,
+  "text": "",
+  "blocks": [
+    {
+      "block_id": "blk_doc_ef59d1f3a006_23",
+      "document_id": "doc_ef59d1f3a006",
+      "block_type": "paragraph",
+      "text": "Two sets of specimens were fabricated under argon shielding gas, without and with preheating the build platform to 150 °C. Specimen geometry is shown in Figure 1. For better tracking each set of specimens in the following context, specimens fabricated without preheating the build platform, and the ones fabricated with preheating the build platform to 150 °C are designated by NP and P150, respectively.",
+      "block_order": 23,
+      "page": 3,
+      "heading_path": "Experimental Procedures"
+    },
+    {
+      "block_id": "blk_doc_ef59d1f3a006_66",
+      "document_id": "doc_ef59d1f3a006",
+      "block_type": "paragraph",
+      "text": "Preheating the build platform to 150 °C increased the ductility of material by 14%.",
+      "block_order": 66,
+      "page": 8,
+      "heading_path": "Tensile properties"
+    }
+  ],
+  "tables": [
+    {
+      "table_id": "tbl_doc_ef59d1f3a006_2_table_2",
+      "document_id": "doc_ef59d1f3a006",
+      "table_order": 2,
+      "caption_text": "Tensile results for the tested build-platform conditions",
+      "caption_block_id": null,
+      "page": 8,
+      "heading_path": "Tensile properties",
+      "column_headers": [
+        "Build platform conditions",
+        "Yield strength (MPa)",
+        "Ultimate tensile strength (MPa)",
+        "Elongation (%)"
+      ],
+      "table_matrix": [
+        ["Non-preheated", "448", "617", "72"],
+        ["Preheated", "465", "618", "82"]
+      ],
+      "header_row_count": 0
+    }
+  ],
+  "figures": []
+}

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from application.repositories.collection_repository import (
+    CollectionDocumentSummary,
+    CollectionSummary,
+)
+
 from domain.source import Collection, Document
 
 
@@ -21,9 +26,28 @@ class MemoryCollectionRepository:
     async def list_collections(
         self,
         owner_user_id: str | None = None,
-    ) -> tuple[Collection, ...]:
+    ) -> tuple[CollectionSummary, ...]:
         return tuple(
-            collection
+            CollectionSummary(
+                collection_id=collection.collection_id,
+                name=collection.name,
+                description=collection.description,
+                status=collection.status,
+                created_at=collection.created_at,
+                updated_at=collection.updated_at,
+                documents=tuple(
+                    CollectionDocumentSummary(
+                        document_id=document.document_id,
+                        original_filename=document.original_filename,
+                        media_type=document.media_type,
+                        status=document.status,
+                        size_bytes=document.size_bytes,
+                        created_at=document.created_at,
+                        updated_at=document.updated_at or document.created_at,
+                    )
+                    for document in collection.documents
+                ),
+            )
             for _, collection in sorted(self._collections.items())
             if owner_user_id is None
             or collection.owner_user_id == owner_user_id

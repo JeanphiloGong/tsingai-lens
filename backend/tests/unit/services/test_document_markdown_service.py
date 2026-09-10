@@ -5,7 +5,10 @@ from hashlib import sha256
 
 import pytest
 
-from tests.support.collection_service import build_test_collection_service
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
+)
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
     DocumentMarkdownService,
@@ -510,7 +513,7 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
         "Stored Filename Collection"
     )
     collection_id = collection["collection_id"]
-    await collection_service.import_normalized_batch(
+    await build_test_source_import_service(collection_service).import_normalized_batch(
         collection_id,
         NormalizedImportBatch(
             documents=(

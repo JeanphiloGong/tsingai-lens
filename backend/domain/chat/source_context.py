@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ class ChatSourceContext:
     quote: str
     heading_path: str | None = None
     quote_truncated: bool = False
+    source_digest: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -45,6 +47,11 @@ class ChatSourceContext:
         if self.page is not None and self.page < 1:
             raise ValueError("page must be positive")
         object.__setattr__(self, "quote_truncated", bool(self.quote_truncated))
+        if self.source_digest is not None:
+            digest = _required_text(self.source_digest, "source_digest").lower()
+            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("source_digest must be a SHA-256 hex digest")
+            object.__setattr__(self, "source_digest", digest)
         if self.resource_ref.resource_type != "source":
             raise ValueError("source context requires a source resource reference")
         expected_resource_id = f"{self.document_id}:{self.source_ref}"
@@ -79,6 +86,11 @@ class ChatSourceContext:
                 else None
             ),
             quote_truncated=bool(payload.get("quote_truncated", False)),
+            source_digest=(
+                str(payload["source_digest"])
+                if payload.get("source_digest") is not None
+                else None
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -93,6 +105,7 @@ class ChatSourceContext:
             "quote": self.quote,
             "heading_path": self.heading_path,
             "quote_truncated": self.quote_truncated,
+            "source_digest": self.source_digest,
         }
 
 

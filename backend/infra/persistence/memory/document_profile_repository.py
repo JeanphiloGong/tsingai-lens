@@ -9,19 +9,17 @@ from domain.core import DocumentProfile
 
 class MemoryDocumentProfileRepository:
     def __init__(self) -> None:
-        self._profiles: dict[str, DocumentProfile] = {}
+        self._profiles: dict[tuple[str, str], DocumentProfile] = {}
 
-    async def replace(self, profile: DocumentProfile) -> None:
-        self._profiles[profile.document_id] = deepcopy(profile)
+    async def replace(self, collection_id: str, profile: DocumentProfile) -> None:
+        self._profiles[(collection_id, profile.document_id)] = deepcopy(profile)
 
     async def read(
         self,
         collection_id: str,
         document_id: str,
     ) -> DocumentProfile | None:
-        profile = self._profiles.get(document_id)
-        if profile is None or profile.collection_id != collection_id:
-            return None
+        profile = self._profiles.get((collection_id, document_id))
         return deepcopy(profile)
 
     async def list_collection(
@@ -33,10 +31,14 @@ class MemoryDocumentProfileRepository:
         return tuple(
             deepcopy(profile)
             for profile in sorted(
-                self._profiles.values(), key=lambda item: item.document_id
+                (
+                    profile
+                    for (owner_collection_id, _), profile in self._profiles.items()
+                    if owner_collection_id == collection_id
+                ),
+                key=lambda item: item.document_id,
             )
-            if profile.collection_id == collection_id
-            and (selected is None or profile.document_id in selected)
+            if selected is None or profile.document_id in selected
         )
 
 

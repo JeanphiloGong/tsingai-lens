@@ -120,7 +120,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         title = str(payload.get("title") or payload.get("source_filename") or "")
         return StructuredDocumentProfile(
             doc_type="review" if "review" in title.casefold() else "experimental",
-            parsing_warnings=[],
+            profile_warnings=[],
             confidence=0.95,
         )
 
@@ -302,16 +302,16 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         )
 
 
-def _wait_for_task(client: TestClient, task_id: str) -> dict[str, Any]:
+def _wait_for_run(client: TestClient, run_id: str) -> dict[str, Any]:
     deadline = monotonic() + 20
     while monotonic() < deadline:
-        response = client.get(f"{API_PREFIX}/tasks/{task_id}")
+        response = client.get(f"{API_PREFIX}/pipeline-runs/{run_id}")
         assert response.status_code == 200
-        task = response.json()
-        if task["status"] not in {"queued", "running"}:
-            return task
+        run = response.json()
+        if run["status"] not in {"queued", "running"}:
+            return run
         sleep(0.02)
-    raise AssertionError(f"task did not finish: {task_id}")
+    raise AssertionError(f"pipeline run did not finish: {run_id}")
 
 
 def _wait_for_analysis(
@@ -350,8 +350,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     with TestClient(create_app(chat_session_service=object())) as client:
         client.app.state.document_profile_service._document_profile_extractor = model
         client.app.state.document_preparation_service._response_client = model
-        research_service = client.app.state.research_objective_service
-        research_service._response_client = model
+        research_service = client.app.state.evidence_analysis_service
+        research_service.objective_input_service._response_client = model
+        client.app.state.objective_discovery_service._response_client = model
         research_service.finding_synthesis_service.assertion_judge = model
 
         login = client.post(
@@ -391,18 +392,17 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             queued = client.post(
                 f"{API_PREFIX}/collections/{collection_id}/documents/"
                 f"{document_id}/preparation",
-                json={"mode": "standard"},
             )
             assert queued.status_code == 200
 
-        task_history = client.get(
-            f"{API_PREFIX}/collections/{collection_id}/tasks",
+        run_history = client.get(
+            f"{API_PREFIX}/collections/{collection_id}/pipeline-runs",
             params={"limit": 20},
         )
-        assert task_history.status_code == 200
-        for task in task_history.json()["items"]:
-            completed_task = _wait_for_task(client, task["task_id"])
-            assert completed_task["status"] == "completed", completed_task
+        assert run_history.status_code == 200
+        for run in run_history.json()["items"]:
+            completed_run = _wait_for_run(client, run["run_id"])
+            assert completed_run["status"] == "completed", completed_run
 
         document_ids = tuple(document_ids_by_filename.values())
         collection = client.get(f"{API_PREFIX}/collections/{collection_id}")
@@ -416,11 +416,11 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             json={"document_ids": list(document_ids)},
         )
         assert discovered.status_code == 200, discovered.text
-        discovery_task = discovered.json()
-        assert discovery_task["task_id"]
-        completed_discovery = _wait_for_task(
+        discovery_run = discovered.json()
+        assert discovery_run["run_id"]
+        completed_discovery = _wait_for_run(
             client,
-            discovery_task["task_id"],
+            discovery_run["run_id"],
         )
         assert completed_discovery["status"] == "completed", completed_discovery
         listed_objectives = client.get(

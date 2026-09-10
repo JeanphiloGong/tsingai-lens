@@ -1,6 +1,6 @@
 """In-memory persistence adapters."""
 
-from infra.persistence.memory.task_repository import MemoryTaskRepository
+from infra.persistence.memory.pipeline_run_repository import MemoryPipelineRunRepository
 from infra.persistence.memory.collection_repository import MemoryCollectionRepository
 from infra.persistence.memory.document_profile_repository import (
     MemoryDocumentProfileRepository,
@@ -12,7 +12,7 @@ from infra.persistence.memory.paper_map_repository import MemoryPaperMapReposito
 from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 
 __all__ = [
-    "MemoryTaskRepository",
+    "MemoryPipelineRunRepository",
     "MemoryCollectionRepository",
     "MemoryDocumentProfileRepository",
     "MemorySourceArtifactRepository",

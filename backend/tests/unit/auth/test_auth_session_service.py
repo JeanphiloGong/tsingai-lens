@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 
+from application.repositories.auth_repository import AuthSessionRecord
+
 import pytest
 
 from application.auth import (
@@ -36,6 +38,10 @@ async def test_auth_session_service_logs_in_and_resolves_user(auth_session_servi
     assert resolved["user_id"] == user["user_id"]
     assert resolved["email"] == "reader@example.com"
     assert "password_hash" not in resolved
+
+    stored_user = await service.repository.read_user(user["user_id"])
+    assert stored_user.user_id == user["user_id"]
+    assert stored_user.password_hash not in repr(stored_user)
 
 
 async def test_auth_session_service_rejects_bad_password(auth_session_service):
@@ -75,8 +81,8 @@ async def test_auth_session_service_persists_only_the_bearer_token_hash(
     stored = next(iter(service.repository.sessions_by_token_hash.values()))
 
     assert stored is not None
-    assert stored["session_id"] != bearer_token
-    assert stored["token_hash"] == sha256(bearer_token.encode("utf-8")).hexdigest()
+    assert stored.session_id != bearer_token
+    assert list(service.repository.sessions_by_token_hash) == [sha256(bearer_token.encode("utf-8")).hexdigest()]
 
 
 async def test_auth_session_service_rejects_expired_session(auth_session_service):
@@ -88,14 +94,13 @@ async def test_auth_session_service_rejects_expired_session(auth_session_service
     bearer_token = "expired-browser-token"
     now = datetime.now(timezone.utc)
     await service.repository.add_session(
-        {
-            "session_id": "session_expired",
-            "user_id": user["user_id"],
-            "token_hash": sha256(bearer_token.encode("utf-8")).hexdigest(),
-            "created_at": (now - timedelta(hours=2)).isoformat(),
-            "expires_at": (now - timedelta(hours=1)).isoformat(),
-            "revoked_at": None,
-        }
+        AuthSessionRecord(
+            session_id="session_expired",
+            user_id=user["user_id"],
+            created_at=(now - timedelta(hours=2)).isoformat(),
+            expires_at=(now - timedelta(hours=1)).isoformat(),
+        ),
+        token_hash=sha256(bearer_token.encode("utf-8")).hexdigest(),
     )
 
     with pytest.raises(SessionNotFoundError):

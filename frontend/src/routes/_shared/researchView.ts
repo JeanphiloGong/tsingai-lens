@@ -176,6 +176,23 @@ export type ObjectiveAnalysisState = {
 	abstention_reason: FindingAbstentionReason | null;
 	abstention_note: string | null;
 };
+export type ObjectiveAnalysisProgress = Pick<
+	ObjectiveAnalysisState,
+	| 'collection_id'
+	| 'objective_id'
+	| 'analysis_version'
+	| 'status'
+	| 'phase'
+	| 'processed_document_count'
+	| 'total_document_count'
+	| 'current_document_id'
+	| 'progress_message'
+	| 'error_code'
+	| 'error_message'
+	| 'created_at'
+	| 'started_at'
+	| 'completed_at'
+> & { analysis_version: number | null; status: ObjectiveAnalysisStatus | null };
 export type ObjectiveEvidenceGap = {
 	evidence_id: string;
 	document_id: string;
@@ -862,6 +879,44 @@ export async function createEvidenceVersion(
 	}) as Promise<EvidenceAuthoringResult>;
 }
 
+export type FindingEvidenceSummary = {
+	collection_id: string;
+	objective_id: string;
+	finding_id: string;
+	analysis_version: number;
+	language: 'en' | 'zh';
+	text: string;
+	citation_ids: string[];
+	references: Array<{
+		id: string;
+		kind: 'finding' | 'evidence';
+		label: string;
+		document_id?: string | null;
+		source_ref?: string | null;
+		page_numbers?: number[];
+		source_excerpt?: string | null;
+	}>;
+	model: string;
+	prompt_version: string;
+	generated_at: string;
+};
+
+export async function generateFindingSummary(
+	collectionId: string,
+	objectiveId: string,
+	findingId: string,
+	analysisVersion: number,
+	language: 'en' | 'zh',
+	signal?: AbortSignal
+): Promise<FindingEvidenceSummary> {
+	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}/summary`;
+	return requestJson(path, {
+		method: 'POST',
+		body: JSON.stringify({ analysis_version: analysisVersion, language }),
+		signal
+	}) as Promise<FindingEvidenceSummary>;
+}
+
 export async function fetchObjectiveEvidenceMap(
 	collectionId: string,
 	objectiveId: string
@@ -894,6 +949,17 @@ export async function fetchObjectiveAnalysis(collectionId: string, objectiveId: 
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`
 	);
 	return normalizeObjectiveAnalysis(data, collectionId);
+}
+
+export async function fetchObjectiveAnalysisStatus(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveAnalysisProgress> {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	return (await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis/status`
+	)) as ObjectiveAnalysisProgress;
 }
 
 export async function createFindingFeedback(

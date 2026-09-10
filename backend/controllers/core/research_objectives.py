@@ -2,24 +2,30 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from application.repositories.objective_repository import StoredObjective
+from application.core.objectives.finding_summary import FindingSummaryUnavailable
+
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
 )
 
 from controllers.schemas.core.research_objectives import (
     FindingDetailResponse,
+    FindingSummaryRequest,
+    FindingSummaryResponse,
     FindingListResponse,
     DocumentSelectionRequest,
     ObjectiveAnalysisResponse,
+    ObjectiveAnalysisStatusResponse,
     ObjectiveEvidenceListResponse,
     ObjectiveEvidenceMapResponse,
     ObjectiveScopeResponse,
     PaginatedObjectiveListResponse,
 )
-from controllers.schemas.source.task import TaskResponse
+from controllers.schemas.source.pipeline_run import PipelineRunResponse
 
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
@@ -27,16 +33,16 @@ router = APIRouter(prefix="/collections", tags=["research-objectives"])
 
 @router.post(
     "/{collection_id}/objective-discovery",
-    response_model=TaskResponse,
+    response_model=PipelineRunResponse,
     summary="Queue research question formation from selected ready documents",
 )
 async def discover_collection_objectives(
     collection_id: str,
     payload: DocumentSelectionRequest,
     request: Request,
-) -> TaskResponse:
+) -> PipelineRunResponse:
     try:
-        task = await request.app.state.research_objective_service.start_objective_discovery(
+        run = await request.app.state.objective_discovery_service.start_objective_discovery(
             collection_id,
             tuple(payload.document_ids),
         )
@@ -44,7 +50,7 @@ async def discover_collection_objectives(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return TaskResponse(**task)
+    return PipelineRunResponse(**run)
 
 
 @router.get(
@@ -74,7 +80,7 @@ async def list_collection_objectives(
     )
     return PaginatedObjectiveListResponse(
         collection_id=collection_id,
-        objectives=page,
+        objectives=[_objective_response_record(item) for item in page],
         offset=offset,
         limit=limit,
         total=len(ranked_objectives),
@@ -92,7 +98,7 @@ async def preview_collection_objective_scope(
     request: Request,
 ) -> ObjectiveScopeResponse:
     try:
-        preview = await request.app.state.research_objective_service.preview_objective_scope(
+        preview = await request.app.state.evidence_analysis_service.preview_objective_scope(
             collection_id,
             objective_id,
         )
@@ -150,6 +156,26 @@ async def start_collection_objective_analysis(
             },
         ) from exc
     return _to_objective_analysis_response(payload)
+
+
+@router.get(
+    "/{collection_id}/objectives/{objective_id}/analysis/status",
+    response_model=ObjectiveAnalysisStatusResponse,
+    summary="Read lightweight research objective analysis progress",
+)
+async def get_collection_objective_analysis_status(
+    collection_id: str,
+    objective_id: str,
+    request: Request,
+) -> ObjectiveAnalysisStatusResponse:
+    try:
+        payload = await request.app.state.objective_analysis_service.get_analysis_status(
+            collection_id,
+            objective_id,
+        )
+    except FileNotFoundError as exc:
+        raise _objective_not_found(collection_id, objective_id, exc) from exc
+    return ObjectiveAnalysisStatusResponse(**payload)
 
 
 @router.get(
@@ -227,6 +253,49 @@ async def get_objective_finding(
     return FindingDetailResponse(**payload)
 
 
+@router.post(
+    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary",
+    response_model=FindingSummaryResponse,
+    summary="Generate a cited reading summary of a published Finding",
+)
+async def summarize_objective_finding(
+    collection_id: str,
+    objective_id: str,
+    finding_id: str,
+    body: FindingSummaryRequest,
+    request: Request,
+) -> FindingSummaryResponse:
+    try:
+        payload = await request.app.state.objective_analysis_service.summarize_finding(
+            collection_id,
+            objective_id,
+            finding_id,
+            analysis_version=body.analysis_version,
+            language=body.language,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Published Finding not found."
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "summary_stale_analysis",
+                "message": "The published analysis has changed. Reload before generating a summary.",
+            },
+        ) from exc
+    except FindingSummaryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": str(exc),
+                "message": "The evidence summary is unavailable. Original evidence remains accessible.",
+            },
+        ) from exc
+    return FindingSummaryResponse(**payload)
+
+
 @router.get(
     "/{collection_id}/objectives/{objective_id}/evidence",
     response_model=ObjectiveEvidenceListResponse,
@@ -279,13 +348,21 @@ async def get_objective_evidence_map(
     return ObjectiveEvidenceMapResponse(**payload)
 
 
+def _objective_response_record(stored: StoredObjective) -> dict:
+    return {
+        **stored.objective.to_record(),
+        "created_at": stored.created_at.isoformat() if stored.created_at else None,
+        "updated_at": stored.updated_at.isoformat() if stored.updated_at else None,
+    }
+
+
 def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
     objective = payload["objective"]
     active = payload.get("analysis")
     published = payload.get("published_analysis")
     return ObjectiveAnalysisResponse(
         collection_id=payload["collection_id"],
-        objective=payload.get("objective_record") or objective.to_record(),
+        objective=_objective_response_record(objective),
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
         paper_contributions=[

@@ -87,7 +87,7 @@ class FakeObjectiveExtractor:
         title = str(payload.get("title") or "")
         return StructuredDocumentProfile(
             doc_type="review" if "Review" in title else "experimental",
-            parsing_warnings=[],
+            profile_warnings=[],
             confidence=0.9,
         )
 

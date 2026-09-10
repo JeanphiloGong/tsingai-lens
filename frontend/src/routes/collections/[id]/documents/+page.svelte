@@ -9,6 +9,44 @@
 		type DocumentType
 	} from '../../../_shared/documents';
 	import { t } from '../../../_shared/i18n';
+	import { getContext } from 'svelte';
+	import { DOCUMENT_AGENT, type DocumentAgent } from './documentAgent';
+	const agent = getContext<DocumentAgent>(DOCUMENT_AGENT);
+	$: selectedIds = new Set($agent.papers.map((paper) => paper.document_id));
+	$: selectedOnPage =
+		profiles?.items.filter((paper) => selectedIds.has(paper.document_id)).length ?? 0;
+
+	function togglePaper(profile: DocumentProfile, index: number) {
+		if ($agent.busy) return;
+		agent.update((state) => ({
+			...state,
+			papers: selectedIds.has(profile.document_id)
+				? state.papers.filter((paper) => paper.document_id !== profile.document_id)
+				: [
+						...state.papers,
+						{ document_id: profile.document_id, title: displayTitle(profile, index) }
+					]
+		}));
+	}
+	function selectPage() {
+		if (!profiles || $agent.busy) return;
+		const pageIds = new Set(profiles.items.map((paper) => paper.document_id));
+		const allSelected = selectedOnPage === profiles.items.length;
+		agent.update((state) => ({
+			...state,
+			papers: allSelected
+				? state.papers.filter((paper) => !pageIds.has(paper.document_id))
+				: [
+						...state.papers,
+						...profiles!.items
+							.filter((paper) => !selectedIds.has(paper.document_id))
+							.map((paper, index) => ({
+								document_id: paper.document_id,
+								title: displayTitle(paper, offset + index)
+							}))
+					]
+		}));
+	}
 
 	let profiles: DocumentProfilesResponse | null = null;
 	let loading = false;
@@ -85,11 +123,7 @@
 	}
 
 	function displayTitle(profile: DocumentProfile, index: number) {
-		return (
-			profile.title?.trim() ||
-			profile.source_filename?.trim() ||
-			$t('research.documents.untitledPaper', { number: index + 1 })
-		);
+		return profile.title?.trim() || $t('research.documents.untitledPaper', { number: index + 1 });
 	}
 
 	function documentTypeLabel(profile: DocumentProfile) {
@@ -112,6 +146,9 @@
 <svelte:head><title>{$t('collection.tabs.papers')}</title></svelte:head>
 
 <section class="papers-page fade-up">
+	<a class="workspace-link" href={`/collections/${collectionId}`}
+		>{$t('researchAgent.backToWorkspace')}</a
+	>
 	<header class="papers-header">
 		<div>
 			<h2>{$t('collection.tabs.papers')}</h2>
@@ -159,6 +196,33 @@
 			{/if}
 		</div>
 	</form>
+	<div class="selection-toolbar">
+		<label
+			><input
+				type="checkbox"
+				checked={Boolean(profiles?.items.length) && selectedOnPage === profiles?.items.length}
+				indeterminate={selectedOnPage > 0 && selectedOnPage < (profiles?.items.length ?? 0)}
+				disabled={$agent.busy || loading || !profiles?.items.length}
+				on:change={selectPage}
+			/>{$t('researchAgent.paperScope.selectPage')}</label
+		>
+		<span aria-live="polite"
+			>{$t('researchAgent.paperScope.selected', { count: $agent.papers.length })}</span
+		>
+		{#if $agent.papers.length}<button
+				class="btn btn--ghost btn--small"
+				type="button"
+				disabled={$agent.busy}
+				on:click={() => agent.update((state) => ({ ...state, papers: [] }))}
+				>{$t('researchAgent.paperScope.clear')}</button
+			>{/if}
+		<button
+			class="btn btn--primary btn--small"
+			type="button"
+			on:click={() => agent.update((state) => ({ ...state, open: true }))}
+			>{$t('workbench.askResearchAgent')}</button
+		>
+	</div>
 
 	{#if loading}
 		<p class="page-state" aria-busy="true">{$t('research.documents.profileLoading')}</p>
@@ -191,12 +255,19 @@
 		<div class="paper-list">
 			{#each profiles.items as profile, index (profile.document_id)}
 				<div class="paper-row" data-paper-row>
+					<input
+						class="paper-checkbox"
+						type="checkbox"
+						disabled={$agent.busy}
+						checked={selectedIds.has(profile.document_id)}
+						aria-label={$t('researchAgent.paperScope.select', {
+							title: displayTitle(profile, offset + index)
+						})}
+						on:change={() => togglePaper(profile, offset + index)}
+					/>
 					<div class="paper-row__identity">
 						<span class="paper-type">{documentTypeLabel(profile)}</span>
 						<h3>{displayTitle(profile, offset + index)}</h3>
-						{#if profile.source_filename && profile.source_filename !== profile.title}
-							<p>{profile.source_filename}</p>
-						{/if}
 					</div>
 
 					<div class="paper-row__metadata">
@@ -224,9 +295,9 @@
 						</a>
 					</div>
 
-					{#if profile.parsing_warnings.length}
+					{#if profile.profile_warnings.length}
 						<ul class="paper-warnings">
-							{#each profile.parsing_warnings as warning (warning)}
+							{#each profile.profile_warnings as warning (warning)}
 								<li>{warning}</li>
 							{/each}
 						</ul>
@@ -276,7 +347,6 @@
 	.papers-header h2,
 	.papers-header p,
 	.paper-row h3,
-	.paper-row p,
 	.page-state h3,
 	.page-state p {
 		margin: 0;
@@ -363,7 +433,7 @@
 
 	.paper-row {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(130px, auto) auto;
+		grid-template-columns: 20px minmax(0, 1fr) minmax(90px, auto) auto;
 		align-items: center;
 		gap: 16px;
 		min-height: 70px;
@@ -391,7 +461,6 @@
 		line-height: 20px;
 	}
 
-	.paper-row p,
 	.paper-row__metadata {
 		color: var(--text-secondary);
 		font-size: 12px;
@@ -431,13 +500,14 @@
 		}
 
 		.paper-row {
-			grid-template-columns: 1fr;
+			grid-template-columns: 20px minmax(0, 1fr);
 			gap: 8px;
 			padding: 12px 0;
 		}
 
 		.paper-row__action,
 		.paper-row__metadata {
+			grid-column: 2;
 			justify-self: start;
 			text-align: left;
 		}
@@ -458,6 +528,58 @@
 		.paper-pagination {
 			align-items: stretch;
 			flex-direction: column;
+		}
+	}
+	.workspace-link {
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.selection-toolbar {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 12px;
+		padding: 10px 0;
+		border-block: 1px solid var(--border-default);
+		font-size: 12px;
+	}
+	.selection-toolbar label {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.selection-toolbar > span {
+		margin-right: auto;
+		color: var(--text-secondary);
+	}
+	input[type='checkbox'] {
+		width: 16px;
+		height: 16px;
+		accent-color: var(--brand-primary);
+		cursor: pointer;
+	}
+	.paper-row:has(.paper-checkbox:checked) {
+		background: var(--brand-soft);
+	}
+	.papers-page {
+		container-type: inline-size;
+	}
+	@container (max-width: 850px) {
+		.paper-filters {
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		}
+	}
+	@container (max-width: 500px) {
+		.paper-filters {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.paper-row {
+			grid-template-columns: 20px minmax(0, 1fr);
+		}
+		.paper-row__metadata,
+		.paper-row__action {
+			grid-column: 2;
+			text-align: left;
 		}
 	}
 </style>

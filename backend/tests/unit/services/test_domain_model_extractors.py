@@ -492,7 +492,7 @@ def test_paper_source_signal_screen_binds_source_identity_in_backend():
             "window_role": "results",
             "document_profile": {
                 "doc_type": "review",
-                "parsing_warnings": ["parser internal warning"],
+                "profile_warnings": ["parser internal warning"],
             },
             "source_units": [
                 {
@@ -751,7 +751,7 @@ def test_paper_research_map_prompt_exposes_science_without_backend_lineage():
             "window_role": "results",
             "document_profile": {
                 "doc_type": "experimental",
-                "parsing_warnings": ["parser internal warning"],
+                "profile_warnings": ["parser internal warning"],
                 "confidence": 0.84,
             },
             "source_units": [
@@ -1285,7 +1285,7 @@ def test_domain_model_extractors_validate_json_text_response():
 
 def test_domain_model_extractors_record_provider_reported_usage() -> None:
     document_client = _FakeOpenAIClient(
-        '{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}'
+        '{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}'
     )
     facts_client = _FakeOpenAIClient(
         '{"method_mentions":[],"material_mentions":[],"variant_mentions":[],'
@@ -1325,7 +1325,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v14",
+        "finding_synthesis": "finding_synthesis.v15",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -1333,7 +1333,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
 def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning():
     client = _FakeOpenAIClient(
         'The draft was {"doc_type": experimental,}\n'
-        'Final answer:\n{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}'
+        'Final answer:\n{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}'
     )
     extractor = _document_profile_extractor(client)
 
@@ -1354,7 +1354,7 @@ def test_document_profile_retry_includes_the_invalid_output_it_must_correct():
     client = _FakeOpenAIClient(
         [
             "The document appears to be an experimental paper.",
-            '{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}',
+            '{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}',
         ]
     )
     extractor = _document_profile_extractor(client)
@@ -1770,7 +1770,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v14"
+    assert trace["prompt_version"] == "finding_synthesis.v15"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -3746,7 +3746,7 @@ def test_objective_paper_frame_prompt_exposes_science_without_backend_lineage():
             },
             "document_profile": {
                 "doc_type": "experimental",
-                "parsing_warnings": ["parser internal warning"],
+                "profile_warnings": ["parser internal warning"],
             },
             "paper_prior": {
                 "document_id": "prior-document-internal",
@@ -4169,6 +4169,7 @@ def test_structured_objective_evidence_normalizes_compact_context_attributes():
         "value": "316L stainless steel",
         "unit": None,
         "context_scope": "unknown",
+        "applies_to_outcomes": [],
     }
     assert json.loads(str(context.sample[0].value)) == {
         "shape": "cylindrical",
@@ -4819,7 +4820,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient(
-        '{"doc_type":"experimental","parsing_warnings":[],"confidence":0.91}'
+        '{"doc_type":"experimental","profile_warnings":[],"confidence":0.91}'
     )
     extractor = DocumentProfileExtractor(client=client, model="fake-model")
 
@@ -4832,7 +4833,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
 
     assert profile == StructuredDocumentProfile(
         doc_type="experimental",
-        parsing_warnings=[],
+        profile_warnings=[],
         confidence=0.91,
     )
     assert client.beta.chat.completions.calls == []

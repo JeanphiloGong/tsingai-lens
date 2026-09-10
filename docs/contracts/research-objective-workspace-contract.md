@@ -43,6 +43,14 @@ Owns:
 - candidate/confirmed state;
 - active and published analysis-version pointers.
 
+When a researcher follows a published result into a new question, the candidate
+also retains `parent_objective_id`, the exact `parent_analysis_version`, and a
+bounded `derivation_basis` containing validated Finding, scientific
+Evidence-gap, or non-failed paper-contribution references. This is question
+provenance, not Evidence or a claim that the new question is already supported.
+The candidate write rejects a parent version that is no longer the published
+version.
+
 It does not own execution progress, errors, complete document content, or
 embedded child arrays.
 
@@ -367,8 +375,9 @@ supersession lineage. A new Source-grounded record uses
 `origin=agent_authored` when the Agent proposes it and the researcher approves
 the exact write. An Agent-assisted correction remains `human_revised` and is
 distinguished by `created_by_tool_call_id`. An Agent uses the same command only
-after exact-argument approval and supplies the `source_digest` obtained from
-`inspect_document_sources`. Invalid excerpts, stale or out-of-scope Sources,
+  after exact-argument approval and supplies the `source_digest` obtained from
+  `read_source` or a complete untruncated `inspect_document_sources` result.
+  Invalid excerpts, stale or out-of-scope Sources,
 concurrent analysis, and attempts to revise a superseded record are conflicts;
 they never create a partial record.
 

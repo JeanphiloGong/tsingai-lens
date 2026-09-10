@@ -300,7 +300,7 @@ async function mockApis(page: Page) {
 							title: 'LPBF 316L tensile study',
 							source_filename: 'paper-1.pdf',
 							doc_type: 'experimental',
-							parsing_warnings: [],
+							profile_warnings: [],
 							confidence: 0.95
 						}
 					],
@@ -362,6 +362,119 @@ async function mockApis(page: Page) {
 	});
 }
 
+for (const width of [320, 768, 1024, 1440]) {
+	test(`prioritizes Finding results over coverage details at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		await mockApis(page);
+		const pageErrors: string[] = [];
+		page.on('pageerror', (error) => pageErrors.push(error.message));
+		const findings = Array.from({ length: 12 }, (_, index) => ({
+			...finding,
+			finding_id: `finding-${index + 1}`,
+			statement: index
+				? `Reported annealing response under condition ${index + 1}.`
+				: finding.statement
+		}));
+		await page.route(`**/objectives/${objectiveId}/analysis`, (route) =>
+			route.fulfill(
+				json({
+					collection_id: collectionId,
+					objective: { ...objective, active_analysis_version: 1 },
+					active_analysis: analysis('succeeded', 1),
+					published_analysis: analysis('succeeded', 1),
+					warnings: [],
+					evidence_review: {
+						total_evidence_count: 32,
+						result_count: 24,
+						comparable_evidence_count: 12,
+						gap_count: 20,
+						omitted_gap_count: 0,
+						status_counts: { comparable: 12, needs_context: 20 },
+						gaps: Array.from({ length: 20 }, (_, index) => ({
+							evidence_id: `gap-${index}`,
+							document_id: documentId,
+							source_kind: 'table',
+							source_ref: tableSourceRef,
+							page_numbers: [7],
+							evidence_status: 'needs_context',
+							reason: 'The test temperature is not reported for this comparison.',
+							outcome: 'tensile strength',
+							source_excerpt: evidence.source_excerpt
+						}))
+					}
+				})
+			)
+		);
+		await page.route(`**/objectives/${objectiveId}/findings?*`, (route) =>
+			route.fulfill(
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					items: findings,
+					total: findings.length,
+					offset: 0,
+					limit: 200
+				})
+			)
+		);
+		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`);
+		const result = page.getByRole('heading', { name: finding.statement, exact: true });
+		await expect(result).toBeVisible();
+		const coverage = page.getByRole('group', { name: 'Evidence coverage', exact: true });
+		await expect(coverage).not.toHaveAttribute('open');
+		await expect(coverage.locator('summary')).toContainText('20 to review');
+		expect((await coverage.boundingBox())!.height).toBeLessThanOrEqual(60);
+		await expect(coverage.locator('.evidence-gap')).toHaveCount(20);
+		await expect(coverage.locator('.evidence-gap').first()).not.toBeVisible();
+		await expect(page.getByText('分析完成', { exact: true })).not.toBeVisible();
+		const resultBox = (await result.boundingBox())!;
+		await page.screenshot({ path: `test-results/finding-results-first-${width}.png` });
+		const layout = await page.evaluate(() =>
+			Object.fromEntries(
+				[
+					'.site-header',
+					'.collection-header',
+					'.collection-tabs',
+					'.objective-header',
+					'.findings-sidebar'
+				].map((selector) => {
+					const bounds = document.querySelector(selector)?.getBoundingClientRect();
+					return [selector, bounds && { y: bounds.y, height: bounds.height }];
+				})
+			)
+		);
+		expect(resultBox.y + resultBox.height, JSON.stringify(layout)).toBeLessThanOrEqual(900);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+			true
+		);
+		const summary = coverage.locator('summary');
+		await summary.focus();
+		await page.keyboard.press('Enter');
+		await expect(coverage).toHaveAttribute('open');
+		await expect(
+			coverage.getByText('The test temperature is not reported for this comparison.').first()
+		).toBeVisible();
+		await expect(coverage.getByRole('link', { name: 'Open source' }).first()).toHaveAttribute(
+			'href',
+			/source_ref=tbl_doc_1_3_table_3/
+		);
+		await summary.focus();
+		await page.keyboard.press('Enter');
+		await expect(coverage).not.toHaveAttribute('open');
+		if (width <= 1000) {
+			await page.getByRole('combobox', { name: 'Select Finding' }).selectOption('finding-2');
+		} else {
+			await page.getByRole('button', { name: new RegExp(findings[1].statement) }).click();
+		}
+		await expect(
+			page.getByRole('heading', { name: findings[1].statement, exact: true })
+		).toBeVisible();
+		await expect(page).toHaveURL(/finding_id=finding-2/);
+		expect(pageErrors).toEqual([]);
+	});
+}
+
 for (const viewport of [
 	{ name: 'desktop', width: 1280, height: 720 },
 	{ name: 'mobile', width: 390, height: 844 }
@@ -383,9 +496,9 @@ for (const viewport of [
 		await mockApis(page);
 		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
 
-		await expect(page.getByText('Evidence extraction failed.')).toBeVisible();
+		await expect(page.getByText('Evidence analysis did not complete.')).toBeVisible();
 		await expect(page.getByText('正在显示已发布的 v1；重试 v2 失败。')).toBeVisible();
-		await expect(page.getByText(finding.statement).first()).toBeVisible();
+		await expect(page.getByRole('heading', { name: finding.statement, exact: true })).toBeVisible();
 		await expect(page.getByText('相关联', { exact: true })).toBeVisible();
 		await expect(page.getByRole('heading', { name: '证据对比' })).toBeVisible();
 		await expect(

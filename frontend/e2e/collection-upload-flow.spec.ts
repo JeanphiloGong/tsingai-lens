@@ -32,21 +32,25 @@ function document(documentId: string, status: string, filename: string) {
 	};
 }
 
-function preparationTask(documentId: string, status: 'queued' | 'running' | 'failed') {
+function preparationRun(documentId: string, status: 'queued' | 'running' | 'failed') {
 	return {
-		task_id: `task_${documentId}`,
+		run_id: `run_${documentId}`,
 		collection_id: collectionId,
-		document_id: documentId,
-		task_type: 'document_preparation',
+		pipeline_name: 'document_preparation',
+		scope_type: 'document',
+		scope_id: documentId,
 		mode: 'standard',
 		input_fingerprint: `input-${documentId}`,
 		status,
-		current_stage: status === 'failed' ? 'failed' : 'source_parsing',
+		current_node: status === 'failed' ? 'failed' : 'source_parsing',
 		progress_percent: status === 'running' ? 42 : 0,
 		progress_detail:
 			status === 'running' ? { phase: 'source_parsing', message: 'Parsing this paper.' } : null,
 		errors: status === 'failed' ? ['The PDF could not be parsed.'] : [],
 		warnings: [],
+		nodes: {},
+		stats: {},
+		context: {},
 		created_at: '2026-08-27T00:00:00Z',
 		updated_at: '2026-08-27T00:01:00Z',
 		started_at: status === 'running' ? '2026-08-27T00:00:01Z' : null,
@@ -54,16 +58,17 @@ function preparationTask(documentId: string, status: 'queued' | 'running' | 'fai
 	};
 }
 
-function discoveryTask(status: 'queued' | 'completed') {
+function discoveryRun(status: 'queued' | 'completed') {
 	return {
-		task_id: 'task_discovery',
+		run_id: 'run_discovery',
 		collection_id: collectionId,
-		document_id: null,
-		task_type: 'objective_discovery',
+		pipeline_name: 'objective_discovery',
+		scope_type: 'collection',
+		scope_id: collectionId,
 		mode: 'standard',
 		input_fingerprint: 'discovery-scope',
 		status,
-		current_stage: status === 'completed' ? 'objectives_ready' : 'queued',
+		current_node: status === 'completed' ? 'objectives_ready' : 'queued',
 		progress_percent: status === 'completed' ? 100 : 0,
 		progress_detail: {
 			phase: status === 'completed' ? 'objectives_ready' : 'queued',
@@ -74,6 +79,9 @@ function discoveryTask(status: 'queued' | 'completed') {
 		},
 		errors: [],
 		warnings: [],
+		nodes: {},
+		stats: {},
+		context: {},
 		created_at: '2026-08-27T00:00:00Z',
 		updated_at: '2026-08-27T00:01:00Z',
 		started_at: status === 'completed' ? '2026-08-27T00:00:01Z' : null,
@@ -122,14 +130,14 @@ async function mockCurrentDocumentApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/documents` && method === 'GET') {
 			return route.fulfill(json({ count: documents.length, items: documents }));
 		}
-		if (path === `/api/v1/collections/${collectionId}/tasks` && method === 'GET') {
+		if (path === `/api/v1/collections/${collectionId}/pipeline-runs` && method === 'GET') {
 			return route.fulfill(
 				json({
 					collection_id: collectionId,
 					count: 2,
 					items: [
-						preparationTask('doc_processing', 'running'),
-						preparationTask('doc_failed', 'failed')
+						preparationRun('doc_processing', 'running'),
+						preparationRun('doc_failed', 'failed')
 					]
 				})
 			);
@@ -139,16 +147,16 @@ async function mockCurrentDocumentApis(page: Page) {
 			method === 'POST'
 		) {
 			preparationRequests.push(path);
-			return route.fulfill(json(preparationTask('doc_failed', 'queued'), 202));
+			return route.fulfill(json(preparationRun('doc_failed', 'queued'), 202));
 		}
-		if (path === '/api/v1/tasks/task_doc_failed' && method === 'GET') {
-			return route.fulfill(json(preparationTask('doc_failed', 'failed')));
+		if (path === '/api/v1/pipeline-runs/run_doc_failed' && method === 'GET') {
+			return route.fulfill(json(preparationRun('doc_failed', 'failed')));
 		}
-		if (path === '/api/v1/tasks/task_doc_processing' && method === 'GET') {
-			return route.fulfill(json(preparationTask('doc_processing', 'running')));
+		if (path === '/api/v1/pipeline-runs/run_doc_processing' && method === 'GET') {
+			return route.fulfill(json(preparationRun('doc_processing', 'running')));
 		}
-		if (path === '/api/v1/tasks/task_discovery' && method === 'GET') {
-			return route.fulfill(json(discoveryTask('completed')));
+		if (path === '/api/v1/pipeline-runs/run_discovery' && method === 'GET') {
+			return route.fulfill(json(discoveryRun('completed')));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives` && method === 'GET') {
 			return route.fulfill(json({ collection_id: collectionId, objectives }));
@@ -167,7 +175,7 @@ async function mockCurrentDocumentApis(page: Page) {
 					confirmation_status: 'candidate'
 				}
 			];
-			return route.fulfill(json(discoveryTask('queued')));
+			return route.fulfill(json(discoveryRun('queued')));
 		}
 
 		return route.fulfill(json({ detail: `unhandled test route: ${method} ${path}` }, 404));
@@ -197,7 +205,7 @@ test('ready papers remain usable while other papers process or fail', async ({ p
 	await page.getByText('1 paper(s) need attention', { exact: true }).click();
 	await expect(page.getByText('The PDF could not be parsed.')).toBeVisible();
 	await page.getByRole('button', { name: 'Retry' }).click();
-	await expect(page.getByText('1 paper preparation task(s) queued.')).toBeVisible();
+	await expect(page.getByText('1 paper preparation run(s) queued.')).toBeVisible();
 	expect(requests.preparationRequests).toEqual([
 		`/api/v1/collections/${collectionId}/documents/doc_failed/preparation`
 	]);

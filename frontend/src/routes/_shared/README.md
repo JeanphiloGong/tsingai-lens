@@ -8,7 +8,7 @@ This node owns browser-side helpers shared across frontend routes.
 - centralize authentication expiry and API error handling;
 - expose typed clients for Collection, Document preparation, Source,
   Objective/Finding, and Assistant resources;
-- keep formatting, translations, and task-state shaping out
+- keep formatting, translations, and Pipeline Run state shaping out
   of route components.
 
 ## Important Files
@@ -16,10 +16,12 @@ This node owns browser-side helpers shared across frontend routes.
 - `api.ts`
   Base request helpers, shared HTTP error behavior, and same-origin blob
   downloads used by source archives and Finding dataset exports.
-- `collections.ts`, `collectionDocuments.ts`, `tasks.ts`
-  Collection upload, current Document, independent preparation, and task
-  progress contracts. `tasks.ts` also queues collection-level research-question
-  formation and normalizes its persisted `objective_discovery` Task.
+- `collections.ts`, `collectionDocuments.ts`, `pipelineRuns.ts`
+  Collection upload, current Document, independent preparation, and Pipeline
+  Run progress contracts. Collection history uses compact run summaries; one
+  run read retains complete diagnostic state. `pipelineRuns.ts` also queues
+  collection-level research-question formation and normalizes its persisted
+  `objective_discovery` Pipeline Run.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated
@@ -37,7 +39,7 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
   gold-draft URLs serve the corresponding collection exports.
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, streamed text
-  deltas, capability results, exact write decisions, and the one-item pending
+  deltas, capability results, exact write decisions, and the bounded pending
   Source handoff between a document reader and its Collection Agent.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans

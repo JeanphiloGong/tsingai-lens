@@ -77,6 +77,78 @@ class CreateFindingVersionArguments(BaseModel):
         return self
 
 
+class CreateFindingDraftArguments(CreateFindingVersionArguments):
+    draft_id: str = Field(min_length=1, max_length=128)
+
+
+class CreateFindingDraftCapability:
+    spec = ToolSpec(
+        name="create_finding_draft",
+        description=(
+            "Record one transient research-conclusion draft for researcher review. "
+            "The draft names Evidence from one published Objective version but does "
+            "not validate those bindings, publish a Finding, or change any existing "
+            "record. Use the separate approved Finding write only after inspecting "
+            "and validating the exact Evidence."
+        ),
+        risk=ToolRisk.DRAFT,
+        input_model=CreateFindingDraftArguments,
+    )
+
+    async def execute(
+        self,
+        context: CapabilityExecutionContext,
+        arguments: CreateFindingDraftArguments,
+    ) -> ChatToolResult:
+        draft = arguments.model_dump()
+        evidence_ids = tuple(
+            dict.fromkeys(
+                (
+                    *arguments.supporting_evidence_ids,
+                    *arguments.contradicting_evidence_ids,
+                    *arguments.context_evidence_ids,
+                    *arguments.condition_boundary_evidence_ids,
+                )
+            )
+        )
+        refs = [
+            ChatResourceRef(
+                resource_type="research_objective",
+                resource_id=arguments.objective_id,
+                href=(
+                    f"/collections/{context.collection_id}/objectives/"
+                    f"{arguments.objective_id}"
+                ),
+            )
+        ]
+        refs.extend(
+            ChatResourceRef(
+                resource_type="evidence",
+                resource_id=(
+                    f"{arguments.objective_id}:"
+                    f"{arguments.source_analysis_version}:{evidence_id}"
+                ),
+                href=(
+                    f"/collections/{context.collection_id}/objectives/"
+                    f"{arguments.objective_id}?evidence_id={evidence_id}"
+                ),
+            )
+            for evidence_id in evidence_ids
+        )
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id,
+            status="succeeded",
+            data={
+                "draft": draft,
+                "persistence": "transient_chat_result",
+                "published": False,
+                "requires_user_approval": True,
+                "requires_evidence_validation": True,
+            },
+            resource_refs=tuple(refs),
+        )
+
+
 class CreateFindingVersionCapability:
     spec = ToolSpec(
         name="create_finding_version",
@@ -159,10 +231,13 @@ class CreateFindingVersionCapability:
                 "abstention_reason": result.analysis.abstention_reason,
             },
             resource_refs=tuple(refs),
+            warnings=tuple(finding.warnings) if finding is not None else (),
         )
 
 
 __all__ = [
+    "CreateFindingDraftArguments",
+    "CreateFindingDraftCapability",
     "CreateFindingVersionArguments",
     "CreateFindingVersionCapability",
 ]

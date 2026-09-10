@@ -10,12 +10,17 @@ import unicodedata
 from typing import Any, Mapping
 from uuid import uuid4
 
+from application.core.objectives.analysis.source_validation import (
+    authored_source_fact_grounding_warnings,
+)
+from application.core.objectives.analysis_records import (
+    list_all_evidence,
+    list_all_findings,
+)
 from application.source.collection_service import CollectionService
 from domain.core import ObjectiveAnalysis, ObjectiveEvidence
-from domain.ports import ObjectiveRepository, SourceArtifactRepository
-
-
-_PAGE_SIZE = 500
+from application.repositories.source_artifact_repository import SourceArtifactRepository
+from application.repositories.objective_repository import ObjectiveRepository
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,8 @@ class EvidenceAuthoringResult:
 class CanonicalObjectiveSource:
     content: str
     page: int | None
+    heading_path: str | None
+    grounding_source: Mapping[str, Any]
 
 
 def resolve_canonical_objective_source(
@@ -38,7 +45,16 @@ def resolve_canonical_objective_source(
             (item for item in document.blocks if item.block_id == source_ref), None
         )
         if source is not None:
-            return CanonicalObjectiveSource(content=source.text, page=source.page)
+            return CanonicalObjectiveSource(
+                content=source.text,
+                page=source.page,
+                heading_path=source.heading_path,
+                grounding_source={
+                    "source_kind": "text_window",
+                    "text": source.text,
+                    "heading_path": source.heading_path,
+                },
+            )
     elif source_kind == "table":
         source = next(
             (item for item in document.tables if item.table_id == source_ref), None
@@ -48,6 +64,8 @@ def resolve_canonical_objective_source(
             return CanonicalObjectiveSource(
                 content=str(record["table_markdown"] or "").strip(),
                 page=source.page,
+                heading_path=source.heading_path,
+                grounding_source={**record, "source_kind": "table"},
             )
     elif source_kind == "figure":
         source = next(
@@ -55,7 +73,14 @@ def resolve_canonical_objective_source(
         )
         if source is not None:
             return CanonicalObjectiveSource(
-                content=str(source.caption_text or ""), page=source.page
+                content=str(source.caption_text or ""),
+                page=source.page,
+                heading_path=source.heading_path,
+                grounding_source={
+                    "source_kind": "figure",
+                    "caption_text": source.caption_text,
+                    "heading_path": source.heading_path,
+                },
             )
     else:
         raise ValueError(f"unsupported objective evidence source: {source_kind}")
@@ -152,6 +177,16 @@ class EvidenceAuthoringService:
             digest = hashlib.sha256(canonical.content.encode("utf-8")).hexdigest()
             if source_digest != digest:
                 raise ValueError("Source verification token does not match the canonical Source")
+        grounding_warnings = authored_source_fact_grounding_warnings(
+            {
+                "changed_variables": list(changed_variables),
+                "comparison": comparison,
+                "reported_result": reported_result,
+                "attribution_scope": attribution_scope,
+                "scientific_context": scientific_context,
+            },
+            source=canonical.grounding_source,
+        )
 
         source_evidence = await self._all_evidence(
             collection_id, objective_id, source_analysis_version
@@ -227,6 +262,7 @@ class EvidenceAuthoringService:
                 "created_by_tool_call_id": created_by_tool_call_id,
                 "created_at": now,
                 "authoring_note": self._clean_optional(authoring_note),
+                "warnings": list(grounding_warnings),
             }
         )
 
@@ -295,38 +331,22 @@ class EvidenceAuthoringService:
     async def _all_evidence(
         self, collection_id: str, objective_id: str, analysis_version: int
     ) -> tuple[ObjectiveEvidence, ...]:
-        records: list[ObjectiveEvidence] = []
-        while True:
-            page, total = await self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=len(records),
-                limit=_PAGE_SIZE,
-            )
-            records.extend(page)
-            if len(records) >= total:
-                return tuple(records)
-            if not page:
-                raise RuntimeError("objective Evidence pagination did not advance")
+        return await list_all_evidence(
+            self.objective_repository,
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
 
     async def _all_findings(
         self, collection_id: str, objective_id: str, analysis_version: int
     ) -> tuple[Any, ...]:
-        records: list[Any] = []
-        while True:
-            page, total = await self.objective_repository.list_findings(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=len(records),
-                limit=_PAGE_SIZE,
-            )
-            records.extend(page)
-            if len(records) >= total:
-                return tuple(records)
-            if not page:
-                raise RuntimeError("objective Finding pagination did not advance")
+        return await list_all_findings(
+            self.objective_repository,
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
 
     @staticmethod
     def _clean_optional(value: str | None) -> str | None:

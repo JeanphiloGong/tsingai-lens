@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.auth_repository import AuthUserRecord
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -36,13 +38,13 @@ COLLECTION_ID = "col_source"
 @pytest.fixture
 async def source_repository(postgres_session_factory):
     await PostgresAuthRepository(postgres_session_factory).add_user(
-        {
-            "user_id": "user_source",
-            "email": "source@example.com",
-            "display_name": None,
-            "password_hash": "synthetic-password-hash",
-            "created_at": datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
-        }
+        AuthUserRecord(
+            user_id="user_source",
+            email="source@example.com",
+            display_name=None,
+            password_hash="synthetic-password-hash",
+            created_at=datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
+        )
     )
     collections = PostgresCollectionRepository(postgres_session_factory)
     await collections.add_collection(
@@ -176,6 +178,43 @@ async def test_source_repository_round_trips_each_current_document_independently
         first,
         second,
     )
+
+
+async def test_source_existence_does_not_load_artifact_json(
+    source_repository, monkeypatch
+):
+    assert not await source_repository.has_documents(COLLECTION_ID)
+    await source_repository.replace_document(
+        COLLECTION_ID, _source("doc_a", title="Paper A")
+    )
+
+    async def fail_hydration(*args, **kwargs):
+        pytest.fail("Existence must not hydrate Source artifacts")
+
+    monkeypatch.setattr(source_repository, "_read_documents", fail_hydration)
+    assert await source_repository.has_documents(COLLECTION_ID)
+    assert not await source_repository.has_documents("another-collection")
+
+
+async def test_profile_only_row_is_not_a_prepared_source(source_repository):
+    from domain.core import DocumentProfile
+    from infra.persistence.postgres.document_profile_repository import (
+        PostgresDocumentProfileRepository,
+    )
+
+    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    await profiles.replace(
+        COLLECTION_ID,
+        DocumentProfile(
+            document_id="doc_a",
+            title="Paper A",
+            doc_type="uncertain",
+            profile_warnings=(),
+            confidence=0.0,
+        ),
+    )
+    assert await source_repository.read_document(COLLECTION_ID, "doc_a") is None
+    assert not await source_repository.has_documents(COLLECTION_ID)
 
 
 async def test_source_repository_batch_read_is_exact_ordered_and_complete(

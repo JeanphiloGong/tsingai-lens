@@ -4,7 +4,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { authState, clearAuthState, fetchCurrentSession, logout } from './_shared/auth';
+  import { authState, fetchCurrentSession, logout, startAuthSynchronization } from './_shared/auth';
   import { API_DOCS_PATH } from './_shared/base';
   import { collections } from './_shared/collections';
   import { errorMessage } from './_shared/api';
@@ -27,6 +27,7 @@
     .slice(0, 1)
     .toUpperCase();
   $: if (browser && $authState.status === 'anonymous' && !isLoginRoute) {
+    collections.set([]);
     void goto('/login', { replaceState: true });
   }
 
@@ -103,13 +104,11 @@
       await logout();
     } catch (error) {
       authError = errorMessage(error);
-      clearAuthState();
     }
-    collections.set([]);
-    await goto('/login', { replaceState: true });
   }
 
   onMount(() => {
+    const stopAuthSynchronization = startAuthSynchronization();
     void loadSession();
 
     const handleClick = (event: MouseEvent) => {
@@ -122,7 +121,10 @@
       }
     };
     window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
+    return () => {
+      stopAuthSynchronization();
+      window.removeEventListener('click', handleClick);
+    };
   });
 
   $: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);

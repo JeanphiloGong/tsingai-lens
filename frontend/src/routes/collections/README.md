@@ -11,14 +11,14 @@ This node owns the Collection route family.
   expandable attention section. Objective discovery uses the complete current
   ready-paper set without restoring the retired Collection build contract. The
   action is named research-question formation and returns a persisted
-  collection Task; queued/running progress survives navigation or refresh,
+  collection-scoped Pipeline Run; queued/running progress survives navigation or refresh,
   disables duplicate submission, and refreshes Objectives at completion. A
-  failed Task exposes its error and restores the retry action. This phase does
+  failed run exposes its error and restores the retry action. This phase does
   not claim that Objective Evidence analysis has started.
   The overview keeps a persistent four-stage research strip and, while paper
-  preparation tasks are queued or running, adds an aggregate progress bar with
-  ready/total papers, active task count, and weighted task completion. It does
-  not present one task as the progress of the entire collection, and it does
+  preparation runs are queued or running, adds an aggregate progress bar with
+  ready/total papers, active run count, and weighted run completion. It does
+  not present one run as the progress of the entire collection, and it does
   not count collection-level Objective discovery as paper preparation. A
   collapsed export section can download a user-selected set of original paper
   files as a bounded ZIP with its manifest; it does not change the research
@@ -47,20 +47,34 @@ This node owns the Collection route family.
   Secondary Objective Evidence Map. It selects one published Objective and
   shows deterministic Finding, Evidence, exact Source, paper, and coverage
   relationships without restoring the retired collection-wide Graph contract.
+  A Finding filter restricts the displayed chain to its related records; a
+  separate unlinked-Evidence filter retains inspected facts outside Findings.
+  Objective-level coverage stays visible in either filter. Source return links
+  retain the Objective and Finding selection.
 - `collections/[id]/documents/*`
-  Parsed-paper reading and exact Source verification. A researcher may hand one
-  stable Source block to the same Collection's Agent for explanation or draft
-  formation; the handoff creates no Objective, Evidence, or Finding.
+  Parsed-paper reading and exact Source verification. Papers can be selected
+  across list pages, and up to 12 stable Source blocks can be selected for a
+  question. The Collection Agent opens alongside the list or reader and remains
+  mounted when collapsed. New session starts a separate Collection-bound
+  conversation. The handoff creates no Objective, Evidence, or Finding.
+  The documents layout retains paper tabs and can show two readers beside that
+  conversation. `DocumentTabs.svelte` owns tab controls, and
+  `documents/[document_id]/DocumentReader.svelte` owns each paper's loading,
+  reading mode, and Source selection with explicit document inputs. Source
+  navigation stays local to the target reader; closing a tab does not clear
+  question context. Narrow screens retain the tabs and show one paper at a time.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
-  write approval. A pending Source from the document reader is reviewable and
+  write approval. A bounded final answer remains visible with a limited-reading
+  notice when the Agent reaches its step limit; only a failed turn is presented
+  as an error. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.
   Its research-process capability projects the same current Documents and
-  persisted per-paper preparation tasks used by the Collection page; Chat does
+  persisted per-paper preparation runs used by the Collection page; Chat does
   not own a second progress model or expose model reasoning and retry internals.
   The Agent may propose preparing exact papers. The action requires approval,
-  returns their queued or reused tasks, and does not discover or confirm an
+  returns their queued or reused runs, and does not discover or confirm an
   Objective or start deep Objective analysis.
   For a researcher-authored question, the Agent can preview a bounded paper
   scope without claiming that mapped relationships or review citations are
@@ -80,19 +94,32 @@ This node owns the Collection route family.
   Source-grounded Evidence record. That write requires the same exact
   approval, Source digest, and immutable-version publication as the human
   authoring command.
+  Source searches, complete table reads, Evidence/Finding drafts, quality
+  assessments, and follow-up Objective drafts remain visible as reviewable
+  research artifacts in the conversation. From a published analysis, the Agent
+  may also propose a ResearchPlan and, after a separate approval, save it with
+  the Finding/Evidence snapshots it used; a stale snapshot is shown as a
+  technical failure rather than silently saving a plan against newer results.
   The Agent composer can also add PDF papers directly to the current
   Collection. This user action reuses the canonical Collection document upload
-  endpoint and queues independent per-paper preparation tasks; it does not send
+  endpoint and queues independent per-paper preparation runs; it does not send
   file bytes through Chat, create an Agent-owned attachment, or form an
   Objective. Each selected paper remains visible with upload/preparation
   status, failures can be retried without duplicating a successful upload, and
-  the Collection workspace remains the canonical place to inspect full task
+  the Collection workspace remains the canonical place to inspect full run
   progress.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
 
 ## Objective Interaction
+
+The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
+Opening "AI summary" requests one short paragraph; it has no categorized
+sections or evidence counters. Compact references link to exact Sources, and
+model attribution remains visible. The optional summary is generated only on
+request and cleared on scope, version, or language changes; it never modifies
+the published result. Failure leaves the original result available with a retry.
 
 The user-facing hierarchy is:
 
@@ -138,6 +165,9 @@ across the complete loaded list, then paginates matching results five at a time.
 Workflow-state filtering distinguishes pending, active, published, and failed
 analysis; changing a filter resets to the first page so no matching Objective is
 hidden by a stale page position.
+Leaving the Objective list stops its status polling. Late reads cannot restart
+polling or fetch further result snapshots after the page has been destroyed;
+the persisted analysis continues independently on the server.
 The page handles these states explicitly:
 
 - candidate: confirm and analyze is the primary action;
@@ -160,6 +190,16 @@ without model metadata are labeled explicitly instead of guessing a model.
 The Finding list returns the complete display shape. Selection reuses that item
 and loads only its paginated Evidence with the published `analysis_version`;
 stale rapid-selection responses are discarded.
+The Finding route uses a compact Collection link and single-row navigation in
+place of the Collection overview header. Published results appear directly
+beneath the Objective question. Evidence
+coverage is a compact, initially collapsed sidebar disclosure with record and
+review-gap counts; expanding it preserves gap reasons, excerpts, status counts,
+and exact Source links. Research scope and export controls are also collapsed
+instead of introducing the results with explanatory panels. On narrow screens,
+multiple Findings use a select control so the full list does not precede the
+selected result. No-Finding outcomes remain explicit, and active or failed
+analysis states remain visible alongside any previously published results.
 The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
 `source_excerpt` once, shows baseline/target/result fields structurally, uses

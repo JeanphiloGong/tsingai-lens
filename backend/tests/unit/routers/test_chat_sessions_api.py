@@ -14,8 +14,9 @@ except ImportError:  # pragma: no cover
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatSessionNotFoundError,
+    ChatSourceContextError,
 )
-from application.source.task_service import TaskService
+from application.pipeline import PipelineRunService
 from controllers.chat import sessions as sessions_controller
 from controllers.schemas.chat.session import (
     ChatSessionCreateRequest,
@@ -30,7 +31,7 @@ from domain.chat import (
     ChatToolCall,
     ToolRisk,
 )
-from infra.persistence.memory import MemoryObjectiveRepository, MemoryTaskRepository
+from infra.persistence.memory import MemoryObjectiveRepository, MemoryPipelineRunRepository
 from main import create_app
 
 
@@ -88,6 +89,11 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         return self.messages
 
+    async def get_trajectory_for_user(self, session_id: str, user_id: str):
+        await self.get_session_for_user(session_id, user_id)
+        return {"branches": [], "branch_draft": None, "running": False,
+                "messages": self.messages, "pending_approval": self.pending, "feedback": ()}
+
     async def get_pending_approval_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
         return self.pending
@@ -103,6 +109,10 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         if message == "blocked":
             raise ChatApprovalPendingError(self.pending.tool_call_id)
+        if message == "forged source":
+            raise ChatSourceContextError(
+                "selected Source quote is not contained in the canonical Source"
+            )
         assert message == "你好"
         if source_contexts:
             self.messages = (
@@ -117,6 +127,8 @@ class _Service:
             )
         return {
             "status": "completed",
+            "completion_reason": "model_answer",
+            "warnings": [],
             "messages": self.messages,
             "pending_approval": None,
             "error_code": None,
@@ -203,7 +215,8 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert messages.pending_approval.tool_call_id == "call-1"
 
 
-def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
+@pytest.mark.parametrize("count", [1, 3, 12])
+def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None:
     service = _Service()
     source_context = {
         "resource_ref": {
@@ -217,7 +230,7 @@ def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
         "collection_id": "col-1",
         "document_id": "doc-1",
         "document_title": "Paper A",
-        "source_kind": "paragraph",
+        "source_kind": "text_window",
         "source_ref": "results",
         "page": 3,
         "quote": "Conductivity improved to 12 mS/cm under EIS.",
@@ -227,11 +240,19 @@ def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
     turn = asyncio.run(
         sessions_controller.post_chat_message(
             "chat-1",
-            ChatTurnRequest(message="你好", source_contexts=[source_context]),
+            ChatTurnRequest(message="你好", source_contexts=[source_context] + [
+                {**source_context, "source_ref": f"methods-{index}", "resource_ref": {
+                    **source_context["resource_ref"], "resource_id": f"doc-1:methods-{index}"
+                }} for index in range(1, count)
+            ]),
             _request(service),
         )
     )
 
+    assert len(turn.messages[0].source_contexts) == count
+    if count == 12:
+        with pytest.raises(ValueError):
+            ChatTurnRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
     assert turn.messages[0].source_contexts[0].document_id == "doc-1"
     assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
         ChatResourceRef(
@@ -243,6 +264,25 @@ def test_chat_sessions_api_accepts_one_traceable_source_context() -> None:
             ),
         ).to_record()
     )
+
+
+def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
+    with pytest.raises(HTTPException) as invalid:
+        asyncio.run(
+            sessions_controller.post_chat_message(
+                "chat-1",
+                ChatTurnRequest(message="forged source"),
+                _request(_Service()),
+            )
+        )
+
+    assert invalid.value.status_code == 422
+    assert invalid.value.detail == {
+        "code": "chat_source_context_invalid",
+        "message": (
+            "selected Source quote is not contained in the canonical Source"
+        ),
+    }
 
 
 def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
@@ -305,13 +345,15 @@ class _AuthService:
         return {"user_id": "user-1", "email": "researcher@example.com"}
 
 
-def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> None:
+def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
+    collection_service,
+) -> None:
     service = _Service()
-    inert_task_service = TaskService(MemoryTaskRepository())
+    inert_pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
     app = create_app(
         auth_session_service=_AuthService(),
-        collection_service=SimpleNamespace(),
-        task_service=inert_task_service,
+        collection_service=collection_service,
+        pipeline_run_service=inert_pipeline_run_service,
         source_artifact_repository=object(),
         document_profile_repository=object(),
         paper_map_repository=object(),
@@ -343,12 +385,14 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> N
     assert turn.json()["status"] == "completed"
 
 
-def test_chat_message_route_streams_text_then_the_persisted_turn() -> None:
+def test_chat_message_route_streams_text_then_the_persisted_turn(
+    collection_service,
+) -> None:
     service = _Service()
     app = create_app(
         auth_session_service=_AuthService(),
-        collection_service=SimpleNamespace(),
-        task_service=TaskService(MemoryTaskRepository()),
+        collection_service=collection_service,
+        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
         source_artifact_repository=object(),
         document_profile_repository=object(),
         paper_map_repository=object(),

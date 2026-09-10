@@ -13,7 +13,90 @@
     {
       "key": "preheating_microstructure",
       "question_term_groups": [["preheat", "build platform"]],
-      "expected_term_groups": [["preheat", "build platform"], ["microstructure", "grain", "dislocation"]]
+      "expected_term_groups": [["preheat", "build platform"], ["microstructure", "grain", "dislocation"]],
+      "required_finding_claims": [
+        {
+          "label": "P002 preheating cellular-structure observation",
+          "paper_id": "P002",
+          "statement_term_groups": [
+            ["without preheating", "no preheating", "non-preheated"],
+            ["preheating the build platform to 150", "preheating to 150", "preheated to 150"],
+            ["cellular structure", "cellular microstructure"]
+          ],
+          "allowed_assertion_strengths": ["descriptive", "associative"],
+          "allowed_attribution_scopes": ["descriptive_only", "association_only", "isolated_effect"],
+          "allowed_synthesis_statuses": ["insufficient_confirmation"]
+        }
+      ],
+      "required_source_evidence": [
+        {
+          "label": "P002 preheating condition definition",
+          "paper_id": "P002",
+          "source_kind": "text_window",
+          "source_term_groups": [
+            ["specimens fabricated without preheating"],
+            ["preheating the build platform to 150"],
+            ["NP"],
+            ["P150"],
+            ["respectively"]
+          ],
+          "allowed_evidence_roles": ["condition_context", "direct_result"]
+        },
+        {
+          "label": "P002 fixed process context",
+          "paper_id": "P002",
+          "source_kind": "text_window",
+          "source_term_groups": [
+            ["Renishaw AM 250"],
+            ["layer thickness"],
+            ["hatch spacing"],
+            ["laser power"],
+            ["scan speed"],
+            ["316L SS"]
+          ],
+          "allowed_evidence_roles": ["condition_context", "direct_result"]
+        },
+        {
+          "label": "P002 observed cellular microstructure",
+          "paper_id": "P002",
+          "source_kind": "text_window",
+          "source_term_groups": [
+            ["Comparing the microstructure obtained for P150 with NP"],
+            ["cellular structure is seen in the former condition"]
+          ],
+          "allowed_evidence_roles": ["direct_result"]
+        },
+        {
+          "label": "P002 cooling-rate and equiaxed-cellular conclusion",
+          "paper_id": "P002",
+          "source_kind": "text_window",
+          "source_term_groups": [
+            ["cooling rate of P150"],
+            ["NP condition"],
+            ["equiaxed cellular structure"]
+          ],
+          "allowed_evidence_roles": ["direct_result"]
+        }
+      ],
+      "forbidden_direct_sources": [
+        {
+          "label": "P002 cited background experiments",
+          "paper_id": "P002",
+          "source_kind": "text_window",
+          "source_term_groups": [
+            ["Yang et al."],
+            ["Al-Mg (-Sc)-Zr"],
+            ["Liu et al."],
+            ["TiAl alloy"]
+          ]
+        },
+        {
+          "label": "P003 cited prior investigation",
+          "paper_id": "P003",
+          "source_kind": "text_window",
+          "source_term_groups": [["our prior investigation"]]
+        }
+      ]
     },
     {
       "key": "heat_treatment_microstructure",
@@ -22,7 +105,7 @@
     },
     {
       "key": "porosity_mechanical_properties",
-      "question_term_groups": [["porosity", "pore"], ["mechanical properties"]],
+      "question_term_groups": [["porosity", "pore"], ["mechanical properties", "elongation", "ductility"]],
       "expected_term_groups": [["porosity", "pore"], ["yield strength", "elongation", "ductility", "mechanical"]]
     },
     {

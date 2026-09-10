@@ -5,6 +5,14 @@ from difflib import SequenceMatcher
 import re
 from typing import Any
 
+from application.core.objectives.domain_knowledge.registry import (
+    MaterialMatch,
+    MaterialMatchQuality,
+    material_identity_key as _registry_material_identity_key,
+    material_match as _registry_material_match,
+    material_registry_version as _registry_version,
+    material_text_mentions as _registry_material_text_mentions,
+)
 from domain.core import ResearchObjective
 
 
@@ -166,6 +174,9 @@ _PROPERTY_LABEL_ALIASES = {
     "ductility": "elongation",
     "el": "elongation",
     "el%": "elongation",
+    "elongation percentage": "elongation",
+    "elongation percent": "elongation",
+    "percentage elongation": "elongation",
     "elongation to failure": "elongation",
     "te": "total elongation",
     "te%": "total elongation",
@@ -365,33 +376,6 @@ _PRESERVED_PROPERTY_QUALIFIERS = frozenset(
 _SINGLE_TOKEN_PROPERTY_QUALIFIERS = frozenset(
     {"average", "material", "relative", "surface", "total", "uniform"}
 )
-_TENSILE_METHOD_PROPERTIES = frozenset(
-    {
-        "yield strength",
-        "ultimate tensile strength",
-        "tensile strength",
-        "strength",
-        "elongation",
-        "modulus",
-    }
-)
-_MICROHARDNESS_METHOD_PROPERTIES = frozenset({"hardness", "microhardness"})
-_CHARACTERIZATION_METHOD_PROPERTIES = frozenset(
-    {
-        "density",
-        "relative density",
-        "densification",
-        "porosity",
-        "defect length",
-        "defect structure",
-        "grain size",
-        "max defect length",
-        "microstructure",
-        "grain size primary dendrite spacing",
-    }
-)
-
-
 def normalize_property_label(value: Any) -> str | None:
     text = _label_without_unit_suffix(value)
     text = text.replace("_", " ").replace("-", " ").strip()
@@ -721,23 +705,6 @@ def _source_defined_axis_aliases(source_text: str) -> tuple[tuple[str, str], ...
     return tuple(dict.fromkeys(aliases))
 
 
-def objective_method_families(
-    objective: ResearchObjective | None,
-) -> tuple[str, ...]:
-    if objective is None:
-        return ()
-    families: list[str] = []
-    for axis in objective.outcomes:
-        normalized = normalize_property_label(axis)
-        if not normalized:
-            continue
-        for property_name in (normalized, *broad_outcome_expansions(normalized)):
-            family = _method_family_for_property(property_name)
-            if family is not None:
-                families.append(family)
-    return tuple(dict.fromkeys(families))
-
-
 def process_role_is_specific(role_label: str) -> bool:
     role_tokens = axis_tokens(role_label)
     return bool(role_tokens) and not role_tokens.issubset(
@@ -815,132 +782,57 @@ def axis_key(value: Any) -> str:
     return " ".join(text.split())
 
 
-def _material_family(value: Any) -> str | None:
-    text = " ".join(str(value or "").strip().casefold().split())
-    if not text:
-        return None
-    if re.search(
-        r"(?<![a-z0-9])(?:ti(?:tanium)?|tc4)(?![a-z0-9])|"
-        r"(?<![a-z0-9])ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
-        r"al[\s-]*6[\s-]*v[\s-]*4|64)(?![a-z0-9])",
-        text,
-    ):
-        return "titanium"
-    if re.search(r"\b(?:al(?:uminum|uminium)?)[\s-]*\d|\balumin(?:um|ium)\b", text):
-        return "aluminum"
-    if re.search(
-        r"\b(?:stainless steel|tool steel|maraging steel|carbon steel|"
-        r"austenitic stainless|h\d{2}|ss\d{3,4}|aisi[\s-]*\d{3,4})\b",
-        text,
-    ):
-        return "steel"
-    if re.search(r"\b(?:nickel|hastelloy|superalloy|hwsa)\b", text):
-        return "nickel-superalloy"
-    if re.search(r"\b(?:cobalt|cocr)\b", text):
-        return "cobalt-alloy"
-    if re.search(r"\b(?:tin|sn)\b", text):
-        return "tin"
-    return None
+def material_registry_version() -> str:
+    """Return the vocabulary version used for recall-only material hints."""
+
+    return _registry_version()
 
 
-def _material_is_exact_grade(value: Any) -> bool:
-    text = " ".join(str(value or "").strip().casefold().split())
-    return bool(
-        re.search(
-            r"(?<![a-z0-9])(?:tc4|ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
-            r"al[\s-]*6[\s-]*v[\s-]*4|64)|al[\s-]*\d{4}|h\d{2}|"
-            r"ss\d{3,4}|aisi[\s-]*\d{3,4}|\d{3,4}l|cocr|hastelloy[\s-]*[a-z])"
-            r"(?![a-z0-9])",
-            text,
-        )
-    )
+def material_identity_key(value: Any, *, include_broad: bool = True) -> str | None:
+    """Return a stable material key without inferring a material family."""
+
+    return _registry_material_identity_key(value, include_broad=include_broad)
 
 
-def _canonical_material_grade(value: Any) -> str | None:
-    text = " ".join(str(value or "").strip().casefold().split())
-    if re.search(
-        r"(?<![a-z0-9])(?:tc4|ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
-        r"al[\s-]*6[\s-]*v[\s-]*4|64))(?![a-z0-9])",
-        text,
-    ):
-        return "titanium:ti-6al-4v"
-    if re.search(
-        r"(?<![a-z0-9])(?:ss|aisi)?[\s-]*316[\s-]*l(?![a-z0-9])|"
-        r"(?<![a-z0-9])316[\s-]*l[\s-]*(?:stainless[\s-]*steel)?",
-        text,
-    ):
-        return "steel:316l"
-    if re.search(
-        r"(?<![a-z0-9])17[\s-]*4[\s-]*ph(?![a-z0-9])",
-        text,
-    ):
-        return "steel:17-4ph"
-    return None
+def material_match_quality(left: Any, right: Any) -> MaterialMatchQuality:
+    """Classify material labels without promoting a family match to identity."""
+
+    return _registry_material_match(left, right).quality
+
+
+def material_match_details(left: Any, right: Any) -> MaterialMatch:
+    """Return the traceable recall relation between two material labels."""
+
+    return _registry_material_match(left, right)
+
+
+def source_text_mentions_material(text: Any, target: Any) -> bool:
+    """Find an explicit material label in a Source text for recall/binding."""
+
+    return _registry_material_text_mentions(text, target)
 
 
 def material_values_match_for_scope(left: Any, right: Any) -> bool:
-    """Match material identity only for deciding whether a paper merits inspection."""
+    """Keep exact or possible labels in scope for inspection.
 
-    left_key = axis_key(left)
-    right_key = axis_key(right)
-    if not left_key or not right_key:
-        return False
-    if left_key == right_key:
-        return True
-    left_grade = _canonical_material_grade(left)
-    right_grade = _canonical_material_grade(right)
-    if left_grade is not None and left_grade == right_grade:
-        return True
-    left_family = _material_family(left)
-    right_family = _material_family(right)
-    if not left_family or left_family != right_family:
-        return False
-    if _material_is_exact_grade(left) and _material_is_exact_grade(right):
-        return False
-    return True
+    ``possible`` is a recall state only. Direct comparison uses the stricter
+    :func:`material_value_matches_objective_comparison_scope` predicate.
+    """
+
+    return material_match_quality(left, right) in {
+        MaterialMatchQuality.EXACT,
+        MaterialMatchQuality.POSSIBLE,
+    }
 
 
 def material_value_matches_objective_comparison_scope(
     evidence_value: Any,
     objective_value: Any,
 ) -> bool:
-    """Require enough material identity for a direct Objective comparison."""
+    """Require an exact literal or registry alias for direct comparison."""
 
-    evidence_key = axis_key(evidence_value)
-    objective_key = axis_key(objective_value)
-    if not evidence_key or not objective_key:
-        return False
-    if evidence_key == objective_key:
-        return True
-    evidence_grade = _canonical_material_grade(evidence_value)
-    objective_grade = _canonical_material_grade(objective_value)
-    if evidence_grade is not None or objective_grade is not None:
-        return evidence_grade is not None and evidence_grade == objective_grade
-    evidence_family = _material_family(evidence_value)
-    objective_family = _material_family(objective_value)
-    if not evidence_family or evidence_family != objective_family:
-        return False
-    if _material_is_exact_grade(objective_value):
-        return False
-    return True
-
-
-def material_scope_value_is_specific(value: Any) -> bool:
-    """Return whether a material label can support a screening exclusion."""
-
-    return (
-        _canonical_material_grade(value) is not None
-        or _material_family(value) is not None
-    )
-
-
-def material_scope_value_is_broad(value: Any) -> bool:
-    """Return whether a label denotes an unresolved broad material population."""
-
-    text = " ".join(str(value or "").strip().casefold().split())
-    return bool(
-        re.search(r"\b(?:metal|metallic|materials?)\b", text)
-        and re.search(r"\b(?:alloys?|materials?|parts?|components?)\b", text)
+    return material_match_quality(evidence_value, objective_value) is (
+        MaterialMatchQuality.EXACT
     )
 
 
@@ -1269,19 +1161,6 @@ def _source_text_mentions_single_axis(text: str, axis: str) -> bool:
         )
         for axis_token in axis_token_values
     )
-
-
-def _method_family_for_property(property_name: Any) -> str | None:
-    normalized = normalize_property_label(property_name)
-    if not normalized:
-        return None
-    if normalized in _TENSILE_METHOD_PROPERTIES:
-        return "tensile_mechanics"
-    if normalized in _MICROHARDNESS_METHOD_PROPERTIES:
-        return "microhardness"
-    if normalized in _CHARACTERIZATION_METHOD_PROPERTIES:
-        return "density_porosity_microstructure"
-    return None
 
 
 def _label_without_unit_suffix(value: Any) -> str:

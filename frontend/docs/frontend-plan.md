@@ -39,11 +39,11 @@
   会在同一事务中固化为 `confirmed`，并冻结所选文档的
   `document_id + preparation_fingerprint` 后进入排队状态；已确认 Objective
   则直接创建或复用分析版本。Objective discovery 立即返回持久化的
-  `objective_discovery` Task；集合页通过 Task 接口恢复和轮询状态，不能用页面本地
+  `objective_discovery` Pipeline Run；集合页通过 Pipeline Run 接口恢复和轮询状态，不能用页面本地
   loading 作为运行事实。分析命令返回后，Objective 列表在当前行展示并轮询进度，
   不自动跳转到详情页。
 
-- 查询文档准备任务：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`
+- 查询 Pipeline Run：`GET /api/v1/collections/{collection_id}/pipeline-runs`、`GET /api/v1/pipeline-runs/{run_id}`
 - 文档与 Source 核验：`GET /api/v1/collections/{collection_id}/documents/profiles`、
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`、
@@ -60,7 +60,7 @@
 - `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
 - Collection 只组织当前文档；Source、DocumentProfile、Paper Map 和就绪状态
   都属于单篇 Document。上传新文档或重试失败文档不会重新处理其他文档
-- 同一 Document 同时最多一个准备任务，不同 Document 可以并发准备；上传在准备期间保持可用
+- 同一 Document 同时最多一个准备 Pipeline Run，不同 Document 可以并发准备；上传在准备期间保持可用
 - Objective discovery 和 analysis 只使用用户明确勾选的已就绪文档；处理中或失败文档
   不会阻塞已就绪子集的研究工作
 - `/collections/{collection_id}/objectives` 和

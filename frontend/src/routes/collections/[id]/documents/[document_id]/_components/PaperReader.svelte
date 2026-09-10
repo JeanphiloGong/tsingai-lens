@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
 	import type {
@@ -37,10 +36,13 @@
 	export let activeSourceSpanId = '';
 	export let activeSourceAnchor: SourceAnchor | null = null;
 	export let sourceJumpToken = 0;
-	export let collectionId = '';
+	import SourceSelection from './SourceSelection.svelte';
+	import { selectableSource } from './sourceSelection';
+	export let selectedSourceKeys: string[] = [];
+	export let selectionDisabled = false;
+	export let onToggleSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onAskSource: (selection: DocumentSourceSelection) => void = () => {};
 	export let onSelectSourceSpan: (sourceSpanId: string) => void = () => {};
-	$: assistantHref = resolve('/collections/[id]/assistant', { id: collectionId });
 
 	let thumbnailTab: 'source' | 'outline' = 'source';
 	let currentPage = 1;
@@ -188,7 +190,7 @@
 		} catch (error) {
 			if (generation !== loadGeneration) return;
 			pdfDocument = null;
-			pdfError = error instanceof Error ? error.message : String(error);
+			pdfError = $t('workbench.pdfLoadFailed');
 		} finally {
 			if (generation === loadGeneration) {
 				pdfLoading = false;
@@ -243,7 +245,7 @@
 			await renderInitialPages(renderId);
 		} catch (error) {
 			if (generation !== loadGeneration || renderId !== renderGeneration) return;
-			pdfError = error instanceof Error ? error.message : String(error);
+			pdfError = $t('workbench.pdfLoadFailed');
 		}
 	}
 
@@ -350,7 +352,7 @@
 			if (error instanceof Error && error.name === 'RenderingCancelledException') return false;
 			updatePageState(pageNumber, {
 				status: 'error',
-				error: error instanceof Error ? error.message : String(error)
+				error: $t('workbench.pdfPageRenderError')
 			});
 			return false;
 		}
@@ -375,13 +377,48 @@
 		return Array.from({ length: Math.max(1, count) }, (_, index) => index + 1);
 	}
 
+	function fitWidth(node: HTMLElement) {
+		let lastWidth = node.clientWidth;
+		let timer: ReturnType<typeof setTimeout>;
+		const observer = new ResizeObserver(() => {
+			const width = node.clientWidth;
+			if (!width) {
+				lastWidth = 0;
+				clearTimeout(timer);
+				return;
+			}
+			if (Math.abs(width - lastWidth) < 2) return;
+			lastWidth = width;
+			clearTimeout(timer);
+			if (zoom !== 'Fit' || !pdfDocument) return;
+			timer = setTimeout(async () => {
+				if (!mounted || !node.clientWidth || zoom !== 'Fit') return;
+				const generation = loadGeneration;
+				const renderId = renderGeneration + 1;
+				const position = node.scrollTop / Math.max(1, node.scrollHeight);
+				await renderAllPages();
+				if (mounted && generation === loadGeneration && renderId === renderGeneration)
+					node.scrollTop = position * node.scrollHeight;
+			}, 120);
+		});
+		observer.observe(node);
+		return {
+			destroy() {
+				observer.disconnect();
+				clearTimeout(timer);
+			}
+		};
+	}
+
 	async function jumpToSource(anchor: SourceAnchor) {
 		if (!browser) return;
 		const pageNumber = Math.max(1, Math.min(totalPages, anchor.pageIndex + 1));
 		currentPage = pageNumber;
 		await tick();
 		await ensurePageRendered(pageNumber);
-		const target = document.getElementById(`pdf-page-${pageNumber}`);
+		const target = pdfScrollContainer?.querySelector<HTMLElement>(
+			`[data-page-number="${pageNumber}"]`
+		);
 		if (target) {
 			pendingSourceJump = null;
 			scrollPageIntoView(target, 'center');
@@ -395,7 +432,9 @@
 		if (!browser) return;
 		await tick();
 		await ensurePageRendered(pageNumber);
-		const target = document.getElementById(`pdf-page-${pageNumber}`);
+		const target = pdfScrollContainer?.querySelector<HTMLElement>(
+			`[data-page-number="${pageNumber}"]`
+		);
 		if (target) {
 			scrollPageIntoView(target, 'start');
 		}
@@ -507,18 +546,13 @@
 		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
 	}
 
-	function selectParsedSource(pageNumber: number, sourceSpanId: string | null) {
-		currentPage = pageNumber;
-		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
-	}
-
 	function parsedSourceSelection(
 		pageNumber: number,
 		paragraph: WorkbenchPdfParagraph
 	): DocumentSourceSelection {
 		return {
-			source_kind: 'paragraph',
-			source_ref: paragraph.source_span_id || paragraph.id,
+			source_kind: 'text_window',
+			source_ref: paragraph.id,
 			page: pageNumber,
 			quote: paragraph.text,
 			heading_path: paragraph.section
@@ -617,10 +651,10 @@
 		<button class="rail-bottom" type="button" aria-label={$t('workbench.morePages')}>v</button>
 	</aside>
 
-	<article class="pdf-shell" aria-labelledby="paper-reader-title">
+	<article class="pdf-shell" aria-label={title}>
 		<header class="pdf-header">
 			<div>
-				<h1 id="paper-reader-title">{title}</h1>
+				<h1>{title}</h1>
 				<div class="paper-meta">
 					{#each metadata as item, index}
 						<span>{item}</span>
@@ -725,6 +759,7 @@
 
 		<div
 			class="pdf-scroll-container"
+			use:fitWidth
 			bind:this={pdfScrollContainer}
 			on:scroll={updateCurrentPageFromScroll}
 		>
@@ -753,7 +788,7 @@
 					<section
 						class="pdf-page-shell"
 						data-testid="pdf-page-shell"
-						id={`pdf-page-${page.pageNumber}`}
+						data-page-number={page.pageNumber}
 						aria-label={page.label}
 						style={`width: ${page.width}px; height: ${page.height}px;`}
 						use:pageShell={page.pageNumber}
@@ -797,27 +832,34 @@
 					{#each pages as page}
 						<section
 							class="parsed-source-page"
-							id={`pdf-page-${page.page_number}`}
+							data-page-number={page.page_number}
 							aria-label={page.label}
 						>
 							<div class="parsed-source-page__label">{page.label}</div>
 							{#each page.paragraphs as paragraph}
-								<div class="parsed-source-entry">
-									<button
-										type="button"
+								{@const selection = parsedSourceSelection(page.page_number, paragraph)}
+								<div
+									class="parsed-source-entry"
+									use:selectableSource={{
+										selection,
+										disabled: selectionDisabled,
+										onToggle: onToggleSource
+									}}
+								>
+									<div
 										class="parsed-source-paragraph"
 										class:active={paragraph.source_span_id === activeSourceSpanId}
-										on:click={() => selectParsedSource(page.page_number, paragraph.source_span_id)}
 									>
 										<span>{paragraph.section || $t('workbench.sectionFallback')}</span>
 										<p>{paragraph.text}</p>
-									</button>
-									<a
-										class="parsed-source-agent-action"
-										href={assistantHref}
-										on:click={() => onAskSource(parsedSourceSelection(page.page_number, paragraph))}
-										>{$t('workbench.askResearchAgent')}</a
-									>
+									</div>
+									<SourceSelection
+										{selection}
+										selectedKeys={selectedSourceKeys}
+										disabled={selectionDisabled}
+										onToggle={onToggleSource}
+										onAsk={onAskSource}
+									/>
 								</div>
 							{/each}
 						</section>
@@ -1517,26 +1559,6 @@
 		line-height: 22px;
 	}
 
-	.parsed-source-agent-action {
-		display: inline-flex;
-		min-height: 32px;
-		align-items: center;
-		padding: 0 10px;
-		border: 1px solid #bfdbfe;
-		border-radius: 6px;
-		background: #ffffff;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 700;
-		text-decoration: none;
-	}
-
-	.parsed-source-agent-action:hover,
-	.parsed-source-agent-action:focus-visible {
-		border-color: #2563eb;
-		background: #eff6ff;
-	}
-
 	.skeleton {
 		width: 280px;
 		height: 16px;
@@ -1583,7 +1605,7 @@
 		}
 	}
 
-	@media (max-width: 1024px) {
+	@container document-reader (max-width: 860px) {
 		.paper-reader-grid {
 			grid-template-columns: 1fr;
 			grid-template-rows: auto minmax(0, 1fr);

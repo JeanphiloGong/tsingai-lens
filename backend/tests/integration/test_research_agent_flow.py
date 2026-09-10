@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
 import pytest
@@ -15,31 +14,20 @@ from application.chat import (
 )
 from application.chat.capabilities import GetCollectionContextCapability
 from application.chat.session_service import ChatSessionService
-from application.source.task_service import TaskService
+from application.pipeline import PipelineRunService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
-    MemoryTaskRepository,
+    MemorySourceArtifactRepository,
+    MemoryPipelineRunRepository,
 )
 from main import create_app
 from tests.support.chat_repository import MemoryChatRepository
+from tests.unit.application.test_research_agent_runner import _Model
 
 
 pytestmark = pytest.mark.anyio
-
-
-class _Model:
-    def __init__(self, *turns: ModelTurn) -> None:
-        self.turns = deque(turns)
-
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
-        assert messages
-        assert {item.name for item in tool_specs} == {
-            "get_collection_context",
-            "create_objective_candidate",
-        }
-        return self.turns.popleft()
 
 
 class _ObjectiveRepository:
@@ -114,28 +102,30 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
     chat_repository = MemoryChatRepository()
+    source_artifact_repository = MemorySourceArtifactRepository()
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="get_collection_context",
                 arguments={},
-            )
+            ),)
         ),
         ModelTurn(content="This collection is ready for a focused research question."),
         ModelTurn(
             content="I prepared the exact candidate for your approval.",
-            tool_call=ModelToolCall(
+            tool_calls=(ModelToolCall(
                 name="create_objective_candidate",
                 arguments={
                     "question": "How does energy input affect grain morphology?"
                 },
-            ),
+            ),),
         ),
         ModelTurn(content="The candidate was created and still requires review."),
     )
     chat_service = ChatSessionService(
         collection_service=collection_service,
+        source_artifact_repository=source_artifact_repository,
         repository=chat_repository,
         runner=ResearchAgentRunner(
             model=model,
@@ -153,8 +143,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app(
         auth_session_service=auth_session_service,
         collection_service=collection_service,
-        task_service=TaskService(MemoryTaskRepository()),
-        source_artifact_repository=object(),
+        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+        source_artifact_repository=source_artifact_repository,
         document_profile_repository=MemoryDocumentProfileRepository(),
         paper_map_repository=MemoryPaperMapRepository(),
         objective_repository=objective_repository,
@@ -222,10 +212,14 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         {"question": "How does energy input affect grain morphology?"}
     ]
     assert trajectory.json()["pending_approval"] is None
+    assert model.all_tool_spec_names[0] == ("discover_research_tools",)
+    assert "create_objective_candidate" not in model.all_tool_spec_names[-1]
     assert [item["role"] for item in trajectory.json()["items"]] == [
         "user",
         "assistant",
         "user",
+        "assistant",
+        "tool",
         "assistant",
         "tool",
         "assistant",

@@ -69,6 +69,9 @@ class ObjectiveSummaryResponse(BaseModel):
     confidence: float = 0.0
     reason: str | None = None
     source_relationship_ids: list[str] = Field(default_factory=list)
+    parent_objective_id: str | None = None
+    parent_analysis_version: int | None = Field(default=None, ge=1)
+    derivation_basis: list[dict[str, Any]] = Field(default_factory=list)
     confirmation_status: ConfirmationStatus
     active_analysis_version: int | None = None
     published_analysis_version: int | None = None
@@ -195,6 +198,25 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     abstention_note: str | None = None
 
 
+class ObjectiveAnalysisStatusResponse(BaseModel):
+    """Small progress payload used while an Objective analysis is running."""
+
+    collection_id: str
+    objective_id: str
+    analysis_version: int | None = Field(default=None, ge=1)
+    status: AnalysisStatus | None = None
+    phase: str | None = None
+    processed_document_count: int = Field(default=0, ge=0)
+    total_document_count: int = Field(default=0, ge=0)
+    current_document_id: str | None = None
+    progress_message: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
 class ObjectiveEvidenceGapResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -250,6 +272,7 @@ class ObjectiveEvidenceAttributeResponse(BaseModel):
     value: str | int | float | bool
     unit: str | None = None
     context_scope: EvidenceContextScope = "unknown"
+    applies_to_outcomes: list[str] = Field(default_factory=list, max_length=4)
 
 
 class ObjectiveEvidenceVariableResponse(BaseModel):
@@ -335,6 +358,7 @@ class FindingResponse(BaseModel):
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
     created_at: str | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ObjectiveEvidenceResponse(BaseModel):
@@ -367,6 +391,7 @@ class ObjectiveEvidenceResponse(BaseModel):
     failure_reason: str | None = None
     confidence: float
     supports_finding: bool = False
+    warnings: list[str] = Field(default_factory=list)
     origin: Literal[
         "system_generated", "human_authored", "human_revised", "agent_authored"
     ] = "system_generated"
@@ -526,6 +551,14 @@ class ObjectiveEvidenceMapResponse(BaseModel):
     coverage: ObjectiveEvidenceMapCoverageResponse
 
 
+class InspectedObjectiveSourceRefResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_kind: Literal["text_window", "table", "figure"]
+    source_ref: str
+    source_digest: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
+
+
 class PaperContributionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -556,6 +589,7 @@ class PaperContributionResponse(BaseModel):
     evidence_disposition: Literal[
         "excluded",
         "no_routable_evidence",
+        "no_grounded_evidence",
         "coverage_incomplete",
         "extraction_failed",
         "no_comparable_evidence",
@@ -568,6 +602,9 @@ class PaperContributionResponse(BaseModel):
     uninspected_source_count: int | None = Field(default=None, ge=0)
     evidence_disposition_reason: str | None = None
     evidence_status_counts: dict[EvidenceStatus, int] = Field(default_factory=dict)
+    inspected_source_refs: list[InspectedObjectiveSourceRefResponse] = Field(
+        default_factory=list
+    )
 
 
 class ObjectiveAnalysisResponse(BaseModel):
@@ -598,6 +635,37 @@ class FindingListResponse(BaseModel):
     offset: int
     limit: int
     total: int
+
+
+class FindingSummaryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    analysis_version: int = Field(ge=1)
+    language: Literal["en", "zh"] = "en"
+
+
+class FindingSummaryReferenceResponse(BaseModel):
+    id: str
+    kind: Literal["finding", "evidence"]
+    label: str
+    document_id: str | None = None
+    source_ref: str | None = None
+    source_kind: str | None = None
+    page_numbers: list[int] = Field(default_factory=list)
+    source_excerpt: str | None = None
+
+
+class FindingSummaryResponse(BaseModel):
+    collection_id: str
+    objective_id: str
+    finding_id: str
+    analysis_version: int
+    language: Literal["en", "zh"]
+    text: str
+    citation_ids: list[str]
+    references: list[FindingSummaryReferenceResponse]
+    model: str
+    prompt_version: str
+    generated_at: str
 
 
 class FindingDetailResponse(BaseModel):

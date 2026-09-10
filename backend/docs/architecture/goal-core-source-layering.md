@@ -21,9 +21,10 @@ an Objective. It cannot claim Evidence or a Finding.
 
 ### Collection and Document Source
 
-A Collection assembles papers. Each Document independently owns its current
-bytes, preparation task, Source structure, coarse Profile, and lightweight Paper
-Map. Adding one paper does not rebuild existing papers.
+A Collection assembles papers. Each Document keeps its current file metadata and
+readiness. Its preparation Pipeline Run produces a separate format-neutral Source
+tree, coarse Profile, and lightweight Paper Map. Adding one paper does not
+rebuild existing papers.
 
 ### Research Intelligence Core
 

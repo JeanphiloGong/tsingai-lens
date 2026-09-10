@@ -48,7 +48,7 @@ class StartResearchProcessCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        _arguments: StartResearchProcessArguments,
+        arguments: StartResearchProcessArguments,
     ) -> ChatToolResult:
         collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -67,13 +67,14 @@ class StartResearchProcessCapability:
         available_ids = {
             str(document.get("document_id") or "") for document in documents
         }
-        selected_ids = tuple(
+        requested_ids = tuple(
             dict.fromkeys(
                 str(document_id).strip()
-                for document_id in _arguments.document_ids
+                for document_id in arguments.document_ids
                 if str(document_id).strip()
             )
-        ) or tuple(
+        )
+        selected_ids = requested_ids or tuple(
             str(document.get("document_id") or "") for document in documents
         )
         missing_ids = [
@@ -91,36 +92,41 @@ class StartResearchProcessCapability:
                     + ", ".join(missing_ids)
                 ),
             )
-        queued_tasks = []
+        queued_runs = []
         for document_id in selected_ids:
-            queued_tasks.append(
-                await self.document_preparation_service.queue_document(
+            queued_runs.append(
+                await self.document_preparation_service.queue_document_preparation(
                     context.collection_id,
                     document_id,
-                    mode="standard",
                 )
             )
-        tasks = tuple(queued_tasks)
+        runs = tuple(queued_runs)
+        scope_is_collection = not requested_ids
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="queued",
             data={
                 "collection_id": context.collection_id,
                 "document_ids": list(selected_ids),
-                "tasks": tasks,
-                "mode": "standard",
+                "runs": runs,
                 "research_scope": "document_preparation",
                 "objective_discovery_started": False,
                 "objective_analysis_started": False,
             },
             resource_refs=tuple(
                 ChatResourceRef(
-                    resource_type="document_preparation_task",
-                    resource_id=str(task["task_id"]),
+                    resource_type="pipeline_run",
+                    resource_id=str(run["run_id"]),
                     href=f"/collections/{context.collection_id}",
                 )
-                for task in tasks
+                for run in runs
             ),
+            warnings=(
+                f"No document scope was supplied; all {len(selected_ids)} paper(s) "
+                "in the collection were queued for preparation.",
+            )
+            if scope_is_collection
+            else (),
         )
 
 

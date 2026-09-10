@@ -10,8 +10,10 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +36,10 @@ class ObjectiveExperimentPlan(Base):
             name="fk_objective_experiment_plans_objective",
             ondelete="CASCADE",
         ),
+        UniqueConstraint(
+            "parent_plan_id",
+            name="uq_objective_experiment_plans_parent_plan_id",
+        ),
     )
 
     plan_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -55,8 +61,36 @@ class ObjectiveExperimentPlan(Base):
         _JSON_DOCUMENT, nullable=False
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    plan_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+    parent_plan_id: Mapped[str | None] = mapped_column(
+        String(128),
+        ForeignKey(
+            "objective_experiment_plans.plan_id",
+            name="fk_objective_experiment_plans_parent_plan_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    structured_plan: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=True,
+    )
     created_by: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("auth_users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey(
+            "auth_users.user_id",
+            name="fk_objective_experiment_plans_updated_by_auth_users",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

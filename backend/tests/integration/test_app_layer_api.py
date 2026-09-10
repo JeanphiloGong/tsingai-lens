@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 from hashlib import sha256
 
 import pytest
 from fastapi.testclient import TestClient
 
-from application.source.task_service import TaskService
+from application.pipeline import PipelineRunService
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
     MemoryObjectiveRepository,
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
-    MemoryTaskRepository,
+    MemoryPipelineRunRepository,
 )
 from tests.support.chat_repository import MemoryChatRepository
 from tests.support.experiment_plan_repository import (
@@ -28,19 +29,15 @@ API_V1_PREFIX = "/api/v1"
 class _ImmediateDocumentPreparationService:
     """Complete the HTTP boundary test without invoking parser or LLM providers."""
 
-    def __init__(self, collection_service, task_service) -> None:  # noqa: ANN001
+    def __init__(self, collection_service, pipeline_run_service) -> None:  # noqa: ANN001
         self.collection_service = collection_service
-        self.task_service = task_service
+        self.pipeline_run_service = pipeline_run_service
 
-    async def queue_document(
+    async def queue_document_preparation(
         self,
         collection_id: str,
         document_id: str,
-        *,
-        mode: str,
-        request_id: str | None,
     ) -> dict:
-        del request_id
         document = await self.collection_service.get_document(
             collection_id,
             document_id,
@@ -48,15 +45,14 @@ class _ImmediateDocumentPreparationService:
         fingerprint = sha256(
             f"{document.sha256}:test-parser:test-analysis".encode("utf-8")
         ).hexdigest()
-        task, created = await self.task_service.get_or_create_document_task(
+        run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
-            task_type="document_preparation",
+            pipeline_name="document_preparation",
             input_fingerprint=fingerprint,
-            mode=mode,
         )
         if not created:
-            return task
+            return run
         await self.collection_service.update_document_preparation(
             collection_id,
             document_id,
@@ -65,10 +61,10 @@ class _ImmediateDocumentPreparationService:
             parser_version="test-parser",
             document_analysis_version="test-analysis",
         )
-        return await self.task_service.finish_task(
-            task["task_id"],
+        return await self.pipeline_run_service.finish_run(
+            run["run_id"],
             status="completed",
-            current_stage="ready",
+            current_node="ready",
             progress_percent=100,
             progress_detail={
                 "phase": "ready",
@@ -87,12 +83,12 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
 
     from main import create_app
 
-    task_service = TaskService(MemoryTaskRepository())
+    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
     with TestClient(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=task_service,
+            pipeline_run_service=pipeline_run_service,
             source_artifact_repository=MemorySourceArtifactRepository(),
             document_profile_repository=MemoryDocumentProfileRepository(),
             paper_map_repository=MemoryPaperMapRepository(),
@@ -103,7 +99,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         )
     ) as client:
         client.app.state.document_preparation_service = (
-            _ImmediateDocumentPreparationService(collection_service, task_service)
+            _ImmediateDocumentPreparationService(collection_service, pipeline_run_service)
         )
         login = client.post(
             f"{API_V1_PREFIX}/auth/login",
@@ -138,6 +134,62 @@ def test_request_id_is_generated_and_echoed(app_client) -> None:
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
+def test_lost_upload_response_can_be_retried_then_prepared_once(app_client) -> None:
+    collection_id = _create_collection(app_client)
+    original = _upload(app_client, collection_id, "paper.txt", b"Methods\nLPBF treatment")
+    path = f"{API_V1_PREFIX}/collections/{collection_id}/documents"
+    recovered = app_client.post(
+        path, params={"reuse_existing": "true"},
+        files={"file": ("renamed.txt", b"Methods\nLPBF treatment", "text/plain")},
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["document_id"] == original["document_id"]
+    preparation_path = f"{path}/{original['document_id']}/preparation"
+    prepared = app_client.post(preparation_path)
+    assert prepared.status_code == 200
+    repeated = app_client.post(preparation_path)
+    assert repeated.status_code == 200
+    assert repeated.json()["run_id"] == prepared.json()["run_id"]
+    documents = app_client.get(path).json()["items"]
+    assert len(documents) == 1
+    assert documents[0]["status"] == "ready"
+
+
+def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> None:
+    collection_id = _create_collection(app_client)
+    _upload(app_client, collection_id, "private.txt", b"Private LPBF treatment")
+    asyncio.run(app_client.app.state.auth_session_service.create_user(
+        email="other@example.test", password="other-test-password",
+    ))
+    app_client.cookies.clear()
+    assert app_client.post(f"{API_V1_PREFIX}/auth/login", json={
+        "email": "other@example.test", "password": "other-test-password",
+    }).status_code == 200
+    response = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
+        params={"reuse_existing": "true"},
+        files={"file": ("private.txt", b"Private LPBF treatment", "text/plain")},
+    )
+    assert response.status_code == 404
+
+
+def test_collection_list_returns_compact_document_rows(app_client) -> None:
+    collection_id = _create_collection(app_client)
+    uploaded = _upload(app_client, collection_id, "paper-a.txt", b"Methods\nPaper A")
+
+    response = app_client.get(f"{API_V1_PREFIX}/collections")
+
+    assert response.status_code == 200
+    document = response.json()["items"][0]["documents"][0]
+    assert document["document_id"] == uploaded["document_id"]
+    assert document["original_filename"] == "paper-a.txt"
+    assert document["status"] == "stored"
+    assert "storage_key" not in document
+    assert "sha256" not in document
+    assert "parser_version" not in document
+    assert "preparation_fingerprint" not in document
+
+
 def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_work(
     app_client,
 ) -> None:
@@ -148,11 +200,11 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     prepared = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
         f"{first['document_id']}/preparation",
-        json={"mode": "standard"},
     )
     assert prepared.status_code == 200
     assert prepared.json()["status"] == "completed"
-    assert prepared.json()["document_id"] == first["document_id"]
+    assert prepared.json()["scope_type"] == "document"
+    assert prepared.json()["scope_id"] == first["document_id"]
 
     after_first_preparation = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}"
@@ -178,37 +230,115 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     repeated = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
         f"{first['document_id']}/preparation",
-        json={"mode": "standard"},
     )
     assert repeated.status_code == 200
-    assert repeated.json()["task_id"] == prepared.json()["task_id"]
+    assert repeated.json()["run_id"] == prepared.json()["run_id"]
 
-    task_list = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/tasks"
+    run_list = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"
     )
-    assert task_list.status_code == 200
-    assert task_list.json()["count"] == 1
-    assert task_list.json()["items"][0]["task_type"] == "document_preparation"
+    assert run_list.status_code == 200
+    assert run_list.json()["count"] == 1
+    run_summary = run_list.json()["items"][0]
+    assert set(run_summary) == {
+        "run_id",
+        "pipeline_name",
+        "scope_type",
+        "scope_id",
+        "status",
+        "current_node",
+        "progress_percent",
+        "progress_detail",
+        "errors",
+        "warnings",
+        "updated_at",
+    }
+    assert run_summary["pipeline_name"] == "document_preparation"
+
+    run_detail = app_client.get(
+        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['run_id']}"
+    )
+    assert run_detail.status_code == 200
+    assert {
+        "collection_id",
+        "mode",
+        "input_fingerprint",
+        "nodes",
+        "stats",
+        "context",
+        "resumed_from_run_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+    } <= set(run_detail.json())
 
 
-def test_document_preparation_rejects_unknown_mode(app_client) -> None:
-    collection_id = _create_collection(app_client, "Invalid preparation mode")
-    document = _upload(app_client, collection_id, "paper.txt", b"Paper")
-
-    response = app_client.post(
+def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
+    collection_id = _create_collection(app_client, "Private pipeline run")
+    document = _upload(app_client, collection_id, "paper.txt", b"Methods")
+    prepared = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
         f"{document['document_id']}/preparation",
-        json={"mode": "unknown"},
     )
+    assert prepared.status_code == 200
 
-    assert response.status_code == 422
+    auth = app_client.app.state.auth_session_service
+    asyncio.run(
+        auth.create_user(email="other@example.com", password="other-password")
+    )
+    login = app_client.post(
+        f"{API_V1_PREFIX}/auth/login",
+        json={"email": "other@example.com", "password": "other-password"},
+    )
+    assert login.status_code == 200
+
+    response = app_client.get(
+        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['run_id']}"
+    )
+    assert response.status_code == 404
+
+
+def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(app_client) -> None:
+    collection_id = _create_collection(app_client, "Private pipeline history")
+    document = _upload(app_client, collection_id, "paper.txt", b"Methods")
+    prepared = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{document['document_id']}/preparation",
+    )
+    assert prepared.status_code == 200
+
+    auth = app_client.app.state.auth_session_service
+    asyncio.run(
+        auth.create_user(email="other@example.com", password="other-password")
+    )
+    login = app_client.post(
+        f"{API_V1_PREFIX}/auth/login",
+        json={"email": "other@example.com", "password": "other-password"},
+    )
+    assert login.status_code == 200
+
+    listed = app_client.get(
+        f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"
+    )
+    assert listed.status_code == 404
+    queued = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{document['document_id']}/preparation",
+    )
+    assert queued.status_code == 404
+
+
+def test_document_preparation_contract_has_no_request_body(app_client) -> None:
+    operation = app_client.get("/api/openapi.json").json()["paths"][
+        "/api/v1/collections/{collection_id}/documents/{document_id}/preparation"
+    ]["post"]
+
+    assert "requestBody" not in operation
 
 
 @pytest.mark.parametrize(
     "retired_path",
     (
-        "/collections/{collection_id}/tasks/build",
-        "/collections/{collection_id}/tasks/index",
         "/comparable-results",
         "/collections/{collection_id}/research-view",
         "/collections/{collection_id}/materials",
@@ -226,7 +356,7 @@ def test_retired_build_and_projection_routes_are_not_registered(
     path = retired_path.format(collection_id=collection_id)
     response = (
         app_client.post(f"{API_V1_PREFIX}{path}", json={})
-        if "/tasks/" in path
+        if "/pipeline-runs/" in path
         else app_client.get(f"{API_V1_PREFIX}{path}")
     )
 

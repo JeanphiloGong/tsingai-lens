@@ -6,7 +6,9 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from application.repositories.objective_repository import StoredObjective
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core import (
@@ -23,19 +25,10 @@ from domain.core import (
 from domain.pipeline import ExecutionStats
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
-    ObjectiveDocumentEvidenceRecord,
-    ObjectiveDiscoveryRecord,
-    ObjectiveEvidenceRecord,
-    ObjectiveFindingRecord,
-    ObjectivePaperContributionRecord,
     ObjectiveResearchRecord,
 )
-from infra.persistence.postgres.models.source import (
-    SourceBlock,
-    SourceDocument,
-    SourceFigure,
-    SourceTable,
-)
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
+from infra.persistence.postgres.models.collection import Collection
 
 
 class PostgresObjectiveRepository:
@@ -58,29 +51,18 @@ class PostgresObjectiveRepository:
         now = datetime.now(timezone.utc)
         objective_ids = [item.objective_id for item in facts.research_objectives]
         async with self.session_factory.begin() as session:
-            discovery = await session.get(ObjectiveDiscoveryRecord, collection_id)
-            if discovery is None:
-                discovery = ObjectiveDiscoveryRecord(
-                    collection_id=collection_id,
-                    research_objectives_ready=facts.research_objectives_ready,
-                    document_inputs=[item.to_record() for item in facts.document_inputs],
-                    objective_ids=objective_ids,
-                    study_dispositions=[
-                        item.to_record() for item in facts.study_dispositions
-                    ],
-                    updated_at=now,
-                )
-                session.add(discovery)
-            else:
-                discovery.research_objectives_ready = facts.research_objectives_ready
-                discovery.document_inputs = [
-                    item.to_record() for item in facts.document_inputs
-                ]
-                discovery.objective_ids = objective_ids
-                discovery.study_dispositions = [
-                    item.to_record() for item in facts.study_dispositions
-                ]
-                discovery.updated_at = now
+            collection = await session.get(Collection, collection_id, with_for_update=True)
+            if collection is None:
+                raise FileNotFoundError(f"collection not found: {collection_id}")
+            collection.discovery_ready = facts.research_objectives_ready
+            collection.discovery_document_inputs = [
+                item.to_record() for item in facts.document_inputs
+            ]
+            collection.discovery_objective_ids = objective_ids
+            collection.discovery_study_dispositions = [
+                item.to_record() for item in facts.study_dispositions
+            ]
+            collection.discovery_updated_at = now
 
             existing_system_rows = tuple(
                 await session.scalars(
@@ -120,34 +102,34 @@ class PostgresObjectiveRepository:
 
     async def read(self, collection_id: str) -> ObjectiveFactSet:
         async with self.session_factory() as session:
-            discovery = await session.get(ObjectiveDiscoveryRecord, collection_id)
-            if discovery is None:
+            collection = await session.get(Collection, collection_id)
+            if collection is None or not collection.discovery_objective_ids:
                 return ObjectiveFactSet()
             rows = tuple(
                 await session.scalars(
                     select(ObjectiveResearchRecord).where(
                         ObjectiveResearchRecord.collection_id == collection_id,
                         ObjectiveResearchRecord.objective_id.in_(
-                            discovery.objective_ids or [""]
+                            collection.discovery_objective_ids or [""]
                         ),
                     )
                 )
             )
             by_id = {row.objective_id: self._objective_from_row(row) for row in rows}
             return ObjectiveFactSet(
-                research_objectives_ready=discovery.research_objectives_ready,
+                research_objectives_ready=collection.discovery_ready,
                 document_inputs=tuple(
                     PreparedDocumentInput.from_mapping(item)
-                    for item in discovery.document_inputs
+                    for item in collection.discovery_document_inputs
                 ),
                 research_objectives=tuple(
                     by_id[objective_id]
-                    for objective_id in discovery.objective_ids
+                    for objective_id in collection.discovery_objective_ids
                     if objective_id in by_id
                 ),
                 study_dispositions=tuple(
                     PaperStudyDisposition.from_mapping(item)
-                    for item in discovery.study_dispositions
+                    for item in collection.discovery_study_dispositions
                 ),
             )
 
@@ -172,7 +154,7 @@ class PostgresObjectiveRepository:
     async def list_objective_records(
         self,
         collection_id: str,
-    ) -> tuple[dict[str, Any], ...]:
+    ) -> tuple[StoredObjective, ...]:
         async with self.session_factory() as session:
             rows = tuple(
                 await session.scalars(
@@ -210,10 +192,15 @@ class PostgresObjectiveRepository:
             )
             if prior is not None:
                 existing = self._objective_from_row(prior)
+                existing_record = existing.to_record()
+                objective_record = objective.to_record()
+                existing_record["rank"] = None
+                objective_record["rank"] = None
                 if (
                     existing.collection_id != objective.collection_id
                     or existing.objective_id != objective.objective_id
                     or existing.created_by_user_id != created_by_user_id
+                    or existing_record != objective_record
                 ):
                     raise ValueError(
                         "authored candidate tool call already created a different objective"
@@ -253,13 +240,27 @@ class PostgresObjectiveRepository:
         self,
         collection_id: str,
         objective_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> StoredObjective | None:
         async with self.session_factory() as session:
             row = await session.get(
                 ObjectiveResearchRecord,
                 (collection_id, objective_id),
             )
             return self._objective_record_from_row(row) if row is not None else None
+
+    async def confirm_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        async with self.session_factory.begin() as session:
+            row = await self._locked_objective(session, collection_id, objective_id)
+            objective = self._objective_from_row(row)
+            if objective.confirmation_status == "confirmed":
+                return objective
+            confirmed = objective.confirm()
+            self._write_objective(row, confirmed, now=datetime.now(timezone.utc))
+            return confirmed
 
     async def queue_analysis(
         self,
@@ -413,6 +414,7 @@ class PostgresObjectiveRepository:
         error_code: str,
         error_message: str,
         expected_status: str | None = None,
+        contributions: tuple[PaperContribution, ...] = (),
     ) -> ObjectiveAnalysis:
         async with self.session_factory.begin() as session:
             row = await self._locked_analysis(
@@ -421,6 +423,18 @@ class PostgresObjectiveRepository:
             analysis = self._analysis_from_row(row)
             if expected_status is not None and analysis.status != expected_status:
                 return analysis
+            key = (collection_id, objective_id, analysis_version)
+            if contributions:
+                if any(item.key[:3] != key for item in contributions):
+                    raise ValueError("analysis artifact belongs to another version")
+                input_documents = {
+                    item.document_id for item in analysis.document_inputs
+                }
+                if {item.document_id for item in contributions} != input_documents:
+                    raise ValueError(
+                        "paper contributions must cover every analysis input"
+                    )
+                self._write_contributions(row, contributions)
             analysis = analysis.fail(
                 error_code=error_code,
                 error_message=error_message,
@@ -457,23 +471,17 @@ class PostgresObjectiveRepository:
     ) -> None:
         now = datetime.now(timezone.utc)
         async with self.session_factory.begin() as session:
-            row = await session.get(ObjectiveDocumentEvidenceRecord, checkpoint.key)
-            if row is None:
-                session.add(
-                    ObjectiveDocumentEvidenceRecord(
-                        collection_id=checkpoint.collection_id,
-                        objective_id=checkpoint.objective_id,
-                        document_id=checkpoint.document_id,
-                        input_fingerprint=checkpoint.input_fingerprint,
-                        status=checkpoint.status,
-                        payload=checkpoint.to_record(),
-                        created_at=checkpoint.started_at or now,
-                        updated_at=now,
-                    )
-                )
-                return
-            row.status = checkpoint.status
-            row.payload = checkpoint.to_record()
+            row = await self._locked_analysis(
+                session,
+                checkpoint.collection_id,
+                checkpoint.objective_id,
+                checkpoint.analysis_version,
+            )
+            payload = dict(row.payload or {})
+            checkpoints = dict(payload.get("document_evidence_checkpoints") or {})
+            checkpoints[_checkpoint_storage_key(checkpoint)] = checkpoint.to_record()
+            payload["document_evidence_checkpoints"] = checkpoints
+            row.payload = payload
             row.updated_at = now
 
     async def read_document_evidence(
@@ -484,15 +492,22 @@ class PostgresObjectiveRepository:
         input_fingerprint: str,
     ) -> ObjectiveDocumentEvidence | None:
         async with self.session_factory() as session:
-            row = await session.get(
-                ObjectiveDocumentEvidenceRecord,
-                (collection_id, objective_id, document_id, input_fingerprint),
+            analysis_rows = tuple(
+                await session.scalars(
+                    select(ObjectiveAnalysisRecord).where(
+                        ObjectiveAnalysisRecord.collection_id == collection_id,
+                        ObjectiveAnalysisRecord.objective_id == objective_id,
+                    ).order_by(ObjectiveAnalysisRecord.analysis_version.desc())
+                )
             )
-            return (
-                ObjectiveDocumentEvidence.from_mapping(row.payload)
-                if row is not None
-                else None
-            )
+            key = f"{document_id}:{input_fingerprint}"
+            for analysis_row in analysis_rows:
+                checkpoint = (analysis_row.payload or {}).get(
+                    "document_evidence_checkpoints", {}
+                ).get(key)
+                if checkpoint is not None:
+                    return ObjectiveDocumentEvidence.from_mapping(checkpoint)
+            return None
 
     async def publish_analysis(
         self,
@@ -529,61 +544,8 @@ class PostgresObjectiveRepository:
             for finding in findings:
                 finding.validate_sources(evidence_records, contributions)
 
-            await session.execute(
-                delete(ObjectiveEvidenceRecord).where(
-                    ObjectiveEvidenceRecord.collection_id == collection_id,
-                    ObjectiveEvidenceRecord.objective_id == objective_id,
-                    ObjectiveEvidenceRecord.analysis_version == analysis_version,
-                )
-            )
-            await session.execute(
-                delete(ObjectiveFindingRecord).where(
-                    ObjectiveFindingRecord.collection_id == collection_id,
-                    ObjectiveFindingRecord.objective_id == objective_id,
-                    ObjectiveFindingRecord.analysis_version == analysis_version,
-                )
-            )
-            await session.execute(
-                delete(ObjectivePaperContributionRecord).where(
-                    ObjectivePaperContributionRecord.collection_id == collection_id,
-                    ObjectivePaperContributionRecord.objective_id == objective_id,
-                    ObjectivePaperContributionRecord.analysis_version
-                    == analysis_version,
-                )
-            )
-            session.add_all(
-                ObjectivePaperContributionRecord(
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis_version,
-                    source_document_id=item.document_id,
-                    payload=item.to_record(),
-                )
-                for item in contributions
-            )
-            await session.flush()
-            session.add_all(
-                ObjectiveEvidenceRecord(
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis_version,
-                    evidence_id=item.evidence_id,
-                    source_document_id=item.document_id,
-                    payload=item.to_record(),
-                )
-                for item in evidence_records
-            )
-            session.add_all(
-                ObjectiveFindingRecord(
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis_version,
-                    finding_id=item.finding_id,
-                    display_rank=item.display_rank,
-                    payload=item.to_record(),
-                )
-                for item in findings
-            )
+            self._write_contributions(analysis_row, contributions)
+            self._write_result_records(analysis_row, evidence_records, findings)
             analysis = analysis.succeed(
                 completed_at=datetime.now(timezone.utc),
                 abstention_reason=abstention_reason,
@@ -664,40 +626,10 @@ class PostgresObjectiveRepository:
                 finding.validate_sources(evidence_records, contributions)
 
             now = datetime.now(timezone.utc)
-            session.add(self._new_analysis_row(analysis, now=now))
-            session.add_all(
-                ObjectivePaperContributionRecord(
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis.analysis_version,
-                    source_document_id=item.document_id,
-                    payload=item.to_record(),
-                )
-                for item in contributions
-            )
-            await session.flush()
-            session.add_all(
-                ObjectiveEvidenceRecord(
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis.analysis_version,
-                    evidence_id=item.evidence_id,
-                    source_document_id=item.document_id,
-                    payload=item.to_record(),
-                )
-                for item in evidence_records
-            )
-            session.add_all(
-                ObjectiveFindingRecord(
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis.analysis_version,
-                    finding_id=item.finding_id,
-                    display_rank=item.display_rank,
-                    payload=item.to_record(),
-                )
-                for item in findings
-            )
+            analysis_row = self._new_analysis_row(analysis, now=now)
+            self._write_contributions(analysis_row, contributions)
+            self._write_result_records(analysis_row, evidence_records, findings)
+            session.add(analysis_row)
             objective = objective.queue_analysis(analysis.analysis_version)
             objective = objective.publish_analysis(analysis)
             self._write_objective(objective_row, objective, now=now)
@@ -758,19 +690,16 @@ class PostgresObjectiveRepository:
         analysis_version: int,
     ) -> tuple[PaperContribution, ...]:
         async with self.session_factory() as session:
-            rows = tuple(
-                await session.scalars(
-                    select(ObjectivePaperContributionRecord)
-                    .where(
-                        ObjectivePaperContributionRecord.collection_id == collection_id,
-                        ObjectivePaperContributionRecord.objective_id == objective_id,
-                        ObjectivePaperContributionRecord.analysis_version
-                        == analysis_version,
-                    )
-                    .order_by(ObjectivePaperContributionRecord.source_document_id)
-                )
+            row = await session.get(
+                ObjectiveAnalysisRecord,
+                (collection_id, objective_id, analysis_version),
             )
-            return tuple(PaperContribution.from_mapping(row.payload) for row in rows)
+            if row is None:
+                return ()
+            return tuple(
+                PaperContribution.from_mapping(item)
+                for item in (row.payload or {}).get("paper_contributions", ())
+            )
 
     async def list_findings(
         self,
@@ -781,33 +710,17 @@ class PostgresObjectiveRepository:
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[tuple[Finding, ...], int]:
-        conditions = (
-            ObjectiveFindingRecord.collection_id == collection_id,
-            ObjectiveFindingRecord.objective_id == objective_id,
-            ObjectiveFindingRecord.analysis_version == analysis_version,
-        )
         async with self.session_factory() as session:
-            total = int(
-                await session.scalar(
-                    select(func.count()).select_from(ObjectiveFindingRecord).where(
-                        *conditions
-                    )
-                )
-                or 0
+            row = await session.get(
+                ObjectiveAnalysisRecord,
+                (collection_id, objective_id, analysis_version),
             )
-            rows = tuple(
-                await session.scalars(
-                    select(ObjectiveFindingRecord)
-                    .where(*conditions)
-                    .order_by(
-                        ObjectiveFindingRecord.display_rank,
-                        ObjectiveFindingRecord.finding_id,
-                    )
-                    .offset(max(0, offset))
-                    .limit(max(1, min(limit, 200)))
-                )
-            )
-            return tuple(Finding.from_mapping(row.payload) for row in rows), total
+            if row is None:
+                return (), 0
+            records = _sorted_finding_records((row.payload or {}).get("findings", ()))
+            total = len(records)
+            page = records[max(0, offset) : max(0, offset) + max(1, min(limit, 200))]
+            return tuple(Finding.from_mapping(item) for item in page), total
 
     async def read_finding(
         self,
@@ -818,10 +731,15 @@ class PostgresObjectiveRepository:
     ) -> Finding | None:
         async with self.session_factory() as session:
             row = await session.get(
-                ObjectiveFindingRecord,
-                (collection_id, objective_id, analysis_version, finding_id),
+                ObjectiveAnalysisRecord,
+                (collection_id, objective_id, analysis_version),
             )
-            return Finding.from_mapping(row.payload) if row is not None else None
+            if row is None:
+                return None
+            for item in (row.payload or {}).get("findings", ()):
+                if item.get("finding_id") == finding_id:
+                    return Finding.from_mapping(item)
+            return None
 
     async def list_evidence(
         self,
@@ -835,51 +753,41 @@ class PostgresObjectiveRepository:
     ) -> tuple[tuple[ObjectiveEvidence, ...], int]:
         async with self.session_factory() as session:
             evidence_ids: set[str] | None = None
+            row = await session.get(
+                ObjectiveAnalysisRecord,
+                (collection_id, objective_id, analysis_version),
+            )
+            if row is None:
+                return (), 0
+            payload = row.payload or {}
             if finding_id is not None:
-                finding_row = await session.get(
-                    ObjectiveFindingRecord,
-                    (collection_id, objective_id, analysis_version, finding_id),
+                finding = next(
+                    (
+                        item
+                        for item in payload.get("findings", ())
+                        if item.get("finding_id") == finding_id
+                    ),
+                    None,
                 )
-                if finding_row is None:
+                if finding is None:
                     return (), 0
-                finding = Finding.from_mapping(finding_row.payload)
+                finding = Finding.from_mapping(finding)
                 evidence_ids = {
                     *finding.supporting_evidence_ids,
                     *finding.contradicting_evidence_ids,
                     *finding.context_evidence_ids,
                 }
-            conditions = [
-                ObjectiveEvidenceRecord.collection_id == collection_id,
-                ObjectiveEvidenceRecord.objective_id == objective_id,
-                ObjectiveEvidenceRecord.analysis_version == analysis_version,
-            ]
+            records = list(payload.get("evidence_records", ()))
             if evidence_ids is not None:
                 if not evidence_ids:
                     return (), 0
-                conditions.append(
-                    ObjectiveEvidenceRecord.evidence_id.in_(evidence_ids)
-                )
-            total = int(
-                await session.scalar(
-                    select(func.count()).select_from(ObjectiveEvidenceRecord).where(
-                        *conditions
-                    )
-                )
-                or 0
-            )
-            rows = tuple(
-                await session.scalars(
-                    select(ObjectiveEvidenceRecord)
-                    .where(*conditions)
-                    .order_by(ObjectiveEvidenceRecord.evidence_id)
-                    .offset(max(0, offset))
-                    .limit(max(1, min(limit, 500)))
-                )
-            )
-            return (
-                tuple(ObjectiveEvidence.from_mapping(row.payload) for row in rows),
-                total,
-            )
+                records = [
+                    item for item in records if item.get("evidence_id") in evidence_ids
+                ]
+            records.sort(key=lambda item: str(item.get("evidence_id") or ""))
+            total = len(records)
+            page = records[max(0, offset) : max(0, offset) + max(1, min(limit, 500))]
+            return tuple(ObjectiveEvidence.from_mapping(item) for item in page), total
 
     @staticmethod
     def _objective_from_row(row: ObjectiveResearchRecord) -> ResearchObjective:
@@ -888,11 +796,12 @@ class PostgresObjectiveRepository:
     @staticmethod
     def _objective_record_from_row(
         row: ObjectiveResearchRecord,
-    ) -> dict[str, Any]:
-        record = PostgresObjectiveRepository._objective_from_row(row).to_record()
-        record["created_at"] = row.created_at.isoformat()
-        record["updated_at"] = row.updated_at.isoformat()
-        return record
+    ) -> StoredObjective:
+        return StoredObjective(
+            objective=PostgresObjectiveRepository._objective_from_row(row),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     @staticmethod
     def _analysis_from_row(row: ObjectiveAnalysisRecord) -> ObjectiveAnalysis:
@@ -934,15 +843,37 @@ class PostgresObjectiveRepository:
         *,
         now: datetime,
     ) -> ObjectiveAnalysisRecord:
+        payload = analysis.to_record()
+        payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
         return ObjectiveAnalysisRecord(
             collection_id=analysis.collection_id,
             objective_id=analysis.objective_id,
             analysis_version=analysis.analysis_version,
             status=analysis.status,
-            payload=analysis.to_record(),
+            payload=payload,
             created_at=analysis.created_at or now,
             updated_at=now,
         )
+
+    @staticmethod
+    def _write_contributions(
+        row: ObjectiveAnalysisRecord,
+        contributions: tuple[PaperContribution, ...],
+    ) -> None:
+        payload = dict(row.payload or {})
+        payload["paper_contributions"] = [item.to_record() for item in contributions]
+        row.payload = payload
+
+    @staticmethod
+    def _write_result_records(
+        row: ObjectiveAnalysisRecord,
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        findings: tuple[Finding, ...],
+    ) -> None:
+        payload = dict(row.payload or {})
+        payload["evidence_records"] = [item.to_record() for item in evidence_records]
+        payload["findings"] = [item.to_record() for item in findings]
+        row.payload = payload
 
     @staticmethod
     def _write_analysis(
@@ -950,7 +881,18 @@ class PostgresObjectiveRepository:
         analysis: ObjectiveAnalysis,
     ) -> None:
         row.status = analysis.status
-        row.payload = analysis.to_record()
+        previous = dict(row.payload or {})
+        payload = analysis.to_record()
+        payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
+        for key in (
+            "paper_contributions",
+            "document_evidence_checkpoints",
+            "evidence_records",
+            "findings",
+        ):
+            if key in previous:
+                payload[key] = previous[key]
+        row.payload = payload
         row.updated_at = datetime.now(timezone.utc)
 
     @staticmethod
@@ -1002,27 +944,29 @@ class PostgresObjectiveRepository:
         collection_id: str,
         evidence: ObjectiveEvidence,
     ) -> None:
-        document_collection = await session.scalar(
-            select(SourceDocument.collection_id).where(
-                SourceDocument.source_document_id == evidence.document_id
+        row = await session.scalar(
+            select(DocumentPreparationRow).where(
+                DocumentPreparationRow.document_id == evidence.document_id,
             )
         )
-        if document_collection != collection_id:
+        if row is None:
             raise FileNotFoundError(
                 f"source document not found: {collection_id}/{evidence.document_id}"
             )
-        model, identity = {
-            "text_window": (SourceBlock, SourceBlock.block_id),
-            "table": (SourceTable, SourceTable.table_id),
-            "figure": (SourceFigure, SourceFigure.figure_id),
+        artifact = dict(row.artifact_json or {})
+        source_rows = {
+            "text_window": artifact.get("blocks") or [],
+            "table": artifact.get("tables") or [],
+            "figure": artifact.get("figures") or [],
+        }.get(evidence.source_kind)
+        if source_rows is None:
+            raise ValueError(f"unsupported objective evidence source kind: {evidence.source_kind}")
+        identity_key = {
+            "text_window": "block_id",
+            "table": "table_id",
+            "figure": "figure_id",
         }[evidence.source_kind]
-        exists = await session.scalar(
-            select(func.count()).select_from(model).where(
-                model.source_document_id == evidence.document_id,
-                identity == evidence.source_ref,
-            )
-        )
-        if not exists:
+        if not any(str(item.get(identity_key)) == evidence.source_ref for item in source_rows):
             raise FileNotFoundError(
                 "objective evidence source not found: "
                 f"{collection_id}/{evidence.document_id}/"
@@ -1031,3 +975,17 @@ class PostgresObjectiveRepository:
 
 
 __all__ = ["PostgresObjectiveRepository"]
+
+
+def _checkpoint_storage_key(checkpoint: ObjectiveDocumentEvidence) -> str:
+    return f"{checkpoint.document_id}:{checkpoint.input_fingerprint}"
+
+
+def _sorted_finding_records(values: Any) -> list[dict[str, Any]]:
+    return sorted(
+        (dict(item) for item in values or ()),
+        key=lambda item: (
+            int(item.get("display_rank") or 0),
+            str(item.get("finding_id") or ""),
+        ),
+    )

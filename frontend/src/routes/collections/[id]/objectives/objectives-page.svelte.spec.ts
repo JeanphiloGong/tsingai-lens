@@ -470,15 +470,18 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 	it('polls an active list row until Findings are published', async () => {
 		let analysisReads = 0;
+		let statusReads = 0;
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({
 					collection_id: 'col_123',
-					objectives: [
-						objective({ confirmation_status: 'confirmed', active_analysis_version: 1 })
-					]
+					objectives: [objective({ confirmation_status: 'confirmed', active_analysis_version: 1 })]
 				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis/status') && current.method === 'GET') {
+				statusReads += 1;
+				return jsonResponse(analysisState('succeeded'));
 			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'GET') {
 				analysisReads += 1;
@@ -507,9 +510,45 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			.element(browserPage.getByRole('link', { name: '查看 Findings' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
 		const completedReadCount = analysisReads;
-		expect(completedReadCount).toBeGreaterThanOrEqual(2);
+		expect(completedReadCount).toBe(2);
+		expect(statusReads).toBe(1);
 		await new Promise((resolve) => setTimeout(resolve, 2700));
 		expect(analysisReads).toBe(completedReadCount);
+		expect(statusReads).toBe(1);
+	});
+
+	it('does not restart polling when a pending analysis read finishes after leaving', async () => {
+		let finishAnalysis: ((response: Response) => void) | undefined;
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/objectives') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [objective({ confirmation_status: 'confirmed', active_analysis_version: 1 })]
+				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'GET') {
+				return new Promise<Response>((resolve) => {
+					finishAnalysis = resolve;
+				});
+			}
+			throw new Error(`unexpected request after leaving: ${current.method} ${current.path}`);
+		});
+
+		render(Page);
+		await expect.poll(() => finishAnalysis).toBeDefined();
+		await cleanup();
+		finishAnalysis!(
+			jsonResponse({
+				collection_id: 'col_123',
+				objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
+				active_analysis: analysisState('running'),
+				published_analysis: null,
+				warnings: []
+			})
+		);
+		await new Promise((resolve) => setTimeout(resolve, 2700));
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
 	it('shows the published version without a second result lookup', async () => {

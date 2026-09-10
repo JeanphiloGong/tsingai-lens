@@ -32,6 +32,7 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 });
 
 vi.mock('$app/stores', () => ({ page: pageStore }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
@@ -281,6 +282,7 @@ function evidenceMapWithUnlinkedContext() {
 describe('collections/[id]/graph/+page.svelte', () => {
 	let published = true;
 	let includeUnlinkedContext = false;
+	let includeSecondFinding = false;
 
 	beforeEach(() => {
 		setPage({
@@ -289,6 +291,7 @@ describe('collections/[id]/graph/+page.svelte', () => {
 		});
 		published = true;
 		includeUnlinkedContext = false;
+		includeSecondFinding = false;
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
@@ -298,12 +301,82 @@ describe('collections/[id]/graph/+page.svelte', () => {
 				return jsonResponse(objectivesPayload(published));
 			}
 			if (url.pathname === '/api/v1/collections/col_123/objectives/obj_1/evidence-map') {
-				return jsonResponse(
-					includeUnlinkedContext ? evidenceMapWithUnlinkedContext() : evidenceMapPayload()
-				);
+				const map = includeUnlinkedContext
+					? evidenceMapWithUnlinkedContext()
+					: evidenceMapPayload();
+				if (includeSecondFinding) {
+					map.nodes.push({
+						id: 'finding:finding-2',
+						type: 'finding',
+						finding_id: 'finding-2',
+						label: 'Strength increased under a different treatment.'
+					});
+					map.edges.push({
+						id: 'edge-second',
+						source: 'finding:finding-2',
+						target: 'evidence:ev-conflict',
+						relation: 'supports',
+						condition_boundary: true
+					});
+					map.coverage.finding_count = 2;
+				}
+				return jsonResponse(map);
 			}
 			return jsonResponse({ detail: `unexpected request: ${url.pathname}` }, 404, 'Not Found');
 		});
+	});
+
+	it('filters shared evidence by its selected Finding relation and preserves Objective coverage', async () => {
+		includeSecondFinding = true;
+		render(Page);
+		await browserPage.getByLabelText('Finding').selectOptions('finding-2');
+		await expect.element(browserPage.getByText('Supports', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Contradicts', { exact: true }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('UTS decreased after heat treatment.'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Heat treatment paper A', { exact: true }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 failed paper')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Table · table-2' }))
+			.toHaveAttribute('href', expect.stringContaining('finding_id%3Dfinding-2'));
+		await browserPage.getByLabelText('Finding').selectOptions('');
+		await expect
+			.element(browserPage.getByText('UTS decreased after heat treatment.'))
+			.toBeInTheDocument();
+	});
+
+	it('keeps unlinked evidence inspectable and honors a Finding deep link', async () => {
+		includeUnlinkedContext = true;
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL(
+				'http://localhost/collections/col_123/graph?objective_id=obj_1&finding_id=finding-1'
+			)
+		});
+		render(Page);
+		await expect.element(browserPage.getByLabelText('Finding')).toHaveValue('finding-1');
+		await expect
+			.element(
+				browserPage.getByText('Porosity was measured after heat treatment.', { exact: true })
+			)
+			.not.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Unlinked evidence (1)' }).click();
+		await expect
+			.element(
+				browserPage
+					.getByText('Porosity was measured after heat treatment.', { exact: true })
+					.first()
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Supports', { exact: true }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 failed paper')).toBeInTheDocument();
 	});
 
 	it('labels evidence that still needs context instead of implying a Finding relation', async () => {
@@ -339,7 +412,11 @@ describe('collections/[id]/graph/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Objective evidence map' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Heat treatment generally decreased tensile strength.'))
+			.element(
+				browserPage.getByText('Heat treatment generally decreased tensile strength.', {
+					exact: true
+				})
+			)
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Supports')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Contradicts')).toBeInTheDocument();

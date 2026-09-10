@@ -145,6 +145,100 @@ dependencies, states, prompts, and verification from it.
 - Node-local `README.md` files define local purpose and navigation for owned
   backend seams.
 
+### Model and Repository Ownership
+
+Make ownership apparent from the file a developer opens. Clear module boundaries
+and beginner-readable code are valid design goals even without a runtime bug or
+performance problem. Separate models by responsibility, not by creating a copy
+for every layer.
+
+- Domain models belong in `domain/` and express business objects, meaningful
+  state, invariants, and state transitions. They must not depend on SQLAlchemy,
+  Pydantic, HTTP models, or infrastructure implementations. Application services
+  continue to orchestrate use cases.
+- For new or explicitly refactored repositories, place the contract in
+  `application/repositories/<name>_repository.py`. Define its dedicated input
+  and result types in that same file, next to the methods that consume or return
+  them. Do not collect unrelated repository result types in a shared `models.py`
+  or place them in `domain/` merely because several callers use them.
+- Application callers import repository contracts and their result types from
+  that owning contract file, without importing PostgreSQL implementations.
+  Contracts may depend on domain objects; domain objects must not depend on
+  application repository contracts.
+- Repository implementations, ORM records, SQL, database transactions, storage
+  mappings, and implementation-private query types belong in
+  `infra/persistence/`. ORM records and database session state must not escape
+  through public repository results. Repository results must not depend on HTTP
+  response models or transport envelopes.
+- HTTP request and response models belong at the controller boundary. Controllers
+  translate application or repository results into the public HTTP contract;
+  repositories do not construct API responses.
+- Returning a domain object directly is valid when it already expresses the
+  result. Introduce a named repository result only when query projections or
+  persistence metadata require one. Do not manufacture `StoredX` wrappers or
+  duplicate domain, repository, ORM, and API models solely for symmetry.
+- When a repository result includes a domain object, declare a field of that
+  domain type and add only the repository-specific fields. Reuse the domain
+  model rather than repeating its fields or converting an existing instance to
+  a dictionary and back merely to include it in the result.
+- Judge fields by meaning, not by whether they are persisted. Source identities,
+  Evidence provenance, analysis versions, and scientifically meaningful
+  timestamps can belong to the domain. Database-only keys and bookkeeping do
+  not become domain concepts simply because a table contains them.
+
+Apply this convention incrementally within explicitly requested work. It does
+not authorize a bulk migration, new layers, or compatibility forwarding. Pure
+ownership moves must preserve scientific behavior, persisted formats,
+serialization used in fingerprints, API shapes, authorization, retries, and
+concurrency. Update direct callers and remove obsolete definitions and imports
+within the approved scope.
+
+Review check: can a new developer find a repository's methods and dedicated
+result types in one file, then identify the domain rules, storage mapping, and
+HTTP conversion without tracing unrelated layers?
+
+#### Example: Reuse a Domain Model in a Repository Result
+
+A researcher opens a saved question about how laser power affects Ti-6Al-4V
+porosity. `ResearchObjective` in `domain/core/research_objective.py` already owns
+the question, material scope, variables, outcomes, and business rules. A caller
+also needs the record timestamps, so the repository result references that
+domain model directly and adds only those timestamps.
+
+Keep this result definition beside the repository contract. The relevant
+excerpt is:
+
+```python
+# application/repositories/objective_repository.py
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
+
+from domain.core.research_objective import ResearchObjective
+
+
+@dataclass(frozen=True)
+class StoredObjective:
+    objective: ResearchObjective
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ObjectiveRepository(Protocol):
+    async def read_objective_record(
+        self, collection_id: str, objective_id: str,
+    ) -> StoredObjective | None: ...
+```
+
+`objective: ResearchObjective` is a field type declaration: the result contains
+a domain object, not a second definition of its fields. `StoredObjective` owns
+the additional record metadata; `ResearchObjective` keeps its domain rules.
+When no extra metadata or projection is needed, return the domain object itself.
+
+Defining this relationship needs no conversion helper or serialization layer.
+Database decoding stays in the repository implementation, and HTTP formatting
+stays at the controller boundary; neither belongs in this result definition.
+
 ## 12 Golden Rules (Why / How / Check)
 
 1. Keep handlers thin and ownership clear.

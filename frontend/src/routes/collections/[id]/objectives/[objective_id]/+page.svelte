@@ -9,9 +9,11 @@
 	import EvidenceAuthoringEditor from '../../_components/EvidenceAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
 	import { downloadBlob, errorMessage } from '../../../../_shared/api';
+	import { t } from '../../../../_shared/i18n';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
 		fetchObjectiveAnalysis,
+		fetchObjectiveAnalysisStatus,
 		fetchObjectiveEvidence,
 		fetchObjectiveFindings,
 		objectiveFindingDatasetUrl,
@@ -84,10 +86,7 @@
 			documentTitles =
 				profilesResult.status === 'fulfilled'
 					? Object.fromEntries(
-							profilesResult.value.items.map((item) => [
-								item.document_id,
-								item.title || item.source_filename || ''
-							])
+							profilesResult.value.items.map((item) => [item.document_id, item.title || ''])
 						)
 					: {};
 			await loadFindings(preferredFindingId, updateFindingUrl);
@@ -362,20 +361,29 @@
 
 	async function refreshAnalysis() {
 		try {
+			const status = await fetchObjectiveAnalysisStatus(collectionId, objectiveId);
 			const previousVersion = analysis?.objective.published_analysis_version ?? null;
-			const refreshed = await fetchObjectiveAnalysis(collectionId, objectiveId);
-			const nextVersion = refreshed.objective.published_analysis_version;
-			if (nextVersion !== previousVersion) {
-				findingRequestSequence += 1;
-				selectedFinding = null;
-				evidence = [];
-				closeAuthoring();
-				authoringEvidence = [];
-				authoringEvidenceVersion = null;
+			if (analysis?.active_analysis && status.status) {
+				analysis = {
+					...analysis,
+					active_analysis: { ...analysis.active_analysis, ...status }
+				};
 			}
-			analysis = refreshed;
-			if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
-				await loadFindings();
+			if (status.status !== 'queued' && status.status !== 'running') {
+				const refreshed = await fetchObjectiveAnalysis(collectionId, objectiveId);
+				const nextVersion = refreshed.objective.published_analysis_version;
+				if (nextVersion !== previousVersion) {
+					findingRequestSequence += 1;
+					selectedFinding = null;
+					evidence = [];
+					closeAuthoring();
+					authoringEvidence = [];
+					authoringEvidenceVersion = null;
+				}
+				analysis = refreshed;
+				if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
+					await loadFindings();
+				}
 			}
 			schedulePoll();
 		} catch (err) {
@@ -438,7 +446,6 @@
 			<div>
 				<a href={resolve('/collections/[id]/objectives', { id: collectionId })}>研究目标</a>
 				<h1>{analysis.objective.question}</h1>
-				<p>{analysis.objective.requested_comparator || '尚未设置比较意图'}</p>
 			</div>
 			<div class="header-actions">
 				{#if !isProcessing}
@@ -454,16 +461,7 @@
 			</div>
 		</header>
 
-		<div class="scope-strip">
-			<div><span>材料</span><strong>{joined(analysis.objective.material_scope)}</strong></div>
-			<div><span>变量</span><strong>{joined(analysis.objective.variables)}</strong></div>
-			<div><span>结果</span><strong>{joined(analysis.objective.outcomes)}</strong></div>
-			<div><span>机制</span><strong>{joined(analysis.objective.mechanisms)}</strong></div>
-			<div><span>约束</span><strong>{joined(analysis.objective.constraints)}</strong></div>
-			<div><span>文献</span><strong>{analysis.objective.seed_document_ids.length} 篇</strong></div>
-		</div>
-
-		{#if active}
+		{#if active && (active.status !== 'succeeded' || !published)}
 			<section class:failed={active.status === 'failed'} class="analysis-state" role="status">
 				<div>
 					<strong
@@ -473,7 +471,11 @@
 								? '分析完成'
 								: '正在分析'}</strong
 					>
-					<span>{active.progress_message || active.error_message || active.phase}</span>
+					<span>
+						{active.status === 'failed'
+							? $t('researchAgent.capability.analysisFailed')
+							: active.progress_message || active.phase}
+					</span>
 					{#if active.status === 'failed' && published && active.analysis_version !== published.analysis_version}
 						<span class="version-note"
 							>正在显示已发布的 v{published.analysis_version}；重试 v{active.analysis_version} 失败。</span
@@ -494,62 +496,12 @@
 			</section>
 		{/if}
 
-		{#if published && analysis.evidence_review.total_evidence_count > 0}
-			<section class="evidence-review" aria-label="证据覆盖审阅">
-				<div class="evidence-review__header">
-					<div>
-						<h2>证据覆盖</h2>
-						<p>保留每条原文记录，并把暂时不能支撑结论的原因列出来。</p>
-					</div>
-					<span class="evidence-review__total">
-						{analysis.evidence_review.total_evidence_count} 条原文记录 ·
-						{analysis.evidence_review.result_count} 条结果
-					</span>
-				</div>
-				<div class="evidence-review__counts" aria-label="证据状态统计">
-					{#each Object.entries(analysis.evidence_review.status_counts) as [status, count] (status)}
-						<span class="evidence-count">
-							<strong>{count}</strong>
-							{evidenceStatusLabel(status)}
-						</span>
-					{/each}
-				</div>
-				{#if analysis.evidence_review.gaps.length}
-					<div class="evidence-review__gaps">
-						<h3>需要研究者判断的记录</h3>
-						{#each analysis.evidence_review.gaps as gap (gap.evidence_id)}
-							<article class="evidence-gap">
-								<div class="evidence-gap__heading">
-									<strong>{evidenceStatusLabel(gap.evidence_status)}</strong>
-									<span>
-										{documentTitles[gap.document_id] || gap.document_id}
-										{#if gap.page_numbers.length}
-											· p.{gap.page_numbers.join(', ')}{/if}
-									</span>
-								</div>
-								<p>{gap.reason}</p>
-								{#if gap.outcome}<small>结果轴：{gap.outcome}</small>{/if}
-								{#if gap.source_excerpt}<blockquote>{gap.source_excerpt}</blockquote>{/if}
-								<a href={resolve(evidenceGapHref(gap))}>查看原文</a>
-							</article>
-						{/each}
-						{#if analysis.evidence_review.omitted_gap_count > 0}
-							<p class="evidence-review__omitted">
-								还有 {analysis.evidence_review.omitted_gap_count} 条记录未展开，请从原文和 Evidence 列表继续审阅。
-							</p>
-						{/if}
-					</div>
-				{/if}
-			</section>
-		{/if}
-
 		{#if published}
 			<section class="findings-workspace" aria-label="Finding 审阅工作区">
 				<aside class="findings-sidebar" aria-label="Finding 列表">
 					<div class="findings-heading">
 						<div>
 							<h2>Findings</h2>
-							<p>选择一条发现进行证据审阅。</p>
 						</div>
 						<div class="findings-meta" aria-label="分析元信息">
 							<span>{findings.length} 条 · v{published.analysis_version}</span>
@@ -568,6 +520,18 @@
 						新建 Finding
 					</button>
 					{#if findings.length}
+						{#if findings.length > 1}
+							<select
+								class="mobile-finding-select"
+								aria-label={$t('research.findingReview.selectFinding')}
+								value={selectedFindingId}
+								on:change={(event) => reviewFinding(event.currentTarget.value)}
+							>
+								{#each findings as item, index (item.finding_id)}
+									<option value={item.finding_id}>{index + 1}. {item.statement}</option>
+								{/each}
+							</select>
+						{/if}
 						<ul class="finding-list">
 							{#each findings as item (item.finding_id)}
 								<li>
@@ -591,15 +555,78 @@
 					{:else}
 						<p class="empty-findings">当前版本尚无 Finding。</p>
 					{/if}
-					<section class="export-panel" aria-label="导出 Finding 数据">
-						<div class="export-panel__heading">
-							<div>
-								<h3>导出研究结果</h3>
+					{#if analysis.evidence_review.total_evidence_count > 0}
+						<details
+							class="evidence-review secondary-details"
+							aria-label={$t('research.findingReview.coverage')}
+						>
+							<summary>
+								{$t('research.findingReview.coverage')}
+								<span
+									>{$t('research.findingReview.coverageCount', {
+										count: analysis.evidence_review.total_evidence_count
+									})}</span
+								>
+								{#if analysis.evidence_review.gap_count}
+									<span class="gap-count"
+										>{$t('research.findingReview.gapCount', {
+											count: analysis.evidence_review.gap_count
+										})}</span
+									>
+								{/if}
+							</summary>
+							<div class="evidence-review__body">
 								<p>
-									下载当前已发布分析 v{published.analysis_version} 的 Finding 数据，用于复核或后续标注。
+									{$t('research.findingReview.coverageTotal', {
+										count: analysis.evidence_review.total_evidence_count,
+										results: analysis.evidence_review.result_count
+									})}
 								</p>
+								<div class="evidence-review__counts" aria-label="证据状态统计">
+									{#each Object.entries(analysis.evidence_review.status_counts) as [status, count] (status)}
+										<span class="evidence-count"
+											><strong>{count}</strong> {evidenceStatusLabel(status)}</span
+										>
+									{/each}
+								</div>
+								{#if analysis.evidence_review.gaps.length}
+									<div class="evidence-review__gaps">
+										<h3>{$t('research.findingReview.gapsTitle')}</h3>
+										{#each analysis.evidence_review.gaps as gap (gap.evidence_id)}
+											<article class="evidence-gap">
+												<div class="evidence-gap__heading">
+													<strong>{evidenceStatusLabel(gap.evidence_status)}</strong>
+													<span>
+														{documentTitles[gap.document_id] ||
+															$t('research.findingReview.untitledPaper')}
+														{#if gap.page_numbers.length}
+															· p.{gap.page_numbers.join(', ')}{/if}
+													</span>
+												</div>
+												<p>{gap.reason}</p>
+												{#if gap.outcome}<small
+														>{$t('research.findingReview.outcome', { outcome: gap.outcome })}</small
+													>{/if}
+												{#if gap.source_excerpt}<blockquote>{gap.source_excerpt}</blockquote>{/if}
+												<a href={resolve(evidenceGapHref(gap))}
+													>{$t('research.findingReview.openSource')}</a
+												>
+											</article>
+										{/each}
+									</div>
+								{/if}
+								{#if analysis.evidence_review.omitted_gap_count > 0}
+									<p>
+										{$t('research.findingReview.omittedGaps', {
+											count: analysis.evidence_review.omitted_gap_count
+										})}
+									</p>
+								{/if}
 							</div>
-						</div>
+						</details>
+					{/if}
+					<details class="export-panel secondary-details" aria-label="导出 Finding 数据">
+						<summary>{$t('research.findingReview.export')}</summary>
 						<div class="export-filters">
 							<label>
 								<span>标注状态</span>
@@ -651,7 +678,7 @@
 								>{/if}
 						</div>
 						{#if datasetError}<p class="export-error" role="alert">{datasetError}</p>{/if}
-					</section>
+					</details>
 				</aside>
 
 				<section
@@ -730,6 +757,22 @@
 		{:else if !isProcessing}
 			<p class="page-state">确认并开始分析后，这里将展示可追溯的 Findings。</p>
 		{/if}
+		<details class="secondary-details research-scope">
+			<summary>{$t('research.findingReview.scope')}</summary>
+			{#if analysis.objective.requested_comparator}<p class="scope-comparator">
+					{analysis.objective.requested_comparator}
+				</p>{/if}
+			<div class="scope-strip">
+				<div><span>材料</span><strong>{joined(analysis.objective.material_scope)}</strong></div>
+				<div><span>变量</span><strong>{joined(analysis.objective.variables)}</strong></div>
+				<div><span>结果</span><strong>{joined(analysis.objective.outcomes)}</strong></div>
+				<div><span>机制</span><strong>{joined(analysis.objective.mechanisms)}</strong></div>
+				<div><span>约束</span><strong>{joined(analysis.objective.constraints)}</strong></div>
+				<div>
+					<span>文献</span><strong>{analysis.objective.seed_document_ids.length} 篇</strong>
+				</div>
+			</div>
+		</details>
 	</section>
 {/if}
 
@@ -738,7 +781,7 @@
 		width: min(1360px, 100%);
 		margin: 0 auto;
 		display: grid;
-		gap: 22px;
+		gap: 16px;
 	}
 	.objective-header {
 		display: flex;
@@ -750,6 +793,9 @@
 		color: var(--text-secondary);
 		font-size: 13px;
 	}
+	.objective-header > div {
+		min-width: 0;
+	}
 	h1,
 	h2,
 	p {
@@ -758,18 +804,48 @@
 	h1 {
 		margin-top: 8px;
 		max-width: 850px;
-		font-size: 25px;
+		font-size: 20px;
 		line-height: 1.4;
-	}
-	.objective-header p,
-	.findings-heading p {
-		margin-top: 6px;
-		color: var(--text-secondary);
+		overflow-wrap: anywhere;
 	}
 	.header-actions {
 		display: flex;
+		flex-shrink: 0;
 		gap: 8px;
 		flex-wrap: wrap;
+	}
+	.secondary-details {
+		border-top: 1px solid var(--border-default);
+		font-size: 12px;
+	}
+	.secondary-details > summary {
+		min-height: 36px;
+		padding: 8px 0;
+		box-sizing: border-box;
+		color: var(--text-secondary);
+		line-height: 20px;
+		cursor: pointer;
+		overflow-wrap: anywhere;
+	}
+	.secondary-details > summary:hover,
+	.secondary-details[open] > summary {
+		color: var(--text-primary);
+	}
+	.secondary-details > summary:focus-visible,
+	.mobile-finding-select:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+	.secondary-details > summary span {
+		margin-left: 6px;
+	}
+	.secondary-details > summary .gap-count {
+		color: var(--warning-text);
+	}
+	.scope-comparator {
+		padding: 8px 0 12px;
+		color: var(--text-secondary);
+		overflow-wrap: anywhere;
 	}
 	.scope-strip {
 		display: grid;
@@ -822,38 +898,21 @@
 		color: var(--text-secondary);
 		white-space: pre-line;
 	}
-	.evidence-review {
+	.evidence-review__body {
 		display: grid;
 		gap: 14px;
-		padding: 16px 18px;
-		border: 1px solid var(--border-default);
-		background: var(--surface-subtle);
-	}
-	.evidence-review__header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 16px;
-	}
-	.evidence-review h2 {
-		font-size: 17px;
+		padding: 8px 0 16px;
+		overflow-wrap: anywhere;
 	}
 	.evidence-review h3 {
 		font-size: 14px;
 	}
 	.evidence-review p,
-	.evidence-review__total,
 	.evidence-gap span,
 	.evidence-gap small {
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 1.5;
-	}
-	.evidence-review__header p {
-		margin-top: 4px;
-	}
-	.evidence-review__total {
-		white-space: nowrap;
 	}
 	.evidence-review__counts {
 		display: flex;
@@ -906,9 +965,6 @@
 		font-size: 12px;
 		font-weight: 600;
 	}
-	.evidence-review__omitted {
-		margin-top: 2px;
-	}
 	.analysis-state .version-note {
 		color: var(--text-primary);
 		font-weight: 600;
@@ -924,6 +980,7 @@
 		align-items: start;
 	}
 	.findings-sidebar {
+		min-width: 0;
 		position: sticky;
 		top: 16px;
 		max-height: calc(100vh - 32px);
@@ -938,6 +995,24 @@
 		align-items: flex-start;
 		margin-bottom: 12px;
 	}
+	.findings-heading h2 {
+		font-size: 16px;
+		line-height: 24px;
+	}
+	.mobile-finding-select {
+		display: none;
+		width: 100%;
+		min-width: 0;
+		min-height: 36px;
+		margin-bottom: 12px;
+		padding: 6px 8px;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: inherit;
+		font: inherit;
+		font-size: 13px;
+	}
 	.findings-meta {
 		display: grid;
 		max-width: 55%;
@@ -951,6 +1026,8 @@
 		overflow-wrap: anywhere;
 	}
 	.finding-list {
+		max-height: 360px;
+		overflow-y: auto;
 		margin: 0;
 		padding: 0;
 		list-style: none;
@@ -992,18 +1069,8 @@
 		line-height: 1.45;
 	}
 	.export-panel {
-		margin-top: 18px;
-		padding-top: 16px;
-		border-top: 1px solid var(--border-default);
+		padding-bottom: 8px;
 	}
-	.export-panel__heading {
-		display: grid;
-		gap: 5px;
-	}
-	.export-panel h3 {
-		font-size: 14px;
-	}
-	.export-panel p,
 	.export-panel label span,
 	.export-status {
 		color: var(--text-secondary);
@@ -1065,22 +1132,49 @@
 	@media (max-width: 1000px) {
 		.findings-workspace {
 			grid-template-columns: 1fr;
-			gap: 24px;
+			gap: 16px;
 		}
 		.findings-sidebar {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			column-gap: 12px;
 			position: static;
 			max-height: none;
 			overflow: visible;
-			padding: 0 0 20px;
+			padding: 0;
 			border-right: 0;
 			border-bottom: 1px solid var(--border-default);
 		}
+		.finding-list {
+			display: none;
+		}
+		.mobile-finding-select {
+			display: block;
+		}
+		.mobile-finding-select,
+		.secondary-details,
+		.empty-findings {
+			grid-column: 1 / -1;
+		}
+		.findings-heading {
+			flex-wrap: wrap;
+			gap: 4px 12px;
+			align-items: center;
+		}
+		.findings-meta {
+			max-width: 100%;
+			font-size: 11px;
+		}
+		.new-finding {
+			width: auto;
+			align-self: start;
+		}
 	}
 	@media (max-width: 820px) {
-		.objective-header,
-		.findings-heading {
+		.objective-header {
 			flex-direction: column;
 			align-items: flex-start;
+			gap: 12px;
 		}
 		.findings-meta {
 			max-width: 100%;
@@ -1089,12 +1183,6 @@
 		}
 		.scope-strip {
 			grid-template-columns: 1fr 1fr;
-		}
-		.evidence-review__header {
-			flex-direction: column;
-		}
-		.evidence-review__total {
-			white-space: normal;
 		}
 	}
 </style>

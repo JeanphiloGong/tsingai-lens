@@ -155,6 +155,7 @@ class ChatToolCall:
     arguments: Mapping[str, Any]
     arguments_digest: str
     risk: ToolRisk | str
+    position: int = 0
     status: ToolCallStatus | str = ToolCallStatus.REQUESTED
     started_at: str | None = None
     finished_at: str | None = None
@@ -164,6 +165,8 @@ class ChatToolCall:
     decided_at: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.position, int) or isinstance(self.position, bool) or self.position < 0:
+            raise ValueError("tool call position must be a non-negative integer")
         for field_name in (
             "tool_call_id",
             "session_id",
@@ -226,6 +229,7 @@ class ChatToolCall:
         name: str,
         arguments: Mapping[str, Any],
         risk: ToolRisk,
+        position: int = 0,
     ) -> "ChatToolCall":
         copied_arguments = _arguments(arguments)
         return cls(
@@ -236,7 +240,13 @@ class ChatToolCall:
             arguments=copied_arguments,
             arguments_digest=tool_arguments_digest(copied_arguments),
             risk=risk,
+            position=position,
         )
+
+    def to_request(self):
+        from domain.chat.message import ChatToolRequest
+
+        return ChatToolRequest(self.tool_call_id, self.name, self.arguments, self.position)
 
     def require_approval(self) -> "ChatToolCall":
         if self.status is not ToolCallStatus.REQUESTED or self.risk is not ToolRisk.WRITE:
@@ -327,6 +337,7 @@ class ChatToolCall:
             tool_call_id=str(payload.get("tool_call_id") or ""),
             session_id=str(payload.get("session_id") or ""),
             assistant_message_id=str(payload.get("assistant_message_id") or ""),
+            position=payload["position"],
             name=str(payload.get("name") or ""),
             arguments=(
                 dict(payload["arguments"])
@@ -349,6 +360,7 @@ class ChatToolCall:
             "tool_call_id": self.tool_call_id,
             "session_id": self.session_id,
             "assistant_message_id": self.assistant_message_id,
+            "position": self.position,
             "name": self.name,
             "arguments": deepcopy(dict(self.arguments)),
             "arguments_digest": self.arguments_digest,

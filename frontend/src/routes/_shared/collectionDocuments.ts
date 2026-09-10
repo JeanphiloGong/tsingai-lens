@@ -1,4 +1,4 @@
-import { requestJson } from './api';
+import { errorMessage, getApiErrorDetail, requestJson } from './api';
 
 export type CollectionDocument = {
 	document_id: string;
@@ -21,6 +21,15 @@ export type CollectionDocument = {
 export type CollectionDocumentsResponse = {
 	count: number;
 	items: CollectionDocument[];
+};
+
+export type CollectionDocumentUploadFailure = {
+	file: File;
+	message: string;
+};
+
+export type CollectionDocumentUploadResponse = CollectionDocumentsResponse & {
+	failures: CollectionDocumentUploadFailure[];
 };
 
 function normalizeCollectionDocument(item: unknown): CollectionDocument | null {
@@ -72,13 +81,21 @@ export async function listCollectionDocuments(
 	return { count: items.length, items };
 }
 
-export async function uploadCollectionDocument(collectionId: string, file: File) {
+export async function uploadCollectionDocument(
+	collectionId: string,
+	file: File,
+	reuseExisting = false
+) {
 	const formData = new FormData();
 	formData.append('file', file);
-	const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/documents`, {
-		method: 'POST',
-		body: formData
-	});
+	const query = reuseExisting ? '?reuse_existing=true' : '';
+	const data = await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/documents${query}`,
+		{
+			method: 'POST',
+			body: formData
+		}
+	);
 
 	const uploaded = normalizeCollectionDocument(data);
 	if (!uploaded) {
@@ -87,11 +104,23 @@ export async function uploadCollectionDocument(collectionId: string, file: File)
 	return uploaded;
 }
 
-export async function uploadCollectionDocuments(collectionId: string, files: File[]) {
+export function isDuplicateCollectionDocumentError(error: unknown) {
+	return getApiErrorDetail(error) === 'document content already exists in collection';
+}
+
+export async function uploadCollectionDocuments(
+	collectionId: string,
+	files: File[]
+): Promise<CollectionDocumentUploadResponse> {
 	const items: CollectionDocument[] = [];
+	const failures: CollectionDocumentUploadFailure[] = [];
 	for (const file of files) {
-		items.push(await uploadCollectionDocument(collectionId, file));
+		try {
+			items.push(await uploadCollectionDocument(collectionId, file));
+		} catch (error) {
+			failures.push({ file, message: errorMessage(error) });
+		}
 	}
 
-	return { count: items.length, items } satisfies CollectionDocumentsResponse;
+	return { count: items.length, items, failures };
 }

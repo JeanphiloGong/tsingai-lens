@@ -1,14 +1,14 @@
 import { buildApiUrl, requestJson } from './api';
 
 export type DocumentType = 'experimental' | 'review' | 'mixed' | 'uncertain';
+export type ProfileStatus = 'completed' | 'extraction_failed';
 
 export type DocumentProfile = {
 	document_id: string;
-	collection_id: string;
 	title: string | null;
-	source_filename: string | null;
 	doc_type: DocumentType;
-	parsing_warnings: string[];
+	profile_status: ProfileStatus;
+	profile_warnings: string[];
 	confidence: number | null;
 	page_count: number | null;
 };
@@ -20,6 +20,7 @@ export type DocumentProfilesResponse = {
 	summary: {
 		total_documents: number;
 		doc_type_counts: Record<DocumentType, number>;
+		technical_failure_count: number;
 		warnings: string[];
 	};
 	items: DocumentProfile[];
@@ -171,18 +172,20 @@ function nullableNumber(value: unknown) {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
-function normalizeProfile(value: unknown, collectionId: string): DocumentProfile | null {
+function normalizeProfile(value: unknown): DocumentProfile | null {
 	const record = asRecord(value);
 	const documentId = String(record?.document_id ?? '').trim();
 	if (!record || !documentId) return null;
 	const rawType = String(record.doc_type ?? 'uncertain') as DocumentType;
 	return {
 		document_id: documentId,
-		collection_id: String(record.collection_id ?? collectionId),
 		title: optionalText(record.title),
-		source_filename: optionalText(record.source_filename),
 		doc_type: DOCUMENT_TYPES.has(rawType) ? rawType : 'uncertain',
-		parsing_warnings: stringList(record.parsing_warnings),
+		profile_status:
+			String(record.profile_status ?? 'completed') === 'extraction_failed'
+				? 'extraction_failed'
+				: 'completed',
+		profile_warnings: stringList(record.profile_warnings),
 		confidence: nullableNumber(record.confidence),
 		page_count: nullableNumber(record.page_count)
 	};
@@ -387,7 +390,7 @@ export async function fetchDocumentProfiles(
 	)) as Record<string, unknown>;
 	const items = Array.isArray(data.items)
 		? data.items
-				.map((item) => normalizeProfile(item, collectionId))
+				.map((item) => normalizeProfile(item))
 				.filter((item): item is DocumentProfile => item !== null)
 		: [];
 	const summary = asRecord(data.summary);
@@ -404,6 +407,7 @@ export async function fetchDocumentProfiles(
 				mixed: finiteNumber(counts?.mixed),
 				uncertain: finiteNumber(counts?.uncertain)
 			},
+			technical_failure_count: finiteNumber(summary?.technical_failure_count),
 			warnings: stringList(summary?.warnings)
 		},
 		items
@@ -440,7 +444,7 @@ export async function fetchDocumentProfile(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/profile`,
 		{ method: 'GET' }
 	);
-	const profile = normalizeProfile(data, collectionId);
+	const profile = normalizeProfile(data);
 	if (!profile) throw new Error('Document profile response is invalid.');
 	return profile;
 }

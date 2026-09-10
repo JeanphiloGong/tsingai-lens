@@ -22,6 +22,17 @@ def test_normalize_property_label_preserves_source_alias_behavior(
     )
 
 
+def test_elongation_percentage_objective_matches_source_el_percent_alias() -> None:
+    assert (
+        property_matching.normalize_property_label("elongation percentage")
+        == "elongation"
+    )
+    assert property_matching.source_text_mentions_axis(
+        "Preheating increased the El% by approximately 14%.",
+        "elongation percentage",
+    )
+
+
 def test_broad_objective_matches_specific_measurement() -> None:
     assert property_matching.property_matches_target_axes(
         "mechanical properties",
@@ -315,18 +326,14 @@ def test_material_scope_matching_distinguishes_alias_broad_and_conflicting_label
         "titanium alloy",
         "Ti-6Al-4V",
     )
-    assert not property_matching.material_scope_value_is_specific(
-        "metal additively manufactured material"
-    )
-    assert property_matching.material_scope_value_is_broad(
-        "metal additively manufactured material"
-    )
-    assert not property_matching.material_scope_value_is_broad(
-        "aerospace components"
-    )
-    assert property_matching.material_scope_value_is_specific("Al7075")
-    assert property_matching.material_scope_value_is_specific("316L")
-    assert property_matching.material_scope_value_is_specific("17-4PH")
+    assert property_matching.material_match_quality(
+        "titanium alloy",
+        "Ti-6Al-4V",
+    ).value == "possible"
+    assert property_matching.material_match_quality(
+        "metal additively manufactured material",
+        "Ti-6Al-4V",
+    ).value == "unknown"
     assert not property_matching.material_values_match_for_scope(
         "Al7075",
         "Ti-6Al-4V",
@@ -347,3 +354,88 @@ def test_material_scope_matching_distinguishes_alias_broad_and_conflicting_label
         "17-4PH stainless steel",
         "Ti-6Al-4V",
     )
+
+
+def test_material_scope_does_not_equate_unregistered_material_families() -> None:
+    """A shared word such as nickel is not proof of material identity."""
+
+    assert not property_matching.material_values_match_for_scope(
+        "nickel foam",
+        "nickel alloy",
+    )
+    assert not property_matching.material_values_match_for_scope(
+        "polyimide film",
+        "polyimide composite",
+    )
+    assert not property_matching.material_values_match_for_scope(
+        "catalyst A",
+        "catalyst B",
+    )
+
+
+def test_material_match_quality_preserves_unknown_as_reviewable() -> None:
+    quality = property_matching.material_match_quality(
+        "nickel foam",
+        "nickel alloy",
+    )
+
+    assert quality.value == "unknown"
+    assert property_matching.material_match_quality(
+        "unknown",
+        "unknown",
+    ).value == "unknown"
+    assert property_matching.material_match_quality(
+        "titanium alloy",
+        "titanium alloy",
+    ).value == "possible"
+    assert not property_matching.material_value_matches_objective_comparison_scope(
+        "titanium alloy",
+        "titanium alloy",
+    )
+    assert property_matching.material_match_quality(
+        "聚酰亚胺薄膜",
+        "聚酰亚胺薄膜",
+    ).value == "unknown"
+    assert not property_matching.material_value_matches_objective_comparison_scope(
+        "聚酰亚胺薄膜",
+        "聚酰亚胺薄膜",
+    )
+    assert property_matching.material_registry_version()
+
+
+def test_material_text_mentions_requires_a_complete_registered_alias() -> None:
+    assert property_matching.source_text_mentions_material(
+        "Ti6Al4V samples were evaluated after annealing.",
+        "Ti-6Al-4V",
+    )
+    assert not property_matching.source_text_mentions_material(
+        "The static C4 model was evaluated after annealing.",
+        "TC4",
+    )
+    assert not property_matching.source_text_mentions_material(
+        "The investigated grade was 316LN.",
+        "316L stainless steel",
+    )
+
+
+@pytest.mark.parametrize("value", ("N/A", "not available", "未报告", "未知"))
+def test_material_registry_preserves_declared_missing_values(value: str) -> None:
+    assert property_matching.material_identity_key(value) is None
+
+
+@pytest.mark.parametrize(
+    ("unregistered_form", "registered_material"),
+    (
+        ("17.4 pH", "17-4PH stainless steel"),
+        ("316/L", "316L stainless steel"),
+        ("T/C4", "Ti-6Al-4V"),
+    ),
+)
+def test_material_registry_does_not_create_aliases_by_dropping_punctuation(
+    unregistered_form: str,
+    registered_material: str,
+) -> None:
+    assert property_matching.material_match_quality(
+        unregistered_form,
+        registered_material,
+    ).value == "unknown"

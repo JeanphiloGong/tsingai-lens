@@ -10,6 +10,7 @@ from itertools import combinations
 from typing import Any
 
 from application.core.objectives import property_matching
+from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
     StructuredAxisCanonicalizationPlan,
@@ -308,32 +309,24 @@ class ObjectiveCandidateService:
         maps_by_document_id = {
             paper_map.document_id: paper_map for paper_map in paper_maps
         }
-        records = sorted(
-            (
-                self._relationship_record(
-                    maps_by_document_id[document_id],
-                    study,
-                    relationship,
-                )
-                for document_id, study, relationship in inventory.values()
-                if self._objective_seed_rejection_reason(study, relationship) is None
-            ),
-            key=self._record_relationship_id,
+        eligible_ids = sorted(
+            relationship_id
+            for relationship_id, (_, study, relationship) in inventory.items()
+            if self._objective_seed_rejection_reason(study, relationship) is None
         )
-        records_by_id = {
-            self._record_relationship_id(record): record for record in records
-        }
         base_groups: list[list[str]] = []
-        for record in records:
-            relationship_id = self._record_relationship_id(record)
+        for relationship_id in eligible_ids:
+            _, study, relationship = inventory[relationship_id]
             compatible_group = next(
                 (
                     group
                     for group in base_groups
                     if all(
-                        self._record_compatibility(
-                            record,
-                            records_by_id[other_id],
+                        self._relationship_compatibility(
+                            study,
+                            relationship,
+                            inventory[other_id][1],
+                            inventory[other_id][2],
                         )
                         is _Compatibility.COMPATIBLE
                         for other_id in group
@@ -352,7 +345,14 @@ class ObjectiveCandidateService:
         )
 
         return [
-            [records_by_id[relationship_id] for relationship_id in group]
+            [
+                self._relationship_record(
+                    maps_by_document_id[inventory[relationship_id][0]],
+                    inventory[relationship_id][1],
+                    inventory[relationship_id][2],
+                )
+                for relationship_id in group
+            ]
             for group in sorted(base_groups, key=lambda group: tuple(group))
         ]
 
@@ -365,8 +365,11 @@ class ObjectiveCandidateService:
     ) -> list[list[str]]:
         def has_known_material(group: Iterable[str]) -> bool:
             return any(
-                cls._known_material_keys(
-                    relationship_inventory[relationship_id][1].material_scope
+                any(
+                    property_matching.material_identity_key(value) is not None
+                    for value in relationship_inventory[
+                        relationship_id
+                    ][1].material_scope
                 )
                 for relationship_id in group
             )
@@ -415,44 +418,6 @@ class ObjectiveCandidateService:
             "warnings": list(paper_map.warnings),
         }
 
-    @staticmethod
-    def _record_relationship_id(record: Mapping[str, Any]) -> str:
-        relationship = record.get("relationship")
-        if not isinstance(relationship, Mapping):
-            return ""
-        return str(relationship.get("relationship_id") or "")
-
-    @classmethod
-    def _record_compatibility(
-        cls,
-        left: Mapping[str, Any],
-        right: Mapping[str, Any],
-    ) -> _Compatibility:
-        left_study = left.get("study")
-        right_study = right.get("study")
-        left_relationship = left.get("relationship")
-        right_relationship = right.get("relationship")
-        if not all(
-            isinstance(item, Mapping)
-            for item in (
-                left_study,
-                right_study,
-                left_relationship,
-                right_relationship,
-            )
-        ):
-            return _Compatibility.INCOMPATIBLE
-        return cls._relationship_compatibility(
-            PaperResearchScope.from_mapping(
-                {**dict(left_study), "relationships": [dict(left_relationship)]}
-            ),
-            PaperResearchRelationship.from_mapping(left_relationship),
-            PaperResearchScope.from_mapping(
-                {**dict(right_study), "relationships": [dict(right_relationship)]}
-            ),
-            PaperResearchRelationship.from_mapping(right_relationship),
-        )
-
     @classmethod
     def _relationship_compatibility(
         cls,
@@ -487,17 +452,55 @@ class ObjectiveCandidateService:
         left: Iterable[str],
         right: Iterable[str],
     ) -> _Compatibility:
-        left_keys = cls._known_material_keys(left)
-        right_keys = cls._known_material_keys(right)
-        if not left_keys and not right_keys:
+        left_values = tuple(
+            value
+            for value in left
+            if property_matching.material_identity_key(value) is not None
+        )
+        right_values = tuple(
+            value
+            for value in right
+            if property_matching.material_identity_key(value) is not None
+        )
+        if not left_values and not right_values:
             return _Compatibility.COMPATIBLE
-        if not left_keys or not right_keys:
+        if not left_values or not right_values:
             return _Compatibility.POSSIBLE
-        if left_keys == right_keys:
+
+        qualities = tuple(
+            tuple(
+                property_matching.material_match_quality(left_value, right_value)
+                for right_value in right_values
+            )
+            for left_value in left_values
+        )
+
+        # Multiple labels can describe separate material arms in one paper.
+        # Exclude a pair of scopes only when every possible pairing is an
+        # explicit identity conflict; partial overlap and unknown labels still
+        # require researcher inspection.
+        if all(
+            quality is MaterialMatchQuality.CONFLICT
+            for row in qualities
+            for quality in row
+        ):
+            return _Compatibility.INCOMPATIBLE
+
+        exact_left = all(
+            any(quality is MaterialMatchQuality.EXACT for quality in row)
+            for row in qualities
+        )
+        exact_right = all(
+            any(
+                qualities[row_index][column_index]
+                is MaterialMatchQuality.EXACT
+                for row_index in range(len(left_values))
+            )
+            for column_index in range(len(right_values))
+        )
+        if exact_left and exact_right:
             return _Compatibility.COMPATIBLE
-        if left_keys < right_keys or right_keys < left_keys:
-            return _Compatibility.POSSIBLE
-        return _Compatibility.INCOMPATIBLE
+        return _Compatibility.POSSIBLE
 
     @classmethod
     def _known_material_keys(cls, values: Iterable[str]) -> frozenset[str]:
@@ -509,27 +512,10 @@ class ObjectiveCandidateService:
 
     @classmethod
     def _known_material_scalar(cls, value: Any) -> str | None:
-        key = cls._axis_record_key(value)
-        if not key or key in _MISSING_CONTEXT_VALUES:
-            return None
-        if re.search(
-            r"(?<![a-z0-9])ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
-            r"al[\s-]*6[\s-]*v[\s-]*4|64)(?![a-z0-9])",
-            key,
-        ):
-            return "titanium-alloy:ti-6al-4v"
-        material_grades = cls._material_grade_keys(key)
-        if len(material_grades) == 1:
-            remainder = re.sub(
-                r"(?<![a-z0-9])(?:aisi[\s-]*|ss[\s-]*)?"
-                r"\d{3,4}[a-z]{0,2}(?![a-z0-9])",
-                " ",
-                key,
-            )
-            remaining_words = frozenset(re.findall(r"[a-z]+", remainder))
-            if remaining_words <= {"stainless", "steel"}:
-                return f"stainless-steel:{next(iter(material_grades))}"
-        return cls._axis_identity(key)
+        return property_matching.material_identity_key(
+            value,
+            include_broad=False,
+        )
 
     @classmethod
     def _known_context_scalar(cls, value: Any) -> str | None:
@@ -1175,14 +1161,8 @@ class ObjectiveCandidateService:
         if cls._axis_values_are_equivalent(left, right):
             return True
         if axis_type == "material":
-            left_material = cls._known_material_scalar(left)
-            if (
-                left_material is not None
-                and left_material == cls._known_material_scalar(right)
-            ):
-                return False
-            return bool(
-                cls._material_grade_keys(left) & cls._material_grade_keys(right)
+            return property_matching.material_match_quality(left, right) is (
+                MaterialMatchQuality.EXACT
             )
         return property_matching.axis_alias_matches_canonical(
             left, right
@@ -1316,17 +1296,6 @@ class ObjectiveCandidateService:
             (cls._axis_record_key(left), cls._axis_record_key(right))
         )
         return axis_type, left_key, right_key
-
-    @staticmethod
-    def _material_grade_keys(value: str) -> frozenset[str]:
-        return frozenset(
-            match.group(1)
-            for match in re.finditer(
-                r"(?<![a-z0-9])(?:aisi[\s-]*|ss[\s-]*)?"
-                r"(\d{3,4}[a-z]{0,2})(?![a-z0-9])",
-                value.casefold(),
-            )
-        )
 
     @classmethod
     def _axis_mapping_from_plan(

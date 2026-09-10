@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.repositories.objective_repository import StoredObjective
+
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -9,7 +11,7 @@ from fastapi.testclient import TestClient
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
     ResearchObjectiveNotFoundError,
 )
@@ -202,13 +204,14 @@ def _paper_contribution() -> PaperContribution:
     )
 
 
-def test_evidence_attribute_response_preserves_context_scope_and_legacy_default() -> None:
+def test_evidence_attribute_response_preserves_scope_and_outcome_applicability() -> None:
     simulation = ObjectiveEvidenceAttributeResponse.model_validate(
         {
             "name": "solver",
             "value": "ANSYS",
             "unit": None,
             "context_scope": "simulation",
+            "applies_to_outcomes": ["residual stress"],
         }
     )
     legacy = ObjectiveEvidenceAttributeResponse.model_validate(
@@ -216,7 +219,9 @@ def test_evidence_attribute_response_preserves_context_scope_and_legacy_default(
     )
 
     assert simulation.context_scope == "simulation"
+    assert simulation.applies_to_outcomes == ["residual stress"]
     assert legacy.context_scope == "unknown"
+    assert legacy.applies_to_outcomes == []
 
 
 class _Repository:
@@ -228,7 +233,7 @@ class _Repository:
 
     async def list_objective_records(self, collection_id):
         objectives = await self.list_objectives(collection_id)
-        return tuple(objective.to_record() for objective in objectives)
+        return tuple(StoredObjective(objective) for objective in objectives)
 
 
 class _DiscoveryService:
@@ -242,14 +247,15 @@ class _DiscoveryService:
     ):
         self.discovery_calls.append((collection_id, document_ids))
         return {
-            "task_id": "task-discovery-1",
+            "run_id": "run-discovery-1",
             "collection_id": collection_id,
-            "document_id": None,
-            "task_type": "objective_discovery",
+            "pipeline_name": "objective_discovery",
+            "scope_type": "collection",
+            "scope_id": collection_id,
             "mode": "standard",
             "input_fingerprint": "scope-fingerprint",
             "status": "queued",
-            "current_stage": "queued",
+            "current_node": "queued",
             "progress_percent": 0,
             "progress_detail": {
                 "phase": "queued",
@@ -323,11 +329,29 @@ class _Service:
     async def get_analysis_state(self, collection_id, objective_id):
         return {
             "collection_id": collection_id,
-            "objective": _objective(),
+            "objective": StoredObjective(_objective()),
             "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
             "paper_contributions": (_paper_contribution(),),
             "warnings": [],
+        }
+
+    async def get_analysis_status(self, collection_id, objective_id):
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective_id,
+            "analysis_version": 1,
+            "status": self.analysis_status,
+            "phase": "started" if self.analysis_status == "running" else self.analysis_status,
+            "processed_document_count": 0,
+            "total_document_count": 1,
+            "current_document_id": "paper-1" if self.analysis_status == "running" else None,
+            "progress_message": "Analysis is running." if self.analysis_status == "running" else None,
+            "error_code": None,
+            "error_message": None,
+            "created_at": "2026-08-31T00:00:00+00:00",
+            "started_at": "2026-08-31T00:00:01+00:00" if self.analysis_status == "running" else None,
+            "completed_at": None,
         }
 
     async def list_findings(self, collection_id, objective_id, **kwargs):
@@ -469,7 +493,9 @@ def _client(
     app = FastAPI()
     app.state.objective_repository = repository or _Repository()
     app.state.objective_analysis_service = service or _Service()
-    app.state.research_objective_service = discovery_service or _DiscoveryService()
+    scope_and_discovery = discovery_service or _DiscoveryService()
+    app.state.objective_discovery_service = scope_and_discovery
+    app.state.evidence_analysis_service = scope_and_discovery
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -698,8 +724,8 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
     assert discovery_response.status_code == 200
     assert analysis_response.status_code == 200
-    assert discovery_response.json()["task_id"] == "task-discovery-1"
-    assert discovery_response.json()["task_type"] == "objective_discovery"
+    assert discovery_response.json()["run_id"] == "run-discovery-1"
+    assert discovery_response.json()["pipeline_name"] == "objective_discovery"
     assert discovery_response.json()["status"] == "queued"
     assert discovery_service.discovery_calls == [
         ("col-1", tuple(document_ids)),
@@ -778,6 +804,20 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
     assert "understanding" not in payload
 
 
+def test_objective_analysis_status_api_returns_only_progress_state() -> None:
+    response = _client(_Service(queued=True)).get(
+        "/collections/col-1/objectives/obj-1/analysis/status"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "queued"
+    assert payload["analysis_version"] == 1
+    assert "paper_contributions" not in payload
+    assert "published_analysis" not in payload
+    assert "stats" not in payload
+
+
 def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
     response = _client().get(
         "/collections/col-1/objectives/obj-1/findings",
@@ -833,7 +873,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
             )
             return {
                 "collection_id": collection_id,
-                "objective": _objective(),
+                "objective": StoredObjective(_objective()),
                 "analysis": analysis,
                 "published_analysis": analysis,
                 "paper_contributions": (_paper_contribution(),),

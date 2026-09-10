@@ -14,7 +14,7 @@ class StructuredDocumentProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     doc_type: Literal["experimental", "review", "mixed", "uncertain"] = "uncertain"
-    parsing_warnings: list[
+    profile_warnings: list[
         Literal["insufficient_content", "classification_uncertain"]
     ] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)

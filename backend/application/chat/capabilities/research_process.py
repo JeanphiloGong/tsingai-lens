@@ -36,9 +36,9 @@ class InspectResearchProcessCapability:
         input_model=InspectResearchProcessArguments,
     )
 
-    def __init__(self, *, collection_service: Any, task_service: Any) -> None:
+    def __init__(self, *, collection_service: Any, pipeline_run_service: Any) -> None:
         self.collection_service = collection_service
-        self.task_service = task_service
+        self.pipeline_run_service = pipeline_run_service
 
     async def execute(
         self,
@@ -49,16 +49,18 @@ class InspectResearchProcessCapability:
             context.collection_id,
             context.user_id,
         )
-        tasks = await self.task_service.list_tasks(
+        runs = await self.pipeline_run_service.list_runs(
             collection_id=context.collection_id,
             limit=200,
             offset=0,
         )
         latest_by_document: dict[str, Mapping[str, Any]] = {}
-        for task in tasks:
-            document_id = str(task.get("document_id") or "").strip()
+        for run in runs:
+            if run.get("scope_type") != "document":
+                continue
+            document_id = str(run.get("scope_id") or "").strip()
             if document_id and document_id not in latest_by_document:
-                latest_by_document[document_id] = task
+                latest_by_document[document_id] = run
 
         documents = tuple(collection.get("documents") or ())
         records = tuple(
@@ -69,17 +71,17 @@ class InspectResearchProcessCapability:
         warnings = self._bounded_texts(
             (
                 warning
-                for task in latest_by_document.values()
-                for warning in task.get("warnings") or ()
+                for run in latest_by_document.values()
+                for warning in run.get("warnings") or ()
             ),
             limit=_VISIBLE_WARNING_LIMIT,
         )
         failures = self._bounded_texts(
             (
                 error
-                for task in latest_by_document.values()
-                if str(task.get("current_stage") or "") != "interrupted"
-                for error in task.get("errors") or ()
+                for run in latest_by_document.values()
+                if str(run.get("current_node") or "") != "interrupted"
+                for error in run.get("errors") or ()
             ),
             limit=_VISIBLE_FAILURE_LIMIT,
         )
@@ -117,12 +119,12 @@ class InspectResearchProcessCapability:
         latest_by_document: Mapping[str, Mapping[str, Any]],
     ) -> dict[str, Any]:
         document_id = str(document.get("document_id") or "")
-        task = latest_by_document.get(document_id)
+        run = latest_by_document.get(document_id)
         document_status = str(document.get("status") or "stored")
-        task_status = str(task.get("status") or "") if task is not None else ""
+        run_status = str(run.get("status") or "") if run is not None else ""
         interrupted = (
-            task_status == "failed"
-            and str(task.get("current_stage") or "") == "interrupted"
+            run_status == "failed"
+            and str(run.get("current_node") or "") == "interrupted"
         )
         status = (
             document_status
@@ -133,17 +135,17 @@ class InspectResearchProcessCapability:
                 "completed": "ready",
                 "partial_success": "ready",
                 "failed": "failed",
-            }.get(task_status, document_status)
+            }.get(run_status, document_status)
         )
         return {
             "document_id": document_id,
             "filename": str(document.get("original_filename") or "")[:300],
             "status": status,
-            "task_id": str(task.get("task_id") or "") or None if task else None,
-            "stage": str(task.get("current_stage") or "") or None if task else None,
+            "run_id": str(run.get("run_id") or "") or None if run else None,
+            "stage": str(run.get("current_node") or "") or None if run else None,
             "progress_percent": (
-                max(0, min(100, int(task.get("progress_percent") or 0)))
-                if task
+                max(0, min(100, int(run.get("progress_percent") or 0)))
+                if run
                 else 0
             ),
         }

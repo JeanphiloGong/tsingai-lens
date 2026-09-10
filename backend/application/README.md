@@ -5,7 +5,8 @@ lower-level runtime or persistence implementations.
 
 ## Scope
 
-- application-level orchestration for Goal, Source, Core, and Derived flows
+- application-level orchestration for Goal, Source, Core, Chat, Evaluation,
+  and Derived flows
 - wiring between controllers and domain or infra concerns
 - collection-facing workflows that should stay testable above engine level
 
@@ -20,13 +21,19 @@ lower-level runtime or persistence implementations.
 `application/` keeps the outer technical layer.
 Inside it, business responsibilities are now grouped as:
 
+- [`repositories/README.md`](repositories/README.md)
+  Storage contracts and their owner-specific input and query-result types
+
 - [`goal/README.md`](goal/README.md)
   Goal Brief intake and research-intent shaping
 - [`source/README.md`](source/README.md)
   Collection lifecycle, current Document membership, per-document preparation,
-  Source loading, and task state
+  and Source loading
+- [`chat/README.md`](chat/README.md)
+  Collection-bound Research Agent trajectory, capabilities, and write approval
 - [`pipeline/README.md`](pipeline/README.md)
-  Shared observable pipeline records; workflow ordering stays in owning services
+  Pipeline Run admission, telemetry, persistence, and recovery; scientific
+  workflow ordering stays in owning services
 - [`core/README.md`](core/README.md)
   Document profiles, Paper Maps, Objectives, Evidence, and Findings
 - [`evaluation/README.md`](evaluation/README.md)
@@ -37,8 +44,6 @@ Inside it, business responsibilities are now grouped as:
 
 ## Related Docs
 
-- [`docs/application-layer-one-shot-cutover-plan.md`](docs/application-layer-one-shot-cutover-plan.md)
-  Historical application cutover background
 - [`../docs/architecture/goal-core-source-layering.md`](../docs/architecture/goal-core-source-layering.md)
   Goal, Source, Core, consumer, and Derived responsibility boundaries
 

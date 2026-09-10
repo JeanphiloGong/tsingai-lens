@@ -25,16 +25,36 @@ from application.core.objectives.agent_analysis_service import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-PaperRelevance = Literal["high", "medium", "low", "uncertain"]
+PaperRelevance = Literal["high", "medium", "low", "irrelevant", "uncertain"]
 PaperRole = Literal[
     "primary_experiment",
     "supporting_method",
     "supporting_background",
     "review",
     "modeling_only",
+    "irrelevant",
     "mixed",
     "uncertain",
 ]
+PaperInspectionOutcome = Literal[
+    "evidence_recorded",
+    "no_grounded_evidence",
+    "excluded_after_review",
+    "extraction_failed",
+]
+
+
+class AgentInspectedSourceArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_kind: EvidenceSourceKind
+    source_ref: str = Field(min_length=1, max_length=240)
+    source_digest: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
 
 
 class AgentPaperSummaryArguments(BaseModel):
@@ -45,6 +65,26 @@ class AgentPaperSummaryArguments(BaseModel):
     paper_role: PaperRole
     contribution_summary: str = Field(min_length=1, max_length=2_000)
     confidence: float = Field(ge=0, le=1)
+    inspection_outcome: PaperInspectionOutcome = "evidence_recorded"
+    inspection_outcome_reason: str | None = Field(default=None, max_length=2_000)
+    inspected_source_refs: list[AgentInspectedSourceArguments] = Field(
+        default_factory=list,
+        max_length=24,
+    )
+
+    @model_validator(mode="after")
+    def validate_inspection_outcome(self) -> "AgentPaperSummaryArguments":
+        if self.inspection_outcome == "evidence_recorded":
+            return self
+        if not str(self.inspection_outcome_reason or "").strip():
+            raise ValueError(
+                "a paper without Evidence requires an inspection outcome reason"
+            )
+        if not self.inspected_source_refs:
+            raise ValueError(
+                "a paper without Evidence requires at least one inspected Source"
+            )
+        return self
 
 
 class AgentEvidenceDraftArguments(BaseModel):
@@ -92,7 +132,7 @@ class PublishAgentObjectiveAnalysisArguments(BaseModel):
         min_length=1, max_length=20
     )
     evidence_drafts: list[AgentEvidenceDraftArguments] = Field(
-        min_length=1, max_length=100
+        default_factory=list, max_length=100
     )
 
     @model_validator(mode="after")
@@ -107,10 +147,14 @@ class PublishAgentObjectiveAnalysisArguments(BaseModel):
                 "Agent analysis requires one paper summary per selected document"
             )
         evidence_ids = {item.document_id for item in self.evidence_drafts}
-        if evidence_ids != set(self.document_ids):
-            raise ValueError(
-                "Agent analysis requires Evidence for every selected document"
-            )
+        for summary in self.paper_summaries:
+            has_evidence = summary.document_id in evidence_ids
+            expects_evidence = summary.inspection_outcome == "evidence_recorded"
+            if has_evidence != expects_evidence:
+                raise ValueError(
+                    "each selected paper must either provide Evidence or record an "
+                    "explicit no-Evidence inspection outcome"
+                )
         return self
 
 
@@ -119,9 +163,14 @@ class PublishAgentObjectiveAnalysisCapability:
         name="publish_agent_objective_analysis",
         description=(
             "Publish one complete Objective analysis that you authored after reading "
-            "the exact canonical Sources with inspect_document_sources. Include every "
-            "paper in the approved scope, at least one exact grounded Evidence record "
-            "per paper, and an honest paper-level summary. Source digests and verbatim "
+            "the exact canonical Sources with read_source or complete untruncated "
+            "inspect_document_sources results. Include every paper in the approved "
+            "scope and an honest paper-level summary. Record grounded Evidence when a "
+            "Source supports a fact; otherwise record an exact inspected Source and an "
+            "explicit scientific absence, exclusion, or technical extraction-failure "
+            "reason. Use extraction_failed only when the Source was selected but the "
+            "technical extraction could not complete; it is not scientific absence. "
+            "Source digests and verbatim "
             "excerpts are revalidated by Lens. This write requires explicit user "
             "approval. It does not run automatic extraction or synthesize a Finding."
         ),
@@ -160,6 +209,13 @@ class PublishAgentObjectiveAnalysisCapability:
             created_by_user_id=context.user_id,
             created_by_tool_call_id=context.tool_call_id,
         )
+        scientific_warnings = tuple(
+            dict.fromkeys(
+                f"{evidence.evidence_id}: {warning}"
+                for evidence in result.evidence_records
+                for warning in evidence.warnings
+            )
+        )
         refs = [
             ChatResourceRef(
                 resource_type="objective_analysis",
@@ -187,6 +243,36 @@ class PublishAgentObjectiveAnalysisCapability:
             )
             for evidence in result.evidence_records
         )
+        if getattr(result.analysis, "status", "succeeded") == "failed":
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status="failed",
+                data={
+                    "analysis": result.analysis.to_record(),
+                    "paper_contributions": [
+                        item.to_record() for item in result.contributions
+                    ],
+                    "evidence": [
+                        item.to_record() for item in result.evidence_records
+                    ],
+                    "evidence_count": len(result.evidence_records),
+                    "finding_count": 0,
+                    "next_step": (
+                        "Retry the analysis after the technical extraction issue is "
+                        "resolved; no scientific conclusion was published."
+                    ),
+                },
+                resource_refs=tuple(refs),
+                warnings=(
+                    "The Agent analysis failed during technical Source extraction; "
+                    "the previous published result, if any, remains unchanged.",
+                ),
+                error_code=result.analysis.error_code or "agent_analysis_failed",
+                error_message=(
+                    result.analysis.error_message
+                    or "Agent analysis failed before publication."
+                ),
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
@@ -206,11 +292,13 @@ class PublishAgentObjectiveAnalysisCapability:
                 ),
             },
             resource_refs=tuple(refs),
+            warnings=scientific_warnings,
         )
 
 
 __all__ = [
     "AgentEvidenceDraftArguments",
+    "AgentInspectedSourceArguments",
     "AgentPaperSummaryArguments",
     "PublishAgentObjectiveAnalysisArguments",
     "PublishAgentObjectiveAnalysisCapability",

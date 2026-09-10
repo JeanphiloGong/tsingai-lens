@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 import pytest
 
-import application.source.collection_service as collection_service_module
+import application.source.source_archive_service as source_archive_service_module
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
@@ -61,8 +61,8 @@ def _build_client(
     auth_session_service,
     collection_service,
 ) -> Iterator[TestClient]:
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryTaskRepository
+    from application.pipeline import PipelineRunService
+    from infra.persistence.memory import MemoryPipelineRunRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -74,7 +74,7 @@ def _build_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryTaskRepository()),
+            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -146,8 +146,8 @@ def test_app_lifespan_composes_one_shared_collection_service(
     auth_session_service,
     collection_service,
 ) -> None:
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryTaskRepository
+    from application.pipeline import PipelineRunService
+    from infra.persistence.memory import MemoryPipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
@@ -157,7 +157,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryTaskRepository()),
+            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -169,18 +169,45 @@ def test_app_lifespan_composes_one_shared_collection_service(
             state.document_profile_service,
             state.goal_service,
             state.chat_session_service,
-            state.research_objective_service,
-            state.objective_analysis_service.research_objective_service,
+            state.evidence_analysis_service,
+            state.objective_analysis_service.evidence_analysis_service,
         )
 
         assert all(
             service.collection_service is collection_service
             for service in collection_consumers
         )
-        assert "start_research_process" in {
+        capability_names = {
             spec.name
             for spec in state.chat_session_service.runner.capabilities.specs
         }
+        assert {
+            "get_collection_context",
+            "inspect_document_sources",
+            "search_sources",
+            "read_source",
+            "inspect_table",
+            "inspect_research_process",
+            "start_research_process",
+            "query_published_findings",
+            "inspect_published_finding",
+            "record_finding_feedback",
+            "curate_finding",
+            "create_finding_draft",
+            "create_finding_version",
+            "create_evidence_draft",
+            "create_evidence_version",
+            "publish_agent_objective_analysis",
+            "propose_objective_drafts",
+            "preview_research_scope",
+            "create_objective_candidate",
+            "start_objective_analysis",
+            "inspect_objective_analysis",
+            "assess_objective_quality",
+            "derive_objective",
+            "propose_research_plan",
+            "create_research_plan",
+        }.issubset(capability_names)
 
 
 def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
@@ -193,15 +220,15 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
     from application.source.document_preparation_service import (
         DocumentPreparationService,
     )
-    from application.source.task_service import TaskService
-    from infra.persistence.memory import MemoryTaskRepository
+    from application.pipeline import PipelineRunService
+    from infra.persistence.memory import MemoryPipelineRunRepository
     from main import create_app
 
     preparation_recovery = AsyncMock(return_value=0)
     analysis_recovery = AsyncMock(return_value=0)
     monkeypatch.setattr(
         DocumentPreparationService,
-        "recover_interrupted_tasks",
+        "recover_interrupted_runs",
         preparation_recovery,
     )
     monkeypatch.setattr(
@@ -216,7 +243,7 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            task_service=TaskService(MemoryTaskRepository()),
+            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service),
         )
     ):
@@ -527,7 +554,7 @@ def test_collection_source_archive_returns_413_for_oversized_selection(
     auth_session_service,
     collection_service,
 ):
-    monkeypatch.setattr(collection_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 3)
+    monkeypatch.setattr(source_archive_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 3)
     with _build_client(
         monkeypatch,
         tmp_path,

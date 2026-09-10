@@ -19,27 +19,31 @@ operation creates a short task-local `AsyncSession`.
 
 - `PostgresCollectionRepository`: `Collection -> current Documents`, including
   file metadata and preparation state.
-- `PostgresTaskRepository`: observable per-document tasks and their stages.
+- `PostgresPipelineRunRepository`: observable Collection- or Document-scoped
+  execution and nested node telemetry in one row.
 - `PostgresSourceArtifactRepository`: the current Source aggregate for each
-  Document.
-- `PostgresDocumentProfileRepository`: one current profile per Document.
-- `PostgresPaperMapRepository`: one current bounded Paper Map per Document.
-- `PostgresObjectiveRepository`: current discovery selection, Objective records,
-  versioned analyses, contributions, Evidence, and Findings.
-- `PostgresChatRepository`: Agent sessions, messages, tool calls, results, and
-  approval decisions.
+  Document, stored in the Source section of `document_preparations`.
+- `PostgresDocumentProfileRepository`: one current profile per Document,
+  stored in `document_preparations.profile_json` with its own input fingerprint.
+- `PostgresPaperMapRepository`: reads and writes the embedded Paper Map fields
+  on `document_preparations`, after a profile exists.
+- `PostgresObjectiveRepository`: Collection discovery fields, Objective records,
+  versioned analyses (including private checkpoints and contributions), Evidence,
+  and Findings.
+- `PostgresChatRepository`: Agent sessions, messages, tool calls, embedded
+  results, and approval decisions.
 - `PostgresFindingReviewRepository`, `PostgresExperimentPlanRepository`, and
   `PostgresEvaluationRepository`: their named downstream records.
 
 ## Objective Aggregate
 
 ```text
-objective_discovery
+collections.discovery_*
 research_objectives
   -> objective_analyses
-     -> objective_paper_contributions
-     -> objective_evidence
-     -> objective_findings
+     -> payload.paper_contributions / payload.document_evidence_checkpoints
+     -> payload.evidence_records
+     -> payload.findings
 ```
 
 Discovery and each analysis store exact `document_inputs`, where every item is
@@ -47,6 +51,15 @@ Discovery and each analysis store exact `document_inputs`, where every item is
 Only a complete succeeded version advances the published pointer; failure never
 hides the prior published version.
 
+Each preparation producer owns its section. Updating a Profile cannot relabel
+the current Source fingerprint, and Collection status updates cannot rewrite
+artifact provenance. A profile without a known input fingerprint remains
+unversioned; a preparation row without a Source artifact is not a parsed Source.
+
 SQLAlchemy models own storage shape, domain records own scientific invariants,
-and Pydantic models own HTTP payloads. Do not add a generic repository, storage
+and Pydantic models own HTTP payloads. Repository contracts and their dedicated
+query results live together in
+[`application/repositories/`](../../application/repositories/README.md).
+Implementations return those results or domain objects, never ORM rows or HTTP
+response models. Do not add a generic repository, storage
 selector, compatibility wrapper, dual write, schema probe, or fallback store.

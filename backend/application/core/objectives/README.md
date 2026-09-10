@@ -12,6 +12,75 @@ The two activities share paper inputs but not scientific authority. A Paper Map
 can suggest what to inspect; only Objective analysis can publish Evidence and
 Findings.
 
+## Start Here
+
+Use the following entry points when modifying the Core workflow:
+
+| Task | Entry point | Result |
+|---|---|---|
+| Resolve selected ready papers | `ObjectiveInputService.resolve_prepared_document_inputs()` | frozen input set; no parsing |
+| Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
+| Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
+| Create/confirm a candidate | `ObjectiveAuthoringService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
+| Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
+| Generate analysis artifacts | `ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` | per-paper Evidence and Finding inputs |
+| Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
+
+Paper Map construction is intentionally split by responsibility:
+
+- `paper_research_map_service.py` coordinates the document-level sequence;
+- `paper_map_sources.py` owns Source selection and window payloads;
+- `paper_map_extraction.py` owns model extraction, structured-output recovery,
+  and window-result normalization;
+- `paper_map_aggregation.py` owns window consolidation, study identity merging,
+  unresolved-signal reconciliation, and final status assessment.
+
+The coordinator must remain the only place that orders these steps. Moving a
+helper does not authorize changing Source order, recovery budgets, or map
+status semantics.
+
+`ObjectiveInputService.load_or_build_paper_maps()` may call the model and store
+a refreshed map. Its other input reads do not create Objectives or Evidence.
+Discovery stores candidate Objectives; authoring stores only the explicitly
+requested creation or confirmation. Scientific analysis returns records and
+stores reusable per-paper checkpoints; `ObjectiveAnalysisService` controls the
+complete version's publication. Both HTTP and Agent callers use these owners.
+
+The analysis runtime receives `ObjectiveInputService` and
+`DocumentProfileService` directly at construction. It does not reach through
+the scientific engine to discover those dependencies.
+
+## Changing This Package
+
+| Change | First owner | Focused test under `tests/unit/application/` |
+|---|---|---|
+| Which prepared papers may enter research | `objective_input_service.py` | `test_objective_discovery_service_ownership.py` |
+| Discovery admission or restart recovery | `objective_discovery_service.py` | `test_objective_discovery_service_ownership.py` |
+| Candidate question formation | `objective_candidate_service.py` | `test_objective_candidate_service.py` |
+| Approved creation, confirmation, or derivation | `objective_authoring_service.py` | `test_objective_derivation_persistence.py` |
+| Initial or expanded Paper Map reading scope | `paper_map_sources.py` | `test_paper_research_map_service.py` |
+| Map extraction and technical recovery | `paper_map_extraction.py` | `test_paper_research_map_service.py` |
+| Map merging, reconciliation, or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
+| One paper's scientific Evidence flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
+| Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
+| Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.py` | `test_finding_summary.py` |
+
+For a scientific stage, continue to [`analysis/README.md`](analysis/README.md).
+For cross-module verification, use the commands in
+[`../../../tests/objective-analysis-verification.md`](../../../tests/objective-analysis-verification.md).
+Do not change the persisted record or HTTP schema merely to move a helper.
+
+The scientific order is always the source of truth:
+
+```text
+Paper Map -> candidate Objective -> confirmed Objective
+  -> framing -> routing -> Source extraction -> grounding
+  -> paper experiment binding -> cross-paper Finding
+```
+
+Paper Maps and routes are navigation inputs. Only grounded Source facts may
+become Evidence, and only compatible Evidence may become a Finding.
+
 ## Document-Level Paper Map
 
 `PaperResearchMapService.build_document_paper_map()` receives one prepared
@@ -55,6 +124,23 @@ POST objective-discovery {document_ids}
 `preparation_fingerprint`. Empty, duplicate, unknown, non-ready, or stale inputs
 are rejected. Discovery never falls back to all Collection papers.
 
+`ObjectiveInputService` owns this input boundary for both Discovery and
+Analysis. It also loads the matching Source documents, Profiles, document trees,
+and reusable Paper Maps; it does not form scientific claims or persist
+Objectives/Evidence.
+
+`load_source_inputs()` returns `ObjectiveSourceInputs`, a typed dictionary of
+the selected domain objects and their document indexes. Analysis adds only
+`paper_maps` through `ObjectiveAnalysisInputs`. Model clients remain service
+dependencies: reading prepared paper data neither initializes a client nor
+passes one through the scientific input bundle.
+
+A stored Paper Map is reusable only when its input fingerprint and policy
+version match and its Source coverage contains no technical extraction failure.
+Another requested workflow rebuilds a technically failed map once through the
+normal bounded extraction path. Scientific insufficiency alone does not trigger
+a rebuild; a completed inspection may legitimately leave scope unresolved.
+
 Candidate formation identifies shared scientific themes while preserving each
 paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,
@@ -69,6 +155,10 @@ contribute concrete questions, then fills remaining slots by cross-paper
 support, structured-result coverage, relationship count, and confidence. A
 researcher can still create another Objective manually from any map
 relationship; the bounded list only controls the first review surface.
+
+Grouping compares the existing typed scopes and relationships from the
+inventory. It serializes the resulting groups only after compatibility and
+material-ambiguity decisions, without reparsing domain objects for every pair.
 
 The resulting `seed_document_ids` record the papers whose mapped relationships
 caused the question to be formed. They are question provenance, not the complete
@@ -108,6 +198,20 @@ POST objectives/{objective_id}/analysis {document_ids}
 
 At most one version is queued or running for an Objective. Retry allocates the
 next version. A failed retry never hides an earlier published version.
+
+`processed_document_count` counts selected papers with completed Evidence
+inspections, including reusable successful checkpoints and persisted failures.
+Framing, routing, and individual Source reads do not increment it. A failed
+inspection is finished work, not successful scientific evidence; its failure
+remains visible in the contribution. Counts are unique and progress writes are
+serialized across concurrent papers. Finding synthesis can still be running
+after all selected paper inspections have finished.
+
+`analysis_errors.py` owns user-facing wording for existing failure codes.
+Analysis writes use those messages, and failed-analysis reads also apply them
+to historical records without rewriting storage. HTTP and Agent consumers see
+the same safe wording. Technical details remain in internal diagnostics, not in
+the public error message; a scientific abstention remains a successful analysis.
 
 Before execution, the service resolves each frozen Document again and requires
 the same preparation fingerprint. Re-preparing a paper therefore makes the old
@@ -239,10 +343,15 @@ state through the public API.
 - `paper_research_map_service.py`: one Document's lightweight Paper Map.
 - `objective_candidate_service.py`: candidate formation from selected maps.
 - `scope_screening.py`: collection-wide deterministic scope for one Objective.
-- `research_objective_service.py`: selected-input loading and scientific
-  orchestration.
+- `objective_input_service.py`: selected prepared-paper inputs, Profiles, Source
+  trees, and reusable Paper Maps.
+- `objective_discovery_service.py`: discovery run lifecycle and candidate
+  formation.
+- `objective_authoring_service.py`: user-approved Objective creation,
+  confirmation, and derivation.
+- `objective_analysis_service.py`: source-grounded analysis orchestration.
 - `analysis_service.py`: versioning, dispatch, progress, retry, and publication.
-- `analysis/paper_framing.py`: paper relevance and scope.
+- `analysis/source_screening.py`: paper relevance and Source scope.
 - `analysis/evidence_routing.py`: likely Source selection.
 - `analysis/source_extraction.py`: Source-local extraction and grounding.
 - `analysis/paper_experiment.py`: within-paper experiment binding.

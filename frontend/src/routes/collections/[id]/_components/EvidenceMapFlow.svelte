@@ -10,18 +10,62 @@
 
 	export let map: ObjectiveEvidenceMap;
 	export let collectionId: string;
+	export let selectedFindingId = '';
+	export let unlinkedOnly = false;
+	export let onSelectFinding: (id: string) => void = () => {};
 
 	$: objective = map.nodes.find((node) => node.type === 'objective');
-	$: findings = map.nodes.filter((node) => node.type === 'finding');
-	$: evidence = map.nodes.filter((node) => node.type === 'evidence');
-	$: sources = map.nodes.filter((node) => node.type === 'source');
-	$: documents = map.nodes.filter((node) => node.type === 'document');
+	$: allFindings = map.nodes.filter((node) => node.type === 'finding');
+	$: findingEdges = map.edges.filter((edge) =>
+		['supports', 'contradicts', 'contextualizes'].includes(edge.relation)
+	);
+	$: selectedNodeId = allFindings.find((node) => node.finding_id === selectedFindingId)?.id;
+	$: linkedIds = new Set(findingEdges.map((edge) => edge.target));
+	$: selectedIds = new Set(
+		findingEdges.filter((edge) => edge.source === selectedNodeId).map((edge) => edge.target)
+	);
+	$: findings = unlinkedOnly
+		? []
+		: allFindings.filter((node) => !selectedFindingId || node.finding_id === selectedFindingId);
+	$: evidence = map.nodes.filter(
+		(node) =>
+			node.type === 'evidence' &&
+			(unlinkedOnly ? !linkedIds.has(node.id) : !selectedFindingId || selectedIds.has(node.id))
+	);
+	$: evidenceIds = new Set(evidence.map((node) => node.id));
+	$: allSources = map.nodes.filter((node) => node.type === 'source');
+	$: sourceIds = new Set(
+		map.edges
+			.filter((edge) => edge.relation === 'extracted_from' && evidenceIds.has(edge.source))
+			.map((edge) => edge.target)
+	);
+	$: sources = allSources.filter(
+		(node) =>
+			(!selectedFindingId && !unlinkedOnly) ||
+			sourceIds.has(node.id) ||
+			node.evidence_ids?.some((id) => evidence.some((item) => item.evidence_id === id))
+	);
+	$: documentIds = new Set([...evidence, ...sources].map((node) => node.document_id));
+	$: documents = map.nodes.filter(
+		(node) =>
+			node.type === 'document' &&
+			((!selectedFindingId && !unlinkedOnly) || documentIds.has(node.document_id))
+	);
 
-	function incomingFindingEdge(evidenceId: string) {
-		return map.edges.find(
-			(edge) =>
-				edge.target === evidenceId &&
-				['supports', 'contradicts', 'contextualizes'].includes(edge.relation)
+	function incomingFindingEdges(evidenceId: string) {
+		return findingEdges.filter(
+			(edge) => edge.target === evidenceId && (!selectedFindingId || edge.source === selectedNodeId)
+		);
+	}
+
+	function evidenceSources(item: ObjectiveEvidenceMapNode) {
+		return sources.filter(
+			(node) =>
+				node.evidence_ids?.includes(item.evidence_id ?? '') ||
+				map.edges.some(
+					(edge) =>
+						edge.source === item.id && edge.target === node.id && edge.relation === 'extracted_from'
+				)
 		);
 	}
 
@@ -58,7 +102,10 @@
 		node: ObjectiveEvidenceMapNode
 	): `/collections/${string}/documents/${string}` {
 		const base: `/collections/${string}/documents/${string}` = `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(node.document_id ?? '')}`;
-		const returnTo = resolve('/collections/[id]/graph', { id: collectionId });
+		const selection = new SvelteURLSearchParams({ objective_id: map.objective_id });
+		if (selectedFindingId) selection.set('finding_id', selectedFindingId);
+		if (unlinkedOnly) selection.set('evidence', 'unlinked');
+		const returnTo = `${resolve('/collections/[id]/graph', { id: collectionId })}?${selection}`;
 		const params = new SvelteURLSearchParams({
 			view: 'parsed-paper',
 			source_ref: node.source_ref ?? '',
@@ -141,6 +188,7 @@
 		</p>
 	{/if}
 
+	<slot name="summary" />
 	<div class="flow" aria-label={$t('research.evidenceMap.flowLabel')}>
 		<section class="column column--objective">
 			<header>
@@ -174,21 +222,39 @@
 				<h3>{$t('research.evidenceMap.findingsColumn')}</h3>
 			</header>
 			{#each findings as finding (finding.id)}
-				<article class="node node--finding">
+				<article
+					class="node node--finding"
+					class:node--selected={finding.finding_id === selectedFindingId}
+				>
 					<div class="node-meta">
-						<span>{finding.synthesis_status?.replaceAll('_', ' ')}</span>
+						{#if finding.synthesis_status}<span
+								>{$t(`research.comparison.synthesis.${finding.synthesis_status}`)}</span
+							>{/if}
 						<span
 							>{$t('research.evidenceMap.certainty', { value: percent(finding.certainty) })}</span
 						>
 					</div>
-					<strong>{finding.statement ?? finding.label}</strong>
+					<button
+						class="finding-select"
+						type="button"
+						aria-pressed={finding.finding_id === selectedFindingId}
+						on:click={() => onSelectFinding(finding.finding_id ?? '')}
+						><strong>{finding.statement ?? finding.label}</strong></button
+					>
 					<p>{joined(finding.factors)} → {finding.outcome}</p>
 					{#if finding.limitations?.length}
 						<p class="limitation">{finding.limitations.join(' ')}</p>
 					{/if}
+					{#if !findingEdges.some((edge) => edge.source === finding.id)}<p class="limitation">
+							{$t('research.evidenceMap.noLinkedEvidence')}
+						</p>{/if}
 				</article>
 			{:else}
-				<p class="column-empty">{$t('research.evidenceMap.noFindings')}</p>
+				<p class="column-empty">
+					{$t(
+						unlinkedOnly ? 'research.evidenceMap.unlinkedTitle' : 'research.evidenceMap.noFindings'
+					)}
+				</p>
 			{/each}
 		</section>
 
@@ -198,28 +264,50 @@
 				<h3>{$t('research.evidenceMap.evidenceColumn')}</h3>
 			</header>
 			{#each evidence as item (item.id)}
-				{@const edge = incomingFindingEdge(item.id)}
-				<article class="node node--evidence" class:node--unlinked={!edge}>
-					<div
-						class="relation relation--{edge
-							? relationTone(edge)
-							: evidenceStatusTone(item.evidence_status)}"
-					>
-						{#if edge}{relationLabel(edge)}{:else}{evidenceStatusLabel(item.evidence_status)}{/if}
-						{#if edge?.condition_boundary}
-							<span>{$t('research.evidenceMap.conditionBoundary')}</span>
-						{/if}
-					</div>
+				{@const edges = incomingFindingEdges(item.id)}
+				<article class="node node--evidence" class:node--unlinked={!edges.length}>
+					{#each edges as edge (edge.id)}
+						<div class="relation relation--{relationTone(edge)}">
+							<span class="relation-name">{relationLabel(edge)}</span>
+							{#if !selectedFindingId && allFindings.length > 1}<button
+									class="relation-finding"
+									on:click={() =>
+										onSelectFinding(
+											allFindings.find((node) => node.id === edge.source)?.finding_id ?? ''
+										)}
+									>{$t('research.evidenceMap.findingNumber', {
+										number: allFindings.findIndex((node) => node.id === edge.source) + 1
+									})}</button
+								>{/if}
+							{#if edge?.condition_boundary}
+								<span>{$t('research.evidenceMap.conditionBoundary')}</span>
+							{/if}
+						</div>
+					{:else}<div class="relation relation--{evidenceStatusTone(item.evidence_status)}">
+							{evidenceStatusLabel(item.evidence_status)}
+						</div>{/each}
 					<strong>{item.label}</strong>
 					<div class="node-meta">
-						<span>{item.direction?.replaceAll('_', ' ')}</span>
-						<span>{item.attribution_scope?.replaceAll('_', ' ')}</span>
+						{#if item.direction}<span>{$t(`research.evidenceMap.direction.${item.direction}`)}</span
+							>{/if}
+						{#if item.attribution_scope}<span
+								>{$t(`research.evidenceMap.attribution.${item.attribution_scope}`)}</span
+							>{/if}
 						<span>{percent(item.confidence)}</span>
 					</div>
 					{#if item.source_excerpt && item.source_excerpt !== item.label}
 						<blockquote>{item.source_excerpt}</blockquote>
 					{/if}
-					{#if !edge && item.evidence_status_reason}
+					{#each evidenceSources(item) as source (source.id)}<a
+							class="evidence-source"
+							href={resolve(sourceHref(source))}
+							>{documents.find((node) => node.document_id === source.document_id)?.label ??
+								source.document_id} · {$t('research.evidenceMap.openSource')}{source.page_numbers
+								?.length
+								? ` · ${source.page_numbers.join(', ')}`
+								: ''}</a
+						>{/each}
+					{#if !edges.length && item.evidence_status_reason}
 						<p class="limitation">{item.evidence_status_reason}</p>
 					{/if}
 				</article>
@@ -432,6 +520,43 @@
 
 	.node--finding {
 		border-left: 3px solid var(--info-text);
+	}
+
+	.node--selected {
+		border-color: var(--brand-primary);
+		background: var(--brand-soft);
+	}
+	.finding-select,
+	.relation-finding {
+		border: 0;
+		padding: 0;
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+	.finding-select:hover,
+	.relation-finding:hover,
+	.evidence-source:hover {
+		text-decoration: underline;
+	}
+	.finding-select:focus-visible,
+	.relation-finding:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 3px;
+	}
+	.evidence-source {
+		color: var(--brand-primary);
+		font-size: 11px;
+	}
+	.relation-finding {
+		margin-left: 6px;
+		font: inherit;
+		text-decoration: underline;
+	}
+	.relation .relation-name {
+		margin-left: 0;
+		font-weight: inherit;
 	}
 
 	.node--source,

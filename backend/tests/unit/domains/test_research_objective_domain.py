@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from domain.core.research_objective import (
+    ObjectiveEvidenceComparison,
+    ObjectiveEvidenceContext,
+    ObjectiveEvidenceResult,
+    ObjectiveEvidenceVariable,
+)
+
 import pytest
 
 from domain.core import (
@@ -114,6 +121,9 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
             "document_id": "review-paper",
             "doc_role": "review",
             "review_synthesis": ReviewSynthesisMap(disputes=(item,)).to_record(),
+            "input_fingerprint": "map-input-v1",
+            "map_version": "paper-map.v1",
+            "generated_at": "2026-09-08T09:00:00+00:00",
         }
     )
 
@@ -122,6 +132,9 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
     assert restored == skim
     assert restored.review_synthesis.disputes == (item,)
     assert restored.review_synthesis.citation_leads == ()
+    assert restored.input_fingerprint == "map-input-v1"
+    assert restored.map_version == "paper-map.v1"
+    assert restored.generated_at == "2026-09-08T09:00:00+00:00"
 
 
 def test_non_review_paper_rejects_review_synthesis_map() -> None:
@@ -283,6 +296,20 @@ def test_build_research_objective_id_covers_complete_scientific_intent() -> None
     )
     assert objective_id != build_research_objective_id(
         **{**scientific_intent, "outcomes": ("pitting potential",)}
+    )
+    assert objective_id != build_research_objective_id(
+        **scientific_intent,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=2,
+    )
+    assert build_research_objective_id(
+        **scientific_intent,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=2,
+    ) != build_research_objective_id(
+        **scientific_intent,
+        parent_objective_id="objective-other",
+        parent_analysis_version=2,
     )
 
 
@@ -638,6 +665,46 @@ def test_paper_contribution_records_auditable_evidence_disposition() -> None:
     assert PaperContribution.from_mapping(contribution.to_record()) == contribution
 
 
+def test_paper_contribution_preserves_inspected_source_lineage_without_evidence() -> None:
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "evidence_disposition": "no_grounded_evidence",
+            "routed_source_count": 1,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+            "evidence_disposition_reason": (
+                "The inspected Results Source contains no target outcome."
+            ),
+            "inspected_source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "block-results",
+                    "source_digest": "a" * 64,
+                }
+            ],
+            "confidence": 0.9,
+        }
+    )
+
+    assert contribution.inspected_source_refs[0].source_ref == "block-results"
+    assert contribution.to_record()["inspected_source_refs"] == [
+        {
+            "source_kind": "text_window",
+            "source_ref": "block-results",
+            "source_digest": "a" * 64,
+        }
+    ]
+    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
+
+
 def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
     base = {
         "collection_id": "collection-1",
@@ -684,6 +751,26 @@ def test_excluded_paper_contribution_requires_reason() -> None:
         )
 
 
+def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch) -> None:
+    selected = _candidate_evidence().select(evidence_role="direct_result")
+
+    result = ObjectiveEvidenceResult.from_mapping({
+        "outcome": "strength", "value": 610, "unit": "MPa",
+        "result_text": "The heat-treated sample reached 610 MPa.",
+    })
+
+    def reject_serialization(_self):
+        pytest.fail("scientific state transitions must not serialize existing Evidence")
+
+    monkeypatch.setattr(ObjectiveEvidence, "to_record", reject_serialization)
+    extracted = selected.mark_extracted(reported_result=result)
+
+    assert extracted.reported_result == result
+    assert extracted.selection_status == "extracted"
+    assert extracted.source_excerpt == selected.source_excerpt
+    assert selected.selection_status == "selected"
+
+
 def test_objective_evidence_preserves_source_and_structured_result() -> None:
     candidate = _candidate_evidence()
     selected = candidate.select(
@@ -691,31 +778,31 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
         reason="Reports the target strength result.",
     )
     extracted = selected.mark_extracted(
-        changed_variables=[
-            {
-                "name": "heat treatment",
-                "baseline_value": "as-built",
-                "target_value": "heat-treated",
-            }
-        ],
-        comparison={
+        changed_variables=(
+            ObjectiveEvidenceVariable(
+                name="heat treatment",
+                baseline_value="as-built",
+                target_value="heat-treated",
+            ),
+        ),
+        comparison=ObjectiveEvidenceComparison.from_mapping({
             "baseline_label": "as-built",
             "target_label": "heat-treated",
             "axis_names": ["heat treatment"],
             "comparable": True,
-        },
-        reported_result={
+        }),
+        reported_result=ObjectiveEvidenceResult.from_mapping({
             "outcome": "yield strength",
             "value": 610,
             "unit": "MPa",
             "direction": "increase",
             "result_text": "The heat-treated sample reached 610 MPa.",
-        },
+        }),
         attribution_scope="isolated_effect",
-        scientific_context={
+        scientific_context=ObjectiveEvidenceContext.from_mapping({
             "material": [{"name": "alloy", "value": "316L"}],
             "test": [{"name": "method", "value": "tensile test"}],
-        },
+        }),
     )
 
     assert candidate.selection_status == "candidate"
@@ -729,6 +816,22 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert extracted.supports_finding is True
     assert "route_id" not in extracted.to_record()
     assert "evidence_unit_id" not in extracted.to_record()
+
+
+def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
+    legacy = _candidate_evidence()
+    explicit_empty = _candidate_evidence(related_source_refs=[])
+
+    assert legacy.related_source_refs == ()
+    assert "related_source_refs" not in legacy.to_record()
+    assert ObjectiveEvidence.from_mapping(
+        legacy.to_record()
+    ).related_source_refs_explicit is False
+    assert explicit_empty.related_source_refs == ()
+    assert explicit_empty.to_record()["related_source_refs"] == []
+    assert ObjectiveEvidence.from_mapping(
+        explicit_empty.to_record()
+    ).related_source_refs_explicit is True
 
 
 def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:
@@ -889,9 +992,9 @@ def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
         evidence_role="condition_context",
     ).select(evidence_role="condition_context")
     extracted = evidence.mark_extracted(
-        scientific_context={
+        scientific_context=ObjectiveEvidenceContext.from_mapping({
             "test": [{"name": "temperature", "value": 25, "unit": "C"}]
-        }
+        })
     )
 
     assert extracted.supports_finding is True
@@ -903,7 +1006,7 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
         rejected.mark_extracted(
-            scientific_context={"process": [{"name": "state", "value": "invalid"}]}
+            scientific_context=ObjectiveEvidenceContext.from_mapping({"process": [{"name": "state", "value": "invalid"}]})
         )
     with pytest.raises(ValueError, match="identity and source"):
         _candidate_evidence(source_excerpt="")

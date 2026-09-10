@@ -10,9 +10,11 @@
 	import {
 		fetchCollectionObjectives,
 		fetchObjectiveAnalysis,
+		fetchObjectiveAnalysisStatus,
 		fetchObjectiveScope,
 		runObjectiveAnalysis,
 		type ObjectiveAnalysisState,
+		type ObjectiveAnalysisProgress,
 		type ObjectiveList,
 		type ObjectiveScope,
 		type ObjectiveScopeDecision,
@@ -45,6 +47,7 @@
 	let error = '';
 	let loadedCollectionId = '';
 	let analysisPollTimer: ReturnType<typeof setTimeout> | null = null;
+	let disposed = false;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectives = objectiveList?.objectives ?? [];
@@ -97,7 +100,10 @@
 		void loadObjectives();
 	}
 
-	onDestroy(clearAnalysisPoll);
+	onDestroy(() => {
+		disposed = true;
+		clearAnalysisPoll();
+	});
 
 	function clearAnalysisPoll() {
 		if (analysisPollTimer) clearTimeout(analysisPollTimer);
@@ -106,20 +112,31 @@
 
 	function scheduleAnalysisPoll() {
 		clearAnalysisPoll();
+		if (disposed) return;
 		if (!Object.values(analysisStates).some(isAnalysisProcessing)) return;
 		analysisPollTimer = setTimeout(() => void pollActiveAnalyses(), ANALYSIS_POLL_DELAY_MS);
 	}
 
 	async function pollActiveAnalyses() {
+		if (disposed) return;
 		const objectiveIds = Object.entries(analysisStates)
 			.filter(([, analysis]) => isAnalysisProcessing(analysis))
 			.map(([objectiveId]) => objectiveId);
 		if (!objectiveIds.length) return;
 		try {
 			const snapshots = await Promise.all(
-				objectiveIds.map((objectiveId) => fetchObjectiveAnalysis(collectionId, objectiveId))
+				objectiveIds.map((objectiveId) => fetchObjectiveAnalysisStatus(collectionId, objectiveId))
 			);
-			for (const snapshot of snapshots) applyAnalysisSnapshot(snapshot);
+			if (disposed) return;
+			for (const snapshot of snapshots) {
+				if (snapshot.status === 'succeeded' || snapshot.status === 'failed') {
+					const analysis = await fetchObjectiveAnalysis(collectionId, snapshot.objective_id);
+					if (disposed) return;
+					applyAnalysisSnapshot(analysis);
+				} else {
+					applyAnalysisStatus(snapshot);
+				}
+			}
 		} catch (err) {
 			error = errorMessage(err);
 		}
@@ -143,6 +160,15 @@
 		};
 	}
 
+	function applyAnalysisStatus(status: ObjectiveAnalysisProgress) {
+		const previous = analysisStates[status.objective_id];
+		if (!previous) return;
+		analysisStates = {
+			...analysisStates,
+			[status.objective_id]: { ...previous, ...status }
+		};
+	}
+
 	function prioritizeObjectives(items: ObjectiveSummary[]) {
 		const resumed = items.filter(
 			(objective) =>
@@ -158,8 +184,11 @@
 		loading = true;
 		error = '';
 		try {
-			objectiveList = await fetchCollectionObjectives(collectionId);
+			const listing = await fetchCollectionObjectives(collectionId);
+			if (disposed) return;
+			objectiveList = listing;
 			await refreshActiveAnalysisStates();
+			if (disposed) return;
 			scopesByObjective = {};
 			selectedDocumentIdsByObjective = {};
 			objectivePage = 0;
@@ -196,7 +225,7 @@
 				}
 			})
 		);
-		analysisStates = Object.fromEntries(states);
+		if (!disposed) analysisStates = Object.fromEntries(states);
 	}
 
 	function analysisStatus(objective: ObjectiveSummary) {
@@ -630,7 +659,7 @@
 						{/if}
 						{#if activeAnalysis?.status === 'failed'}
 							<p class="analysis-error" role="alert">
-								{activeAnalysis.error_message || '本次分析失败，请检查论文范围后重试。'}
+								{$t('researchAgent.capability.analysisFailed')}
 							</p>
 						{/if}
 						<div class="actions">

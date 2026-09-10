@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core import PaperResearchMap
 from infra.persistence.postgres.models.document import Document
-from infra.persistence.postgres.models.paper_map import PaperMapRow
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 
 class PostgresPaperMapRepository:
@@ -21,18 +21,22 @@ class PostgresPaperMapRepository:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{paper_map.document_id}"
                 )
-            row = await session.get(PaperMapRow, paper_map.document_id)
-            if row is None:
-                session.add(
-                    PaperMapRow(
-                        document_id=paper_map.document_id,
-                        collection_id=collection_id,
-                        payload=paper_map.to_record(),
-                    )
+            row = await session.scalar(
+                select(DocumentPreparationRow)
+                .join(
+                    Document,
+                    Document.document_id == DocumentPreparationRow.document_id,
                 )
-                return
-            row.collection_id = collection_id
-            row.payload = paper_map.to_record()
+                .where(
+                    DocumentPreparationRow.document_id == paper_map.document_id,
+                    Document.collection_id == collection_id,
+                )
+            )
+            if row is None or not row.profile_json:
+                raise FileNotFoundError(
+                    f"document profile not found: {collection_id}/{paper_map.document_id}"
+                )
+            _replace_row(row, paper_map)
 
     async def read(
         self,
@@ -40,10 +44,18 @@ class PostgresPaperMapRepository:
         document_id: str,
     ) -> PaperResearchMap | None:
         async with self.session_factory() as session:
-            row = await session.get(PaperMapRow, document_id)
-            if row is None or row.collection_id != collection_id:
-                return None
-            return PaperResearchMap.from_mapping(row.payload)
+            row = await session.scalar(
+                select(DocumentPreparationRow)
+                .join(
+                    Document,
+                    Document.document_id == DocumentPreparationRow.document_id,
+                )
+                .where(
+                    DocumentPreparationRow.document_id == document_id,
+                    Document.collection_id == collection_id,
+                )
+            )
+            return _from_row(row) if row is not None and row.paper_map_payload else None
 
     async def list_collection(
         self,
@@ -53,13 +65,36 @@ class PostgresPaperMapRepository:
         if document_ids == ():
             return ()
         async with self.session_factory() as session:
-            statement = select(PaperMapRow).where(
-                PaperMapRow.collection_id == collection_id
+            statement = (
+                select(DocumentPreparationRow)
+                .join(
+                    Document,
+                    Document.document_id == DocumentPreparationRow.document_id,
+                )
+                .where(Document.collection_id == collection_id)
             )
             if document_ids is not None:
-                statement = statement.where(PaperMapRow.document_id.in_(document_ids))
-            rows = await session.scalars(statement.order_by(PaperMapRow.document_id))
-            return tuple(PaperResearchMap.from_mapping(row.payload) for row in rows)
+                statement = statement.where(
+                    DocumentPreparationRow.document_id.in_(document_ids)
+                )
+            rows = await session.scalars(
+                statement.order_by(DocumentPreparationRow.document_id)
+            )
+            return tuple(_from_row(row) for row in rows if row.paper_map_payload)
+
+
+def _payload(paper_map: PaperResearchMap) -> dict[str, object]:
+    return paper_map.to_record()
+
+
+def _replace_row(row: DocumentPreparationRow, paper_map: PaperResearchMap) -> None:
+    row.paper_map_payload = _payload(paper_map)
+
+
+def _from_row(row: DocumentPreparationRow) -> PaperResearchMap:
+    payload = dict(row.paper_map_payload or {})
+    payload.setdefault("document_id", row.document_id)
+    return PaperResearchMap.from_mapping(payload)
 
 
 __all__ = ["PostgresPaperMapRepository"]

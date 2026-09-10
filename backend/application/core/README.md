@@ -1,8 +1,8 @@
 # Core Application Layer
 
 This package owns scientific interpretation after one Document has parseable
-Source artifacts. It does not own Collection membership, file storage, task
-admission, or Agent conversation.
+Source artifacts. It does not own Collection membership, file storage, document
+preparation admission, or Agent conversation.
 
 ## Document-Level Scientific Triage
 
@@ -60,11 +60,20 @@ inputs allowed to reconstruct experiment context or create Evidence.
 - `objectives/paper_research_map_service.py`: lightweight Paper Map construction.
 - `objectives/objective_candidate_service.py`: candidate formation from selected
   Paper Maps.
-- `objectives/research_objective_service.py`: selected-input loading and
-  scientific analysis orchestration.
+- `objectives/objective_input_service.py`: selected prepared-paper input loading.
+- `objectives/objective_discovery_service.py`: candidate Objective discovery.
+- `objectives/objective_authoring_service.py`: user-approved Objective writes.
+- `objectives/objective_analysis_service.py`: source-grounded Objective analysis.
 - `objectives/analysis_service.py`: version allocation, background dispatch,
   publication state, and reads.
 - `objectives/analysis/`: framing, routing, extraction, grounding, paper-level
   experiment binding, and cross-paper Finding synthesis.
 - `paper_facts/`: extraction helpers used inside Objective analysis, including
-  deterministic table repair; it is not a persisted paper-fact aggregate.
+  model-assisted table repair; it is not a persisted paper-fact aggregate.
+
+Read [`objectives/README.md`](objectives/README.md) for the entry methods and
+modification map. Source preparation calls
+[`document_profiles/README.md`](document_profiles/README.md) first; model usage
+and persistence belong to each responsibility rather than a second global
+scientific pipeline. Tests are indexed in
+[`../../tests/README.md`](../../tests/README.md).

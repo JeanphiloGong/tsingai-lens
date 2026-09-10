@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from application.repositories.auth_repository import AuthUserRecord
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from domain.source import Collection, Document
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.postgres.models.document import Document as DocumentRow
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 
 pytestmark = pytest.mark.anyio
@@ -22,13 +26,13 @@ async def collection_repository(postgres_session_factory):
     now = datetime(2026, 8, 27, tzinfo=timezone.utc)
     for user_id in ("user_a", "user_b"):
         await auth_repository.add_user(
-            {
-                "user_id": user_id,
-                "email": f"{user_id}@example.com",
-                "display_name": None,
-                "password_hash": "synthetic-password-hash",
-                "created_at": now.isoformat(),
-            }
+            AuthUserRecord(
+                user_id=user_id,
+                email=f"{user_id}@example.com",
+                display_name=None,
+                password_hash="synthetic-password-hash",
+                created_at=now.isoformat(),
+            )
         )
     return PostgresCollectionRepository(postgres_session_factory)
 
@@ -123,6 +127,30 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         (document,),
         updated_at=document.created_at,
     )
+    async with collection_repository.session_factory.begin() as session:
+        session.add(
+            DocumentPreparationRow(
+                document_id=document.document_id,
+                source_format="pdf",
+                parser_name="test-parser",
+                parser_version="source-runtime.v1",
+                source_fingerprint="a" * 64,
+                artifact_json={"blocks": [], "tables": [], "figures": []},
+                profile_json={
+                    "document_id": document.document_id,
+                    "title": "Paper",
+                    "doc_type": "uncertain",
+                    "profile_warnings": [],
+                    "confidence": 0.0,
+                    "source_fingerprint": "a" * 64,
+                    "profile_version": "document-profile.v1+paper-map.v1",
+                    "profile_fingerprint": "b" * 64,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
     prepared = replace(
         document,
         status="ready",
@@ -130,7 +158,7 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         document_analysis_version="document-profile.v1+paper-map.v1",
         source_fingerprint="a" * 64,
         profile_fingerprint="b" * 64,
-        preparation_fingerprint="c" * 64,
+        preparation_fingerprint="b" * 64,
         updated_at="2026-08-27T00:02:00+00:00",
     )
 
@@ -199,3 +227,42 @@ async def test_collection_repository_rejects_unknown_owner(collection_repository
         await collection_repository.add_collection(
             _collection("col_unknown_owner", "missing_user")
         )
+
+
+async def test_collection_list_reads_only_summaries_in_two_queries(
+    collection_repository, postgres_sync_engine
+) -> None:
+    for number in range(4):
+        collection = replace(
+            _collection(f"col_summary_{number}"),
+            created_at=f"2026-08-27T00:00:0{number}+00:00",
+            updated_at=f"2026-08-27T00:00:0{number}+00:00",
+        )
+        await collection_repository.add_collection(collection)
+        if number:
+            documents = tuple(
+                _document(collection.collection_id, f"{number}_{suffix}")
+                for suffix in ("z", "a")
+            )
+            await collection_repository.add_documents(
+                collection.collection_id, documents, updated_at=documents[0].created_at
+            )
+    await collection_repository.add_collection(_collection("col_private", "user_b"))
+    statements = []
+    engine = collection_repository.session_factory.kw["bind"].sync_engine
+
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        summaries = await collection_repository.list_collections("user_a")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+
+    assert len(statements) == 2
+    assert all("document_preparations" not in sql for sql in statements)
+    assert [item.collection_id for item in summaries] == [f"col_summary_{i}" for i in range(4)]
+    assert summaries[0].documents == ()
+    assert [doc.document_id for doc in summaries[1].documents] == ["doc_1_z", "doc_1_a"]
+    assert not hasattr(summaries[1].documents[0], "storage_key")

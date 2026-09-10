@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from dataclasses import replace
+
 
 import pytest
 
@@ -10,40 +11,37 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from application.repositories.auth_repository import AuthSessionRecord, AuthUserRecord
+
 
 class MemoryAuthRepository:
     def __init__(self) -> None:
-        self.users: dict[str, dict[str, Any]] = {}
+        self.users: dict[str, AuthUserRecord] = {}
         self.user_ids_by_email: dict[str, str] = {}
-        self.sessions_by_token_hash: dict[str, dict[str, Any]] = {}
+        self.sessions_by_token_hash: dict[str, AuthSessionRecord] = {}
 
-    async def read_user_by_email(self, email: str) -> dict[str, Any] | None:
+    async def read_user_by_email(self, email: str) -> AuthUserRecord | None:
         user_id = self.user_ids_by_email.get(email.strip().lower())
-        return dict(self.users[user_id]) if user_id is not None else None
+        return self.users.get(user_id) if user_id is not None else None
 
-    async def read_user(self, user_id: str) -> dict[str, Any] | None:
-        user = self.users.get(user_id)
-        return dict(user) if user is not None else None
+    async def read_user(self, user_id: str) -> AuthUserRecord | None:
+        return self.users.get(user_id)
 
-    async def add_user(self, payload: Mapping[str, Any]) -> None:
-        user = dict(payload)
-        email = str(user["email"]).strip().lower()
+    async def add_user(self, user: AuthUserRecord) -> None:
+        email = user.email.strip().lower()
         if email in self.user_ids_by_email:
             raise ValueError("user email already exists")
-        user_id = str(user["user_id"])
+        user_id = user.user_id
         self.users[user_id] = user
         self.user_ids_by_email[email] = user_id
 
     async def read_session_by_token_hash(
         self,
         token_hash: str,
-    ) -> dict[str, Any] | None:
-        session = self.sessions_by_token_hash.get(token_hash)
-        return dict(session) if session is not None else None
+    ) -> AuthSessionRecord | None:
+        return self.sessions_by_token_hash.get(token_hash)
 
-    async def add_session(self, payload: Mapping[str, Any]) -> None:
-        session = dict(payload)
-        token_hash = str(session["token_hash"])
+    async def add_session(self, session: AuthSessionRecord, *, token_hash: str) -> None:
         self.sessions_by_token_hash[token_hash] = session
 
     async def revoke_session_by_token_hash(
@@ -53,7 +51,7 @@ class MemoryAuthRepository:
     ) -> None:
         session = self.sessions_by_token_hash.get(token_hash)
         if session is not None:
-            session["revoked_at"] = revoked_at
+            self.sessions_by_token_hash[token_hash] = replace(session, revoked_at=revoked_at)
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +59,7 @@ def _patch_domain_model_extractors(monkeypatch):
     from application.core.document_profiles import (
         service as document_profile_service,
     )
-    from application.core.objectives import research_objective_service
+    from application.core.objectives import objective_input_service
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
@@ -71,7 +69,7 @@ def _patch_domain_model_extractors(monkeypatch):
         lambda: fake,
     )
     monkeypatch.setattr(
-        research_objective_service,
+        objective_input_service,
         "build_default_structured_response_client",
         lambda: fake,
     )

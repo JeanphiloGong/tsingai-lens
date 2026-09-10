@@ -14,7 +14,7 @@
 		type Collection
 	} from './_shared/collections';
 	import { language, t } from './_shared/i18n';
-	import { prepareCollectionDocument } from './_shared/tasks';
+	import { prepareCollectionDocument } from './_shared/pipelineRuns';
 
 	const statusFilters = ['all', 'complete', 'ready', 'processing', 'attention'] as const;
 	type StatusFilter = (typeof statusFilters)[number];
@@ -320,7 +320,7 @@
 
 		try {
 			setRowMessage(collection.id, $t('home.indexing'));
-			const tasks = await Promise.all(
+			const runs = await Promise.all(
 				pendingDocuments.map((document) =>
 					prepareCollectionDocument(collection.id, document.document_id)
 				)
@@ -331,7 +331,7 @@
 						? {
 								...item,
 								status: 'running',
-								updated_at: tasks[0]?.updated_at || item.updated_at
+									updated_at: runs[0]?.updated_at || item.updated_at
 							}
 						: item
 				)

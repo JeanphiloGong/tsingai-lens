@@ -6,7 +6,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from application.source.collection_service import CollectionService
-from domain.ports import SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import (
     SourceDocument,
     SourceDocumentNode,

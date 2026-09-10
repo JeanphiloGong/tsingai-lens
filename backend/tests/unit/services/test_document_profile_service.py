@@ -12,9 +12,12 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from tests.support.collection_service import build_test_collection_service
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
+)
 from domain.core.document_profile import DocumentProfile
-from domain.source import source_documents_from_records
+from domain.source import SourceDocument, source_documents_from_records
 from infra.source.runtime.source_evidence import build_blocks
 from infra.persistence.memory import MemoryDocumentProfileRepository
 from infra.persistence.memory import MemorySourceArtifactRepository
@@ -156,13 +159,13 @@ async def test_document_profile_service_builds_profiles_and_summary(tmp_path):
     assert len(stored) == 3
 
 
-async def test_document_profile_service_returns_source_filename_from_file_mapping(
+async def test_document_profile_service_does_not_duplicate_source_filename(
     tmp_path,
 ):
     collection_service, profile_service = _build_profile_service(tmp_path)
     collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
-    document_record = await collection_service.add_document(
+    document_record = await build_test_source_import_service(collection_service).add_document(
         collection_id,
         "wang_2024_battery.txt",
         b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",
@@ -201,7 +204,7 @@ async def test_document_profile_service_returns_source_filename_from_file_mappin
     item = payload["items"][0]
     assert item["document_id"] == "doc-1"
     assert item["title"] is None
-    assert item["source_filename"] == "wang_2024_battery.txt"
+    assert "source_filename" not in item
     assert item["doc_type"] == "experimental"
 
 
@@ -213,37 +216,33 @@ async def test_document_profile_service_combines_filters_before_paginating(tmp_p
         {
             "document_id": "doc-1",
             "title": "Laser processing of Ti-6Al-4V",
-            "source_filename": "paper-one.pdf",
             "doc_type": "experimental",
-            "parsing_warnings": [],
+            "profile_warnings": [],
         },
         {
             "document_id": "doc-2",
-            "title": "Mechanical response of titanium",
-            "source_filename": "laser-fatigue.pdf",
+            "title": "Laser fatigue response of titanium",
             "doc_type": "review",
-            "parsing_warnings": ["classification_uncertain"],
+            "profile_warnings": ["classification_uncertain"],
         },
         {
             "document_id": "doc-3",
             "title": "Stainless steel review",
-            "source_filename": "review.pdf",
             "doc_type": "review",
-            "parsing_warnings": ["insufficient_content"],
+            "profile_warnings": ["insufficient_content"],
         },
         {
             "document_id": "doc-4",
             "title": "Laser review without warnings",
-            "source_filename": "clean-review.pdf",
             "doc_type": "review",
-            "parsing_warnings": [],
+            "profile_warnings": [],
         },
     ):
         await profile_service.document_profile_repository.replace(
+            collection_id,
             DocumentProfile.from_mapping(
                 {
                     **row,
-                    "collection_id": collection_id,
                     "confidence": 0.9,
                 }
             )
@@ -287,7 +286,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
 
     item = payload["items"][0]
     assert item["doc_type"] == "uncertain"
-    assert item["parsing_warnings"] == ["insufficient_content"]
+    assert item["profile_warnings"] == ["insufficient_content"]
 
 
 async def test_document_profile_service_continues_after_one_model_format_failure(
@@ -333,7 +332,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
                 )
             return StructuredDocumentProfile(
                 doc_type="experimental",
-                parsing_warnings=[],
+                profile_warnings=[],
                 confidence=0.9,
             )
 
@@ -373,9 +372,11 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     records = {profile.document_id: profile.to_record() for profile in profiles}
     assert records["paper-failed"]["doc_type"] == "uncertain"
     assert records["paper-failed"]["confidence"] == 0.0
-    assert records["paper-failed"]["parsing_warnings"] == [
+    assert records["paper-failed"]["profile_warnings"] == [
         "document_profile_extraction_failed"
     ]
+    assert records["paper-failed"]["profile_status"] == "extraction_failed"
+    assert records["paper-success"]["profile_status"] == "completed"
     assert records["paper-success"]["doc_type"] == "experimental"
     failure_log = next(
         record.getMessage()
@@ -442,4 +443,128 @@ async def test_document_profile_service_round_trips_repository_storage_fields(tm
     await _build_profiles(profile_service, collection_id)
 
     restored = await profile_service.read_document_profiles(collection_id)
-    assert isinstance(restored[0].to_record()["parsing_warnings"], list)
+    assert isinstance(restored[0].to_record()["profile_warnings"], list)
+
+
+async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypatch):
+    collections, service = _build_profile_service(tmp_path)
+    collection = await collections.create_collection("Twenty papers")
+    collection_id = collection["collection_id"]
+    for index in range(20):
+        await service.source_artifact_repository.replace_document(
+            collection_id,
+            SourceDocument(
+                document_id=f"doc_{index}",
+                document_order=index,
+                title=f"Paper {index}",
+                text=f"Measured porosity {index}%.",
+            ),
+        )
+        await service.document_profile_repository.replace(
+            collection_id,
+            DocumentProfile(
+                document_id=f"doc_{index}",
+                title=f"Paper {index}",
+                doc_type="experimental",
+                confidence=0.9,
+                profile_warnings=(),
+            ),
+        )
+
+    async def reject_collection_read(*args, **kwargs):
+        pytest.fail("A single-paper read must not load the collection")
+
+    monkeypatch.setattr(
+        service.source_artifact_repository,
+        "read_collection_documents",
+        reject_collection_read,
+    )
+    monkeypatch.setattr(
+        service.document_profile_repository, "list_collection", reject_collection_read
+    )
+    content = await service.get_document_content(collection_id, "doc_7")
+    assert content["content_text"] == "Measured porosity 7%."
+    assert content["title"] == "Paper 7"
+    assert content["blocks"][0]["text"] == content["content_text"]
+    assert (await service.get_document_profile(collection_id, "doc_7"))[
+        "document_id"
+    ] == "doc_7"
+
+
+@pytest.mark.parametrize("has_other_source", [False, True])
+async def test_missing_content_preserves_not_ready_vs_not_found_without_hydration(
+    tmp_path,
+    monkeypatch,
+    has_other_source,
+):
+    from application.core.document_profiles.service import (
+        DocumentContentNotReadyError,
+        DocumentNotFoundError,
+    )
+
+    collections, service = _build_profile_service(tmp_path)
+    collection_id = (await collections.create_collection("Missing source"))[
+        "collection_id"
+    ]
+    if has_other_source:
+        await service.source_artifact_repository.replace_document(
+            collection_id,
+            SourceDocument(
+                document_id="other", document_order=0, title=None, text="Other paper"
+            ),
+        )
+
+    async def reject_collection_read(*args, **kwargs):
+        pytest.fail("Absence checks must not hydrate other papers")
+
+    monkeypatch.setattr(
+        service.source_artifact_repository,
+        "read_collection_documents",
+        reject_collection_read,
+    )
+    expected = (
+        DocumentNotFoundError if has_other_source else DocumentContentNotReadyError
+    )
+    with pytest.raises(expected):
+        await service.get_document_content(collection_id, "missing")
+
+
+@pytest.mark.parametrize(
+    "metadata,title,expected_title,expected_filename",
+    [
+        (
+            {
+                "parsed_title": "Parsed scientific title",
+                "source_path": "folder/paper.pdf",
+            },
+            "Raw title",
+            "Parsed scientific title",
+            "paper.pdf",
+        ),
+        ({"title": "Metadata title"}, None, "Metadata title", None),
+        ({"source_filename": "paper.pdf"}, "paper.pdf", None, "paper.pdf"),
+        ({}, "doc_a", None, None),
+    ],
+)
+async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(
+    tmp_path,
+    metadata,
+    title,
+    expected_title,
+    expected_filename,
+):
+    collections, service = _build_profile_service(tmp_path)
+    collection_id = (await collections.create_collection("Metadata"))["collection_id"]
+    await service.source_artifact_repository.replace_document(
+        collection_id,
+        SourceDocument(
+            document_id="doc_a",
+            document_order=0,
+            title=title,
+            text="Measured density.",
+            metadata=metadata,
+        ),
+    )
+    content = await service.get_document_content(collection_id, "doc_a")
+    assert content["title"] == expected_title
+    assert content["source_filename"] == expected_filename

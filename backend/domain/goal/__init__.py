@@ -3,12 +3,15 @@
 from domain.goal.experiment_plan import (
     EXPERIMENT_PLAN_STATUSES,
     ExperimentPlanRecord,
+    ExperimentPlanRevisionConflictError,
     ExperimentPlanStatus,
     normalize_experiment_plan_status,
 )
+
 __all__ = [
     "EXPERIMENT_PLAN_STATUSES",
     "ExperimentPlanRecord",
+    "ExperimentPlanRevisionConflictError",
     "ExperimentPlanStatus",
     "normalize_experiment_plan_status",
 ]

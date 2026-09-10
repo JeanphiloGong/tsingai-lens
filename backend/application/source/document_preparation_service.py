@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asyncio import CancelledError, Semaphore, Task, create_task
+from asyncio import CancelledError, Semaphore, Task as AsyncTask, create_task
 from dataclasses import replace
 from hashlib import sha256 as hash_sha256
 import json
@@ -15,14 +15,15 @@ import pandas as pd
 
 from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.core.document_profiles.service import DocumentProfileService
+from application.pipeline import PipelineRunService
+from application.pipeline.pipeline_run_service import document_preparation_error_message
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from application.source.task_service import TaskService
-from domain.ports import SourceArtifactRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import Document, SourceDocument
-from infra.source.config.pipeline_mode import IndexingMethod
+from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from infra.source.config.source_runtime_config import (
     CacheConfig,
     InputConfig,
@@ -82,14 +83,14 @@ class DocumentPreparationService:
         self,
         *,
         collection_service: CollectionService,
-        task_service: TaskService,
+        pipeline_run_service: PipelineRunService,
         source_artifact_repository: SourceArtifactRepository,
         document_profile_service: DocumentProfileService,
         source_artifact_builder: SourceArtifactBuilder | None = None,
         max_concurrency: int | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.task_service = task_service
+        self.pipeline_run_service = pipeline_run_service
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
         self._source_artifact_builder = source_artifact_builder
@@ -102,122 +103,152 @@ class DocumentPreparationService:
         if resolved_concurrency < 1:
             raise ValueError("document preparation concurrency must be positive")
         self._semaphore = Semaphore(resolved_concurrency)
-        self._active_tasks: set[Task[dict[str, Any]]] = set()
+        self._active_workers: set[AsyncTask[dict[str, Any]]] = set()
 
-    async def recover_interrupted_tasks(self) -> int:
+    async def recover_interrupted_runs(self) -> int:
         """Make persisted work without a live worker retryable after restart."""
 
-        active_tasks = [
-            *await self.task_service.list_tasks(status="queued"),
-            *await self.task_service.list_tasks(status="running"),
+        active_runs = [
+            *await self.pipeline_run_service.list_runs(status="queued"),
+            *await self.pipeline_run_service.list_runs(status="running"),
         ]
         interrupted_count = 0
-        for task in active_tasks:
-            if task.get("task_type") != "document_preparation":
+        for run in active_runs:
+            if run.get("pipeline_name") != "document_preparation":
                 continue
-            document_id = task.get("document_id")
-            if not document_id:
+            if run.get("scope_type") != "document":
                 continue
+            document_id = str(run["scope_id"])
             try:
                 document = await self.collection_service.get_document(
-                    task["collection_id"],
+                    run["collection_id"],
                     document_id,
                 )
             except FileNotFoundError:
                 document = None
             if document is not None and document.status == "processing":
                 await self.collection_service.update_document_preparation(
-                    task["collection_id"],
+                    run["collection_id"],
                     document_id,
                     status="stored",
                 )
-            await self.task_service.finish_task(
-                task["task_id"],
+            await self.pipeline_run_service.finish_run(
+                run["run_id"],
                 status="failed",
-                current_stage="interrupted",
-                progress_percent=task.get("progress_percent", 0),
+                current_node="interrupted",
+                progress_percent=run.get("progress_percent", 0),
                 errors=[
-                    *task.get("errors", ()),
+                    *run.get("errors", ()),
                     "Document preparation was interrupted by a backend restart.",
                 ],
             )
             interrupted_count += 1
         if interrupted_count:
             logger.warning(
-                "Recovered interrupted document preparation tasks count=%s",
+                "Recovered interrupted document preparation runs count=%s",
                 interrupted_count,
             )
         return interrupted_count
 
-    async def queue_document(
+    async def queue_document_preparation(
         self,
         collection_id: str,
         document_id: str,
-        *,
-        mode: IndexingMethod | str = IndexingMethod.Standard,
-        request_id: str | None = None,
     ) -> dict[str, Any]:
+        """Queue or reuse preparation of one collection document."""
+
         document = await self.collection_service.get_document(
             collection_id,
             document_id,
         )
-        fingerprint = self.fingerprint_for(document)
-        task, created = await self.task_service.get_or_create_document_task(
+        fingerprint = self.preparation_fingerprint_for(document)
+        run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
-            task_type="document_preparation",
+            pipeline_name="document_preparation",
             input_fingerprint=fingerprint,
-            mode=str(mode),
+            reuse_completed=await self._can_reuse_preparation(collection_id, document),
         )
         if created:
-            background = create_task(
-                self.run_task(
-                    task["task_id"],
-                    collection_id,
-                    document_id,
-                    mode=mode,
-                    request_id=request_id,
-                )
-            )
-            self._active_tasks.add(background)
-            background.add_done_callback(self._active_tasks.discard)
-            background.add_done_callback(self._log_unexpected_failure)
-        return task
-
-    async def run_task(
-        self,
-        task_id: str,
-        collection_id: str,
-        document_id: str,
-        *,
-        mode: IndexingMethod | str = IndexingMethod.Standard,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        del request_id
-        async with self._semaphore:
-            document = await self.collection_service.get_document(
+            coroutine = self.run_document_preparation(
+                run["run_id"],
                 collection_id,
                 document_id,
-            )
-            source_identity, profile_identity = self.fingerprints_for(document)
-            fingerprint = profile_identity
-            await self.task_service.update_task(
-                task_id,
-                status="running",
-                current_stage="source_parsing",
-                progress_percent=5,
-                progress_detail={
-                    "phase": "source_parsing",
-                    "unit": "document",
-                    "message": "Parsing the document into traceable Sources.",
-                },
-            )
-            await self.collection_service.update_document_preparation(
-                collection_id,
-                document_id,
-                status="processing",
             )
             try:
+                background = create_task(coroutine)
+            except Exception as exc:
+                coroutine.close()
+                logger.exception(
+                    "Document preparation dispatch failed run_id=%s", run["run_id"]
+                )
+                await self._fail_preparation(
+                    run["run_id"], collection_id, document_id, "dispatch_failed"
+                )
+                raise RuntimeError(
+                    document_preparation_error_message("dispatch_failed")
+                ) from exc
+            self._active_workers.add(background)
+            background.add_done_callback(self._active_workers.discard)
+            background.add_done_callback(self._log_unexpected_failure)
+        return run
+
+    async def _can_reuse_preparation(
+        self, collection_id: str, document: Document
+    ) -> bool:
+        source_identity, profile_identity = self.fingerprints_for(document)
+        if (
+            document.status != "ready"
+            or document.preparation_fingerprint != profile_identity
+            or document.profile_fingerprint != profile_identity
+            or document.source_fingerprint != source_identity
+        ):
+            return False
+        profile = await self.document_profile_service.read_document_profile(
+            collection_id,
+            document.document_id,
+        )
+        if profile is None or profile.profile_status != PROFILE_STATUS_COMPLETED:
+            return False
+        return (
+            await self.source_artifact_repository.read_document(
+                collection_id,
+                document.document_id,
+            )
+            is not None
+        )
+
+    async def run_document_preparation(
+        self,
+        run_id: str,
+        collection_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        async with self._semaphore:
+            stage = "source_parsing"
+            preparation_warnings: list[str] = []
+            try:
+                document = await self.collection_service.get_document(
+                    collection_id, document_id
+                )
+                source_identity, profile_identity = self.fingerprints_for(document)
+                fingerprint = profile_identity
+                await self.pipeline_run_service.update_run(
+                    run_id,
+                    status="running",
+                    current_node=stage,
+                    progress_percent=5,
+                    progress_detail={
+                        "phase": stage,
+                        "unit": "document",
+                        "message": "Parsing the document into traceable Sources.",
+                    },
+                )
+                await self.collection_service.update_document_preparation(
+                    collection_id,
+                    document_id,
+                    status="processing",
+                )
                 source_document = await self.source_artifact_repository.read_document(
                     collection_id,
                     document_id,
@@ -229,19 +260,28 @@ class DocumentPreparationService:
                     source_document = await self._parse_document(
                         collection_id,
                         document,
-                        mode=mode,
                     )
                     await self.source_artifact_repository.replace_document(
                         collection_id,
                         source_document,
                     )
-                    references = SourceReferenceExtractionService().extract(
-                        (source_document,)
-                    )
-                    await self.source_artifact_repository.replace_document_references(
-                        document_id,
-                        references,
-                    )
+                    try:
+                        references = SourceReferenceExtractionService().extract(
+                            (source_document,)
+                        )
+                        await self.source_artifact_repository.replace_document_references(
+                            document_id,
+                            references,
+                        )
+                    except Exception:  # noqa: BLE001
+                        warning = "Source reference extraction failed; Source remains available."
+                        preparation_warnings.append(warning)
+                        logger.warning(
+                            "Source reference extraction failed collection_id=%s document_id=%s",
+                            collection_id,
+                            document_id,
+                            exc_info=True,
+                        )
                     document = await self.collection_service.update_document_preparation(
                         collection_id,
                         document_id,
@@ -249,9 +289,10 @@ class DocumentPreparationService:
                         source_fingerprint=source_identity,
                         parser_version=SOURCE_PARSER_VERSION,
                     )
-                await self.task_service.update_task(
-                    task_id,
-                    current_stage="document_profile",
+                stage = "document_profile"
+                await self.pipeline_run_service.update_run(
+                    run_id,
+                    current_node="document_profile",
                     progress_percent=45,
                     progress_detail={
                         "phase": "document_profile",
@@ -262,16 +303,33 @@ class DocumentPreparationService:
                 profile = await self.document_profile_service.read_document_profile(
                     collection_id, document_id
                 )
-                if profile is None or document.profile_fingerprint != profile_identity:
+                if (
+                    profile is None
+                    or document.profile_fingerprint != profile_identity
+                    or profile.profile_status != PROFILE_STATUS_COMPLETED
+                ):
                     profile = await self.document_profile_service.build_document_profile(
                         collection_id,
                         document_id,
                     )
-                    document = await self.collection_service.update_document_preparation(
+                if profile.profile_status != PROFILE_STATUS_COMPLETED:
+                    await self.collection_service.update_document_preparation(
                         collection_id,
                         document_id,
-                        status="processing",
-                        profile_fingerprint=profile_identity,
+                        status="stored",
+                    )
+                    message = document_preparation_error_message("document_profile")
+                    return await self.pipeline_run_service.finish_run(
+                        run_id,
+                        status="partial_success",
+                        current_node="document_profile",
+                        warnings=[*preparation_warnings, message],
+                        errors=[message],
+                        progress_detail={
+                            "phase": "document_profile",
+                            "unit": "document",
+                            "message": message,
+                        },
                     )
                 await self.collection_service.update_document_preparation(
                     collection_id,
@@ -283,45 +341,65 @@ class DocumentPreparationService:
                     parser_version=SOURCE_PARSER_VERSION,
                     document_analysis_version=DOCUMENT_ANALYSIS_VERSION,
                 )
-                return await self.task_service.finish_task(
-                    task_id,
+                return await self.pipeline_run_service.finish_run(
+                    run_id,
                     status="completed",
-                    current_stage="ready",
+                    current_node="ready",
                     progress_percent=100,
                     progress_detail={
                         "phase": "ready",
                         "unit": "document",
                         "message": "The document is ready for research scope selection.",
                     },
+                    warnings=preparation_warnings,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception(
-                    "Document preparation failed collection_id=%s document_id=%s task_id=%s",
+                    "Document preparation failed collection_id=%s document_id=%s run_id=%s",
                     collection_id,
                     document_id,
-                    task_id,
+                    run_id,
                 )
-                await self.collection_service.update_document_preparation(
-                    collection_id,
-                    document_id,
-                    status="failed",
-                )
-                await self.task_service.finish_task(
-                    task_id,
-                    status="failed",
-                    current_stage="failed",
-                    progress_percent=100,
-                    errors=[str(exc)],
-                    progress_detail={
-                        "phase": "failed",
-                        "unit": "document",
-                        "message": "Document preparation failed.",
-                    },
-                )
+                await self._fail_preparation(run_id, collection_id, document_id, stage)
                 raise
 
+    async def _fail_preparation(
+        self,
+        run_id: str,
+        collection_id: str,
+        document_id: str,
+        stage: str,
+    ) -> None:
+        # A failed document write must not prevent terminalizing its run.
+        try:
+            await self.collection_service.update_document_preparation(
+                collection_id,
+                document_id,
+                status="failed",
+            )
+        except Exception:
+            logger.exception(
+                "Could not record document preparation failure run_id=%s", run_id
+            )
+        try:
+            await self.pipeline_run_service.finish_run(
+                run_id,
+                status="failed",
+                current_node=stage,
+                errors=[document_preparation_error_message(stage)],
+                progress_detail={
+                    "phase": "failed",
+                    "unit": "document",
+                    "message": document_preparation_error_message(stage),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Could not terminalize failed document preparation run_id=%s", run_id
+            )
+
     @staticmethod
-    def fingerprint_for(document: Document) -> str:
+    def preparation_fingerprint_for(document: Document) -> str:
         return DocumentPreparationService.fingerprints_for(document)[1]
 
     @staticmethod
@@ -340,12 +418,9 @@ class DocumentPreparationService:
         self,
         collection_id: str,
         document: Document,
-        *,
-        mode: IndexingMethod | str,
     ) -> SourceDocument:
         outputs = await self._get_source_artifact_builder()(
             config=self._source_config(collection_id, document.document_id),
-            method=mode,
             input_documents=pd.DataFrame(
                 [
                     {
@@ -439,13 +514,13 @@ class DocumentPreparationService:
         return self._source_artifact_builder
 
     @staticmethod
-    def _log_unexpected_failure(task: Task[dict[str, Any]]) -> None:
+    def _log_unexpected_failure(worker: AsyncTask[dict[str, Any]]) -> None:
         try:
-            task.result()
+            worker.result()
         except CancelledError:
-            logger.info("Document preparation task cancelled during backend shutdown")
+            logger.info("Document preparation run cancelled during backend shutdown")
         except Exception:  # noqa: BLE001
-            logger.exception("Document preparation task crashed after scheduling")
+            logger.exception("Document preparation run crashed after scheduling")
 
 
 __all__ = [

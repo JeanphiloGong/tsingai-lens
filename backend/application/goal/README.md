@@ -6,12 +6,14 @@ execution, structured results, and write approval live in `application/chat/`
 and `domain/chat/`.
 
 - `experiment_plan_service.py`
-  Persists manually authored Objective-scoped drafts. New plans have no Chat
-  message provenance because ordinary Agent prose is not a scientifically
-  validated experiment-plan contract. Historical plans that already reference
-  a migrated Chat message remain readable and auditable. Their stored Finding
-  fingerprints are checked against the current Objective dataset before they
-  can return to `ready_for_review`.
+  Persists manually authored Objective-scoped drafts and explicitly approved
+  Research Agent plan drafts. Ordinary Agent prose remains in Chat and cannot
+  be saved as a plan. The approved Agent path supplies a complete structured
+  plan, visible Evidence links, exact current Finding/Evidence fingerprints,
+  authenticated user, and approved tool-call identity. Source snapshots are
+  checked before creation and again before a grounded plan can return to
+  `ready_for_review`. Historical plans that reference a migrated Chat message
+  remain readable and retain their earlier protocol validation rules.
 - `protocol_contract.py`
   Enforces the operational VED design rule shared by chat generation and plan
   persistence: at least one constituent parameter must change, every other

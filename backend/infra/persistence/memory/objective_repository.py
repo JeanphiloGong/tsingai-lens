@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from application.repositories.objective_repository import StoredObjective
+
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
@@ -139,7 +141,7 @@ class MemoryObjectiveRepository:
     async def list_objective_records(
         self,
         collection_id: str,
-    ) -> tuple[dict[str, Any], ...]:
+    ) -> tuple[StoredObjective, ...]:
         objectives = await self.list_objectives(collection_id)
         return tuple(self._objective_record(objective) for objective in objectives)
 
@@ -159,10 +161,15 @@ class MemoryObjectiveRepository:
         for existing in self._objectives.values():
             if existing.created_by_tool_call_id != created_by_tool_call_id:
                 continue
+            existing_record = existing.to_record()
+            objective_record = objective.to_record()
+            existing_record["rank"] = None
+            objective_record["rank"] = None
             if (
                 existing.collection_id != objective.collection_id
                 or existing.objective_id != objective.objective_id
                 or existing.created_by_user_id != created_by_user_id
+                or existing_record != objective_record
             ):
                 raise ValueError(
                     "authored candidate tool call already created a different objective"
@@ -201,9 +208,23 @@ class MemoryObjectiveRepository:
         self,
         collection_id: str,
         objective_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> StoredObjective | None:
         objective = await self.read_objective(collection_id, objective_id)
         return self._objective_record(objective) if objective is not None else None
+
+    async def confirm_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective:
+        key = (collection_id, objective_id)
+        objective = self._require_objective(*key)
+        if objective.confirmation_status == "confirmed":
+            return objective
+        confirmed = objective.confirm()
+        self._objectives[key] = confirmed
+        self._touch_objective(key, datetime.now(timezone.utc))
+        return confirmed
 
     async def queue_analysis(
         self,
@@ -344,17 +365,28 @@ class MemoryObjectiveRepository:
         error_code: str,
         error_message: str,
         expected_status: str | None = None,
+        contributions: tuple[PaperContribution, ...] = (),
     ) -> ObjectiveAnalysis:
         key = (collection_id, objective_id, analysis_version)
         analysis = self._require_analysis(*key)
         if expected_status is not None and analysis.status != expected_status:
             return analysis
+        if contributions:
+            if any(item.key[:3] != key for item in contributions):
+                raise ValueError("analysis artifact belongs to another version")
+            input_documents = {item.document_id for item in analysis.document_inputs}
+            if {item.document_id for item in contributions} != input_documents:
+                raise ValueError(
+                    "paper contributions must cover every analysis input"
+                )
         analysis = analysis.fail(
             error_code=error_code,
             error_message=error_message,
             completed_at=datetime.now(timezone.utc),
         )
         self._analyses[key] = analysis
+        if contributions:
+            self._contributions[key] = contributions
         return analysis
 
     async def interrupt_active_analyses(self) -> int:
@@ -614,15 +646,12 @@ class MemoryObjectiveRepository:
     def _objective_record(
         self,
         objective: ResearchObjective,
-    ) -> dict[str, Any]:
-        record = objective.to_record()
+    ) -> StoredObjective:
         created_at, updated_at = self._objective_timestamps.get(
             (objective.collection_id, objective.objective_id),
             (None, None),
         )
-        record["created_at"] = created_at.isoformat() if created_at else None
-        record["updated_at"] = updated_at.isoformat() if updated_at else None
-        return record
+        return StoredObjective(objective, created_at, updated_at)
 
     def _touch_objective(
         self,

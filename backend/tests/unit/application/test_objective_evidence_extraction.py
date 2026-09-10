@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
@@ -15,6 +16,7 @@ from application.core.objectives.analysis import (
     source_extraction,
     source_screening,
     source_validation,
+    table_repair,
 )
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
@@ -24,6 +26,7 @@ from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     StructuredEvidenceExtractions,
     extract_and_validate_source_facts,
+    _extract_source_round,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
@@ -249,7 +252,7 @@ def test_research_objective_table_source_payload_includes_table_cells():
         }
     )
 
-    assert source_extraction._objective_table_source_needs_llm_structural_repair(
+    assert table_repair._objective_table_source_needs_llm_structural_repair(
         route=route,
         source={
             "table_matrix": [
@@ -439,7 +442,15 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
                                         {"name": "laser power", "value": 180, "unit": "W"},
                                         {"name": "laser power", "value": 240, "unit": "W"},
                                     ],
-                                    "test": [{"name": "test", "value": "ASTM E8"}],
+                                    "test": [
+                                        {
+                                            "name": "test",
+                                            "value": "ASTM E8",
+                                            "applies_to_outcomes": [
+                                                "tensile strength"
+                                            ],
+                                        }
+                                    ],
                                 },
                                 "resolution_status": "resolved",
                                 "confidence": 0.8,
@@ -450,7 +461,7 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
             return StructuredEvidenceExtractions()
 
     extractor = CapturingExtractor()
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -459,7 +470,6 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
         blocks_by_document_id={"paper-1": [result_block, methods_block]},
         tables_by_document_id={"paper-1": [table]},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     result_payload = next(
@@ -790,102 +800,6 @@ def test_empty_context_inspection_preserves_route_scope_for_later_result_read() 
     ]
 
 
-def test_result_recovery_route_names_the_context_still_missing_from_result() -> None:
-    """A result reread tells extraction which experiment fields remain open."""
-
-    objective = _research_objective(
-        {
-            "objective_id": "obj-preheat",
-            "material_scope": ["alloy A"],
-            "variables": ["platform preheating"],
-            "outcomes": ["grain morphology"],
-        }
-    )
-    result_route = EvidenceCandidate.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "results-microstructure",
-            "role": "current_experimental_evidence",
-            "extractable": True,
-        }
-    )
-    result = ExtractedEvidenceDraft.from_mapping(
-        {
-            "evidence_id": "result-1",
-            "objective_id": objective.objective_id,
-            "document_id": result_route.document_id,
-            "source_kind": result_route.source_kind,
-            "source_ref": result_route.source_ref,
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "platform preheating",
-                    "baseline_value": "without preheating",
-                    "target_value": "with preheating",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "without preheating",
-                "target_label": "with preheating",
-                "axis_names": ["platform preheating"],
-                "comparable": True,
-                "incomparability_reasons": [],
-            },
-            "reported_result": {
-                "outcome": "grain morphology",
-                "direction": "mixed",
-                "result_text": "Grain morphology differed between the conditions.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [{"name": "material", "value": "alloy A"}],
-                "test": [{"name": "method", "value": "optical microscopy"}],
-            },
-            "resolution_status": "partial",
-            "confidence": 0.9,
-        }
-    )
-    shared_process = ExtractedEvidenceDraft.from_mapping(
-        {
-            "evidence_id": "methods-1",
-            "objective_id": objective.objective_id,
-            "document_id": result_route.document_id,
-            "source_kind": "text_window",
-            "source_ref": "methods-manufacturing",
-            "evidence_role": "condition_context",
-            "selection_status": "extracted",
-            "changed_variables": [],
-            "comparison": None,
-            "reported_result": None,
-            "attribution_scope": "not_attributable",
-            "scientific_context": {
-                "process": [
-                    {
-                        "name": "manufacturing process",
-                        "value": "laser powder bed fusion",
-                        "context_scope": "experimental",
-                    }
-                ]
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
-    )
-
-    recovery_routes = source_extraction._objective_result_recovery_routes(
-        source_facts=(result, shared_process),
-        routes=(result_route,),
-        attempted_keys=set(),
-        objectives=(objective,),
-    )
-
-    assert len(recovery_routes) == 1
-    assert recovery_routes[0].context_fields == ("process",)
-
-
 def test_bundle_provenance_keeps_only_sources_matching_result_conditions() -> None:
     """Bundle provenance is field-supported rather than whole-bundle provenance."""
 
@@ -1114,6 +1028,669 @@ def test_source_validation_recovers_specific_variable_and_direction_from_result_
     ]
     assert records[0]["reported_result"]["direction"] == "decrease"
     assert records[0]["attribution_scope"] == "association_only"
+
+
+def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes() -> None:
+    """A repeated fixed process label cannot become an incomplete changed factor."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-paper-1",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+            "evidence_role": "direct_result",
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["build platform preheating"],
+                "comparable": False,
+                "incomparability_reasons": ["condition endpoints need binding"],
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "direction": "mixed",
+                "result_text": "P150 had a cellular microstructure compared with NP.",
+            },
+            "attribution_scope": "not_attributable",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-1",
+                    "source_excerpt": (
+                        "P150 had a cellular microstructure compared with NP."
+                    ),
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    def condition(
+        *,
+        label: str,
+        preheating: str,
+        include_duplicate_process_name: bool,
+    ) -> ExtractedEvidenceDraft:
+        process = [
+            {
+                "name": "build platform preheating",
+                "value": preheating,
+                "context_scope": "experimental",
+            }
+        ]
+        if include_duplicate_process_name:
+            process.append(
+                {
+                    "name": "manufacturing process",
+                    "value": "laser beam powder bed fusion",
+                    "context_scope": "experimental",
+                }
+            )
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": f"condition-{label}",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": f"methods-{label}",
+                "evidence_role": "condition_context",
+                "scientific_context": {
+                    "sample": [{"name": "group", "value": label}],
+                    "process": process,
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": f"methods-{label}",
+                    }
+                ],
+                "attribution_scope": "not_attributable",
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    shared_process = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "shared-process",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods-fabrication",
+            "evidence_role": "condition_context",
+            "scientific_context": {
+                "process": [
+                    {
+                        "name": "fabrication method",
+                        "value": "laser beam powder bed fusion",
+                        "context_scope": "experimental",
+                    }
+                ]
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "methods-fabrication",
+                }
+            ],
+            "attribution_scope": "not_attributable",
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-1",
+        source_facts=(
+            shared_process,
+            condition(
+                label="NP",
+                preheating="without preheating",
+                include_duplicate_process_name=True,
+            ),
+            condition(
+                label="P150",
+                preheating="preheating to 150 C",
+                include_duplicate_process_name=False,
+            ),
+            result,
+        ),
+        objectives=(objective,),
+    )
+    bound = next(item for item in reconstructed if item.evidence_id == result.evidence_id)
+
+    assert [item.name for item in bound.changed_variables] == [
+        "build platform preheating"
+    ]
+    assert bound.changed_variables[0].baseline_value == "without preheating"
+    assert bound.changed_variables[0].target_value == "preheating to 150 C"
+    assert bound.comparison is not None and bound.comparison.comparable
+    assert {
+        item.value for item in bound.scientific_context.process
+    } == {"laser beam powder bed fusion"}
+
+
+@pytest.mark.parametrize(
+    ("result_text", "material"),
+    (
+        (
+            "preheating the build platform can lead to lower residual stress, "
+            "more homogenized microstructure",
+            "316L stainless steel",
+        ),
+        (
+            "columnar to equiaxed grain morphology as the build platform "
+            "preheated at 200 C",
+            "Al-Mg (-Sc)-Zr",
+        ),
+        (
+            "significant differences between the grain orientations obtained "
+            "under different preheating temperatures",
+            "TiAl alloy",
+        ),
+    ),
+)
+def test_source_validation_excludes_results_attributed_to_cited_studies(
+    result_text: str,
+    material: str,
+) -> None:
+    """An introduction's cited experiments cannot become this paper's Evidence."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "question": "How does build platform preheating affect microstructure?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "introduction-prior-studies",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    source = {
+        "source_kind": "text_window",
+        "source_ref": route.source_ref,
+        "text": (
+            "It was reported that preheating the build platform can lead to lower "
+            "residual stress, more homogenized microstructure, and better mechanical "
+            "properties compared with no preheating [9]. Yang et al. [10] investigated "
+            "build platform preheating in Al-Mg (-Sc)-Zr. They observed columnar to "
+            "equiaxed grain morphology as the build platform preheated at 200 C. "
+            "Liu et al. [11] investigated preheating temperatures in TiAl alloy. "
+            "They reported significant differences between the grain orientations "
+            "obtained under different preheating temperatures."
+        ),
+    }
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source=source,
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "build platform preheating",
+                    "baseline_value": None,
+                    "target_value": None,
+                    "unit": None,
+                }
+            ],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "microstructure",
+                "result_kind": "observed",
+                "value": None,
+                "unit": None,
+                "direction": "mixed",
+                "result_text": result_text,
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {
+                "material": [{"name": "material", "value": material}]
+            },
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records == ()
+
+
+def test_cited_context_remains_background_and_cannot_bind_current_result() -> None:
+    """A cited experiment in the same paper is not current-experiment context."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-current-alloy",
+            "source_kind": "text_window",
+            "source_ref": "introduction-prior-study",
+            "role": "process_or_treatment",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "text_window",
+        "source_ref": route.source_ref,
+        "text": (
+            "Yang et al. [10] investigated build platform preheating and the "
+            "microstructure of alloy B. They observed equiaxed grains when the "
+            "build platform was preheated at 200 C."
+        ),
+    }
+    records = source_validation.validate_source_fact(
+        route=route,
+        source=source,
+        objective_context=objective,
+        extracted_record={
+            "evidence_id": "cited-method-context",
+            "evidence_role": "condition_context",
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "test",
+                        "value": 200,
+                        "unit": "C",
+                        "context_scope": "experimental",
+                        "applies_to_outcomes": ["microstructure"],
+                    }
+                ]
+            },
+            "attribution_scope": "not_attributable",
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    cited_context = ExtractedEvidenceDraft.from_mapping(records[0])
+    assert cited_context.evidence_role == "background_context"
+    assert cited_context.scientific_context.test[0].context_scope == "background"
+
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "current-result",
+            "objective_id": objective.objective_id,
+            "document_id": route.document_id,
+            "source_kind": "text_window",
+            "source_ref": "current-results",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "microstructure",
+                "direction": "changed",
+                "result_text": "Alloy A developed a cellular microstructure.",
+            },
+            "scientific_context": {
+                "material": [{"name": "material", "value": "alloy A"}]
+            },
+            "source_refs": [
+                {"source_kind": "text_window", "source_ref": "current-results"}
+            ],
+            "attribution_scope": "descriptive_only",
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+    reconstructed = paper_experiment._bind_unambiguous_document_context(
+        (cited_context, result)
+    )
+    bound = next(item for item in reconstructed if item.evidence_id == "current-result")
+
+    assert bound.scientific_context.test == ()
+    assert all(
+        ref.get("source_ref") != route.source_ref for ref in bound.source_refs
+    )
+
+
+def test_source_validation_excludes_study_intent_presented_as_a_result() -> None:
+    """Stating what was investigated is not a scientific observation."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "question": "How does build platform preheating affect microstructure?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "conclusion-intent",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    intent = (
+        "The effect of preheating the build platform on the microstructure and "
+        "mechanical properties of LBPBF 316L SS was investigated."
+    )
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": intent + " The following conclusions can be drawn.",
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "build platform preheating",
+                    "baseline_value": None,
+                    "target_value": None,
+                    "unit": None,
+                }
+            ],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "microstructure",
+                "result_kind": "observed",
+                "value": None,
+                "unit": None,
+                "direction": "mixed",
+                "result_text": intent,
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {
+                "material": [{"name": "material", "value": "316L SS"}]
+            },
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records == ()
+
+
+def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() -> None:
+    """A selected result route cannot turn research intent into an Evidence gap."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "question": "How does build platform preheating affect microstructure?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-preheating",
+                preparation_fingerprint="fingerprint-paper-preheating",
+            ),
+        ),
+        total_document_count=1,
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "conclusion-intent",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "reason": "The Source names the Objective variable and outcome.",
+            "confidence": 0.9,
+        }
+    )
+    intent = (
+        "The effect of preheating the build platform on the microstructure and "
+        "mechanical properties of LBPBF 316L SS was investigated."
+    )
+    block = _study_source_block(
+        "conclusion-intent",
+        "Conclusions",
+        intent + " The following conclusions can be drawn.",
+        8,
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "source_dispositions": [
+                {
+                    "source_unit_id": "frame:text_window:conclusion-intent",
+                    "source_kind": "text_window",
+                    "source_ref": "conclusion-intent",
+                    "disposition": "model_relevant",
+                }
+            ],
+        }
+    )
+    with capture_analysis_diagnostics() as diagnostics:
+        drafts = _extract_source_round(
+            collection_id="col-test",
+            source_extractor=_StudySourceEvidenceExtractor(
+                {"conclusion-intent": None}
+            ),
+            objectives=(objective,),
+            objective_paper_frames=(frame,),
+            objective_evidence_routes=(route,),
+            blocks_by_document_id={"paper-preheating": [block]},
+            tables_by_document_id={"paper-preheating": []},
+            document_trees_by_document_id={},
+        )
+        evidence_records, contributions = evidence_materialization.materialize_evidence(
+            collection_id="col-test",
+            analysis=analysis,
+            objective=objective,
+            drafts=drafts,
+            paper_maps=(),
+            frames=(frame,),
+            routes=(route,),
+            blocks_by_document_id={"paper-preheating": [block]},
+            tables_by_document_id={},
+            figures_by_document_id={},
+        )
+
+    assert len(drafts) == 1
+    assert drafts[0].selection_status == "rejected"
+    assert drafts[0].evidence_role == "irrelevant"
+    assert evidence_records == ()
+    assert contributions[0].uninspected_source_count == 0
+    inspection_trace = next(
+        record
+        for record in diagnostics.records
+        if record["trace_type"] == "objective_source_inspection"
+    )
+    assert inspection_trace["source_ref"] == "conclusion-intent"
+    assert inspection_trace["disposition"] == "no_source_grounded_fact"
+
+
+def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() -> None:
+    """A cited background claim cannot become a current-paper Evidence gap."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "question": "How does build platform preheating affect microstructure?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-preheating",
+                preparation_fingerprint="fingerprint-paper-preheating",
+            ),
+        ),
+        total_document_count=1,
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "introduction-cited-context",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "reason": "The Source mentions the target outcome.",
+            "confidence": 0.9,
+        }
+    )
+    block = _study_source_block(
+        "introduction-cited-context",
+        "Introduction",
+        (
+            "Thermal history is controlled by process parameters, part geometry, "
+            "build orientation, and the fabrication environment [3-6]. These "
+            "have been reported as controlling parameters for reducing defects "
+            "and anisotropy in the microstructure [2]."
+        ),
+        2,
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "source_dispositions": [
+                {
+                    "source_unit_id": (
+                        "frame:text_window:introduction-cited-context"
+                    ),
+                    "source_kind": "text_window",
+                    "source_ref": "introduction-cited-context",
+                    "disposition": "model_relevant",
+                }
+            ],
+        }
+    )
+
+    with capture_analysis_diagnostics() as diagnostics:
+        drafts = _extract_source_round(
+            collection_id="col-test",
+            source_extractor=_StudySourceEvidenceExtractor(
+                {"introduction-cited-context": None}
+            ),
+            objectives=(objective,),
+            objective_paper_frames=(frame,),
+            objective_evidence_routes=(route,),
+            blocks_by_document_id={"paper-preheating": [block]},
+            tables_by_document_id={"paper-preheating": []},
+            document_trees_by_document_id={},
+        )
+        evidence_records, contributions = evidence_materialization.materialize_evidence(
+            collection_id="col-test",
+            analysis=analysis,
+            objective=objective,
+            drafts=drafts,
+            paper_maps=(),
+            frames=(frame,),
+            routes=(route,),
+            blocks_by_document_id={"paper-preheating": [block]},
+            tables_by_document_id={},
+            figures_by_document_id={},
+        )
+
+    assert len(drafts) == 1
+    assert drafts[0].selection_status == "rejected"
+    assert drafts[0].evidence_role == "irrelevant"
+    assert evidence_records == ()
+    assert contributions[0].uninspected_source_count == 0
+    inspection_trace = next(
+        record
+        for record in diagnostics.records
+        if record["trace_type"] == "objective_source_inspection"
+    )
+    assert inspection_trace["source_ref"] == "introduction-cited-context"
+    assert inspection_trace["disposition"] == "no_source_grounded_fact"
+
+
+def test_empty_mixed_current_and_cited_result_route_still_needs_context() -> None:
+    """One cited sentence must not hide an unresolved current-paper result."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-porosity",
+            "question": "How does build platform preheating affect porosity?",
+            "variables": ["build platform preheating"],
+            "outcomes": ["porosity"],
+        }
+    )
+    block = _study_source_block(
+        "results-mixed-context",
+        "Results",
+        (
+            "Porosity was lower in the P150 sample than in the NP sample. "
+            "This trend has been reported as consistent with prior work [2]."
+        ),
+        6,
+    )
+
+    drafts = _extract_source_round(
+        collection_id="col-test",
+        source_extractor=_StudySourceEvidenceExtractor(
+            {"results-mixed-context": None}
+        ),
+        objectives=(objective,),
+        objective_paper_frames=(),
+        objective_evidence_routes=(
+            _study_source_route(objective.objective_id, block.block_id),
+        ),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert len(drafts) == 1
+    assert drafts[0].selection_status == "candidate"
+    assert drafts[0].reported_result is None
+    assert drafts[0].resolution_status == "unresolved"
 
 
 def test_source_validation_retains_ungrounded_model_result_as_failed_evidence():
@@ -3161,7 +3738,7 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
     )
 
     with capture_analysis_diagnostics() as diagnostics:
-        drafts = extract_and_validate_source_facts(
+        drafts = _extract_source_round(
             collection_id="col-test",
             source_extractor=_StudySourceEvidenceExtractor(
                 {"methods-empty": None}
@@ -3172,7 +3749,6 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
             blocks_by_document_id={"paper-1": [block]},
             tables_by_document_id={"paper-1": []},
             document_trees_by_document_id={},
-            _allow_adaptive_context_expansion=False,
         )
         evidence_records, contributions = evidence_materialization.materialize_evidence(
             collection_id="col-test",
@@ -3262,7 +3838,7 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
                 }
             )
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=OmittedConfidenceExtractor(),
         objectives=(objective,),
@@ -3271,7 +3847,6 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
         blocks_by_document_id={"paper-1": [block]},
         tables_by_document_id={},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     result = next(item for item in drafts if item.reported_result is not None)
@@ -3301,6 +3876,88 @@ def _study_source_block(source_ref: str, heading: str, text: str, page: int):
         heading_path=heading,
         text=text,
     )
+
+
+def test_objective_outcome_does_not_synthesize_unreported_test_context() -> None:
+    """Test methods must come from a routed Source, not an outcome lookup."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-strength",
+            "question": "How does laser power affect strength?",
+            "variables": ["laser power"],
+            "outcomes": ["strength"],
+        }
+    )
+    result_block = _study_source_block(
+        "result-strength",
+        "Results",
+        "Strength increased from 900 to 980 MPa as laser power rose from 100 to 200 W.",
+        6,
+    )
+    methods_block = _study_source_block(
+        "methods-strength",
+        "Methods",
+        "Tensile tests followed ASTM E8 on an INSTRON machine.",
+        3,
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    route = _study_source_route(objective.objective_id, result_block.block_id)
+    extractor = _StudySourceEvidenceExtractor(
+        {
+            result_block.block_id: {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": 100,
+                        "target_value": 200,
+                        "unit": "W",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "100 W",
+                    "target_label": "200 W",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                    "incomparability_reasons": [],
+                },
+                "reported_result": {
+                    "outcome": "strength",
+                    "value": 980,
+                    "baseline_value": 900,
+                    "target_value": 980,
+                    "unit": "MPa",
+                    "direction": "increase",
+                    "result_text": "Strength increased from 900 to 980 MPa.",
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {},
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        }
+    )
+
+    drafts = _extract_source_round(
+        collection_id="col-test",
+        source_extractor=extractor,
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={"paper-1": [result_block, methods_block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert [draft.source_ref for draft in drafts] == [result_block.block_id]
 
 
 def test_method_context_is_not_created_for_paper_outside_objective_route_scope() -> None:
@@ -3357,7 +4014,7 @@ def test_method_context_is_not_created_for_paper_outside_objective_route_scope()
         def extract_source(self, payload: dict[str, Any]):
             return StructuredEvidenceExtractions()
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=EmptyExtractor(),
         objectives=(objective,),
@@ -3369,7 +4026,6 @@ def test_method_context_is_not_created_for_paper_outside_objective_route_scope()
         },
         tables_by_document_id={},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert {draft.document_id for draft in drafts} == {"paper-in-scope"}
@@ -3395,7 +4051,11 @@ def _cross_source_microstructure_records() -> dict[str, dict[str, Any]]:
                     {"name": "hatch spacing", "value": 0.1, "unit": "mm"},
                 ],
                 "test": [
-                    {"name": "optical microscopy", "value": "optical microscopy"}
+                    {
+                        "name": "optical microscopy",
+                        "value": "optical microscopy",
+                        "applies_to_outcomes": ["microstructure"],
+                    }
                 ],
             },
             "resolution_status": "resolved",
@@ -3460,7 +4120,8 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
             "Methods",
             (
                 "Sample S1 used laser power 180 W, scanning speed 600 mm/s, "
-                "and hatch spacing 0.1 mm before optical microscopy."
+                "and hatch spacing 0.1 mm before its microstructure was "
+                "examined by optical microscopy."
             ),
             2,
         ),
@@ -3469,7 +4130,8 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
             "Methods",
             (
                 "Sample S2 used laser power 240 W, scanning speed 900 mm/s, "
-                "and hatch spacing 0.1 mm before optical microscopy."
+                "and hatch spacing 0.1 mm before its microstructure was "
+                "examined by optical microscopy."
             ),
             2,
         ),
@@ -3719,7 +4381,7 @@ def test_empty_selected_result_keeps_direct_result_role_when_reason_mentions_con
     )
     extractor = _StudySourceEvidenceExtractor({result_block.block_id: None})
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -3728,7 +4390,6 @@ def test_empty_selected_result_keeps_direct_result_role_when_reason_mentions_con
         blocks_by_document_id={"paper-1": [result_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1
@@ -3928,7 +4589,7 @@ def test_selected_result_source_is_retained_when_validated_model_record_is_empty
     # scientific payload because the record contains no source-grounded fact.
     extractor = _StudySourceEvidenceExtractor({abstract_block.block_id: {}})
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -3937,7 +4598,6 @@ def test_selected_result_source_is_retained_when_validated_model_record_is_empty
         blocks_by_document_id={"paper-1": [abstract_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1
@@ -3982,7 +4642,7 @@ def test_successfully_inspected_extractable_source_leaves_trace_only_marker() ->
     )
     extractor = _StudySourceEvidenceExtractor({abstract_block.block_id: None})
 
-    drafts = extract_and_validate_source_facts(
+    drafts = _extract_source_round(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -3991,7 +4651,6 @@ def test_successfully_inspected_extractable_source_leaves_trace_only_marker() ->
         blocks_by_document_id={"paper-1": [abstract_block]},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
-        _allow_adaptive_context_expansion=False,
     )
 
     assert len(drafts) == 1
@@ -4712,6 +5371,7 @@ def test_complete_result_still_selects_same_paper_fixed_process_controls() -> No
                     {
                         "name": "characterization method",
                         "value": "optical microscopy",
+                        "applies_to_outcomes": ["microstructure"],
                     }
                 ]
             },
@@ -4749,6 +5409,221 @@ def test_complete_result_still_selects_same_paper_fixed_process_controls() -> No
     }
     assert [route.source_ref for route in routes] == ["methods-fixed-controls"]
     assert routes[0].context_fields == ("process",)
+
+
+def test_adaptive_context_prefers_method_for_the_result_outcome() -> None:
+    """A researcher reads the matching characterization method, not any test."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    result_route = _study_source_route(
+        objective.objective_id,
+        "results-microstructure",
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "microstructure-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": result_route.source_ref,
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "build platform preheating",
+                    "baseline_value": "non-preheated",
+                    "target_value": 150,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["build platform preheating"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "direction": "mixed",
+                "result_text": "P150 developed a cellular structure compared with NP.",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {
+                "material": [
+                    {"name": "material", "value": "316L stainless steel"}
+                ],
+                "sample": [{"name": "build orientation", "value": "vertical"}],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser beam powder bed fusion",
+                    }
+                ],
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": result_route.source_ref,
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+    abstract = _study_source_block(
+        "abstract-overview",
+        "Abstract",
+        (
+            "Build platform preheating changed microstructure and mechanical "
+            "properties. Porosity was evaluated using optical microscopy."
+        ),
+        1,
+    )
+    microstructure_method = _study_source_block(
+        "methods-microstructure",
+        "Experimental Procedures",
+        (
+            "For microstructure characterization, specimens were transversely "
+            "cut, ground using 320-2500 grit sandpapers, etched, and examined "
+            "using a KEYENCE digital optical microscope to reveal grains and "
+            "melt pool dimensions."
+        ),
+        4,
+    )
+    tensile_method = _study_source_block(
+        "methods-tensile",
+        "Experimental Procedures",
+        (
+            "Tensile tests at 0.001 s-1 were conducted at room temperature "
+            "using a 100 kN load cell. Two tests were conducted for each "
+            "condition to measure elongation."
+        ),
+        5,
+    )
+
+    routes = source_extraction._build_adaptive_context_routes(
+        objectives=(objective,),
+        source_facts=(result,),
+        objective_evidence_routes=(result_route,),
+        blocks_by_document_id={
+            "paper-1": [abstract, microstructure_method, tensile_method]
+        },
+        tables_by_document_id={"paper-1": []},
+    )
+
+    assert source_extraction._objective_missing_context_fields(result, objective) == {
+        "test"
+    }
+    assert [route.source_ref for route in routes] == ["methods-microstructure"]
+    assert routes[0].context_fields == ("test",)
+
+
+def test_adaptive_context_keeps_method_intent_narrow_when_other_context_is_missing() -> None:
+    """Selecting a characterization Source must not claim unrelated closure."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-microstructure",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform preheating"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    result_route = _study_source_route(
+        objective.objective_id,
+        "results-microstructure",
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "microstructure-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": result_route.source_ref,
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "build platform preheating",
+                    "baseline_value": "non-preheated",
+                    "target_value": 150,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["build platform preheating"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "direction": "mixed",
+                "result_text": "P150 developed a cellular structure compared with NP.",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {
+                "material": [
+                    {"name": "material", "value": "316L stainless steel"}
+                ],
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": result_route.source_ref,
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+    microstructure_method = _study_source_block(
+        "methods-microstructure",
+        "Experimental Procedures",
+        (
+            "For microstructure characterization, specimens were cut perpendicular "
+            "to the final laser tracks, ground, etched, and examined using a digital "
+            "optical microscope to reveal grains and melt pool dimensions."
+        ),
+        4,
+    )
+    process_conditions = _study_source_block(
+        "methods-process",
+        "Experimental Procedures",
+        (
+            "NP and P150 specimens were fabricated by laser powder bed fusion in "
+            "argon using the same machine and scan settings."
+        ),
+        3,
+    )
+
+    routes = source_extraction._build_adaptive_context_routes(
+        objectives=(objective,),
+        source_facts=(result,),
+        objective_evidence_routes=(result_route,),
+        blocks_by_document_id={
+            "paper-1": [process_conditions, microstructure_method]
+        },
+        tables_by_document_id={"paper-1": []},
+    )
+
+    assert source_extraction._objective_missing_context_fields(result, objective) == {
+        "process",
+        "test",
+    }
+    assert {
+        route.source_ref: route.context_fields for route in routes
+    } == {
+        "methods-microstructure": ("test",),
+        "methods-process": ("process",),
+    }
 
 
 def test_fixed_process_controls_join_result_with_methods_source_lineage() -> None:
@@ -4816,6 +5691,7 @@ def test_fixed_process_controls_join_result_with_methods_source_lineage() -> Non
                         {
                             "name": "optical microscopy",
                             "value": "optical microscopy",
+                            "applies_to_outcomes": ["microstructure"],
                         }
                     ]
                 },
@@ -4839,6 +5715,7 @@ def test_fixed_process_controls_join_result_with_methods_source_lineage() -> Non
                         {
                             "name": "characterization method",
                             "value": "optical microscopy",
+                            "applies_to_outcomes": ["microstructure"],
                         }
                     ],
                 },
@@ -4930,7 +5807,13 @@ def test_context_binding_changed_axis_alone_does_not_close_fixed_process() -> No
             },
             "attribution_scope": "isolated_effect",
             "scientific_context": {
-                "test": [{"name": "method", "value": "tensile test"}],
+                "test": [
+                    {
+                        "name": "method",
+                        "value": "tensile test",
+                        "applies_to_outcomes": ["strength"],
+                    }
+                ],
             },
             "resolution_status": "resolved",
             "confidence": 0.9,
@@ -5006,7 +5889,13 @@ def test_context_binding_requires_group_shared_fixed_process_controls(
             },
             "attribution_scope": "isolated_effect",
             "scientific_context": {
-                "test": [{"name": "method", "value": "tensile test"}],
+                "test": [
+                    {
+                        "name": "method",
+                        "value": "tensile test",
+                        "applies_to_outcomes": ["strength"],
+                    }
+                ],
             },
             "resolution_status": "resolved",
             "confidence": 0.9,
@@ -5479,10 +6368,10 @@ def test_adaptive_context_stops_when_new_sources_repeat_same_context_without_clo
     )
 
 
-def test_adaptive_context_stops_after_bounded_progress_rounds(
+def test_adaptive_context_stops_after_available_source_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Small context gains cannot turn one confirmed question into a full-paper read."""
+    """Adaptive review can continue until the paper's available Sources are read."""
 
     objective = _research_objective(
         {
@@ -5598,14 +6487,20 @@ def test_adaptive_context_stops_after_bounded_progress_rounds(
             document_trees_by_document_id={},
         )
 
-    assert context_route_calls == 2
-    assert extractor.calls == ["result-strength", "context-1", "context-2"]
+    assert context_route_calls == 4
+    assert extractor.calls == [
+        "result-strength",
+        "context-1",
+        "context-2",
+        "context-3",
+        "context-4",
+    ]
     result = next(draft for draft in drafts if draft.reported_result is not None)
     assert "Scope gap:" in (result.selection_reason or "")
     assert any(
         record["trace_type"] == "objective_context_scope_gap"
-        and record["context_round"] == 2
-        and "bounded" in str(record["reason"]).casefold()
+        and record["context_round"] == 4
+        and "available same-paper source scope" in str(record["reason"]).casefold()
         for record in diagnostics.records
     )
 
@@ -5961,6 +6856,92 @@ def test_explicit_respectively_aliases_bind_results_to_method_conditions() -> No
         "results-1",
         "methods-1",
     }
+
+
+def test_source_extracted_material_context_retains_its_authoritative_source() -> None:
+    """A material fact comes from an inspected Source, not an Objective hint."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-temperature-strength",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
+        }
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-paper-1",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "reported_result": {
+                "outcome": "strength",
+                "direction": "increase",
+                "result_text": "Strength increased after the higher-temperature treatment.",
+            },
+            "attribution_scope": "descriptive_only",
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+
+    material_context = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "material-paper-1",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods-1",
+            "evidence_role": "condition_context",
+            "selection_status": "extracted",
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}]
+            },
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "methods-1",
+                    "source_excerpt": (
+                        "The specimens were machined from Ti-6Al-4V."
+                    ),
+                    "page": 2,
+                    "heading_path": "Materials and Methods",
+                    "supports": ["scientific_context.material"],
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    augmented = paper_experiment.reconstruct_paper_experiments(
+        collection_id=objective.collection_id,
+        source_facts=(result, material_context),
+        objectives=(objective,),
+    )
+
+    material_contexts = [
+        unit
+        for unit in augmented
+        if unit.reported_result is None and unit.scientific_context.material
+    ]
+    assert material_contexts == [material_context]
+    bound_result = next(unit for unit in augmented if unit.evidence_id == "result-paper-1")
+    assert bound_result.scientific_context.material == material_context.scientific_context.material
+    assert material_contexts[0].source_refs == (
+        {
+            "source_kind": "text_window",
+            "source_ref": "methods-1",
+            "source_excerpt": "The specimens were machined from Ti-6Al-4V.",
+            "page": 2,
+            "heading_path": "Materials and Methods",
+            "supports": ["scientific_context.material"],
+        },
+    )
 
 
 
@@ -6429,8 +7410,8 @@ def test_partial_result_expands_same_paper_context_bundle_once() -> None:
     }
 
 
-def test_empty_result_is_reextracted_after_same_paper_context_closure() -> None:
-    """A result missed on the first pass is retried after its paper context is read."""
+def test_empty_result_is_not_reinterpreted_after_same_paper_context_closure() -> None:
+    """Context closure never asks the model to reinterpret a result Source."""
 
     objective = _research_objective(
         {
@@ -6452,44 +7433,6 @@ def test_empty_result_is_reextracted_after_same_paper_context_closure() -> None:
         "S1 used 150 W laser power and S2 used 200 W laser power on Ti-6Al-4V.",
         2,
     )
-    direct_record = {
-        "evidence_role": "direct_result",
-        "changed_variables": [
-            {
-                "name": "laser power",
-                "baseline_value": 150,
-                "target_value": 200,
-                "unit": "W",
-            }
-        ],
-        "comparison": {
-            "baseline_label": "S1",
-            "target_label": "S2",
-            "axis_names": ["laser power"],
-            "comparable": True,
-            "incomparability_reasons": [],
-        },
-        "reported_result": {
-            "outcome": "porosity",
-            "value": 0.4,
-            "baseline_value": 0.8,
-            "target_value": 0.4,
-            "unit": "%",
-            "direction": "decrease",
-            "result_text": "Porosity decreased from 0.8% for S1 to 0.4% for S2.",
-        },
-        "attribution_scope": "isolated_effect",
-        "scientific_context": {
-            "material": [{"name": "material", "value": "Ti-6Al-4V"}],
-            "sample": [
-                {"name": "sample", "value": "S1"},
-                {"name": "sample", "value": "S2"},
-            ],
-        },
-        "resolution_status": "resolved",
-        "confidence": 0.9,
-    }
-
     class ContextAwareExtractor:
         def __init__(self) -> None:
             self.calls: list[str] = []
@@ -6498,17 +7441,7 @@ def test_empty_result_is_reextracted_after_same_paper_context_closure() -> None:
             source_ref = str(payload["source"]["source_ref"])
             self.calls.append(source_ref)
             if source_ref == "03-results":
-                # The first pass has insufficient context; after Methods is
-                # inspected, the same Source can be transcribed completely.
-                if self.calls.count(source_ref) == 1:
-                    return StructuredEvidenceExtractions()
-                assert "01-methods" in {
-                    item["source_ref"]
-                    for item in payload["same_paper_context_bundle"]
-                }
-                return StructuredEvidenceExtractions.model_validate(
-                    {"extractions": [direct_record]}
-                )
+                return StructuredEvidenceExtractions()
             return StructuredEvidenceExtractions.model_validate(
                 {
                     "extractions": [
@@ -6552,12 +7485,12 @@ def test_empty_result_is_reextracted_after_same_paper_context_closure() -> None:
         document_trees_by_document_id={},
     )
 
-    assert extractor.calls == ["03-results", "01-methods", "03-results"]
+    assert extractor.calls == ["03-results", "01-methods"]
     result_drafts = [draft for draft in drafts if draft.source_ref == "03-results"]
     assert len(result_drafts) == 1
-    assert result_drafts[0].reported_result is not None
-    assert result_drafts[0].selection_status == "extracted"
-    assert result_drafts[0].changed_variables[0].baseline_value == 150
+    assert result_drafts[0].reported_result is None
+    assert result_drafts[0].selection_status == "candidate"
+    assert result_drafts[0].resolution_status == "unresolved"
 
 
 def test_complete_result_endpoints_still_expand_missing_study_context() -> None:
@@ -7775,7 +8708,8 @@ def test_same_paper_encoded_sample_labels_bind_explicit_method_condition_schema(
     )
     methods_details = (
         "Samples were fabricated at different laser powers (100, 120, and 140 W) "
-        "and scan speeds (100, 200, and 280 mm/s)."
+        "and scan speeds (100, 200, and 280 mm/s). Yield strength was measured "
+        "by tensile testing."
     )
 
     def result(evidence_id: str, label: str, value: float) -> ExtractedEvidenceDraft:
@@ -7802,7 +8736,13 @@ def test_same_paper_encoded_sample_labels_bind_explicit_method_condition_schema(
                     "process": [
                         {"name": "manufacturing process", "value": "LPBF"}
                     ],
-                    "test": [{"name": "details", "value": methods_details}],
+                    "test": [
+                        {
+                            "name": "details",
+                            "value": methods_details,
+                            "applies_to_outcomes": ["yield strength"],
+                        }
+                    ],
                 },
                 "source_refs": [
                     {
@@ -8363,6 +9303,342 @@ def test_source_validation_keeps_explicit_mediator_outcome_association() -> None
     assert records[0]["comparison"] is None
 
 
+def test_source_validation_reanchors_result_text_to_the_reported_outcome() -> None:
+    """A result excerpt cannot borrow direction from an unrelated clause.
+
+    This mirrors a real replay failure where the model labelled a sentence about
+    load-carrying capacity as an elongation result, even though the same Source
+    states the porosity/ductility relationship in the following sentence.
+    """
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-result-anchor",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-porosity-anchor",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity-anchor",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    source_text = (
+        "Pores will reduce the load-carrying capacity of the material and act as "
+        "a crack initiation. Therefore, ductility has a further sensitivity to "
+        "porosity than strength."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": source_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "decrease",
+                "result_text": "Pores will reduce the load-carrying capacity of the material and act as a crack initiation.",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    result = records[0]["reported_result"]
+    assert "ductility" in result["result_text"].casefold()
+    assert "porosity" in result["result_text"].casefold()
+    assert result["direction"] == "unknown"
+    assert records[0]["attribution_scope"] == "association_only"
+
+
+def test_source_validation_preserves_explicit_association_variable_without_endpoints() -> None:
+    """An explicit source relationship remains reviewable when endpoints are absent."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-association-variable",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-porosity-association-variable",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity-association-variable",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    source_text = (
+        "Pores reduce the load-carrying capacity of the material. Therefore, "
+        "ductility has a further sensitivity to porosity than strength."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": source_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {"name": "porosity", "baseline_value": None, "target_value": None}
+            ],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "decrease",
+                "result_text": "Pores reduce the load-carrying capacity of the material.",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert [item["name"] for item in record["changed_variables"]] == ["porosity"]
+    assert record["attribution_scope"] == "association_only"
+    assert record["reported_result"]["direction"] == "unknown"
+    assert record["comparison"] is None
+    assert "ductility" in record["reported_result"]["result_text"].casefold()
+    assert record["reported_result"]["direction"] == "unknown"
+
+
+def test_source_validation_recovers_direct_association_after_mediator_context() -> None:
+    """An upstream process mention must not hide a later explicit association."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-mediator-context",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-porosity-mediator-context",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity-mediator-context",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    source_text = (
+        "Porosity decreased after the laser power and scan speed changed. "
+        "No significant porosity influence existed on strength, while ductility "
+        "was more sensitive to porosity."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": source_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "unknown",
+                "result_text": "ductility was more sensitive to porosity.",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert [item["name"] for item in record["changed_variables"]] == ["porosity"]
+    assert record["attribution_scope"] == "association_only"
+    assert record["reported_result"]["direction"] == "unknown"
+
+
+def test_source_validation_drops_mediator_when_intervention_owns_both_sentences() -> None:
+    """A treatment-mediated observation cannot be attributed to the mediator."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-intervention-split",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating-split",
+            "source_kind": "text_window",
+            "source_ref": "results-preheating-split",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    source_text = (
+        "The heat treatments induced the removal of porosity. "
+        "The heat treatments improved elongation."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": source_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "porosity",
+                    "baseline_value": None,
+                    "target_value": None,
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "without heat treatment",
+                "target_label": "heat treatment",
+                "axis_names": ["porosity"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "improve",
+                "result_text": "The heat treatments improved elongation.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+        grounding_sources=(
+            {
+                "source_kind": "text_window",
+                "source_ref": "related-context",
+                "text": "Porosity was discussed in relation to elongation.",
+            },
+        ),
+    )
+
+    assert len(records) == 1
+    assert records[0]["changed_variables"] == []
+    assert records[0]["comparison"] is None
+    assert records[0]["attribution_scope"] == "descriptive_only"
+    assert records[0]["resolution_status"] == "partial"
+    assert "intermediate" in records[0]["selection_reason"]
+
+
+def test_source_validation_keeps_variable_when_source_explicitly_links_it_to_outcome() -> None:
+    """An explicit variable-outcome relation remains an association candidate."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-porosity-elongation-explicit-link",
+            "question": "How does porosity affect elongation?",
+            "variables": ["porosity"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-porosity-explicit-link",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity-explicit-link",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = (
+        "Higher porosity (1.2%) was associated with lower elongation (9%) "
+        "than porosity of 0.4% (elongation 14%)."
+    )
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "porosity",
+                    "baseline_value": 0.4,
+                    "target_value": 1.2,
+                    "unit": "%",
+                }
+            ],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": 9,
+                "unit": "%",
+                "direction": "decrease",
+                "result_text": result_text,
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert [item["name"] for item in records[0]["changed_variables"]] == [
+        "porosity"
+    ]
+    assert records[0]["attribution_scope"] == "association_only"
+
+
 def test_source_validation_preserves_table_association_without_row_endpoints() -> None:
     objective = _research_objective(
         {
@@ -8426,7 +9702,7 @@ def test_source_validation_preserves_table_association_without_row_endpoints() -
     assert records[0]["comparison"] is None
 
 
-def test_source_validation_recovers_material_bound_by_source_heading() -> None:
+def test_source_validation_retains_material_extracted_from_source_heading() -> None:
     objective = _research_objective(
         {
             "objective_id": "obj-energy-ductility",
@@ -8460,7 +9736,9 @@ def test_source_validation_recovers_material_bound_by_source_heading() -> None:
             "result_text": result_text,
         },
         "attribution_scope": "descriptive_only",
-        "scientific_context": {},
+        "scientific_context": {
+            "material": [{"name": "material", "value": "Ti-6Al-4V"}]
+        },
         "resolution_status": "partial",
         "confidence": 0.9,
     }
@@ -8480,7 +9758,7 @@ def test_source_validation_recovers_material_bound_by_source_heading() -> None:
     )
 
     assert records[0]["scientific_context"]["material"] == [
-        {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+        {"name": "material", "value": "Ti-6Al-4V"}
     ]
 
     other_material_records = source_validation.validate_source_fact(
@@ -8497,7 +9775,63 @@ def test_source_validation_recovers_material_bound_by_source_heading() -> None:
     assert other_material_records[0]["scientific_context"]["material"] == []
 
 
-def test_source_validation_recovers_material_bound_by_the_result_source() -> None:
+def test_source_validation_does_not_bind_objective_material_from_a_secondary_object() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-substrate-porosity",
+            "question": "How does heat treatment affect porosity?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["heat treatment condition"],
+            "outcomes": ["porosity"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-nickel-specimen",
+            "source_kind": "text_window",
+            "source_ref": "results-porosity",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    source_text = (
+        "A TC4 substrate supported the nickel specimen. "
+        "Nickel specimen porosity decreased after heat treatment."
+    )
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "heading_path": "Results",
+            "text": source_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "porosity",
+                "direction": "decrease",
+                "result_text": (
+                    "Nickel specimen porosity decreased after heat treatment."
+                ),
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records[0]["scientific_context"]["material"] == []
+
+
+def test_source_validation_retains_material_bound_by_the_result_source() -> None:
     objective = _research_objective(
         {
             "objective_id": "obj-heat-treatment-elongation",
@@ -8556,14 +9890,16 @@ def test_source_validation_recovers_material_bound_by_the_result_source() -> Non
                 "result_text": result_text,
             },
             "attribution_scope": "isolated_effect",
-            "scientific_context": {},
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti6Al4V"}]
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         },
     )
 
     assert records[0]["scientific_context"]["material"] == [
-        {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+        {"name": "material", "value": "Ti6Al4V"}
     ]
     assert "scientific_context.material" in records[0]["source_refs"][0]["supports"]
 
@@ -9265,6 +10601,29 @@ def test_llm_context_keeps_generic_process_when_value_is_source_grounded():
     ]
 
 
+def test_llm_context_keeps_generic_alloy_when_value_is_source_grounded():
+    record = source_validation._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "material": [
+                    {"name": "alloy", "value": "Ti-6Al-4V"}
+                ],
+                "sample": [],
+                "process": [],
+                "test": [],
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": "Ti-6Al-4V specimens were fabricated by LPBF.",
+        },
+    )
+
+    assert record["scientific_context"]["material"] == [
+        {"name": "alloy", "value": "Ti-6Al-4V"}
+    ]
+
+
 def test_llm_result_rejects_ungrounded_categorical_variable_endpoint():
 
     assert not source_validation._objective_extracted_result_is_source_grounded(
@@ -9646,6 +11005,39 @@ def test_result_role_with_only_groundable_context_is_preserved_as_context() -> N
     assert extraction.scientific_context.sample[0].value == "fibrous region"
 
 
+def test_context_role_with_reported_result_is_preserved_as_result() -> None:
+    payload = {
+        "extractions": [
+            {
+                "evidence_role": "condition_context",
+                "changed_variables": [],
+                "comparison": None,
+                "reported_result": {
+                    "outcome": "defect structure",
+                    "value": None,
+                    "unit": None,
+                    "direction": "decrease",
+                    "result_text": "defect density decreases with increasing VED",
+                },
+                "attribution_scope": "not_attributable",
+                "scientific_context": {},
+                "resolution_status": "partial",
+                "confidence": 0.8,
+            }
+        ]
+    }
+
+    normalized = source_extraction._normalize_objective_evidence_payload(payload)
+    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+
+    assert len(parsed.extractions) == 1
+    extraction = parsed.extractions[0]
+    assert extraction.evidence_role == "direct_result"
+    assert extraction.reported_result is not None
+    assert extraction.reported_result.outcome == "defect structure"
+    assert extraction.attribution_scope == "not_attributable"
+
+
 def test_result_role_without_result_or_context_remains_invalid() -> None:
     payload = {
         "extractions": [
@@ -9729,6 +11121,34 @@ def test_research_objective_prompt_requires_context_scope_for_explicit_parameter
     assert "experimental" in system_prompt
 
 
+def test_narrow_test_context_prompt_requires_explicit_outcome_applicability() -> None:
+    system_prompt, user_prompt = source_extraction.build_objective_evidence_prompt(
+        {
+            "objective": {
+                "question": "How does preheating affect microstructure?",
+                "variables": ["preheating"],
+                "outcomes": ["microstructure"],
+            },
+            "evidence_route": {
+                "role": "characterization",
+                "context_fields": ["test"],
+            },
+            "source": {
+                "source_kind": "text_window",
+                "text": (
+                    "Porosity was measured by optical microscopy. "
+                    "Microstructure was characterized by SEM."
+                ),
+            },
+        }
+    )
+
+    assert "OBJECTIVE OUTCOMES" in user_prompt
+    assert '["microstructure"]' in user_prompt
+    assert "applies_to_outcomes" in system_prompt
+    assert "explicitly measures or characterizes" in system_prompt
+
+
 def test_context_scope_survives_model_validation_and_source_grounding() -> None:
     parsed = source_extraction.StructuredEvidenceExtractions.model_validate(
         {
@@ -9763,6 +11183,159 @@ def test_context_scope_survives_model_validation_and_source_grounding() -> None:
     )
     assert grounded["scientific_context"]["process"][0]["context_scope"] == (
         "simulation"
+    )
+
+
+def test_source_grounding_keeps_only_outcome_applicability_named_by_source() -> None:
+    grounded = source_validation._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "method",
+                        "value": "SEM",
+                        "applies_to_outcomes": ["microstructure", "porosity"],
+                    },
+                    {
+                        "name": "method",
+                        "value": "optical microscopy",
+                        "applies_to_outcomes": ["porosity"],
+                    },
+                ]
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": (
+                "SEM and optical microscopy were used. "
+                "Microstructure was characterized by SEM."
+            ),
+        },
+    )
+
+    sem, optical = grounded["scientific_context"]["test"]
+    assert sem["applies_to_outcomes"] == ["microstructure"]
+    assert "applies_to_outcomes" not in optical
+
+
+def test_source_grounding_keeps_single_test_with_empty_outcome_scope() -> None:
+    """An explicit empty scope means the Source has one unassigned method."""
+
+    retained = source_validation._objective_retain_outcome_applicable_test_context(
+        {
+            "reported_result": {"outcome": "porosity"},
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "method",
+                        "value": "X-ray computed tomography",
+                        "applies_to_outcomes": [],
+                    }
+                ]
+            },
+        }
+    )
+
+    assert retained["scientific_context"]["test"] == [
+        {
+            "name": "method",
+            "value": "X-ray computed tomography",
+            "applies_to_outcomes": [],
+        }
+    ]
+
+
+def test_document_context_binds_only_test_method_applicable_to_result_outcome() -> None:
+    """A paper-wide method is usable only for the outcome it explicitly measures."""
+
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "microstructure-result",
+            "objective_id": "obj-preheating-microstructure",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results-microstructure",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "microstructure",
+                "direction": "mixed",
+                "result_text": "The preheated condition developed cellular grains.",
+            },
+            "attribution_scope": "descriptive_only",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-microstructure",
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    def method_context(
+        *,
+        evidence_id: str,
+        source_ref: str,
+        name: str,
+        value: str,
+        applies_to_outcomes: list[str],
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": result.objective_id,
+                "document_id": result.document_id,
+                "source_kind": "text_window",
+                "source_ref": source_ref,
+                "evidence_role": "condition_context",
+                "scientific_context": {
+                    "test": [
+                        {
+                            "name": name,
+                            "value": value,
+                            "context_scope": "experimental",
+                            "applies_to_outcomes": applies_to_outcomes,
+                        }
+                    ]
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": source_ref,
+                    }
+                ],
+                "attribution_scope": "not_attributable",
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    porosity_method = method_context(
+        evidence_id="porosity-method",
+        source_ref="methods-porosity",
+        name="porosity measurement method",
+        value="digital optical microscopy",
+        applies_to_outcomes=["porosity"],
+    )
+    microstructure_method = method_context(
+        evidence_id="microstructure-method",
+        source_ref="methods-microstructure",
+        name="microstructure characterization method",
+        value="scanning electron microscopy",
+        applies_to_outcomes=["microstructure"],
+    )
+
+    reconstructed = paper_experiment._bind_unambiguous_document_context(
+        (porosity_method, microstructure_method, result)
+    )
+    bound = next(item for item in reconstructed if item.evidence_id == result.evidence_id)
+
+    assert [item.value for item in bound.scientific_context.test] == [
+        "scanning electron microscopy"
+    ]
+    assert bound.scientific_context.test[0].applies_to_outcomes == (
+        "microstructure",
     )
 
 
@@ -10016,6 +11589,34 @@ def test_objective_table_rows_skip_repeated_continuation_header_rows():
     assert rows == ((1, ("HIP-SLM (140/280)", "94.68")),)
 
 
+def test_objective_table_rows_honor_declared_header_when_flattened_header_differs():
+    headers, rows = source_validation._objective_table_matrix_rows(
+        {
+            "column_headers": ["column_1", "Cr", "Ni", "N", "P"],
+            "header_row_count": 1,
+            "table_matrix": [
+                ["", "Cr", "Ni", "N", "P"],
+                ["(Wt. %)", "16-18", "4.03", "<0.10", "<0.04"],
+            ],
+        }
+    )
+
+    assert headers == ("column_1", "Cr", "Ni", "N", "P")
+    assert rows == ((1, ("(Wt. %)", "16-18", "4.03", "<0.10", "<0.04")),)
+
+
+def test_objective_table_rows_keep_legacy_matrix_without_declared_header():
+    headers, rows = source_validation._objective_table_matrix_rows(
+        {
+            "column_headers": ["Sample", "Density (%)"],
+            "table_matrix": [["A", "98.2"], ["B", "99.1"]],
+        }
+    )
+
+    assert headers == ("Sample", "Density (%)")
+    assert rows == ((1, ("A", "98.2")), (2, ("B", "99.1")))
+
+
 def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
 ):
     class RepairingPaperFactsExtractor:
@@ -10058,7 +11659,7 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -10144,7 +11745,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -10205,7 +11806,7 @@ def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
 
     with capture_analysis_diagnostics() as diagnostics:
         repaired_source, repair_error = (
-            source_extraction._repair_objective_table_source_if_needed(
+            table_repair.repair_table_source(
                 collection_id="col-test",
                 route=route,
                 source=source,
@@ -10242,6 +11843,56 @@ def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
     )
 
 
+def test_research_objective_table_repair_rejects_reordered_source_labels():
+    class LabelReorderingRepairExtractor:
+        def repair_table_matrix(self, _payload):
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=[
+                    ["Specimens", "Yield Strength (MPa)"],
+                    ["condition B (two)", "100 (+/- 1)"],
+                    ["condition A (one)", "200 (+/- 2)"],
+                ],
+                confidence=0.9,
+            )
+
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-strength",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "column_headers": ["Specimens", "Yield Strength (MPa)"],
+        "table_matrix": [
+            ["Specimens", "Yield Strength (MPa)"],
+            ["condition A (", "100 (+/- 1)"],
+            ["one) condition B (", "200 (+/- 2)"],
+            ["two)", ""],
+        ],
+    }
+
+    repaired_source, repair_error = (
+        table_repair.repair_table_source(
+            collection_id="col-test",
+            route=route,
+            source=source,
+            paper_facts_extractor=LabelReorderingRepairExtractor(),
+        )
+    )
+
+    assert repaired_source is source
+    assert str(repair_error) == (
+        "table matrix repair changed or reordered source row labels"
+    )
+
+
 def test_research_objective_table_repair_rejects_invented_label_tokens():
     class InventingRepairExtractor:
         def repair_table_matrix(self, _payload):
@@ -10275,7 +11926,7 @@ def test_research_objective_table_repair_rejects_invented_label_tokens():
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -10302,7 +11953,7 @@ def test_research_objective_table_repair_accepts_cross_row_uncertainty_rebinding
     ]
 
     assert (
-        source_extraction._objective_table_repair_preserves_result_number_sequences(
+        table_repair._objective_table_repair_preserves_result_number_sequences(
             original_matrix=original_matrix,
             repaired_matrix=repaired_matrix,
         )
@@ -10351,7 +12002,7 @@ def test_research_objective_table_repair_accepts_multiple_parser_fragment_merges
     }
 
     repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
+        table_repair.repair_table_source(
             collection_id="col-test",
             route=route,
             source=source,
@@ -10449,7 +12100,7 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
 
     with capture_analysis_diagnostics() as diagnostics:
         repaired_source, repair_error = (
-            source_extraction._repair_objective_table_source_if_needed(
+            table_repair.repair_table_source(
                 collection_id="col-test",
                 route=route,
                 source=source,
@@ -10460,6 +12111,54 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
     assert repair_error is None
     assert repaired_source["table_matrix"] == repaired_matrix
     assert repaired_source["table_matrix_structural_repair_applied"] is True
+    attestation = repaired_source["table_matrix_repair_attestation"]
+    assert attestation == {
+        "schema_version": "objective_table_repair_attestation.v1",
+        "raw_matrix_sha256": sha256(
+            json.dumps(
+                table_repair._canonical_objective_table_matrix(
+                    source=source,
+                    matrix=source["table_matrix"],
+                ),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        "repaired_matrix_sha256": sha256(
+            json.dumps(
+                repaired_matrix,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    excerpt = (
+        "Specimens: HIP-SLM (140/280) | Hardness (HV): 162.4 ( +/- 6.9) | "
+        "Yield Strength (MPa): 221.3 (+/- 9.3) | "
+        "Tensile Strength (MPa): 332.6 (+/- 39.6) | "
+        "Elongation (%): 9.6 (+/- 4.1)"
+    )
+    source_ref = source_validation._objective_route_source_refs(
+        route=route,
+        source=repaired_source,
+        row_index=3,
+        col_index=1,
+        source_excerpt=excerpt,
+    )[0]
+    assert source_ref["table_matrix_repair_attestation"] == {
+        **attestation,
+        "repaired_row_index": 3,
+        "repaired_row_sha256": sha256(
+            json.dumps(
+                repaired_matrix[3],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        "source_excerpt_sha256": sha256(
+            " ".join(excerpt.split()).casefold().encode("utf-8")
+        ).hexdigest(),
+    }
     assert diagnostics.records == (
         {
             "trace_type": "table_matrix_repair",
@@ -10483,6 +12182,124 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
     )
 
 
+def test_research_objective_table_repair_recovers_complete_p004_table_4_sequence():
+    """P004 Table 4 remains usable when one model cell keeps a split uncertainty."""
+
+    headers = [
+        "Specimens",
+        "Hardness (HV)",
+        "Yield Strength (MPa)",
+        "Tensile Strength (MPa)",
+        "Elongation (%)",
+    ]
+    original_matrix = [
+        headers,
+        ["CR", "215.2 ( +/- 8.5)", "222.5 ( +/- 6.1)", "590.9 ( +/- 5.4)", "63.5 ( +/- 3.1)"],
+        ["as-SLM(100/", "202.4 ( +/- 5.1)", "441.5 ( +/- 15.0)", "570.8 ( +/- 6.0)", "28.9 ( +/- 6.1)"],
+        ["100) HT-SLM", "170.3", "304.4 ( +/- 1.8)", "543.8 ( +/- 2.8)", "37.8 ( +/- 2.4)"],
+        ["(100/100) HIP-SLM (100/100)", "( +/- 4.2) 173.5 ( +/- 4.1)", "306.5 ( +/- 1.3)", "550.7 ( +/- 6.4)", "35.5 ( +/- 4.9)"],
+        ["as-SLM(100/ 200)", "187.2 ( +/- 9.3)", "275.5 ( +/- 18.2)", "306.1 ( +/- 12.1)", "2.5 ( +/- 1.1)"],
+        ["HT-SLM (100/200)", "163.3 ( +/- 4.9)", "196.3 ( +/- 5.4)", "288.1 ( +/- 13.1)", "9.6 ( +/- 0.5)"],
+        ["HIP-SLM (100/200)", "157.5 ( +/- 4.5)", "193.8 ( +/- 5.3)", "275.4 ( +/- 21.0)", "6.8 ( +/- 1.6)"],
+        ["as-SLM(100/ 280)", "181.2 ( +/- 11.9)", "175.0 ( +/- 20.8)", "189.3 ( +/- 24.0)", "1.9 ( +/- 0.3)"],
+        ["HT-SLM", "156.0 ( +/- 6.8)", "128.6 ( +/- 8.9)", "163.4 ( +/- 14.0)", "4.1 ( +/- 1.0)"],
+        ["(100/280) HIP-SLM", "147.6", "130.9 +/-", "171.5 ( +/- 14.6)", "3.9 ( +/- 1.0)"],
+        ["(100/280) as-SLM(120/", "( +/- 9.2) 196.9", "( 10.2) 464.8 ( +/- 5.8)", "593.0 ( +/- 9.1)", "35.0 ( +/- 9.6)"],
+        ["100) HT-SLM", "( +/- 4.5) 176.0", "321.7 ( +/- 3.3)", "570.2 ( +/- 4.9)", "51.2 ( +/- 5.0)"],
+        ["(120/100) HIP-SLM", "( +/- 2.1) 180.5", "322.1 ( +/- 0.4)", "573.9 ( +/- 3.6)", "52.2 ( +/- 1.0)"],
+        ["(120/100) as-SLM(120/", "( +/- 5.7) 181.1", "400.6 ( +/- 7.3)", "462.0 ( +/- 18.5)", "7.1 ( +/- 2.8)"],
+        ["200) HT-SLM", "( +/- 10.8) 159.9 ( +/- 10.9)", "272.3 ( +/- 2.2)", "447.7 ( +/- 18.9)", "17.4 ( +/- 3.9)"],
+        ["(120/200) HIP-SLM", "160.8", "265.1 ( +/- 5.0)", "447.8 ( +/- 20.1)", "14.9 ( +/- 7.1)"],
+        ["(120/200) as-SLM(120/ 280)", "( +/- 4.9) 175.3 ( +/- 13.5)", "228.6 ( +/- 7.1)", "251.8 ( +/- 15.4)", "2.6 ( +/- 0.9)"],
+        ["HT-SLM", "155.9", "174.8", "243.3 ( +/- 29.5)", "6.8 ( +/- 1.7)"],
+        ["(120/280) HIP-SLM (120/280)", "( +/- 8.1) 156.6 ( +/- 9.7)", "( +/- 21.1) 187.8 ( +/- 18.9)", "247.4 ( +/- 26.5)", "6.3 ( +/- 0.9)"],
+        ["as-SLM(140/ 100)", "198.4 ( +/- 3.7)", "455.2 ( +/- 6.5)", "585.8 ( +/- 7.1)", "40.8 ( +/- 1.4)"],
+        ["HT-SLM (140/100)", "173.2 ( +/- 5.7)", "321.9 ( +/- 3.7)", "570.7 ( +/- 3.4)", "54.7 ( +/- 3.0)"],
+        ["HIP-SLM (140/100)", "177.7 +/-", "319.0 ( +/- 5.7)", "566.7 ( +/- 6.2)", "52.7 ( +/- 3.6)"],
+        ["as-SLM(140/ 200)", "( 5.1) 191.4 ( +/- 5.6)", "426.7 ( +/- 2.7)", "516.9 ( +/- 13.0)", "15.2 ( +/- 4.1)"],
+        ["HT-SLM (140/200)", "166.5 ( +/- 6.0)", "290.8 ( +/- 1.3)", "497.0 ( +/- 2.5)", "22.9 ( +/- 1.1)"],
+        ["HIP-SLM (140/200)", "169.2 ( +/- 5.7)", "297.8 ( +/- 3.4)", "506.5 ( +/- 12.2)", "23.9 ( +/- 4.6)"],
+        ["as-SLM(140/ 280)", "191.8 ( +/- 7.2)", "301.4 ( +/- 22.0)", "347.8 ( +/- 31.8)", "5.6 ( +/- 1.2)"],
+        ["HT-SLM", "160.1 ( +/- 5.5)", "217.0 ( +/- 19.9)", "323.2 ( +/- 40.5)", "9.1 ( +/- 1.3)"],
+        ["(140/280) HIP-SLM", "162.4", "221.3 ( +/- 9.3)", "332.6 ( +/- 39.6)", "9.6 ( +/- 4.1)"],
+        ["(140/280)", "( +/- 6.9)", "", "", ""],
+    ]
+    specimen_labels = [
+        "CR",
+        *[
+            f"{state}-SLM ({power}/{speed})"
+            for power in (100, 120, 140)
+            for speed in (100, 200, 280)
+            for state in ("as", "HT", "HIP")
+        ],
+    ]
+
+    class P004RepairExtractor:
+        def repair_table_matrix(self, _payload):
+            numeric_columns = [
+                table_repair._objective_column_numeric_tokens(
+                    original_matrix,
+                    column_index,
+                )
+                for column_index in range(1, len(headers))
+            ]
+            repaired = [headers]
+            for row_index, label in enumerate(specimen_labels):
+                repaired.append(
+                    [
+                        label,
+                        *[
+                            f"{tokens[row_index * 2]} ( +/- {tokens[row_index * 2 + 1]})"
+                            for tokens in numeric_columns
+                        ],
+                    ]
+                )
+            # This is the real split cell that made one production replay fail.
+            repaired[10][2] = "130.9 +/-"
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=repaired,
+                confidence=0.9,
+            )
+
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-strength",
+            "document_id": "paper-p004",
+            "source_kind": "table",
+            "source_ref": "table-4",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-4",
+        "document_id": "paper-p004",
+        "column_headers": headers,
+        "header_row_count": 1,
+        "table_matrix": original_matrix,
+    }
+
+    repaired_source, repair_error = (
+        table_repair.repair_table_source(
+            collection_id="col-test",
+            route=route,
+            source=source,
+            paper_facts_extractor=P004RepairExtractor(),
+        )
+    )
+
+    assert repair_error is None
+    repaired_matrix = repaired_source["table_matrix"]
+    assert repaired_matrix[0] == headers
+    assert [row[0] for row in repaired_matrix[1:]] == specimen_labels
+    assert table_repair._objective_column_numeric_tokens(
+        repaired_matrix, 2
+    ) == table_repair._objective_column_numeric_tokens(original_matrix, 2)
+    assert repaired_matrix[2][2] == "441.5 ( +/- 15.0)"
+    assert repaired_matrix[-1][2] == "221.3 ( +/- 9.3)"
+
+
 def test_research_objective_table_repair_rejects_lost_p004_uncertainty():
     original_matrix = [
         ["Specimens", "Hardness (HV)"],
@@ -10497,7 +12314,7 @@ def test_research_objective_table_repair_rejects_lost_p004_uncertainty():
     ]
 
     assert not (
-        source_extraction._objective_table_repair_preserves_result_number_sequences(
+        table_repair._objective_table_repair_preserves_result_number_sequences(
             original_matrix=original_matrix,
             repaired_matrix=repaired_matrix,
         )
@@ -11382,7 +13199,13 @@ def test_reconstruction_records_validated_context_closure():
                     {"name": "laser power", "value": 200, "unit": "W"},
                     {"name": "hatch spacing", "value": 0.1, "unit": "mm"},
                 ],
-                "test": [{"name": "test method", "value": "density measurement"}],
+                "test": [
+                    {
+                        "name": "test method",
+                        "value": "density measurement",
+                        "applies_to_outcomes": ["relative density"],
+                    }
+                ],
             },
             "source_refs": [
                 {
@@ -11469,7 +13292,11 @@ def test_reconstruction_closure_counts_raw_result_anchors_once_when_rows_form_co
                         {"name": "hatch spacing", "value": 0.1, "unit": "mm"},
                     ],
                     "test": [
-                        {"name": "method", "value": "density measurement"}
+                        {
+                            "name": "method",
+                            "value": "density measurement",
+                            "applies_to_outcomes": ["relative density"],
+                        }
                     ],
                 },
                 "source_refs": [

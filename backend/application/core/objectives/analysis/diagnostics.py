@@ -9,6 +9,7 @@ from copy import deepcopy
 import json
 import logging
 from threading import Lock
+from traceback import walk_tb
 from typing import Any
 
 
@@ -59,8 +60,28 @@ def record_analysis_diagnostic(payload: Mapping[str, Any]) -> None:
         collector.record(record)
 
 
+def record_analysis_failure(error: Exception, **context: str | int) -> None:
+    """Keep failure locations without provider response text, source code or locals."""
+    record_analysis_diagnostic(
+        {
+            **context,
+            "trace_type": "objective_analysis_failure",
+            "error_type": type(error).__name__,
+            "frames": [
+                {
+                    "file": frame.f_code.co_filename,
+                    "line": line,
+                    "function": frame.f_code.co_name,
+                }
+                for frame, line in walk_tb(error.__traceback__)
+            ],
+        }
+    )
+
+
 __all__ = [
     "AnalysisDiagnosticCollector",
     "capture_analysis_diagnostics",
     "record_analysis_diagnostic",
+    "record_analysis_failure",
 ]

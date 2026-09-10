@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections import Counter
 from dataclasses import dataclass
 from functools import partial
 from hashlib import sha1
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Iterable, Literal, Mapping, NamedTuple
 
 from openai import APIConnectionError, APIStatusError
 from pydantic import (
@@ -24,6 +23,8 @@ from pydantic import (
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
+    OBJECTIVE_STATE_TEXT_LIMIT,
+    ROUTE_PROMPT_TEXT_LIMIT,
     order_routes_for_extraction,
 )
 from application.core.objectives.analysis.diagnostics import (
@@ -33,6 +34,9 @@ from application.core.objectives.analysis.source_screening import PaperAnalysisF
 from application.core.objectives.analysis.source_validation import (
     _objective_axis_is_source_grounded,
     _objective_column_key,
+    _objective_result_is_attributed_to_secondary_study,
+    _objective_result_text_is_study_intent_only,
+    _objective_source_is_secondary_only_target_context,
     _objective_source_grounding_text,
     _objective_value_is_source_grounded,
     _objective_route_source_refs,
@@ -41,6 +45,16 @@ from application.core.objectives.analysis.source_validation import (
     _objective_table_row_values,
     _split_property_unit,
     validate_source_fact,
+)
+from application.core.objectives.analysis.source_text import (
+    NUMBER_PATTERN,
+    coerce_result_cell_number,
+    numeric_match_tokens,
+)
+from application.core.objectives.analysis.table_repair import (
+    _objective_table_source_needs_llm_structural_repair,
+    normalize_table_matrix,
+    repair_table_source,
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.paper_facts.extraction import (
@@ -62,26 +76,13 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_ROUTE_PROMPT_TEXT_CHARS = 320
-_ROUTE_PROMPT_HEADER_LIMIT = 8
 _OBJECTIVE_STATE_ITEM_LIMIT = 12
-_OBJECTIVE_STATE_TEXT_CHARS = 220
 # A Source block is normally one paragraph, but tables and figure captions can
 # carry longer result clauses.  Keep a generous bounded window so extraction
 # sees the whole local claim without sending an unbounded document section.
 _OBJECTIVE_EVIDENCE_TEXT_CHARS = 12_000
-# Keep the complete bounded Source block available to extraction.  A second,
-# smaller head-only limit silently removed result clauses that appeared later
-# in a paragraph, which is not a valid evidence-preserving reduction.
-_OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS = _OBJECTIVE_EVIDENCE_TEXT_CHARS
 _OBJECTIVE_CONTEXT_BUNDLE_MAX_SOURCES = 16
 _OBJECTIVE_CONTEXT_BUNDLE_MAX_CHARS = 40_000
-# Same-paper closure is a targeted research read, not a license to inspect an
-# entire paper after every partial result. Two rounds are enough for the normal
-# Results -> Methods -> linked-label chain while leaving unresolved scope
-# explicit when the paper requires a broader review.
-_OBJECTIVE_ADAPTIVE_CONTEXT_MAX_ROUNDS = 2
-_TABLE_MATRIX_REPAIR_PROMPT_TOKEN_LIMIT = 12_000
 _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
     "standard deviation",
     "std",
@@ -106,16 +107,15 @@ _OBJECTIVE_MEASURED_RESULT_TERMS = (
     "measurement",
     "observed",
 )
-_NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _GROUP_LABEL_PATTERN = re.compile(
     r"\b(?:sample|specimen|group|condition)\s*[A-Za-z]?\d+\b|\b[A-Z]{1,3}\d+\b"
 )
 _SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 3072
 _SOURCE_EXTRACTION_MAX_ITEMS = 8
-# Candidate selection and bounded same-paper rereads are part of the scientific
-# extraction contract. Bump it so persisted checkpoints are rebuilt rather than
-# replaying the pre-closure route set.
-OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v18"
+# Candidate selection and immutable result anchors are part of the scientific
+# extraction contract. Rebuild checkpoints so context closure no longer
+# reinterprets a result Source after its source-local read.
+OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v27"
 _ADAPTIVE_CONTEXT_HEADING_MARKERS = (
     "design",
     "method",
@@ -145,6 +145,46 @@ _ADAPTIVE_CONTEXT_TEST_MARKERS = (
     "evaluation",
     "characteriz",
     "analysis",
+)
+_ADAPTIVE_CONTEXT_METHOD_SECTION_MARKERS = (
+    "method",
+    "experimental",
+    "procedure",
+    "protocol",
+    "characteriz",
+    "measurement",
+    "test",
+)
+_ADAPTIVE_CONTEXT_METHOD_EVIDENCE_MARKERS = (
+    "characteriz",
+    "measure",
+    "microscop",
+    "spectroscop",
+    "diffract",
+    "tomograph",
+    "test",
+    "assess",
+    "evaluat",
+    "standard",
+    "load cell",
+    "extensometer",
+)
+_ADAPTIVE_CONTEXT_METHOD_IDENTITY_MARKERS = (
+    "characteriz",
+    "microscop",
+    "spectroscop",
+    "diffract",
+    "tomograph",
+    "standard",
+    "load cell",
+    "extensometer",
+    "instrument",
+    "apparatus",
+)
+_ADAPTIVE_CONTEXT_EXPLICIT_METHOD_HEADING_MARKERS = (
+    "characteriz",
+    "measurement",
+    "test",
 )
 _SOURCE_EXTRACTION_ROLES = {
     "direct_result",
@@ -222,10 +262,14 @@ INPUT SCHEMA AND AUTHORITY
   directions, outcomes, and `result_text`. A bundle Source may support only
   explicit context fields or condition endpoints, and those fields remain
   bound to their bundle Source reference.
-- Context attributes use `{name, value, unit, context_scope}`. `context_scope`
-  is `experimental` for settings applied to fabricated specimens or measured
+- Context attributes use
+  `{name, value, unit, context_scope, applies_to_outcomes}`. `context_scope` is
+  `experimental` for settings applied to fabricated specimens or measured
   tests, `simulation` for model inputs or outputs, `background` for general or
   cited context, and `unknown` only when SOURCE does not establish the scope.
+  For a test or characterization fact, list only the outcomes that SOURCE
+  explicitly says the method measures or characterizes. Leave the list empty
+  for other context families or when SOURCE does not establish that relation.
 
 DECISION PROCESS
 1. If SOURCE does not report an objective outcome or useful objective-specific
@@ -418,7 +462,8 @@ attribution, or classification of adjacent context families.
 
 INPUT
 `CONTEXT FAMILY` names the single requested family but supplies no scientific
-values. `SOURCE` is the only authority for returned values.
+values. `OBJECTIVE OUTCOMES` limits which test-method relationships are useful
+but is not evidence. `SOURCE` is the only authority for returned values.
 
 DECISION PROCESS
 1. Read only SOURCE.
@@ -426,9 +471,14 @@ DECISION PROCESS
    sample, process, result, or test facts that belong to another family.
 3. Keep fixed conditions even when they are not varied and are shared by every
    compared group.
-4. When SOURCE explicitly attaches a fact to a named group, copy that exact
+4. For the `test` family, return a method or test condition only when SOURCE
+   explicitly measures or characterizes one of OBJECTIVE OUTCOMES with it. Copy
+   the exact source-named outcome to `applies_to_outcomes`. Do not return a
+   neighboring outcome's method merely because it appears in the same Source.
+   For other families, use an empty list.
+5. When SOURCE explicitly attaches a fact to a named group, copy that exact
    label to `group_label`; otherwise use null.
-5. If SOURCE has no explicit fact in CONTEXT FAMILY, return `{"facts":[]}`.
+6. If SOURCE has no explicit fact in CONTEXT FAMILY, return `{"facts":[]}`.
 
 HARD RULES
 - Return one JSON object with only `facts`; return no more than sixteen.
@@ -436,9 +486,11 @@ HARD RULES
 - Context applied to fabricated specimens or measured tests uses
   `context_scope: "experimental"`; modeled settings use `"simulation"`.
 - Do not duplicate a fact or invent groups from a plural word.
+- Every non-empty `applies_to_outcomes` value must occur in SOURCE and must be
+  explicitly linked there to the returned method or test condition.
 
 OUTPUT SHAPE
-{"facts":[{"name":"descriptive field name","value":"exact SOURCE value","unit":null,"context_scope":"experimental","group_label":null}]}
+{"facts":[{"name":"descriptive field name","value":"exact SOURCE value","unit":null,"context_scope":"experimental","applies_to_outcomes":["exact SOURCE outcome"],"group_label":null}]}
 Replace the descriptive strings with SOURCE facts. Do not return the example
 strings literally.
 """.strip()
@@ -488,6 +540,7 @@ class StructuredEvidenceAttribute(_SourceExtractionResponse):
     context_scope: Literal["experimental", "simulation", "background", "unknown"] = (
         "unknown"
     )
+    applies_to_outcomes: list[str] = Field(default_factory=list, max_length=4)
 
     @field_validator("context_scope", mode="before")
     @classmethod
@@ -497,6 +550,11 @@ class StructuredEvidenceAttribute(_SourceExtractionResponse):
             allowed=_SOURCE_CONTEXT_SCOPES,
             default="unknown",
         )
+
+    @field_validator("applies_to_outcomes", mode="before")
+    @classmethod
+    def _normalize_applies_to_outcomes(cls, value: object) -> object:
+        return _normalize_list_container(value)
 
 
 class StructuredEvidenceVariable(_SourceExtractionResponse):
@@ -602,10 +660,13 @@ class StructuredEvidenceContext(_SourceExtractionResponse):
             name = str(item.get("name") or info.field_name).strip()
             unit = item.get("unit")
             context_scope = item.get("context_scope")
+            applies_to_outcomes = item.get("applies_to_outcomes")
 
-            def with_context_scope(attribute: dict[str, object]) -> dict[str, object]:
+            def with_context_metadata(attribute: dict[str, object]) -> dict[str, object]:
                 if context_scope is not None:
                     attribute["context_scope"] = context_scope
+                if applies_to_outcomes is not None:
+                    attribute["applies_to_outcomes"] = applies_to_outcomes
                 return attribute
 
             if "value" in item:
@@ -618,7 +679,7 @@ class StructuredEvidenceContext(_SourceExtractionResponse):
                         sort_keys=True,
                     )
                 normalized_items.append(
-                    with_context_scope(
+                    with_context_metadata(
                         {"name": name, "value": attribute_value, "unit": unit}
                     )
                 )
@@ -630,7 +691,7 @@ class StructuredEvidenceContext(_SourceExtractionResponse):
                 if key not in {"name", "unit"}
             }
             normalized_items.append(
-                with_context_scope(
+                with_context_metadata(
                     {
                         "name": name if details else info.field_name,
                         "value": (
@@ -911,7 +972,8 @@ def _objective_context_repair_instruction(
         "Your previous context transcription was invalid. Re-read the original "
         f"SOURCE and transcribe only `{context_field}` facts. Return one compact "
         "JSON object with only `facts`; each fact requires name, value, unit, "
-        "context_scope, and group_label. Do not return adjacent context families "
+        "context_scope, applies_to_outcomes, and group_label. Do not return "
+        "adjacent context families "
         "and do not duplicate a fact. If SOURCE has no explicit requested fact, "
         "return {\"facts\":[]}. Do not add facts absent from "
         f"SOURCE. Validation error: {repair_detail[:1000]}"
@@ -1040,6 +1102,8 @@ def build_objective_evidence_prompt(
     if narrow_context_field is not None:
         user_prompt = (
             f"CONTEXT FAMILY: {narrow_context_field}\n"
+            "OBJECTIVE OUTCOMES: "
+            f"{json.dumps(objective.get('outcomes') or [], ensure_ascii=False, separators=(',', ':'))}\n"
             "INCLUDE ONLY: "
             f"{_OBJECTIVE_CONTEXT_FAMILY_GUIDANCE[narrow_context_field]}\n"
             "EXCLUDE: "
@@ -1138,6 +1202,18 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             and bool(scientific_context.get(family))
             for family in _OBJECTIVE_CONTEXT_FIELD_NAMES
         )
+        if (
+            str(normalized_extraction.get("evidence_role") or "")
+            in _OBJECTIVE_CONTEXT_ROLES
+            and normalized_extraction.get("reported_result") is not None
+        ):
+            # The role is model-authored metadata, while the reported result
+            # must still pass deterministic grounding against the primary
+            # Source. Preserve the candidate fact for that validation instead
+            # of turning a role-label mismatch into a technical extraction
+            # failure. This does not infer contradiction or attribution.
+            normalized_extraction["evidence_role"] = "direct_result"
+            changed = True
         if (
             str(normalized_extraction.get("evidence_role") or "")
             in _DIRECT_RESULT_ROUTE_ROLES
@@ -1368,7 +1444,7 @@ def _objective_evidence_repair_instruction(
 class ObjectiveSourceExtractor:
     """Extract bounded atomic facts from one primary Source.
 
-    A later context revisit may supply an explicit same-paper Evidence Bundle
+    A direct-result request may include an explicit same-paper Evidence Bundle
     for validating conditions; the primary Source still owns measured results.
     """
 
@@ -1707,9 +1783,164 @@ def extract_and_validate_source_facts(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     table_cells_by_document_id: dict[str, list[Any]] | None = None,
     progress_callback: ProgressCallback | None = None,
-    _allow_adaptive_context_expansion: bool = True,
-    _document_state_seed: tuple[ExtractedEvidenceDraft, ...] = (),
 ) -> tuple[ExtractedEvidenceDraft, ...]:
+    """Inspect Sources, then read missing same-paper context while facts advance."""
+    units = list(
+        _extract_source_round(
+            collection_id=collection_id,
+            source_extractor=source_extractor,
+            paper_facts_extractor=paper_facts_extractor,
+            objectives=objectives,
+            objective_paper_frames=objective_paper_frames,
+            objective_evidence_routes=objective_evidence_routes,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
+            table_cells_by_document_id=table_cells_by_document_id,
+            progress_callback=progress_callback,
+        )
+    )
+    seen = {unit.evidence_id for unit in units}
+    # Context discovery is a stateful closure loop. Each round can expose
+    # new sample or condition labels that make another same-paper Source
+    # discoverable. Only previously unread context Sources are added. The
+    # result anchor stays immutable; deterministic paper reconstruction
+    # joins newly grounded context without repeating scientific extraction.
+    known_routes = list(objective_evidence_routes)
+    context_round = 0
+    initial_route_keys = {
+        (route.document_id, route.source_kind, route.source_ref)
+        for route in objective_evidence_routes
+    }
+    available_source_count = sum(
+        len((blocks_by_document_id or {}).get(document_id, ()))
+        + len((tables_by_document_id or {}).get(document_id, ()))
+        + len((figures_by_document_id or {}).get(document_id, ()))
+        for document_id in {
+            route.document_id for route in objective_evidence_routes
+        }
+    )
+    # A paper can be reviewed as far as its concrete Source inventory,
+    # but never beyond it. This replaces an arbitrary round count while
+    # keeping adaptive expansion finite even when a route selector is
+    # imperfect or a provider repeats a candidate.
+    adaptive_source_budget = max(
+        available_source_count - len(initial_route_keys),
+        0,
+    )
+    adaptive_source_count = 0
+    while True:
+        context_round += 1
+        context_state_before = _objective_context_progress_state(
+            units,
+            objectives,
+        )
+        adaptive_context_routes = _build_adaptive_context_routes(
+            objectives=objectives,
+            source_facts=tuple(units),
+            objective_evidence_routes=tuple(known_routes),
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+            document_trees_by_document_id=document_trees_by_document_id,
+        )
+        if adaptive_context_routes:
+            known_routes.extend(adaptive_context_routes)
+            adaptive_source_count += len(adaptive_context_routes)
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_context_expansion",
+                    "collection_id": collection_id,
+                    "route_count": len(adaptive_context_routes),
+                    "context_round": context_round,
+                    "document_keys": sorted(
+                        {
+                            f"{route.objective_id}:{route.document_id}"
+                            for route in adaptive_context_routes
+                        }
+                    ),
+                    "reason": "partial_result_requires_same_paper_context",
+                }
+            )
+            expanded_context_units = _extract_source_round(
+                collection_id=collection_id,
+                source_extractor=source_extractor,
+                paper_facts_extractor=paper_facts_extractor,
+                objectives=objectives,
+                objective_paper_frames=objective_paper_frames,
+                objective_evidence_routes=adaptive_context_routes,
+                blocks_by_document_id=blocks_by_document_id,
+                tables_by_document_id=tables_by_document_id,
+                figures_by_document_id=figures_by_document_id,
+                document_trees_by_document_id=document_trees_by_document_id,
+                table_cells_by_document_id=table_cells_by_document_id,
+                progress_callback=progress_callback,
+                document_state=tuple(units),
+            )
+            for unit in expanded_context_units:
+                if unit.evidence_id in seen:
+                    continue
+                seen.add(unit.evidence_id)
+                units.append(unit)
+
+        context_state_after = _objective_context_progress_state(
+            units,
+            objectives,
+        )
+        if context_state_after == context_state_before:
+            _record_objective_context_scope_gap(
+                collection_id=collection_id,
+                context_round=context_round,
+                units=units,
+                objectives=objectives,
+                reason=(
+                    "Same-paper Sources were inspected but did not reduce "
+                    "the remaining context gap."
+                ),
+            )
+            break
+        if not adaptive_context_routes:
+            break
+        if adaptive_source_count >= adaptive_source_budget:
+            _record_objective_context_scope_gap(
+                collection_id=collection_id,
+                context_round=context_round,
+                units=units,
+                objectives=objectives,
+                reason=(
+                    "The available same-paper Source scope was exhausted "
+                    "before all comparison context was source-grounded."
+                ),
+            )
+            break
+
+    logger.info(
+        "Research objective evidence extraction finished collection_id=%s objective_extractions=%s",
+        collection_id,
+        len(units),
+    )
+    return tuple(units)
+
+
+def _extract_source_round(
+    *,
+    collection_id: str,
+    source_extractor: ObjectiveSourceExtractor,
+    paper_facts_extractor: PaperFactsExtractor | None = None,
+    objectives: tuple[ResearchObjective, ...],
+    objective_paper_frames: tuple[PaperAnalysisFrame, ...],
+    objective_evidence_routes: tuple[EvidenceCandidate, ...],
+    blocks_by_document_id: dict[str, list[Any]],
+    tables_by_document_id: dict[str, list[Any]],
+    figures_by_document_id: dict[str, list[Any]] | None = None,
+    document_trees_by_document_id: dict[str, SourceDocumentTree],
+    table_cells_by_document_id: dict[str, list[Any]] | None = None,
+    progress_callback: ProgressCallback | None = None,
+    document_state: tuple[ExtractedEvidenceDraft, ...] = (),
+) -> tuple[ExtractedEvidenceDraft, ...]:
+    """Read one ordered batch; validate each Source before updating paper state."""
     objective_by_id = {objective.objective_id: objective for objective in objectives}
     frame_by_key = {
         (frame.objective_id, frame.document_id): frame
@@ -1734,7 +1965,7 @@ def extract_and_validate_source_facts(
     units: list[ExtractedEvidenceDraft] = []
     seen: set[str] = set()
     document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
-    for seed in _document_state_seed:
+    for seed in document_state:
         document_state_units.setdefault(
             (seed.objective_id, seed.document_id),
             [],
@@ -1789,7 +2020,7 @@ def extract_and_validate_source_facts(
                 f"source_kind={route.source_kind} "
                 f"source_ref={route.source_ref}"
             )
-        objective_context = objective_by_id.get(route.objective_id)
+        objective_context = objective
         frame = frame_by_key.get((route.objective_id, route.document_id))
         tree_position = _route_tree_position(
             _source_candidate_from_route(
@@ -1804,11 +2035,7 @@ def extract_and_validate_source_facts(
         payload = {
             "collection_id": collection_id,
             "objective": _route_prompt_objective_record(objective),
-            "paper_frame": _route_prompt_paper_frame_record(
-                frame_by_key[(route.objective_id, route.document_id)]
-            )
-            if (route.objective_id, route.document_id) in frame_by_key
-            else {},
+            "paper_frame": _route_prompt_paper_frame_record(frame) if frame else {},
             "evidence_route": _objective_evidence_prompt_route_record(route),
             "tree_position": tree_position,
             "document_state": prior_document_state,
@@ -1822,7 +2049,7 @@ def extract_and_validate_source_facts(
             )
         ):
             resolved_paper_facts_extractor = build_default_paper_facts_extractor()
-        source, table_repair_error = _repair_objective_table_source_if_needed(
+        source, table_repair_error = repair_table_source(
             collection_id=collection_id,
             route=route,
             source=source,
@@ -1866,6 +2093,18 @@ def extract_and_validate_source_facts(
             dict(item) for item in context_bundle
         ]
         route_unit_start = len(units)
+        route_result_is_not_current_observation = bool(
+            source.get("source_kind") == "text_window"
+            and (
+                _objective_result_text_is_study_intent_only(
+                    _objective_source_grounding_text(source)
+                )
+                or _objective_source_is_secondary_only_target_context(
+                    source_text=_objective_source_grounding_text(source),
+                    objective_context=objective_context,
+                )
+            )
+        )
         if (
             table_repair_error is not None
             and _objective_table_source_needs_llm_structural_repair(
@@ -1900,6 +2139,28 @@ def extract_and_validate_source_facts(
             if extraction_error is None:
                 try:
                     parsed = source_extractor.extract_source(payload)
+                    route_result_is_not_current_observation = (
+                        route_result_is_not_current_observation
+                        or (
+                            bool(parsed.extractions)
+                            and all(
+                                item.reported_result is not None
+                                and (
+                                    _objective_result_text_is_study_intent_only(
+                                        item.reported_result.result_text
+                                    )
+                                    or (
+                                        source.get("source_kind") == "text_window"
+                                        and _objective_result_is_attributed_to_secondary_study(
+                                            result_text=item.reported_result.result_text,
+                                            source_text=_objective_source_grounding_text(source),
+                                        )
+                                    )
+                                )
+                                for item in parsed.extractions
+                            )
+                        )
+                    )
                     grounding_source_pairs = _objective_document_grounding_sources(
                         document_state_units.get(document_key, []),
                         route=route,
@@ -2012,6 +2273,7 @@ def extract_and_validate_source_facts(
                 and objective_context is not None
                 and bool(objective_context.outcomes)
                 and bool(route.reason)
+                and not route_result_is_not_current_observation
             ):
                 # A direct result route is already a researcher-facing recall
                 # decision. Do not run a second lexical outcome detector here:
@@ -2033,6 +2295,7 @@ def extract_and_validate_source_facts(
                 and extraction_error is None
                 and not _objective_route_is_context_inspection(route)
                 and objective_context is not None
+                and not route_result_is_not_current_observation
                 and _objective_source_mentions_target_outcome(
                     source,
                     objective=objective_context,
@@ -2060,10 +2323,11 @@ def extract_and_validate_source_facts(
                 [],
             ).append(unit)
         if len(units) == route_unit_start:
-            # A selected result Source remains a visible unresolved anchor so
-            # same-paper context can trigger one bounded reread.  A context or
-            # background Source with no extracted fact is inspection metadata,
-            # not scientific Evidence; retain it only in the internal ledger.
+            # A selected result Source remains a visible unresolved anchor.
+            # Later same-paper context can close only fields already reported
+            # by this immutable result read. A context or background Source
+            # with no extracted fact is inspection metadata, not scientific
+            # Evidence; retain it only in the internal ledger.
             inspection_unit = (
                 _needs_context_objective_evidence_draft(
                     route=route,
@@ -2074,12 +2338,14 @@ def extract_and_validate_source_facts(
                 if (
                     route.role in _DIRECT_RESULT_ROUTE_ROLES
                     and not _objective_route_is_context_inspection(route)
+                    and not route_result_is_not_current_observation
                 )
                 else _inspected_objective_source_draft(route=route)
             )
             if (
                 route.role not in _DIRECT_RESULT_ROUTE_ROLES
                 or _objective_route_is_context_inspection(route)
+                or route_result_is_not_current_observation
             ):
                 record_analysis_diagnostic(
                     {
@@ -2114,176 +2380,6 @@ def extract_and_validate_source_facts(
             route_position,
             max(len(extractable_routes) - route_position, 0),
         )
-    if _allow_adaptive_context_expansion:
-        # Context discovery is a stateful closure loop. Each round can expose
-        # new sample or condition labels that make another same-paper Source
-        # discoverable. Only previously unread context Sources are added to the
-        # bundle. A selected result Source may receive one bounded re-read after
-        # those context facts are grounded, mirroring how a researcher revisits
-        # the result after locating its Methods conditions.
-        known_routes = list(objective_evidence_routes)
-        rechecked_result_keys: set[tuple[str, str, str, str]] = set()
-        context_round = 0
-        while True:
-            context_round += 1
-            context_state_before = _objective_context_progress_state(
-                units,
-                objectives,
-            )
-            adaptive_context_routes = _build_adaptive_context_routes(
-                objectives=objectives,
-                source_facts=tuple(units),
-                objective_evidence_routes=tuple(known_routes),
-                objective_paper_frames=objective_paper_frames,
-                blocks_by_document_id=blocks_by_document_id,
-                tables_by_document_id=tables_by_document_id,
-                figures_by_document_id=figures_by_document_id,
-                document_trees_by_document_id=document_trees_by_document_id,
-            )
-            if adaptive_context_routes:
-                known_routes.extend(adaptive_context_routes)
-                record_analysis_diagnostic(
-                    {
-                        "trace_type": "objective_context_expansion",
-                        "collection_id": collection_id,
-                        "route_count": len(adaptive_context_routes),
-                        "context_round": context_round,
-                        "document_keys": sorted(
-                            {
-                                f"{route.objective_id}:{route.document_id}"
-                                for route in adaptive_context_routes
-                            }
-                        ),
-                        "reason": "partial_result_requires_same_paper_context",
-                    }
-                )
-                expanded_context_units = extract_and_validate_source_facts(
-                    collection_id=collection_id,
-                    source_extractor=source_extractor,
-                    paper_facts_extractor=paper_facts_extractor,
-                    objectives=objectives,
-                    objective_paper_frames=objective_paper_frames,
-                    objective_evidence_routes=adaptive_context_routes,
-                    blocks_by_document_id=blocks_by_document_id,
-                    tables_by_document_id=tables_by_document_id,
-                    figures_by_document_id=figures_by_document_id,
-                    document_trees_by_document_id=document_trees_by_document_id,
-                    table_cells_by_document_id=table_cells_by_document_id,
-                    progress_callback=progress_callback,
-                    _document_state_seed=tuple(units),
-                    _allow_adaptive_context_expansion=False,
-                )
-                for unit in expanded_context_units:
-                    if unit.evidence_id in seen:
-                        continue
-                    seen.add(unit.evidence_id)
-                    units.append(unit)
-
-                # If a selected result Source returned no result before its
-                # same-paper context was available, give that exact Source one
-                # bounded re-read with the newly grounded context. Keeping only
-                # the unresolved candidate would make the system permanently
-                # blind to a recoverable result. Technical failures remain
-                # failed drafts and do not upgrade the scientific status.
-                result_recovery_routes = _objective_result_recovery_routes(
-                    source_facts=tuple(units),
-                    routes=tuple(known_routes),
-                    attempted_keys=rechecked_result_keys,
-                    objectives=objectives,
-                )
-                if result_recovery_routes:
-                    record_analysis_diagnostic(
-                        {
-                            "trace_type": "objective_result_context_recheck",
-                            "collection_id": collection_id,
-                            "context_round": context_round,
-                            "route_count": len(result_recovery_routes),
-                            "source_refs": [
-                                {
-                                    "document_id": route.document_id,
-                                    "source_kind": route.source_kind,
-                                    "source_ref": route.source_ref,
-                                }
-                                for route in result_recovery_routes
-                            ],
-                            "reason": "same_paper_context_was_grounded",
-                        }
-                    )
-                    rechecked_result_keys.update(
-                        _objective_route_identity(route)
-                        for route in result_recovery_routes
-                    )
-                    recovered_result_units = extract_and_validate_source_facts(
-                        collection_id=collection_id,
-                        source_extractor=source_extractor,
-                        paper_facts_extractor=paper_facts_extractor,
-                        objectives=objectives,
-                        objective_paper_frames=objective_paper_frames,
-                        objective_evidence_routes=result_recovery_routes,
-                        blocks_by_document_id=blocks_by_document_id,
-                        tables_by_document_id=tables_by_document_id,
-                        figures_by_document_id=figures_by_document_id,
-                        document_trees_by_document_id=document_trees_by_document_id,
-                        table_cells_by_document_id=table_cells_by_document_id,
-                        progress_callback=progress_callback,
-                        _document_state_seed=tuple(units),
-                        _allow_adaptive_context_expansion=False,
-                    )
-                    _merge_recovered_result_units(
-                        units=units,
-                        document_state_units=document_state_units,
-                        recovered_units=recovered_result_units,
-                        seen=seen,
-                    )
-
-            context_state_after = _objective_context_progress_state(
-                units,
-                objectives,
-            )
-            if context_state_after == context_state_before:
-                _record_objective_context_scope_gap(
-                    collection_id=collection_id,
-                    context_round=context_round,
-                    units=units,
-                    objectives=objectives,
-                    reason=(
-                        "Same-paper Sources were inspected but did not reduce "
-                        "the remaining context gap."
-                    ),
-                )
-                break
-            if not adaptive_context_routes:
-                break
-            if context_round >= _OBJECTIVE_ADAPTIVE_CONTEXT_MAX_ROUNDS:
-                _record_objective_context_scope_gap(
-                    collection_id=collection_id,
-                    context_round=context_round,
-                    units=units,
-                    objectives=objectives,
-                    reason=(
-                        "The bounded same-paper review scope was reached "
-                        "before all comparison context was source-grounded."
-                    ),
-                )
-                break
-
-    for unit in _build_objective_method_family_test_condition_units(
-        objectives=objectives,
-        objective_paper_frames=objective_paper_frames,
-        objective_evidence_routes=objective_evidence_routes,
-        blocks_by_document_id=blocks_by_document_id,
-    ):
-        if not _objective_evidence_has_payload(unit):
-            continue
-        if unit.evidence_id in seen:
-            continue
-        seen.add(unit.evidence_id)
-        units.append(unit)
-    logger.info(
-        "Research objective evidence extraction finished collection_id=%s objective_extractions=%s",
-        collection_id,
-        len(units),
-    )
     return tuple(units)
 
 
@@ -2575,6 +2671,19 @@ def _objective_source_mentions_target_outcome(
     )
 
 
+class _ContextSourceCandidate(NamedTuple):
+    """A possible next read and its ranking signals, never a grounded fact."""
+
+    priority: int
+    position: int
+    source_kind: str
+    source_ref: str
+    role: str
+    matched_fields: tuple[str, ...]
+    term_hits: int
+    specificity: int
+
+
 def _build_adaptive_context_routes(
     *,
     objectives: tuple[ResearchObjective, ...],
@@ -2599,32 +2708,7 @@ def _build_adaptive_context_routes(
     """
 
     objective_by_id = {objective.objective_id: objective for objective in objectives}
-    anchors_by_key: dict[
-        tuple[str, str],
-        list[ExtractedEvidenceDraft],
-    ] = {}
-    context_seed = tuple(
-        unit
-        for unit in source_facts
-        if unit.reported_result is None
-        and unit.evidence_role in _OBJECTIVE_CONTEXT_ROLES
-    )
-    for unit in source_facts:
-        objective = objective_by_id.get(unit.objective_id)
-        if objective is None or not _objective_fact_needs_context(unit, objective):
-            continue
-        if _objective_context_bundle_can_bind_result(
-            unit,
-            context_seed=context_seed,
-            objective=objective,
-        ):
-            continue
-        fields = _objective_missing_context_fields(unit, objective)
-        if fields:
-            anchors_by_key.setdefault(
-                (unit.objective_id, unit.document_id),
-                [],
-            ).append(unit)
+    anchors_by_key = _incomplete_result_anchors(source_facts, objective_by_id)
     if not anchors_by_key:
         return ()
 
@@ -2661,325 +2745,28 @@ def _build_adaptive_context_routes(
             document_id=document_id,
             objective_id=objective_id,
         )
-        candidates: list[
-            tuple[int, int, str, str, str, tuple[str, ...], int, int]
-        ] = []
-        candidate_search_text: dict[tuple[str, str], tuple[str, str]] = {}
-        frame_candidate_keys: set[tuple[str, str]] = set()
-
-        # Framing is a paper-level reading decision.  When it marked a Source
-        # relevant, that decision must survive an over-selective first router;
-        # otherwise a researcher would continue reading the Source while the
-        # analysis silently stops.  These routes are still ordinary transient
-        # routes and must pass the same extraction and grounding path below.
-        frame = next(
-            (
-                paper_frame
-                for paper_frame in objective_paper_frames
-                if paper_frame.objective_id == objective_id
-                and paper_frame.document_id == document_id
-            ),
-            None,
+        (
+            candidates,
+            candidate_search_text,
+            frame_candidate_keys,
+        ) = _collect_context_source_candidates(
+            objective_id=objective_id,
+            document_id=document_id,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+            objective_paper_frames=objective_paper_frames,
+            blocks_by_document_id=blocks_by_document_id,
+            tables_by_document_id=tables_by_document_id,
+            figures_by_document_id=figures_by_document_id,
+            document_tree=document_tree,
+            existing_source_keys=existing_source_keys,
         )
-        if frame is not None:
-            frame_sources: list[tuple[str, str]] = []
-            for disposition in frame.source_dispositions:
-                if not disposition.is_relevant:
-                    continue
-                source_kind = disposition.source_kind.casefold()
-                route_source_kind = (
-                    "table"
-                    if source_kind == "table"
-                    else "figure"
-                    if source_kind == "figure"
-                    else "text_window"
-                    if source_kind in {"section", "block", "text", "text_window"}
-                    else ""
-                )
-                source_ref = disposition.source_ref.strip()
-                if not route_source_kind or not source_ref:
-                    continue
-                if source_kind == "section" and document_tree is not None:
-                    section_node = _tree_node_for_route_source(
-                        document_tree=document_tree,
-                        source_ref_kind="section",
-                        source_ref_id=source_ref,
-                    )
-                    child_refs = (
-                        tuple(
-                            str(
-                                getattr(
-                                    document_tree.nodes.get(child_id),
-                                    "source_ref_id",
-                                    "",
-                                )
-                                or ""
-                            ).strip()
-                            for child_id in getattr(
-                                section_node,
-                                "child_ids",
-                                (),
-                            )
-                            if document_tree.nodes.get(child_id) is not None
-                            and document_tree.nodes[child_id].node_type
-                            in {"paragraph", "list_item", "caption"}
-                        )
-                        if section_node is not None
-                        else ()
-                    )
-                    frame_sources.extend(
-                        ("text_window", child_ref)
-                        for child_ref in child_refs
-                        if child_ref
-                    )
-                    if child_refs:
-                        continue
-                frame_sources.append((route_source_kind, source_ref))
-
-            record_analysis_diagnostic(
-                {
-                    "trace_type": "objective_frame_context_candidates",
-                    "objective_id": objective_id,
-                    "document_id": document_id,
-                    "frame_source_disposition_count": len(frame.source_dispositions),
-                    "frame_relevant_source_count": sum(
-                        1 for item in frame.source_dispositions if item.is_relevant
-                    ),
-                    "frame_route_candidate_count": len(frame_sources),
-                    "frame_route_candidate_refs": [
-                        {"source_kind": kind, "source_ref": source_ref}
-                        for kind, source_ref in frame_sources[:20]
-                    ],
-                }
-            )
-            for route_source_kind, source_ref in frame_sources:
-                if document_tree is not None:
-                    source_node = document_tree.nodes.get(source_ref)
-                    resolved_source_ref = str(
-                        getattr(source_node, "source_ref_id", "") or ""
-                    ).strip()
-                    if resolved_source_ref:
-                        source_ref = resolved_source_ref
-                source_key = (route_source_kind, source_ref)
-                if (
-                    (objective_id, document_id, *source_key)
-                    in existing_source_keys
-                    or source_key in frame_candidate_keys
-                ):
-                    continue
-                frame_route = EvidenceCandidate.from_mapping(
-                    {
-                        "objective_id": objective_id,
-                        "document_id": document_id,
-                        "source_kind": route_source_kind,
-                        "source_ref": source_ref,
-                        "role": "process_or_treatment",
-                        "extractable": True,
-                        "confidence": 0.8,
-                    }
-                )
-                frame_source = _build_objective_route_source_payload(
-                    route=frame_route,
-                    blocks=blocks_by_document_id.get(document_id, []),
-                    tables=tables_by_document_id.get(document_id, []),
-                    figures=figures_by_document_id.get(document_id, []),
-                    document_tree=document_tree,
-                    table_cells=[],
-                )
-                if not frame_source:
-                    continue
-                heading = _adaptive_context_source_heading(
-                    heading_path=frame_source.get("heading_path"),
-                    document_tree=document_tree,
-                    source_ref_kind=(
-                        "block" if route_source_kind == "text_window" else route_source_kind
-                    ),
-                    source_ref=source_ref,
-                )
-                source_text = " ".join(
-                    str(frame_source.get(key) or "")
-                    for key in (
-                        "text",
-                        "caption_text",
-                        "heading_path",
-                        "table_markdown",
-                        "table_visual_text",
-                        "column_headers",
-                        "table_matrix",
-                    )
-                )
-                matched_fields = _adaptive_context_matched_fields(
-                    heading=heading,
-                    text=source_text,
-                    missing_fields=missing_fields,
-                    specific_terms=specific_terms,
-                    specific_term_fields=specific_term_fields,
-                )
-                candidates.append(
-                    (
-                        -1,
-                        -1,
-                        route_source_kind,
-                        source_ref,
-                        _adaptive_context_route_role(heading),
-                        matched_fields,
-                        _adaptive_context_term_hits(source_text, specific_terms),
-                        _adaptive_context_specificity_score(source_text),
-                    )
-                )
-                candidate_search_text[source_key] = (heading, source_text)
-                frame_candidate_keys.add(source_key)
-                existing_source_keys.add(
-                    (objective_id, document_id, *source_key)
-                )
-        for position, block in enumerate(blocks_by_document_id.get(document_id, ())):
-            source_ref = _text(getattr(block, "block_id", ""))
-            text = _text(getattr(block, "text", ""))
-            heading = _adaptive_context_heading(
-                block,
-                document_tree=document_tree,
-                source_ref_kind="block",
-                source_ref=source_ref,
-            )
-            if not source_ref or not text:
-                continue
-            source_key = (objective_id, document_id, "text_window", source_ref)
-            if source_key in existing_source_keys:
-                continue
-            role = _adaptive_context_route_role(heading)
-            matched_fields = _adaptive_context_matched_fields(
-                heading=heading,
-                text=text,
-                missing_fields=missing_fields,
-                specific_terms=specific_terms,
-                specific_term_fields=specific_term_fields,
-            )
-            if not matched_fields:
-                continue
-            priority = 0 if specific_terms and _contains_any_term(text, specific_terms) else 1
-            candidates.append(
-                (
-                    priority,
-                    position,
-                    "text_window",
-                    source_ref,
-                    role,
-                    matched_fields,
-                    _adaptive_context_term_hits(text, specific_terms),
-                    _adaptive_context_specificity_score(text),
-                )
-            )
-            candidate_search_text[("text_window", source_ref)] = (heading, text)
-
-        for position, table in enumerate(tables_by_document_id.get(document_id, ())):
-            source_ref = _text(getattr(table, "table_id", ""))
-            if not source_ref:
-                continue
-            heading = " ".join(
-                part
-                for part in (
-                    _adaptive_context_source_heading(
-                        heading_path=getattr(table, "heading_path", ""),
-                        document_tree=document_tree,
-                        source_ref_kind="table",
-                        source_ref=source_ref,
-                    ),
-                    _text(getattr(table, "caption_text", "")),
-                    " ".join(
-                        _text(value)
-                        for value in (getattr(table, "column_headers", ()) or ())
-                    ),
-                )
-                if part
-            ).casefold()
-            source_key = (objective_id, document_id, "table", source_ref)
-            if source_key in existing_source_keys:
-                continue
-            role = _adaptive_context_route_role(heading)
-            table_text = " ".join(
-                part
-                for part in (
-                    heading,
-                    " ".join(
-                        _text(row)
-                        for row in (getattr(table, "table_matrix", ()) or ())
-                    ),
-                )
-                if part
-            )
-            matched_fields = _adaptive_context_matched_fields(
-                heading=heading,
-                text=table_text,
-                missing_fields=missing_fields,
-                specific_terms=specific_terms,
-                specific_term_fields=specific_term_fields,
-            )
-            if not matched_fields:
-                continue
-            priority = 0 if specific_terms and _contains_any_term(table_text, specific_terms) else 1
-            candidates.append(
-                (
-                    priority,
-                    position,
-                    "table",
-                    source_ref,
-                    role,
-                    matched_fields,
-                    _adaptive_context_term_hits(table_text, specific_terms),
-                    _adaptive_context_specificity_score(table_text),
-                )
-            )
-            candidate_search_text[("table", source_ref)] = (heading, table_text)
-
-        for position, figure in enumerate(figures_by_document_id.get(document_id, ())):
-            source_ref = _text(getattr(figure, "figure_id", ""))
-            caption = _text(getattr(figure, "caption_text", ""))
-            if not source_ref or not caption:
-                continue
-            heading = " ".join(
-                part
-                for part in (
-                    _adaptive_context_source_heading(
-                        heading_path=getattr(figure, "heading_path", ""),
-                        document_tree=document_tree,
-                        source_ref_kind="figure",
-                        source_ref=source_ref,
-                    ),
-                    caption,
-                )
-                if part
-            ).casefold()
-            source_key = (objective_id, document_id, "figure", source_ref)
-            if source_key in existing_source_keys:
-                continue
-            matched_fields = _adaptive_context_matched_fields(
-                heading=heading,
-                text=caption,
-                missing_fields=missing_fields,
-                specific_terms=specific_terms,
-                specific_term_fields=specific_term_fields,
-            )
-            if not matched_fields:
-                continue
-            priority = 0 if specific_terms and _contains_any_term(caption, specific_terms) else 1
-            candidates.append(
-                (
-                    priority,
-                    position,
-                    "figure",
-                    source_ref,
-                    "characterization",
-                    matched_fields,
-                    _adaptive_context_term_hits(caption, specific_terms),
-                    _adaptive_context_specificity_score(caption),
-                )
-            )
-            candidate_search_text[("figure", source_ref)] = (heading, caption)
 
         selected_by_key: dict[
             tuple[str, str],
             tuple[
-                tuple[int, int, str, str, str, tuple[str, ...], int, int],
+                _ContextSourceCandidate,
                 set[str],
                 set[str],
             ],
@@ -3034,204 +2821,47 @@ def _build_adaptive_context_routes(
                 document_id=document_id,
                 objective_id=objective_id,
             )
-            anchor_candidates: list[
-                tuple[int, int, str, str, str, tuple[str, ...], int, int]
-            ] = []
-            structural_candidate_count = 0
-            for candidate in candidates:
-                source_key = (candidate[2], candidate[3])
-                heading, source_text = candidate_search_text.get(source_key, ("", ""))
-                matched_fields = _adaptive_context_matched_fields(
-                    heading=heading,
-                    text=source_text,
-                    missing_fields=anchor_missing_fields,
-                    specific_terms=anchor_terms,
-                    specific_term_fields=anchor_term_fields,
-                )
-                if not matched_fields and source_key not in frame_candidate_keys:
-                    continue
-                anchor_candidates.append(
-                    (
-                        candidate[0],
-                        candidate[1],
-                        candidate[2],
-                        candidate[3],
-                        candidate[4],
-                        matched_fields,
-                        _adaptive_context_term_hits(
-                            source_text,
-                            anchor_terms,
-                            term_fields=anchor_term_fields,
-                            wanted_fields=anchor_missing_fields,
-                        ),
-                        _adaptive_context_specificity_score(source_text),
-                    )
-                )
-
-            # Researchers follow local document structure when a result refers
-            # to a terse group label or an abbreviated condition.  Such a
-            # neighbouring Source may not contain any objective keyword, so
-            # lexical matching alone would silently omit it. Add a small,
-            # bounded structural window around text result anchors. These
-            # candidates carry no matched field families and therefore cannot
-            # claim scientific closure before extraction and validation.
-            anchor_block_position = next(
-                (
-                    position
-                    for position, block in enumerate(
-                        blocks_by_document_id.get(document_id, ())
-                    )
-                    if _text(getattr(block, "block_id", ""))
-                    == _text(anchor.source_ref)
-                ),
-                None,
+            (
+                anchor_candidates,
+                structural_candidate_count,
+            ) = _match_context_candidates_to_result(
+                anchor=anchor,
+                anchor_missing_fields=anchor_missing_fields,
+                anchor_terms=anchor_terms,
+                anchor_term_fields=anchor_term_fields,
+                candidates=candidates,
+                candidate_search_text=candidate_search_text,
+                frame_candidate_keys=frame_candidate_keys,
+                blocks_by_document_id=blocks_by_document_id,
+                document_tree=document_tree,
+                existing_source_keys=existing_source_keys,
             )
-            if anchor_block_position is not None:
-                for position, block in enumerate(
-                    blocks_by_document_id.get(document_id, ())
-                ):
-                    source_ref = _text(getattr(block, "block_id", ""))
-                    text = _text(getattr(block, "text", ""))
-                    if (
-                        not source_ref
-                        or not text
-                        or source_ref == _text(anchor.source_ref)
-                        or abs(position - anchor_block_position)
-                        > _ADAPTIVE_CONTEXT_NEIGHBOR_RADIUS
-                    ):
-                        continue
-                    source_key = ("text_window", source_ref)
-                    if (
-                        (objective_id, document_id, *source_key)
-                        in existing_source_keys
-                        or source_key in candidate_search_text
-                    ):
-                        continue
-                    heading = _adaptive_context_heading(
-                        block,
-                        document_tree=document_tree,
-                        source_ref_kind="block",
-                        source_ref=source_ref,
-                    )
-                    candidate_search_text[source_key] = (heading, text)
-                    anchor_candidates.append(
-                        (
-                            2,
-                            abs(position - anchor_block_position),
-                            "text_window",
-                            source_ref,
-                            _adaptive_context_route_role(heading),
-                            (),
-                            0,
-                            _adaptive_context_specificity_score(text),
-                        )
-                    )
-                    structural_candidate_count += 1
-
-            remaining_candidates = list(anchor_candidates)
-            anchor_selected: list[
-                tuple[int, int, str, str, str, tuple[str, ...], int, int]
-            ] = []
-            anchor_uncovered = set(anchor_missing_fields)
-            while remaining_candidates and anchor_uncovered:
-                covering_candidates = [
-                    item
-                    for item in remaining_candidates
-                    if set(item[5]) & anchor_uncovered
-                ]
-                if not covering_candidates:
-                    break
-                chosen = max(
-                    covering_candidates,
-                    key=lambda item: (
-                        # When process/test closure is still open, a Methods
-                        # or procedure Source is the researcher's next read;
-                        # a high-volume Results paragraph cannot substitute for
-                        # fixed controls merely because it contains more
-                        # objective words or numeric tokens.
-                        (
-                            2
-                            if "process" in anchor_uncovered
-                            and item[4] == "process_or_treatment"
-                            else 2
-                            if "test" in anchor_uncovered
-                            and item[4] == "test_condition"
-                            else 1
-                            if item[4]
-                            in {"process_or_treatment", "test_condition"}
-                            else 0
-                        ),
-                        item[6],
-                        item[7],
-                        len(set(item[5]) & anchor_uncovered),
-                        len(item[5]),
-                        2 if item[2] == "table" else 1 if item[2] == "figure" else 0,
-                        -item[0],
-                        -item[1],
-                        item[3],
-                    ),
-                )
-                anchor_selected.append(chosen)
-                anchor_uncovered.difference_update(chosen[5])
-                remaining_candidates.remove(chosen)
-
-            if anchor_uncovered:
-                frame_fallbacks = [
-                    item
-                    for item in remaining_candidates
-                    if (item[2], item[3]) in frame_candidate_keys
-                ]
-                if frame_fallbacks:
-                    anchor_selected.append(
-                        max(
-                            frame_fallbacks,
-                            key=lambda item: (
-                                item[6],
-                                item[7],
-                                2 if item[2] == "table" else 1 if item[2] == "figure" else 0,
-                                -item[1],
-                                item[3],
-                            ),
-                        )
-                    )
-
-            if anchor_uncovered:
-                structural_fallbacks = [
-                    item
-                    for item in remaining_candidates
-                    if item[0] == 2 and not item[5]
-                ]
-                if structural_fallbacks:
-                    # Read the nearest structural neighbour even when it does
-                    # not advertise a field family. The next extraction pass
-                    # decides whether it contains usable context.
-                    anchor_selected.append(
-                        min(
-                            structural_fallbacks,
-                            key=lambda item: (
-                                item[1],
-                                -item[7],
-                                item[3],
-                            ),
-                        )
-                    )
+            anchor_selected, anchor_uncovered = _choose_context_reads(
+                objective=objective,
+                anchor=anchor,
+                anchor_missing_fields=anchor_missing_fields,
+                anchor_candidates=anchor_candidates,
+                candidate_search_text=candidate_search_text,
+                frame_candidate_keys=frame_candidate_keys,
+            )
 
             anchor_refs = {
                 grouped_anchor.source_ref or grouped_anchor.evidence_id
                 for grouped_anchor in anchor_group
             }
             for selected in anchor_selected:
-                source_key = (selected[2], selected[3])
+                source_key = (selected.source_kind, selected.source_ref)
                 existing = selected_by_key.get(source_key)
                 if existing is None:
                     selected_by_key[source_key] = (
                         selected,
-                        set(selected[5]),
+                        set(selected.matched_fields),
                         set(anchor_refs),
                     )
                     continue
-                existing[1].update(selected[5])
-                existing[2].update(anchor_refs)
+                _, source_fields, source_anchor_refs = existing
+                source_fields.update(selected.matched_fields)
+                source_anchor_refs.update(anchor_refs)
             uncovered_fields.update(anchor_uncovered)
             anchor_audits.append(
                 {
@@ -3278,27 +2908,14 @@ def _build_adaptive_context_routes(
                 "closure_basis": "candidate_source_match_only",
             }
         )
-        for (
-            (
-                _priority,
-                _position,
-                source_kind,
-                source_ref,
-                role,
-                _candidate_matched_fields,
-                _term_hits,
-                _specificity,
-            ),
-            matched_fields,
-            anchor_refs,
-        ) in selected_candidates:
+        for candidate, matched_fields, anchor_refs in selected_candidates:
             route = EvidenceCandidate.from_mapping(
                 {
                     "objective_id": objective_id,
                     "document_id": document_id,
-                    "source_kind": source_kind,
-                    "source_ref": source_ref,
-                    "role": role,
+                    "source_kind": candidate.source_kind,
+                    "source_ref": candidate.source_ref,
+                    "role": candidate.role,
                     "extractable": True,
                     "reason": (
                         (
@@ -3316,9 +2933,623 @@ def _build_adaptive_context_routes(
             )
             adaptive_routes.append(route)
             existing_source_keys.add(
-                (objective_id, document_id, source_kind, source_ref)
+                (objective_id, document_id, candidate.source_kind, candidate.source_ref)
             )
     return tuple(adaptive_routes)
+
+
+def _incomplete_result_anchors(
+    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    objective_by_id: Mapping[str, ResearchObjective],
+) -> dict[tuple[str, str], list[ExtractedEvidenceDraft]]:
+    """Find results whose missing context cannot already bind from read Sources."""
+    anchors_by_key: dict[
+        tuple[str, str],
+        list[ExtractedEvidenceDraft],
+    ] = {}
+    context_seed = tuple(
+        unit
+        for unit in source_facts
+        if unit.reported_result is None
+        and unit.evidence_role in _OBJECTIVE_CONTEXT_ROLES
+    )
+    for unit in source_facts:
+        objective = objective_by_id.get(unit.objective_id)
+        if objective is None or not _objective_fact_needs_context(unit, objective):
+            continue
+        if _objective_context_bundle_can_bind_result(
+            unit,
+            context_seed=context_seed,
+            objective=objective,
+        ):
+            continue
+        fields = _objective_missing_context_fields(unit, objective)
+        if fields:
+            anchors_by_key.setdefault(
+                (unit.objective_id, unit.document_id),
+                [],
+            ).append(unit)
+    return anchors_by_key
+
+
+def _collect_context_source_candidates(
+    *,
+    objective_id: str,
+    document_id: str,
+    missing_fields: set[str],
+    specific_terms: tuple[str, ...],
+    specific_term_fields: Mapping[str, frozenset[str]],
+    objective_paper_frames: tuple[PaperAnalysisFrame, ...],
+    blocks_by_document_id: dict[str, list[Any]],
+    tables_by_document_id: dict[str, list[Any]],
+    figures_by_document_id: dict[str, list[Any]],
+    document_tree: SourceDocumentTree | None,
+    existing_source_keys: set[tuple[str, str, str, str]],
+) -> tuple[
+    list[_ContextSourceCandidate],
+    dict[tuple[str, str], tuple[str, str]],
+    set[tuple[str, str]],
+]:
+    """Collect lexical and framing candidates, indexing each framed Source once."""
+    candidates: list[_ContextSourceCandidate] = []
+    candidate_search_text: dict[tuple[str, str], tuple[str, str]] = {}
+    frame_candidate_keys: set[tuple[str, str]] = set()
+
+    # Framing is a paper-level reading decision.  When it marked a Source
+    # relevant, that decision must survive an over-selective first router;
+    # otherwise a researcher would continue reading the Source while the
+    # analysis silently stops.  These routes are still ordinary transient
+    # routes and must pass the same extraction and grounding path below.
+    frame = next(
+        (
+            paper_frame
+            for paper_frame in objective_paper_frames
+            if paper_frame.objective_id == objective_id
+            and paper_frame.document_id == document_id
+        ),
+        None,
+    )
+    if frame is not None:
+        frame_sources: list[tuple[str, str]] = []
+        for disposition in frame.source_dispositions:
+            if not disposition.is_relevant:
+                continue
+            source_kind = disposition.source_kind.casefold()
+            route_source_kind = (
+                "table"
+                if source_kind == "table"
+                else "figure"
+                if source_kind == "figure"
+                else "text_window"
+                if source_kind in {"section", "block", "text", "text_window"}
+                else ""
+            )
+            source_ref = disposition.source_ref.strip()
+            if not route_source_kind or not source_ref:
+                continue
+            if source_kind == "section" and document_tree is not None:
+                section_node = _tree_node_for_route_source(
+                    document_tree=document_tree,
+                    source_ref_kind="section",
+                    source_ref_id=source_ref,
+                )
+                child_refs = (
+                    tuple(
+                        str(
+                            getattr(
+                                document_tree.nodes.get(child_id),
+                                "source_ref_id",
+                                "",
+                            )
+                            or ""
+                        ).strip()
+                        for child_id in getattr(
+                            section_node,
+                            "child_ids",
+                            (),
+                        )
+                        if document_tree.nodes.get(child_id) is not None
+                        and document_tree.nodes[child_id].node_type
+                        in {"paragraph", "list_item", "caption"}
+                    )
+                    if section_node is not None
+                    else ()
+                )
+                frame_sources.extend(
+                    ("text_window", child_ref)
+                    for child_ref in child_refs
+                    if child_ref
+                )
+                if child_refs:
+                    continue
+            frame_sources.append((route_source_kind, source_ref))
+
+        record_analysis_diagnostic(
+            {
+                "trace_type": "objective_frame_context_candidates",
+                "objective_id": objective_id,
+                "document_id": document_id,
+                "frame_source_disposition_count": len(frame.source_dispositions),
+                "frame_relevant_source_count": sum(
+                    1 for item in frame.source_dispositions if item.is_relevant
+                ),
+                "frame_route_candidate_count": len(frame_sources),
+                "frame_route_candidate_refs": [
+                    {"source_kind": kind, "source_ref": source_ref}
+                    for kind, source_ref in frame_sources[:20]
+                ],
+            }
+        )
+        for route_source_kind, source_ref in frame_sources:
+            if document_tree is not None:
+                source_node = document_tree.nodes.get(source_ref)
+                resolved_source_ref = str(
+                    getattr(source_node, "source_ref_id", "") or ""
+                ).strip()
+                if resolved_source_ref:
+                    source_ref = resolved_source_ref
+            source_key = (route_source_kind, source_ref)
+            if (
+                (objective_id, document_id, *source_key)
+                in existing_source_keys
+                or source_key in frame_candidate_keys
+            ):
+                continue
+            frame_route = EvidenceCandidate.from_mapping(
+                {
+                    "objective_id": objective_id,
+                    "document_id": document_id,
+                    "source_kind": route_source_kind,
+                    "source_ref": source_ref,
+                    "role": "process_or_treatment",
+                    "extractable": True,
+                    "confidence": 0.8,
+                }
+            )
+            frame_source = _build_objective_route_source_payload(
+                route=frame_route,
+                blocks=blocks_by_document_id.get(document_id, []),
+                tables=tables_by_document_id.get(document_id, []),
+                figures=figures_by_document_id.get(document_id, []),
+                document_tree=document_tree,
+                table_cells=[],
+            )
+            if not frame_source:
+                continue
+            heading = _adaptive_context_source_heading(
+                heading_path=frame_source.get("heading_path"),
+                document_tree=document_tree,
+                source_ref_kind=(
+                    "block" if route_source_kind == "text_window" else route_source_kind
+                ),
+                source_ref=source_ref,
+            )
+            source_text = " ".join(
+                str(frame_source.get(key) or "")
+                for key in (
+                    "text",
+                    "caption_text",
+                    "heading_path",
+                    "table_markdown",
+                    "table_visual_text",
+                    "column_headers",
+                    "table_matrix",
+                )
+            )
+            matched_fields = _adaptive_context_matched_fields(
+                heading=heading,
+                text=source_text,
+                missing_fields=missing_fields,
+                specific_terms=specific_terms,
+                specific_term_fields=specific_term_fields,
+            )
+            candidates.append(
+                _ContextSourceCandidate(
+                    priority=-1,
+                    position=-1,
+                    source_kind=route_source_kind,
+                    source_ref=source_ref,
+                    role=_adaptive_context_route_role(heading),
+                    matched_fields=matched_fields,
+                    term_hits=_adaptive_context_term_hits(source_text, specific_terms),
+                    specificity=_adaptive_context_specificity_score(source_text),
+                )
+            )
+            candidate_search_text[source_key] = (heading, source_text)
+            frame_candidate_keys.add(source_key)
+            existing_source_keys.add(
+                (objective_id, document_id, *source_key)
+            )
+    for position, block in enumerate(blocks_by_document_id.get(document_id, ())):
+        source_ref = _text(getattr(block, "block_id", ""))
+        text = _text(getattr(block, "text", ""))
+        heading = _adaptive_context_heading(
+            block,
+            document_tree=document_tree,
+            source_ref_kind="block",
+            source_ref=source_ref,
+        )
+        if not source_ref or not text:
+            continue
+        source_key = (objective_id, document_id, "text_window", source_ref)
+        if source_key in existing_source_keys:
+            continue
+        role = _adaptive_context_route_role(heading)
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=text,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+        )
+        if not matched_fields:
+            continue
+        priority = 0 if specific_terms and _contains_any_term(text, specific_terms) else 1
+        candidates.append(
+            _ContextSourceCandidate(
+                priority=priority,
+                position=position,
+                source_kind="text_window",
+                source_ref=source_ref,
+                role=role,
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(text, specific_terms),
+                specificity=_adaptive_context_specificity_score(text),
+            )
+        )
+        candidate_search_text[("text_window", source_ref)] = (heading, text)
+
+    for position, table in enumerate(tables_by_document_id.get(document_id, ())):
+        source_ref = _text(getattr(table, "table_id", ""))
+        if not source_ref:
+            continue
+        heading = " ".join(
+            part
+            for part in (
+                _adaptive_context_source_heading(
+                    heading_path=getattr(table, "heading_path", ""),
+                    document_tree=document_tree,
+                    source_ref_kind="table",
+                    source_ref=source_ref,
+                ),
+                _text(getattr(table, "caption_text", "")),
+                " ".join(
+                    _text(value)
+                    for value in (getattr(table, "column_headers", ()) or ())
+                ),
+            )
+            if part
+        ).casefold()
+        source_key = (objective_id, document_id, "table", source_ref)
+        if source_key in existing_source_keys:
+            continue
+        role = _adaptive_context_route_role(heading)
+        table_text = " ".join(
+            part
+            for part in (
+                heading,
+                " ".join(
+                    _text(row)
+                    for row in (getattr(table, "table_matrix", ()) or ())
+                ),
+            )
+            if part
+        )
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=table_text,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+        )
+        if not matched_fields:
+            continue
+        priority = 0 if specific_terms and _contains_any_term(table_text, specific_terms) else 1
+        candidates.append(
+            _ContextSourceCandidate(
+                priority=priority,
+                position=position,
+                source_kind="table",
+                source_ref=source_ref,
+                role=role,
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(table_text, specific_terms),
+                specificity=_adaptive_context_specificity_score(table_text),
+            )
+        )
+        candidate_search_text[("table", source_ref)] = (heading, table_text)
+
+    for position, figure in enumerate(figures_by_document_id.get(document_id, ())):
+        source_ref = _text(getattr(figure, "figure_id", ""))
+        caption = _text(getattr(figure, "caption_text", ""))
+        if not source_ref or not caption:
+            continue
+        heading = " ".join(
+            part
+            for part in (
+                _adaptive_context_source_heading(
+                    heading_path=getattr(figure, "heading_path", ""),
+                    document_tree=document_tree,
+                    source_ref_kind="figure",
+                    source_ref=source_ref,
+                ),
+                caption,
+            )
+            if part
+        ).casefold()
+        source_key = (objective_id, document_id, "figure", source_ref)
+        if source_key in existing_source_keys:
+            continue
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=caption,
+            missing_fields=missing_fields,
+            specific_terms=specific_terms,
+            specific_term_fields=specific_term_fields,
+        )
+        if not matched_fields:
+            continue
+        priority = 0 if specific_terms and _contains_any_term(caption, specific_terms) else 1
+        candidates.append(
+            _ContextSourceCandidate(
+                priority=priority,
+                position=position,
+                source_kind="figure",
+                source_ref=source_ref,
+                role="characterization",
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(caption, specific_terms),
+                specificity=_adaptive_context_specificity_score(caption),
+            )
+        )
+        candidate_search_text[("figure", source_ref)] = (heading, caption)
+
+    return candidates, candidate_search_text, frame_candidate_keys
+
+
+def _match_context_candidates_to_result(
+    *,
+    anchor: ExtractedEvidenceDraft,
+    anchor_missing_fields: set[str],
+    anchor_terms: tuple[str, ...],
+    anchor_term_fields: Mapping[str, frozenset[str]],
+    candidates: list[_ContextSourceCandidate],
+    candidate_search_text: dict[tuple[str, str], tuple[str, str]],
+    frame_candidate_keys: set[tuple[str, str]],
+    blocks_by_document_id: dict[str, list[Any]],
+    document_tree: SourceDocumentTree | None,
+    existing_source_keys: set[tuple[str, str, str, str]],
+) -> tuple[list[_ContextSourceCandidate], int]:
+    """Match one result's gaps and index previously unseen structural neighbors."""
+    objective_id = anchor.objective_id
+    document_id = anchor.document_id
+    anchor_candidates: list[_ContextSourceCandidate] = []
+    structural_candidate_count = 0
+    for candidate in candidates:
+        source_key = (candidate.source_kind, candidate.source_ref)
+        heading, source_text = candidate_search_text.get(source_key, ("", ""))
+        matched_fields = _adaptive_context_matched_fields(
+            heading=heading,
+            text=source_text,
+            missing_fields=anchor_missing_fields,
+            specific_terms=anchor_terms,
+            specific_term_fields=anchor_term_fields,
+        )
+        if not matched_fields and source_key not in frame_candidate_keys:
+            continue
+        anchor_candidates.append(
+            _ContextSourceCandidate(
+                priority=candidate.priority,
+                position=candidate.position,
+                source_kind=candidate.source_kind,
+                source_ref=candidate.source_ref,
+                role=candidate.role,
+                matched_fields=matched_fields,
+                term_hits=_adaptive_context_term_hits(
+                    source_text,
+                    anchor_terms,
+                    term_fields=anchor_term_fields,
+                    wanted_fields=anchor_missing_fields,
+                ),
+                specificity=_adaptive_context_specificity_score(source_text),
+            )
+        )
+
+    # Researchers follow local document structure when a result refers
+    # to a terse group label or an abbreviated condition.  Such a
+    # neighbouring Source may not contain any objective keyword, so
+    # lexical matching alone would silently omit it. Add a small,
+    # bounded structural window around text result anchors. These
+    # candidates carry no matched field families and therefore cannot
+    # claim scientific closure before extraction and validation.
+    anchor_block_position = next(
+        (
+            position
+            for position, block in enumerate(
+                blocks_by_document_id.get(document_id, ())
+            )
+            if _text(getattr(block, "block_id", ""))
+            == _text(anchor.source_ref)
+        ),
+        None,
+    )
+    if anchor_block_position is not None:
+        for position, block in enumerate(
+            blocks_by_document_id.get(document_id, ())
+        ):
+            source_ref = _text(getattr(block, "block_id", ""))
+            text = _text(getattr(block, "text", ""))
+            if (
+                not source_ref
+                or not text
+                or source_ref == _text(anchor.source_ref)
+                or abs(position - anchor_block_position)
+                > _ADAPTIVE_CONTEXT_NEIGHBOR_RADIUS
+            ):
+                continue
+            source_key = ("text_window", source_ref)
+            if (
+                (objective_id, document_id, *source_key)
+                in existing_source_keys
+                or source_key in candidate_search_text
+            ):
+                continue
+            heading = _adaptive_context_heading(
+                block,
+                document_tree=document_tree,
+                source_ref_kind="block",
+                source_ref=source_ref,
+            )
+            candidate_search_text[source_key] = (heading, text)
+            anchor_candidates.append(
+                _ContextSourceCandidate(
+                    priority=2,
+                    position=abs(position - anchor_block_position),
+                    source_kind="text_window",
+                    source_ref=source_ref,
+                    role=_adaptive_context_route_role(heading),
+                    matched_fields=(),
+                    term_hits=0,
+                    specificity=_adaptive_context_specificity_score(text),
+                )
+            )
+            structural_candidate_count += 1
+
+    return anchor_candidates, structural_candidate_count
+
+
+def _choose_context_reads(
+    *,
+    objective: ResearchObjective,
+    anchor: ExtractedEvidenceDraft,
+    anchor_missing_fields: set[str],
+    anchor_candidates: list[_ContextSourceCandidate],
+    candidate_search_text: Mapping[tuple[str, str], tuple[str, str]],
+    frame_candidate_keys: set[tuple[str, str]],
+) -> tuple[list[_ContextSourceCandidate], set[str]]:
+    """Choose the next useful reads; matched fields are navigation, not Evidence."""
+    remaining_candidates = list(anchor_candidates)
+    anchor_selected: list[_ContextSourceCandidate] = []
+    anchor_uncovered = set(anchor_missing_fields)
+    while remaining_candidates and anchor_uncovered:
+        covering_candidates = [
+            item
+            for item in remaining_candidates
+            if set(item.matched_fields) & anchor_uncovered
+        ]
+        if not covering_candidates:
+            break
+        chosen = max(
+            covering_candidates,
+            key=lambda item: (
+                # When process/test closure is still open, a Methods
+                # or procedure Source is the researcher's next read;
+                # a high-volume Results paragraph cannot substitute for
+                # fixed controls merely because it contains more
+                # objective words or numeric tokens.
+                (
+                    2
+                    if "process" in anchor_uncovered
+                    and item.role == "process_or_treatment"
+                    else 2
+                    if "test" in anchor_uncovered
+                    and item.role == "test_condition"
+                    else 1
+                    if item.role
+                    in {"process_or_treatment", "test_condition"}
+                    else 0
+                ),
+                (
+                    _adaptive_context_test_source_score(
+                        *candidate_search_text.get(
+                            (item.source_kind, item.source_ref),
+                            ("", ""),
+                        ),
+                        outcomes=objective.outcomes,
+                    )
+                    if "test" in anchor_uncovered
+                    else 0
+                ),
+                item.term_hits,
+                item.specificity,
+                len(set(item.matched_fields) & anchor_uncovered),
+                len(item.matched_fields),
+                2 if item.source_kind == "table" else 1 if item.source_kind == "figure" else 0,
+                -item.priority,
+                -item.position,
+                item.source_ref,
+            ),
+        )
+        chosen_heading, chosen_text = candidate_search_text.get(
+            (chosen.source_kind, chosen.source_ref),
+            ("", ""),
+        )
+        selected_fields = set(chosen.matched_fields) & anchor_uncovered
+        remaining_candidates.remove(chosen)
+        if (
+            anchor.reported_result is not None
+            and "test" in selected_fields
+            and _adaptive_context_test_source_score(
+                chosen_heading,
+                chosen_text,
+                outcomes=objective.outcomes,
+            )
+        ):
+            # This Source won because it explains how the target outcome
+            # was characterized. Incidental words such as ``specimen``
+            # or ``laser`` are navigation signals, not proof that the
+            # same paragraph establishes sample or process context.
+            # Keep this read narrowly test-focused and continue the
+            # selection loop for every other real context gap.
+            selected_fields = {"test"}
+        chosen = chosen._replace(matched_fields=tuple(sorted(selected_fields)))
+        anchor_selected.append(chosen)
+        anchor_uncovered.difference_update(chosen.matched_fields)
+
+    if anchor_uncovered:
+        frame_fallbacks = [
+            item
+            for item in remaining_candidates
+            if (item.source_kind, item.source_ref) in frame_candidate_keys
+        ]
+        if frame_fallbacks:
+            anchor_selected.append(
+                max(
+                    frame_fallbacks,
+                    key=lambda item: (
+                        item.term_hits,
+                        item.specificity,
+                        2 if item.source_kind == "table" else 1 if item.source_kind == "figure" else 0,
+                        -item.position,
+                        item.source_ref,
+                    ),
+                )
+            )
+
+    if anchor_uncovered:
+        structural_fallbacks = [
+            item
+            for item in remaining_candidates
+            if item.priority == 2 and not item.matched_fields
+        ]
+        if structural_fallbacks:
+            # Read the nearest structural neighbour even when it does
+            # not advertise a field family. The next extraction pass
+            # decides whether it contains usable context.
+            anchor_selected.append(
+                min(
+                    structural_fallbacks,
+                    key=lambda item: (
+                        item.position,
+                        -item.specificity,
+                        item.source_ref,
+                    ),
+                )
+            )
+
+    return anchor_selected, anchor_uncovered
+
+
 
 
 _ADAPTIVE_CONTEXT_FIELD_MARKERS: dict[str, tuple[str, ...]] = {
@@ -3505,6 +3736,31 @@ def _objective_missing_context_fields(
     return frozenset(missing)
 
 
+def _objective_test_context_applies_to_outcome(
+    attribute: Any,
+    outcome: str,
+) -> bool:
+    """Return whether a Source explicitly assigns one test fact to an outcome."""
+
+    raw_outcomes = (
+        attribute.get("applies_to_outcomes", ())
+        if isinstance(attribute, Mapping)
+        else getattr(attribute, "applies_to_outcomes", ())
+    )
+    applies_to_outcomes = tuple(
+        str(value).strip()
+        for value in raw_outcomes
+        if str(value).strip()
+    )
+    return bool(
+        applies_to_outcomes
+        and property_matching.outcome_matches_objective_scope(
+            outcome,
+            applies_to_outcomes,
+        )
+    )
+
+
 def _objective_attribute_is_experimental_context(attribute: Any) -> bool:
     """Return whether a context value describes the physical experiment.
 
@@ -3563,182 +3819,6 @@ def _objective_route_identity(
         route.source_kind,
         route.source_ref,
     )
-
-
-def _objective_result_recovery_routes(
-    *,
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
-    routes: tuple[EvidenceCandidate, ...],
-    attempted_keys: set[tuple[str, str, str, str]],
-    objectives: tuple[ResearchObjective, ...],
-) -> tuple[EvidenceCandidate, ...]:
-    """Return direct-result routes whose first read is not yet closed.
-
-    A researcher may find the measured values in Results and then discover the
-    variable endpoints, material, or test conditions in Methods.  Context
-    expansion therefore rereads the exact result Source both when the first
-    pass returned no result and when it returned a partial result.  The route
-    identity, rather than a lexical match, is the authority; one reread per
-    route bounds additional model work.
-    """
-
-    objective_by_id = {objective.objective_id: objective for objective in objectives}
-    context_seed = tuple(
-        unit
-        for unit in source_facts
-        if unit.reported_result is None
-        and unit.evidence_role in _OBJECTIVE_CONTEXT_ROLES
-    )
-    pending_keys: set[tuple[str, str, str, str]] = set()
-    missing_fields_by_key: dict[tuple[str, str, str, str], set[str]] = {}
-    for unit in source_facts:
-        if (
-            unit.evidence_role not in _DIRECT_RESULT_ROUTE_ROLES
-            or unit.selection_status == "failed"
-            or unit.resolution_status not in {"unresolved", "partial"}
-        ):
-            continue
-        objective = objective_by_id.get(unit.objective_id)
-        if objective is None or not _objective_fact_needs_context(unit, objective):
-            continue
-        if unit.reported_result is None:
-            # An empty direct-result read needs a grounded context Source before
-            # it can be revisited.  This preserves the existing bounded retry
-            # path without retrying when context discovery made no progress.
-            if not any(
-                context.objective_id == unit.objective_id
-                and context.document_id == unit.document_id
-                and context.scientific_context.has_content
-                for context in context_seed
-            ):
-                continue
-        else:
-            # If comparison labels are already explicit sample/group labels,
-            # deterministic reconstruction can bind them without another model
-            # call. Revisit only when the context is present but the result
-            # still needs a semantic re-read (for example labels are numeric
-            # levels while Results names only S1/S2).
-            if unit.comparison is None:
-                # Results may report the measured values without naming the
-                # comparison groups at all. Once Methods supplies explicit
-                # sample and process facts, a bounded reread can recover the
-                # missing labels and variable endpoints.
-                has_grouped_context = any(
-                    context.objective_id == unit.objective_id
-                    and context.document_id == unit.document_id
-                    and context.scientific_context.sample
-                    and context.scientific_context.process
-                    for context in context_seed
-                )
-                if not has_grouped_context:
-                    continue
-            elif not _objective_context_bundle_can_bind_result(
-                unit,
-                context_seed=context_seed,
-                objective=objective,
-            ):
-                continue
-            comparison = unit.comparison
-            wanted_labels = (
-                {
-                    _objective_column_key(comparison.baseline_label),
-                    _objective_column_key(comparison.target_label),
-                }
-                if comparison is not None
-                else set()
-            )
-            explicit_group_labels = {
-                _objective_column_key(attribute.value)
-                for context in context_seed
-                if (
-                    context.objective_id == unit.objective_id
-                    and context.document_id == unit.document_id
-                )
-                for attribute in context.scientific_context.sample
-                if attribute.value not in (None, "")
-            }
-            if wanted_labels and wanted_labels <= explicit_group_labels:
-                continue
-        key = (
-            unit.objective_id,
-            unit.document_id,
-            unit.source_kind or "",
-            unit.source_ref or "",
-        )
-        pending_keys.add(key)
-        missing_fields_by_key.setdefault(key, set()).update(
-            _objective_missing_context_fields(unit, objective)
-        )
-    if not pending_keys:
-        return ()
-    selected: dict[tuple[str, str, str, str], EvidenceCandidate] = {}
-    for route in routes:
-        key = _objective_route_identity(route)
-        if (
-            key not in pending_keys
-            or key in attempted_keys
-            or not route.extractable
-            or route.role not in _DIRECT_RESULT_ROUTE_ROLES
-        ):
-            continue
-        route_record = route.to_record()
-        route_record["context_fields"] = sorted(
-            set(route.context_fields) | missing_fields_by_key.get(key, set())
-        )
-        selected.setdefault(key, EvidenceCandidate.from_mapping(route_record))
-    return tuple(selected.values())
-
-
-def _merge_recovered_result_units(
-    *,
-    units: list[ExtractedEvidenceDraft],
-    document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]],
-    recovered_units: tuple[ExtractedEvidenceDraft, ...],
-    seen: set[str],
-) -> None:
-    """Replace an unresolved direct-result placeholder when reread succeeds."""
-
-    for recovered in recovered_units:
-        recovered_key = (
-            recovered.objective_id,
-            recovered.document_id,
-            recovered.source_kind or "",
-            recovered.source_ref or "",
-        )
-        if recovered.reported_result is not None:
-            stale_units = [
-                unit
-                for unit in units
-                if (
-                    unit.evidence_role in _DIRECT_RESULT_ROUTE_ROLES
-                    and unit.selection_status != "failed"
-                    and unit.resolution_status in {"unresolved", "partial"}
-                    and (
-                        unit.objective_id,
-                        unit.document_id,
-                        unit.source_kind or "",
-                        unit.source_ref or "",
-                    )
-                    == recovered_key
-                )
-            ]
-            for stale in stale_units:
-                units.remove(stale)
-                seen.discard(stale.evidence_id)
-                state_units = document_state_units.get(
-                    (stale.objective_id, stale.document_id),
-                    [],
-                )
-                if stale in state_units:
-                    state_units.remove(stale)
-        if recovered.evidence_id in seen:
-            continue
-        seen.add(recovered.evidence_id)
-        units.append(recovered)
-        document_state_units.setdefault(
-            (recovered.objective_id, recovered.document_id),
-            [],
-        ).append(recovered)
 
 
 def _objective_context_semantic_signature(
@@ -3901,10 +3981,9 @@ def _objective_context_bundle_can_bind_result(
 ) -> bool:
     """Return whether read same-paper conditions can bind this result.
 
-    Separate Methods rows for the comparison groups are enough for the later
+    Separate Methods rows for the comparison groups are enough for later
     deterministic paper reconstruction. A generic Methods paragraph without
-    explicit group identity is not enough, so the result is revisited with the
-    bundle in that case.
+    explicit group identity is not enough to close the result.
     """
 
     if unit.reported_result is None or unit.comparison is None:
@@ -4253,9 +4332,50 @@ def _adaptive_context_specificity_score(text: str) -> int:
     inspect this Source before generic procedural prose.
     """
 
-    number_count = min(len(_NUMBER_PATTERN.findall(text)), 6)
+    number_count = min(len(NUMBER_PATTERN.findall(text)), 6)
     group_count = min(len(_GROUP_LABEL_PATTERN.findall(text)), 4)
     return number_count + (2 * group_count)
+
+
+def _adaptive_context_test_source_score(
+    heading: str,
+    text: str,
+    *,
+    outcomes: tuple[str, ...],
+) -> int:
+    """Prefer a Methods Source tied to the result's measured outcome."""
+
+    searchable = " ".join((heading, text)).casefold()
+    evidence_hits = sum(
+        marker in searchable
+        for marker in _ADAPTIVE_CONTEXT_METHOD_EVIDENCE_MARKERS
+    )
+    if not evidence_hits:
+        return 0
+    outcome_hits = sum(
+        property_matching.axis_label_is_mentioned(searchable, outcome)
+        for outcome in outcomes
+        if str(outcome or "").strip()
+    )
+    if not outcome_hits:
+        return 0
+    identifies_method = any(
+        marker in searchable
+        for marker in _ADAPTIVE_CONTEXT_METHOD_IDENTITY_MARKERS
+    ) or any(
+        marker in heading.casefold()
+        for marker in _ADAPTIVE_CONTEXT_EXPLICIT_METHOD_HEADING_MARKERS
+    )
+    if not identifies_method:
+        return 0
+    method_section = any(
+        marker in heading.casefold()
+        for marker in _ADAPTIVE_CONTEXT_METHOD_SECTION_MARKERS
+    )
+    return (4 * outcome_hits) + (2 if method_section else 0) + min(
+        evidence_hits,
+        2,
+    )
 
 
 def _adaptive_context_matched_fields(
@@ -4390,690 +4510,6 @@ def _objective_table_route_should_skip_llm_fallback(
     return False
 
 
-def _repair_objective_table_source_if_needed(
-    *,
-    collection_id: str,
-    route: EvidenceCandidate,
-    source: dict[str, Any],
-    paper_facts_extractor: PaperFactsExtractor | None,
-    unavailable_error: Exception | None = None,
-) -> tuple[dict[str, Any], Exception | None]:
-    if not _objective_table_source_needs_llm_structural_repair(
-        route=route,
-        source=source,
-    ):
-        return source, None
-    original_matrix = _normalized_objective_table_matrix(source.get("table_matrix"))
-    canonical_matrix = _canonical_objective_table_matrix(
-        source=source,
-        matrix=original_matrix,
-    )
-    model_request_count = 0
-    model_row_count: int | None = None
-    final_row_count: int | None = None
-    model_repair_count = 0
-    deterministic_rebind_count = 0
-    number_sequence_verified: bool | None = None
-    warnings: list[str] = []
-
-    def record_trace(status: str, failure_reason: str | None = None) -> None:
-        record_analysis_diagnostic(
-            {
-                "trace_type": "table_matrix_repair",
-                "collection_id": collection_id,
-                "objective_id": route.objective_id,
-                "document_id": route.document_id,
-                "table_id": route.source_ref,
-                "page": source.get("page"),
-                "status": status,
-                "original_row_count": len(canonical_matrix),
-                "model_row_count": model_row_count,
-                "final_row_count": final_row_count,
-                "model_request_count": model_request_count,
-                "model_repair_count": model_repair_count,
-                "fragment_row_reduction_count": (
-                    max(0, len(canonical_matrix) - final_row_count)
-                    if final_row_count is not None
-                    else 0
-                ),
-                "deterministic_rebind_count": deterministic_rebind_count,
-                "number_sequence_verified": number_sequence_verified,
-                "warnings": list(dict.fromkeys(warnings)),
-                "failure_reason": failure_reason,
-            }
-        )
-
-    if unavailable_error is not None:
-        record_trace(
-            "provider_failed",
-            f"{unavailable_error.__class__.__name__}: {unavailable_error}",
-        )
-        return source, unavailable_error
-    try:
-        if paper_facts_extractor is None:
-            raise RuntimeError("table repair extractor is unavailable")
-        repair_payloads = _build_objective_table_matrix_repair_payloads(
-            route=route,
-            source=source,
-            paper_facts_extractor=paper_facts_extractor,
-        )
-        parsed_repair_items = []
-        for repair_payload in repair_payloads:
-            model_request_count += 1
-            parsed_repair_items.append(
-                (
-                    repair_payload,
-                    paper_facts_extractor.repair_table_matrix(repair_payload),
-                )
-            )
-        parsed_repairs = tuple(parsed_repair_items)
-    except Exception as exc:
-        logger.exception(
-            "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
-            collection_id,
-            route.source_ref,
-            route.objective_id,
-            route.document_id,
-            route.source_ref,
-        )
-        record_trace("provider_failed", f"{exc.__class__.__name__}: {exc}")
-        return source, exc
-
-    repair_records = []
-    for repair_payload, parsed in parsed_repairs:
-        repairs = getattr(parsed, "repairs", None)
-        if repairs:
-            row_offset = int(
-                repair_payload["source"]["table_slice"]["first_source_row_index"]
-            )
-            for repair_item in repairs:
-                repair_record = (
-                    repair_item.model_dump()
-                    if hasattr(repair_item, "model_dump")
-                    else dict(repair_item)
-                )
-                if repair_record.get("row_index") is not None:
-                    repair_record["row_index"] = (
-                        int(repair_record["row_index"]) + row_offset - 1
-                    )
-                repair_records.append(repair_record)
-        warnings.extend(
-            str(warning)
-            for warning in getattr(parsed, "warnings", None) or ()
-            if str(warning).strip()
-        )
-    model_repair_count = len(repair_records)
-    repaired_matrix = _merge_objective_table_matrix_repairs(
-        source=source,
-        canonical_matrix=canonical_matrix,
-        parsed_repairs=parsed_repairs,
-    )
-    model_row_count = len(repaired_matrix)
-    if not repaired_matrix:
-        reason = "table matrix repair returned no usable matrix"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    repaired_matrix, residual_repairs = (
-        _cleanup_objective_repaired_table_matrix_residual_fragments(
-            original_matrix=canonical_matrix,
-            repaired_matrix=repaired_matrix,
-            column_headers=source.get("column_headers", ()),
-        )
-    )
-    repaired_matrix, uncertainty_repairs = (
-        _rebind_objective_table_mean_uncertainty_columns(
-            original_matrix=canonical_matrix,
-            repaired_matrix=repaired_matrix,
-            column_headers=source.get("column_headers", ()),
-        )
-    )
-    deterministic_rebind_count = len(uncertainty_repairs)
-    final_row_count = len(repaired_matrix)
-    if (
-        repaired_matrix == canonical_matrix
-        and _objective_table_matrix_has_structural_fragments(canonical_matrix)
-    ):
-        reason = "table matrix repair left the fragmented matrix unchanged"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    if _objective_table_matrix_has_structural_fragments(repaired_matrix):
-        reason = "table matrix repair returned a structurally fragmented matrix"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    number_sequence_verified = (
-        _objective_table_repair_preserves_result_number_sequences(
-            original_matrix=canonical_matrix,
-            repaired_matrix=repaired_matrix,
-        )
-    )
-    if not number_sequence_verified:
-        reason = "table matrix repair changed or reordered source result numbers"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    if not _objective_table_repair_preserves_source_tokens(
-        original_matrix=canonical_matrix,
-        repaired_matrix=repaired_matrix,
-    ):
-        reason = "table matrix repair introduced tokens not present in source"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    repaired_source = dict(source)
-    repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
-    repaired_source["table_matrix"] = repaired_matrix
-    repaired_source["table_matrix_structural_repair_applied"] = True
-    repair_records.extend(residual_repairs)
-    repair_records.extend(uncertainty_repairs)
-    if repair_records:
-        repaired_source["table_matrix_repairs"] = repair_records
-    if warnings:
-        repaired_source["table_matrix_repair_warnings"] = list(
-            dict.fromkeys(warnings)
-        )
-    record_trace("verified")
-    return repaired_source, None
-
-
-def _build_objective_table_matrix_repair_payloads(
-    *,
-    route: EvidenceCandidate,
-    source: dict[str, Any],
-    paper_facts_extractor: PaperFactsExtractor,
-) -> tuple[dict[str, Any], ...]:
-    matrix = _normalized_objective_table_matrix(source.get("table_matrix"))
-    canonical_matrix = _canonical_objective_table_matrix(source=source, matrix=matrix)
-    if not canonical_matrix:
-        return ()
-    headers = canonical_matrix[0]
-    body_rows = canonical_matrix[1:]
-
-    def payload(start: int, end: int) -> dict[str, Any]:
-        return _build_objective_table_matrix_repair_payload(
-            route=route,
-            source=source,
-            headers=headers,
-            body_rows=body_rows,
-            start=start,
-            end=end,
-        )
-
-    estimator = getattr(
-        paper_facts_extractor,
-        "estimate_table_matrix_repair_prompt_tokens",
-        None,
-    )
-    if not callable(estimator):
-        return (payload(0, len(body_rows)),)
-
-    bounded: list[dict[str, Any]] = []
-
-    def append_bounded(start: int, end: int) -> None:
-        candidate = payload(start, end)
-        if (
-            int(estimator(candidate)) <= _TABLE_MATRIX_REPAIR_PROMPT_TOKEN_LIMIT
-            or end - start <= 1
-        ):
-            bounded.append(candidate)
-            return
-        midpoint = start + max(1, (end - start) // 2)
-        append_bounded(start, midpoint)
-        append_bounded(midpoint, end)
-
-    append_bounded(0, len(body_rows))
-    return tuple(bounded)
-
-
-def _build_objective_table_matrix_repair_payload(
-    *,
-    route: EvidenceCandidate,
-    source: dict[str, Any],
-    headers: list[str],
-    body_rows: list[list[str]],
-    start: int,
-    end: int,
-) -> dict[str, Any]:
-    first_source_row_index = start + 1
-    compact_source = {
-        "source_kind": source.get("source_kind"),
-        "source_ref": source.get("source_ref"),
-        "document_id": source.get("document_id"),
-        "page": source.get("page"),
-        "caption_text": source.get("caption_text"),
-        "heading_path": source.get("heading_path"),
-        "column_headers": headers,
-        "table_markdown": render_markdown_table(
-            [headers, *body_rows[start:end]],
-            headers,
-            header_row_count=1,
-        ),
-        "table_visual_text": str(source.get("table_visual_text") or "").strip()
-        or None,
-        "table_slice": {
-            "first_source_row_index": first_source_row_index,
-            "end_source_row_index": end + 1,
-            "total_body_rows": len(body_rows),
-        },
-    }
-    return {
-        "table_role": route.role,
-        "repair_focus": [
-            "repair parser-split cells",
-            "preserve table width",
-            "preserve numeric result cells exactly",
-        ],
-        "source": {
-            key: value
-            for key, value in compact_source.items()
-            if value not in (None, "", [], {})
-        },
-    }
-
-
-def _canonical_objective_table_matrix(
-    *,
-    source: dict[str, Any],
-    matrix: list[list[str]],
-) -> list[list[str]]:
-    if not matrix:
-        return []
-    headers = [str(value).strip() for value in source.get("column_headers", ())]
-    if not any(headers):
-        headers = list(matrix[0])
-    header_row_count = source.get("header_row_count", 1)
-    try:
-        body_start = max(0, min(int(header_row_count), len(matrix)))
-    except (TypeError, ValueError):
-        body_start = 1
-    return [headers, *matrix[body_start:]]
-
-
-def _merge_objective_table_matrix_repairs(
-    *,
-    source: dict[str, Any],
-    canonical_matrix: list[list[str]],
-    parsed_repairs: tuple[tuple[dict[str, Any], Any], ...],
-) -> list[list[str]]:
-    if not canonical_matrix or not parsed_repairs:
-        return []
-    headers = canonical_matrix[0]
-    merged = [headers]
-    for _repair_payload, parsed in parsed_repairs:
-        repaired_slice = _validated_objective_repaired_table_matrix(
-            source={**source, "column_headers": headers},
-            repaired_table_matrix=getattr(parsed, "repaired_table_matrix", None),
-        )
-        if not repaired_slice:
-            return []
-        slice_rows = repaired_slice[1:] if _objective_row_matches_headers(
-            tuple(repaired_slice[0]), tuple(headers)
-        ) else repaired_slice
-        merged.extend(slice_rows)
-    # A layout parser may spill more than one logical row (for example when a
-    # wrapped specimen label and its uncertainty land on separate grid rows).
-    # The repair contract already verifies column width, source-token
-    # conservation, and every numeric column sequence below.  Rejecting every
-    # row-count reduction except one therefore discarded valid complete tables
-    # for no scientific reason.  Keep only the monotonic bound here: a repair
-    # may merge parser fragments, but it may never invent additional rows.
-    if len(merged) < 2 or len(merged) > len(canonical_matrix):
-        return []
-    return merged
-
-
-def _objective_table_repair_preserves_result_number_sequences(
-    *,
-    original_matrix: list[list[str]],
-    repaired_matrix: list[list[str]],
-) -> bool:
-    if not original_matrix or not repaired_matrix:
-        return False
-    expected_width = len(original_matrix[0])
-    if expected_width != len(repaired_matrix[0]):
-        return False
-    if any(len(row) != expected_width for row in original_matrix):
-        return False
-    if any(len(row) != expected_width for row in repaired_matrix):
-        return False
-    return all(
-        _objective_column_numeric_tokens(original_matrix, column_index)
-        == _objective_column_numeric_tokens(repaired_matrix, column_index)
-        for column_index in range(1, expected_width)
-    )
-
-
-_OBJECTIVE_TABLE_TOKEN_PATTERN = re.compile(
-    r"[^\W_]+(?:[-_][^\W_]+)*",
-    re.UNICODE,
-)
-
-
-def _objective_table_repair_preserves_source_tokens(
-    *,
-    original_matrix: list[list[str]],
-    repaired_matrix: list[list[str]],
-) -> bool:
-    """Reject repair text that cannot be assembled from the supplied table.
-
-    Structural repair may move a parser-spilled label or join adjacent cells, but
-    it must not create a new specimen name, process label, or numeric level. A
-    multiset check is deliberately conservative: omission is allowed so the
-    existing residual-fragment cleanup can remove a carried prefix, while any
-    newly introduced lexical token is left unresolved for a researcher.
-    """
-    if not original_matrix or not repaired_matrix:
-        return False
-    original_tokens = Counter(
-        token
-        for row in original_matrix[1:]
-        for cell in row
-        for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(
-            " ".join(str(cell or "").split()).casefold()
-        )
-    )
-    repaired_tokens = Counter(
-        token
-        for row in repaired_matrix[1:]
-        for cell in row
-        for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(
-            " ".join(str(cell or "").split()).casefold()
-        )
-    )
-    return all(
-        repaired_tokens[token] <= original_tokens[token]
-        for token in repaired_tokens
-    )
-
-
-def _objective_column_numeric_tokens(
-    matrix: list[list[str]],
-    column_index: int,
-) -> tuple[str, ...]:
-    return tuple(
-        match.group(0)
-        for row in matrix[1:]
-        for match in _NUMBER_PATTERN.finditer(str(row[column_index] or ""))
-    )
-
-
-def _objective_table_has_mergeable_trailing_fragment_row(
-    matrix: list[list[str]],
-) -> bool:
-    if len(matrix) < 3 or len(matrix[-1]) < 2:
-        return False
-    row = [" ".join(str(cell or "").split()) for cell in matrix[-1]]
-    nonempty_result_cells = [cell for cell in row[1:] if cell]
-    if len(nonempty_result_cells) != 1:
-        return False
-    label = row[0]
-    return bool(
-        re.fullmatch(
-            r"\(?\s*[-+]?\d+(?:\.\d+)?\s*/\s*[-+]?\d+(?:\.\d+)?\s*\)?",
-            label,
-        )
-        and _objective_cell_is_uncertainty_fragment(nonempty_result_cells[0])
-    )
-
-
-def _objective_cell_is_uncertainty_fragment(value: str) -> bool:
-    return bool(
-        re.fullmatch(
-            r"\(?\s*(?:±|\+/-|\+-)\s*"
-            r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*\)?",
-            " ".join(str(value or "").split()),
-        )
-    )
-
-
-def _objective_cell_is_mean_uncertainty_value(value: str) -> bool:
-    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
-    return bool(
-        re.fullmatch(
-            rf"\s*{number}\s*\(?\s*(?:±|\+/-|\+-)\s*{number}\s*\)?\s*",
-            str(value or ""),
-        )
-    )
-
-
-def _rebind_objective_table_mean_uncertainty_columns(
-    *,
-    original_matrix: list[list[str]],
-    repaired_matrix: list[list[str]],
-    column_headers: Any,
-) -> tuple[list[list[str]], list[dict[str, Any]]]:
-    if len(repaired_matrix) < 2 or not original_matrix:
-        return repaired_matrix, []
-    width = len(repaired_matrix[0])
-    if width < 2 or any(len(row) != width for row in repaired_matrix):
-        return repaired_matrix, []
-    if any(len(row) != width for row in original_matrix):
-        return repaired_matrix, []
-
-    body_row_count = len(repaired_matrix) - 1
-    headers = [str(value).strip() for value in column_headers or ()]
-    rebound_matrix = [list(row) for row in repaired_matrix]
-    repairs: list[dict[str, Any]] = []
-    for column_index in range(1, width):
-        source_cells = [row[column_index] for row in original_matrix[1:]]
-        source_tokens = _objective_column_numeric_tokens(
-            original_matrix,
-            column_index,
-        )
-        if len(source_tokens) != body_row_count * 2:
-            continue
-        if not any(
-            len(tuple(_NUMBER_PATTERN.finditer(cell))) != 2
-            for cell in source_cells
-        ):
-            continue
-        uncertainty_cell_count = sum(
-            1
-            for cell in source_cells
-            if re.search(r"(?:±|\+/-|\+-)", cell)
-        )
-        if uncertainty_cell_count < max(2, body_row_count // 2):
-            continue
-        repaired_cells = [row[column_index] for row in repaired_matrix[1:]]
-        if not all(
-            _objective_cell_is_mean_uncertainty_value(cell)
-            for cell in repaired_cells
-        ):
-            continue
-
-        for body_index, repaired_cell in enumerate(repaired_cells):
-            expected_tokens = source_tokens[body_index * 2 : body_index * 2 + 2]
-            actual_tokens = tuple(
-                match.group(0) for match in _NUMBER_PATTERN.finditer(repaired_cell)
-            )
-            if actual_tokens == expected_tokens:
-                continue
-            rebound = f"{expected_tokens[0]} ( ± {expected_tokens[1]})"
-            rebound_matrix[body_index + 1][column_index] = rebound
-            repairs.append(
-                {
-                    "row_index": body_index + 1,
-                    "column": (
-                        headers[column_index]
-                        if column_index < len(headers)
-                        else str(column_index)
-                    ),
-                    "before": repaired_cell,
-                    "after": rebound,
-                    "reason": (
-                        "Rebound a parser-split uncertainty using the complete "
-                        "top-to-bottom numeric sequence of this result column."
-                    ),
-                }
-            )
-    return rebound_matrix, repairs
-
-
-def _validated_objective_repaired_table_matrix(
-    *,
-    source: dict[str, Any],
-    repaired_table_matrix: Any,
-) -> list[list[str]]:
-    if not isinstance(repaired_table_matrix, list) or not repaired_table_matrix:
-        return []
-    headers = [
-        str(header).strip()
-        for header in source.get("column_headers", ())
-        if str(header).strip()
-    ]
-    expected_width = len(headers)
-    repaired_rows: list[list[str]] = []
-    for row in repaired_table_matrix:
-        if not isinstance(row, (list, tuple)):
-            return []
-        repaired_row = [str(cell).strip() for cell in row]
-        if expected_width and len(repaired_row) != expected_width:
-            return []
-        repaired_rows.append(repaired_row)
-    if expected_width and not _objective_row_matches_headers(
-        tuple(repaired_rows[0]),
-        tuple(headers),
-    ):
-        repaired_rows.insert(0, headers)
-    return repaired_rows
-
-
-def _normalized_objective_table_matrix(value: Any) -> list[list[str]]:
-    if not isinstance(value, list):
-        return []
-    return [
-        [str(cell).strip() for cell in row]
-        for row in value
-        if isinstance(row, (list, tuple))
-    ]
-
-
-def _cleanup_objective_repaired_table_matrix_residual_fragments(
-    *,
-    original_matrix: list[list[str]],
-    repaired_matrix: list[list[str]],
-    column_headers: Any,
-) -> tuple[list[list[str]], list[dict[str, Any]]]:
-    if not original_matrix or not repaired_matrix:
-        return repaired_matrix, []
-    headers = [str(value).strip() for value in column_headers or ()]
-    cleaned_matrix: list[list[str]] = []
-    repairs: list[dict[str, Any]] = []
-    for row_index, repaired_row in enumerate(repaired_matrix):
-        original_row = (
-            original_matrix[row_index] if row_index < len(original_matrix) else []
-        )
-        cleaned_row: list[str] = []
-        for col_index, repaired_cell in enumerate(repaired_row):
-            original_cell = (
-                original_row[col_index] if col_index < len(original_row) else ""
-            )
-            cleaned_cell = _cleanup_objective_repaired_cell_residual_prefix(
-                original_cell=original_cell,
-                repaired_cell=repaired_cell,
-            )
-            cleaned_row.append(cleaned_cell)
-            if cleaned_cell != repaired_cell:
-                repairs.append(
-                    {
-                        "row_index": row_index,
-                        "column": (
-                            headers[col_index]
-                            if col_index < len(headers)
-                            else str(col_index)
-                        ),
-                        "before": repaired_cell,
-                        "after": cleaned_cell,
-                        "reason": (
-                            "Removed a leading closing-fragment prefix that "
-                            "belonged to the previous parser-split row label."
-                        ),
-                    }
-                )
-        cleaned_matrix.append(cleaned_row)
-    return cleaned_matrix, repairs
-
-
-def _cleanup_objective_repaired_cell_residual_prefix(
-    *,
-    original_cell: str,
-    repaired_cell: str,
-) -> str:
-    original = " ".join(str(original_cell or "").split())
-    repaired = " ".join(str(repaired_cell or "").split())
-    if not original or not repaired:
-        return repaired_cell
-    if not _objective_cell_text_looks_structurally_fragmented(original):
-        return repaired_cell
-    match = re.match(r"^([^\s()[\]{}|]{1,32}\))\s+(.+)$", original)
-    if match is None:
-        return repaired_cell
-    prefix = f"{match.group(1)} "
-    original_remainder = match.group(2).strip()
-    if not _objective_cell_text_looks_structurally_fragmented(original_remainder):
-        return repaired_cell
-    if not repaired.startswith(prefix):
-        return repaired_cell
-    candidate = repaired[len(prefix) :].strip()
-    if not candidate:
-        return repaired_cell
-    if _objective_cell_text_looks_structurally_fragmented(candidate):
-        return repaired_cell
-    return candidate
-
-
-def _objective_table_matrix_has_structural_fragments(
-    table_matrix: list[list[str]],
-) -> bool:
-    return any(
-        _objective_cell_text_looks_structurally_fragmented(cell)
-        for row in table_matrix
-        for cell in row
-    )
-
-
-def _objective_table_source_needs_llm_structural_repair(
-    *,
-    route: EvidenceCandidate,
-    source: dict[str, Any],
-) -> bool:
-    if route.source_kind != "table":
-        return False
-    if route.role not in {
-        "current_experimental_evidence",
-        "process_or_treatment",
-        "condition_context",
-    }:
-        return False
-    matrix = source.get("table_matrix")
-    if isinstance(matrix, list) and _objective_table_matrix_has_structural_fragments(
-        _normalized_objective_table_matrix(matrix)
-    ):
-        return True
-    cells = source.get("table_cells")
-    if not isinstance(cells, list):
-        return False
-    return any(
-        _objective_cell_text_looks_structurally_fragmented(
-            str(cell.get("cell_text") or "")
-        )
-        for cell in cells
-        if isinstance(cell, dict)
-    )
-
-
-def _objective_cell_text_looks_structurally_fragmented(text: str) -> bool:
-    value = " ".join(str(text or "").split())
-    if not value:
-        return False
-    if value.count("(") != value.count(")"):
-        return True
-    if value.count("[") != value.count("]"):
-        return True
-    if value.endswith(("/", "(", "[", "{")):
-        return True
-    if value.startswith((")", "]", "}")):
-        return True
-    return False
-
-
 def _objective_merge_table_repair_records(
     *,
     deterministic_records: tuple[dict[str, Any], ...],
@@ -5082,356 +4518,6 @@ def _objective_merge_table_repair_records(
     return deterministic_records or llm_records
 
 
-def _build_objective_method_family_test_condition_units(
-    *,
-    objectives: tuple[ResearchObjective, ...],
-    objective_paper_frames: tuple[PaperAnalysisFrame, ...],
-    objective_evidence_routes: tuple[EvidenceCandidate, ...],
-    blocks_by_document_id: dict[str, list[Any]],
-) -> tuple[ExtractedEvidenceDraft, ...]:
-    context_by_objective_id = {context.objective_id: context for context in objectives}
-    routed_document_keys = {
-        (route.objective_id, route.document_id)
-        for route in objective_evidence_routes
-        if route.extractable and route.role != "low_value_or_irrelevant"
-    }
-    records: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for frame in objective_paper_frames:
-        if (
-            frame.relevance == "irrelevant"
-            or (frame.objective_id, frame.document_id) not in routed_document_keys
-        ):
-            continue
-        objective_context = context_by_objective_id.get(frame.objective_id)
-        families = property_matching.objective_method_families(objective_context)
-        if not families:
-            continue
-        blocks = blocks_by_document_id.get(frame.document_id, [])
-        for family in families:
-            key = (frame.objective_id, frame.document_id, family)
-            if key in seen:
-                continue
-            candidate = _objective_method_family_candidate(
-                family=family,
-                blocks=blocks,
-            )
-            if candidate is None:
-                continue
-            block, quote, payload = candidate
-            seen.add(key)
-            source_ref = str(getattr(block, "block_id", "") or "")
-            source_ref_payload = {
-                "source_kind": "text_window",
-                "source_ref": source_ref,
-                "role": "test_condition",
-                "page": getattr(block, "page", None),
-            }
-            records.append(
-                {
-                    "evidence_id": _objective_method_family_unit_id(
-                        objective_id=frame.objective_id,
-                        document_id=frame.document_id,
-                        family=family,
-                    ),
-                    "objective_id": frame.objective_id,
-                    "document_id": frame.document_id,
-                    "evidence_role": "condition_context",
-                    "selection_reason": quote,
-                    "changed_variables": [],
-                    "comparison": None,
-                    "reported_result": None,
-                    "attribution_scope": "not_attributable",
-                    "scientific_context": {
-                        "material": [],
-                        "sample": [],
-                        "process": [],
-                        "test": [
-                            {"name": "method_family", "value": family},
-                            *(
-                                {"name": key, "value": value}
-                                for key, value in payload.items()
-                            ),
-                        ],
-                    },
-                    "source_refs": (
-                        {
-                            key: value
-                            for key, value in source_ref_payload.items()
-                            if value not in (None, "", [], {})
-                        },
-                    ),
-                    "resolution_status": "resolved",
-                    "confidence": 0.86,
-                }
-            )
-    return tuple(ExtractedEvidenceDraft.from_mapping(record) for record in records)
-
-
-def _objective_method_family_candidate(
-    *,
-    family: str,
-    blocks: list[Any],
-) -> tuple[Any, str, dict[str, Any]] | None:
-    best: tuple[int, int, Any, str, dict[str, Any]] | None = None
-    for position, block in enumerate(blocks):
-        text = str(getattr(block, "text", "") or "").strip()
-        if not text:
-            continue
-        combined_text = " ".join(
-            part
-            for part in (
-                str(getattr(block, "heading_path", "") or "").strip(),
-                text,
-            )
-            if part
-        )
-        score = _score_objective_method_family_window(
-            family=family,
-            text=combined_text,
-        )
-        if score <= 0:
-            continue
-        quote = _select_objective_method_family_quote(
-            text,
-            family=family,
-        )
-        if not quote:
-            continue
-        payload = _build_objective_method_family_condition_payload(
-            family=family,
-            text=text,
-        )
-        if not payload:
-            continue
-        candidate = (score, -position, block, quote, payload)
-        if best is None or candidate[:2] > best[:2]:
-            best = candidate
-    if best is None:
-        return None
-    _, _, block, quote, payload = best
-    return block, quote, payload
-
-
-def _score_objective_method_family_window(
-    *,
-    family: str,
-    text: str,
-) -> int:
-    lowered = text.casefold()
-    if family == "tensile_mechanics":
-        terms = (
-            ("tensile", 4),
-            ("stress-strain", 3),
-            ("yield strength", 2),
-            ("ultimate tensile", 2),
-            ("astm e8", 4),
-            ("instron", 4),
-            ("strain rate", 2),
-        )
-    elif family == "microhardness":
-        terms = (
-            ("microhardness", 4),
-            ("vickers", 4),
-            ("hardness", 2),
-            ("wilson", 3),
-            ("holding time", 2),
-            ("readings", 2),
-        )
-    elif family == "density_porosity_microstructure":
-        terms = (
-            ("sem", 3),
-            ("imagej", 4),
-            ("porosity", 3),
-            ("relative density", 3),
-            ("microstructure", 2),
-            ("magnification", 2),
-            ("horizontal", 1),
-            ("vertical", 1),
-        )
-    else:
-        return 0
-    return sum(weight for term, weight in terms if term in lowered)
-
-
-def _build_objective_method_family_condition_payload(
-    *,
-    family: str,
-    text: str,
-) -> dict[str, Any]:
-    if family == "tensile_mechanics":
-        payload: dict[str, Any] = {
-            "method": "tensile testing",
-            "methods": ["tensile testing"],
-            "test_method": "tensile testing",
-            "standard": _extract_first_pattern(
-                text,
-                r"\bASTM\s*E8M?\b",
-            ),
-            "instrument": _extract_first_pattern(
-                text,
-                r"\bINSTRON\b[^.;,\n]*",
-            ),
-            "strain_rate_s-1": _extract_first_pattern(
-                text,
-                r"\b\d+(?:\.\d+)?\s*mm\s*/\s*min\b",
-            ),
-            "specimen_geometry": (
-                "Fig. 2" if re.search(r"\bFig\.\s*2\b", text, re.IGNORECASE) else None
-            ),
-            "sample_orientation": _extract_orientation_phrase(text),
-            "details": _compact_condition_details(text),
-        }
-    elif family == "microhardness":
-        payload = {
-            "method": "Vickers microhardness",
-            "methods": ["Vickers microhardness"],
-            "test_method": "Vickers microhardness",
-            "instrument": _extract_first_pattern(
-                text,
-                r"\b(?:Vickers\s+)?microhardness[^.;\n]*",
-            ),
-            "load": _extract_first_pattern(text, r"\b\d+(?:\.\d+)?\s*N\b"),
-            "holding_time": _extract_first_pattern(
-                text,
-                r"\b\d+(?:\.\d+)?\s*s\b",
-            ),
-            "readings_per_sample": _extract_first_pattern(
-                text,
-                r"\b\d+\s+(?:readings|measurements)\b[^.;\n]*",
-            ),
-            "sample_orientation": _extract_orientation_phrase(text),
-            "details": _compact_condition_details(text),
-        }
-    else:
-        payload = {
-            "method": "SEM / ImageJ",
-            "methods": _dedupe_preserving_order(
-                [
-                    method
-                    for method in ("SEM", "ImageJ")
-                    if method.casefold() in text.casefold()
-                ]
-            )
-            or ["SEM / ImageJ"],
-            "test_method": "SEM / ImageJ",
-            "instrument": _extract_first_pattern(
-                text,
-                r"\bFEI[-\s]INSPECT\s*50\s*SEM\b",
-            )
-            or ("SEM" if re.search(r"\bSEM\b", text, re.IGNORECASE) else None),
-            "section_orientation": _extract_section_orientation_phrase(text),
-            "surface_state": _extract_surface_preparation_phrase(text),
-            "magnification": _extract_first_pattern(
-                text,
-                r"\b\d+(?:\.\d+)?\s*[xX]\s*(?:-|to)\s*\d+(?:\.\d+)?\s*[xX]\b",
-            ),
-            "details": _compact_condition_details(text),
-        }
-    return {
-        key: value for key, value in payload.items() if value not in (None, "", [], {})
-    }
-
-
-def _select_objective_method_family_quote(
-    text: str,
-    *,
-    family: str,
-) -> str | None:
-    terms = {
-        "tensile_mechanics": ("tensile", "astm", "instron", "stress-strain"),
-        "microhardness": ("microhardness", "vickers", "hardness", "wilson"),
-        "density_porosity_microstructure": (
-            "sem",
-            "imagej",
-            "porosity",
-            "relative density",
-            "microstructure",
-        ),
-    }.get(family, ())
-    normalized_text = " ".join(str(text or "").split())
-    if not normalized_text:
-        return None
-    for sentence in re.split(r"(?<=[.!?])\s+", normalized_text):
-        if any(term in sentence.casefold() for term in terms):
-            return sentence[:900].strip()
-    return normalized_text[:900].strip()
-
-
-def _extract_first_pattern(
-    text: str,
-    pattern: str,
-) -> str | None:
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match is None:
-        return None
-    return re.sub(r"\s+", " ", match.group(0)).strip()
-
-
-def _extract_orientation_phrase(text: str) -> str | None:
-    lowered = text.casefold()
-    if "horizontally" in lowered and "substrate" in lowered:
-        return "all blocks built horizontally on substrate"
-    if "horizontal" in lowered and "vertical" in lowered:
-        return "horizontal and vertical sections"
-    if "horizontal" in lowered:
-        return "horizontal"
-    if "vertical" in lowered:
-        return "vertical"
-    return None
-
-
-def _extract_section_orientation_phrase(text: str) -> str | None:
-    lowered = text.casefold()
-    if "horizontal" in lowered and "vertical" in lowered:
-        return "horizontal and vertical sections"
-    return _extract_orientation_phrase(text)
-
-
-def _extract_surface_preparation_phrase(text: str) -> str | None:
-    parts = []
-    grit = _extract_first_pattern(
-        text,
-        r"\b\d+\s*[-]\s*\d+\s*grit\b",
-    )
-    if grit:
-        parts.append(grit)
-    silica = _extract_first_pattern(
-        text,
-        r"\bcolloidal\s+silica\b[^.;\n]*",
-    )
-    if silica:
-        parts.append(silica)
-    return "; ".join(parts) if parts else None
-
-
-def _compact_condition_details(text: str) -> str | None:
-    normalized = " ".join(str(text or "").split())
-    return normalized[:1000].strip() or None
-
-
-def _objective_method_family_unit_id(
-    *,
-    objective_id: str,
-    document_id: str,
-    family: str,
-) -> str:
-    seed = "|".join(("method_family", objective_id, document_id, family))
-    return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
-
-
-def _objective_numeric_match_tokens(value: Any) -> tuple[str, ...]:
-    tokens: list[str] = []
-    for match in _NUMBER_PATTERN.finditer(str(value or "").replace(",", "")):
-        number_text = match.group(0)
-        number = _coerce_number(number_text)
-        if number is None:
-            continue
-        if number.is_integer():
-            tokens.append(str(int(number)))
-        else:
-            tokens.append(("%f" % number).rstrip("0").rstrip("."))
-    return tuple(tokens)
 
 
 def _build_objective_route_source_payload(
@@ -6001,7 +5087,7 @@ def _objective_result_table_matrix_records(
                 )
                 or property_source
             )
-            numeric_value = _coerce_result_cell_number(raw_value)
+            numeric_value = coerce_result_cell_number(raw_value)
             result_value = (
                 numeric_value if numeric_value is not None else str(raw_value).strip()
             )
@@ -6700,7 +5786,7 @@ def _objective_sample_attributes_need_row_number(
     for value in sample_attributes.values():
         tokens = [
             token
-            for token in _objective_numeric_match_tokens(value)
+            for token in numeric_match_tokens(value)
             if token not in {"1", "-1"}
         ]
         if len(set(tokens)) >= 2:
@@ -6713,13 +5799,14 @@ def _objective_sample_attributes_have_stable_label(
 ) -> bool:
     for key in sample_attributes:
         column_key = _objective_column_key(str(key))
+        if column_key.startswith("printed_"):
+            return True
         if column_key in {
             "build_orientation",
             "id",
             "label",
             "material",
             "orientation",
-            "printed_316l",
             "sample",
             "sample_id",
             "sample_label",
@@ -6732,6 +5819,8 @@ def _objective_sample_attributes_have_stable_label(
 
 
 def _objective_table_column_is_sample_key(column_key: str) -> bool:
+    if column_key.startswith("printed_"):
+        return True
     return column_key in {
         "case",
         "condition",
@@ -6739,7 +5828,6 @@ def _objective_table_column_is_sample_key(column_key: str) -> bool:
         "condition_number",
         "id",
         "no",
-        "printed_316l",
         "sample",
         "sample_id",
         "sample_no",
@@ -7016,33 +6104,8 @@ def _objective_value_column_is_non_result(value: str) -> bool:
 
 
 
-def _coerce_number(value: Any) -> float | None:
-    text = str(value).strip().replace(",", "")
-    if not text:
-        return None
-    scientific_match = re.search(
-        r"([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?:[xX\u00d7]\s*10)\s*\^?\s*([-+]?\d+)",
-        text,
-    )
-    if scientific_match is not None:
-        return float(scientific_match.group(1)) * (10 ** int(scientific_match.group(2)))
-    match = _NUMBER_PATTERN.search(text)
-    if match is None:
-        return None
-    return float(match.group(0))
 
 
-def _coerce_result_cell_number(value: Any) -> float | None:
-    text = str(value).strip().replace(",", "")
-    if not text:
-        return None
-    matches = list(_NUMBER_PATTERN.finditer(text))
-    if len(matches) >= 2:
-        leading_prefix = text[: matches[0].start()]
-        between_first_and_second = text[matches[0].end() : matches[1].start()]
-        if "(" in leading_prefix and ")" in between_first_and_second:
-            return float(matches[1].group(0))
-    return _coerce_number(text)
 
 
 
@@ -7254,7 +6317,7 @@ def _objective_evidence_prompt_source(
         if not table_markdown:
             table_markdown = str(
                 render_markdown_table(
-                    _normalized_objective_table_matrix(source.get("table_matrix")),
+                    normalize_table_matrix(source.get("table_matrix")),
                     [str(value) for value in source.get("column_headers", ())],
                     header_row_count=int(source.get("header_row_count", 1) or 0),
                 )
@@ -7266,11 +6329,11 @@ def _objective_evidence_prompt_source(
             "document_id": source.get("document_id"),
             "page": source.get("page"),
             "caption_text": str(source.get("caption_text") or "")[
-                :_ROUTE_PROMPT_TEXT_CHARS
+                :ROUTE_PROMPT_TEXT_LIMIT
             ],
             "heading_path": source.get("heading_path"),
             "column_headers": [
-                str(value)[:_OBJECTIVE_STATE_TEXT_CHARS]
+                str(value)[:OBJECTIVE_STATE_TEXT_LIMIT]
                 for value in source.get("column_headers", []) or []
                 if str(value).strip()
             ],
@@ -7289,7 +6352,7 @@ def _objective_evidence_prompt_source(
             "block_type": source.get("block_type"),
             "heading_path": source.get("heading_path"),
             "text": str(source.get("text") or "")[
-                :_OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS
+                :_OBJECTIVE_EVIDENCE_TEXT_CHARS
             ],
         }
     return dict(source)

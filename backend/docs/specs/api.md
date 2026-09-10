@@ -43,23 +43,48 @@ login.
 - `POST /api/v1/collections/{collection_id}/documents`
 - `POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation`
 - `POST /api/v1/collections/{collection_id}/source-archives`
-- `GET /api/v1/collections/{collection_id}/tasks`
-- `GET /api/v1/tasks/{task_id}`
+- `GET /api/v1/collections/{collection_id}/pipeline-runs`
+- `GET /api/v1/pipeline-runs/{run_id}`
 
 A Collection groups current Documents. Each Document independently owns its
 preparation status, current Source structure, and current DocumentProfile. The
-preparation command queues only the named Document; it does not prepare other
-Collection members or discover Objectives. Paper Map construction is a lazy
-Objective-core operation over an explicit ready-document selection. Task
-responses expose `document_id`, input fingerprint, current stage, progress,
-warnings, terminal errors, timestamps, and retry-appropriate status. Tasks do
-not expose a filesystem output path; scientific artifacts are addressed by
-their owning Document, Objective, analysis, Finding, or Evidence identities.
+collection-scoped preparation, Pipeline Run, and experiment-plan endpoints are
+restricted to the authenticated Collection owner and return `404` for other
+users.
+Document upload accepts the optional query parameter `reuse_existing=true` for
+retrying an uncertain upload outcome. If the normalized content already exists
+in this Collection, the server returns that Document with `200`, preserving its
+identity, filename, and preparation state. Content matching uses server-side
+SHA-256; a matching filename alone never selects an existing Document. The
+default remains `false`, with duplicate content returning `400`. Neither mode
+starts preparation automatically; the caller uses the returned Document ID with
+the existing preparation command. Ownership and upload validation apply before
+recovery just as they do before an ordinary upload.
 
-At most one `document_preparation` task may be queued or running for a Document.
-Repeated requests reuse that active task. A completed task is reusable only when
+The preparation command queues only the named Document; it does not prepare other
+Collection members or discover Objectives. Paper Map construction is a lazy
+Objective-core operation over an explicit ready-document selection. Collection
+Pipeline Run history returns compact rows with run identity,
+pipeline and scope, status, current node, progress, warnings, terminal errors,
+and last-update time. `GET /api/v1/pipeline-runs/{run_id}` returns the complete
+technical record, including the input fingerprint, node telemetry, statistics,
+context, timestamps, and retry lineage. Runs do not expose a filesystem output
+path; scientific artifacts are addressed by their owning Document, Objective,
+analysis, Finding, or Evidence identities.
+
+`GET /api/v1/collections` is the collection-picker projection. Each item
+contains collection identity, name, description, status, paper count, and
+compact current-document rows (`document_id`, filename, media type, status,
+size, and timestamps). It intentionally omits storage keys, SHA-256 values,
+parser versions, and preparation fingerprints. Use the collection detail or
+document-list endpoints when those operational fields are required.
+
+At most one `document_preparation` run may be queued or running for a Document.
+Repeated requests reuse that active run. A completed run is reusable only when
 its input fingerprint still matches the current document bytes, parser version,
-and Profile version. Source and Profile fingerprints are tracked separately so
+and Profile version, the Document is ready, and its Source and completed Profile
+still exist. A technically failed Profile is never a reusable completed result,
+even when an older run incorrectly recorded success. Source and Profile fingerprints are tracked separately so
 a downstream Profile change resumes from the latest still-valid stage. Different
 Documents may prepare concurrently. Paper Map reuse has its own fingerprint,
 which includes the selected Document preparation fingerprint and Paper Map
@@ -71,9 +96,18 @@ PDF uploads are opened with the Source PDF engine before persistence. A damaged,
 incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
 not added to the collection. This check establishes parser readability only;
 scientific structure extraction happens during that Document's preparation.
-A later parser or Profile failure sets only that Document and task to `failed`.
+A later parser or runtime failure sets only that Document and run to `failed`.
+A recoverable model-classification failure preserves the parsed Source, leaves
+the Document `stored`, and returns a `partial_success` run with a failed
+`document_profile` node and a retryable warning. A subsequent preparation request
+reuses the Source and retries classification. A successfully completed but
+scientifically uncertain classification remains reusable. Only completed
+preparation makes the Document ready for Objective scope selection.
+Run-level and node-level preparation errors use safe stage-specific messages,
+including historical records read through list and detail endpoints. Internal
+exceptions remain in logs and traces rather than the public response.
 Paper Map failures belong to Objective discovery/analysis and do not change the
-Document preparation task. All such failures stay technical; they do not claim
+Document preparation run. All such failures stay technical; they do not claim
 scientific absence.
 
 The source archive request accepts between one and 100 unique collection
@@ -93,9 +127,10 @@ The endpoint does not infer which papers failed. Parsing, Paper Map, and
 Objective analysis retain ownership of their failure states. Clients select
 IDs from `Collection.documents` or from stage-specific failure lineage.
 
-The preparation request accepts `mode: standard | fast` and defaults to
-`standard`. It starts a process-local asyncio task and returns immediately;
-clients read persisted state through `GET /api/v1/tasks/{task_id}`. A
+The preparation command has no request body and runs the canonical Source and
+DocumentProfile preparation pipeline. It starts a process-local asyncio task
+and returns immediately; clients read persisted state through
+`GET /api/v1/pipeline-runs/{run_id}`. A
 process-local semaphore defaults to 10 concurrent document preparations. This
 handoff and admission limit are not an external durable queue.
 
@@ -112,6 +147,8 @@ handoff record or a second research-result identity.
 - `GET /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
+- `POST /api/v1/chat-sessions/{session_id}/branches`
+- `PUT /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback`
 - `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
 Chat is the independent conversation and Agent trajectory owner. A Chat session
@@ -121,24 +158,133 @@ structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
 
-A user message may carry at most one `source_contexts` item selected from the
+Message editing and answer regeneration preserve the original trajectory.
+`POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,
+a UUID `request_id`, and optional revised `message` (1-12000 non-whitespace
+characters). Omitting `message` retries the original question. It returns an
+owned `ChatSession` with `root_session_id`, `parent_session_id`,
+`fork_message_id`, `fork_position`, and `fork_content`; these fields are null
+for an original session. The same UUID and revision return the same branch.
+Reusing a UUID for different content is rejected with 422.
+
+Branch creation atomically copies complete turns before the selected question,
+assigning new message and call identities while retaining canonical Source and
+resource references. Later answers and writes stay in their original branch.
+Copied terminal calls describe historical work; they cannot be claimed again.
+New writes require a new exact approval. Branching requires both session and
+current Collection ownership, and returns 409 during execution or unresolved
+approval/recovery, 404 for an unavailable saved user message, and 422 for an
+invalid revision or stale Source.
+
+To execute the saved revision, `POST /messages` accepts `branch_revision: true`
+with the exact `fork_content`. The backend restores Source contexts from the
+original question, validates them against current Sources, and accepts this
+branch's initial turn at most once. A repeated send returns 409
+`chat_branch_already_started`; the client reads the saved trajectory to recover.
+Both ordinary JSON and SSE submission support this behavior.
+
+`GET /messages` also returns `branches` (per-question `message_id`, ordered
+`session_ids`, and `active_session_id`), `branch_draft` (the unsent revision or
+null), and `running`. These fields survive browser reloads. Execution uses a
+PostgreSQL transaction advisory lock shared by workers and branch creation.
+Each running turn holds one dedicated database connection outside the normal
+checkpoint pool; transaction completion or connection loss releases the lock.
+Browser disconnection does not cancel an already running turn. Apply migrations
+through `20260910_0058` before running this version against an existing database.
+
+Answer usefulness feedback is separate from scientific Finding review. For
+example, a researcher can mark an LPBF comparison answer incomplete, request
+the missing tensile test conditions, revise that assessment, or withdraw it.
+This never changes an Objective, Evidence, Finding, approval, or model context.
+
+`PUT /chat-sessions/{session_id}/messages/{message_id}/feedback` accepts
+`rating: helpful | not_helpful | null`, optional
+`reason: incorrect | incomplete | unclear | other | null`, and an optional
+`comment` of at most 2000 characters. A reason requires `not_helpful`.
+`rating: null` withdraws the record and requires absent/null reason and comment;
+the response is HTTP 200 with JSON `null`. Comments are trimmed and blank
+comments become null. Extra fields are rejected.
+
+A non-null rating returns `feedback_id`, `session_id`, `message_id`, `user_id`,
+`rating`, `reason`, `comment`, `response_digest`, `created_at`, and `updated_at`.
+The server computes `response_digest` as SHA-256 of the UTF-8 content of the
+canonical saved answer. Identity, authorship, digest, and timestamps cannot be
+supplied by the client. One user has at most one current rating per message;
+updates preserve identity and creation time, and identical PUTs also preserve
+update time. Withdrawal is idempotent and removes the optional details.
+
+The target must be a persisted, non-empty Assistant text message without tool
+requests in the owned session. Authentication is required (`401`); unavailable
+session, collection, or message ownership returns `404`; ineligible message
+roles or invalid input return `422`. Temporary streaming messages have no saved
+identity and cannot receive feedback.
+
+`GET /chat-sessions/{session_id}/messages` returns a separate `feedback` array
+containing the current user's records, alongside `items` and `pending_approval`.
+The immutable message records and turn/stream contracts contain no feedback.
+MVP feedback is not supplied to models, training, evaluation datasets, or
+scientific review services.
+
+A user message may carry up to 12 `source_contexts` items selected from the
 same Collection's document reader. The item contains a stable Source resource
 reference, document identity, Source kind and reference, optional page and
-heading, a bounded verbatim quote, and whether that quote was shortened. It is stored with that user message and
-returned when the trajectory is reloaded. This context is material for the
-Agent to inspect, not verified Evidence and not authorization to create or
-modify an Objective, Evidence, Finding, or Analysis. The quoted content is never
-treated as model instructions. Existing messages have an empty context list.
+heading, a bounded verbatim quote, and whether that quote was shortened. Before
+the model sees the message, the server resolves the exact canonical Source,
+checks that the quote is contained in it, and replaces client-supplied title,
+page, heading, link, and digest metadata with canonical values. The persisted
+context includes the SHA-256 `source_digest` of the complete Source and is
+returned when the trajectory is reloaded. A missing Source, unsupported Source
+kind, forged locator or quote, or stale submitted digest returns
+`422 chat_source_context_invalid` without running the model or storing a partial
+turn. This context is material for the Agent to inspect, not verified Evidence
+and not authorization to create or modify an Objective, Evidence, Finding, or
+Analysis. The quoted content is never treated as model instructions. Existing
+messages have an empty context list and historical contexts may have a null
+digest.
 
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
-`{"content": string}` data and are transient presentation updates. The stream
+`{"content": string}` data and are transient presentation updates. `progress`
+events carry phase, cycle, elapsed time, and budget fields while a turn runs;
+they are presentation updates and are not scientific trajectory records.
+`snapshot` events identify the current response and assistant message before its
+text deltas; `trajectory` events replace the saved messages after checkpoints.
+The stream
 ends with one `turn` event whose data is the complete `ChatTurnResponse` after
 the durable trajectory checkpoints have succeeded. A terminal `error` event
 contains only a stable code and sanitized message. Partial text is never a
-stored Chat message or a scientific result; clients reload the server
-trajectory after an interrupted stream.
+completed Chat message or a scientific result.
+
+`GET /messages` includes a nullable `response` snapshot: `response_id`, monotonic
+`sequence`, start/update timestamps, current `message_id` and
+`message_created_at`, exact partial `content`, latest `progress`,
+`checkpoint_message_id`, status, completion reason, warnings, and error code.
+Partial content preserves whitespace. PostgreSQL stores only the latest snapshot
+on the owned session, at most every 250 ms for text changes and immediately at
+checkpoints and termination. Ordinary submissions and approved continuations use
+the same capture lifecycle. Scientific claim review still withholds unchecked
+text. Completion clears partial content and retains the terminal metadata;
+the saved messages own the final answer. Branches do not copy runtime snapshots.
+
+`GET /api/v1/chat-sessions/{session_id}/events?response_id={response_id}` resumes
+read-only SSE updates, including when another worker owns generation. The
+authenticated user must still own the session and Collection. The endpoint
+samples the shared snapshot every 250 ms, sends the current trajectory first,
+then changed snapshots, and a new trajectory at checkpoints and termination.
+It never submits a question or repeats a tool. The response ID bounds the
+subscription to that execution; a replaced response closes the subscription
+with a current trajectory. Clients replace content by message ID and ignore older
+sequences instead of appending replayed text. The original submission continues
+to deliver low-latency deltas; reconnecting clients receive bounded snapshot
+updates. A lost connection can be retried from `GET /messages`.
+
+The worker saves a heartbeat every 15 seconds without inventing a new research
+phase. Each visible response starts in `waiting`; receiving its first text
+changes the phase to `responding`. A stale running snapshot with no execution lock is returned as
+`interrupted`, preserving the partial text as incomplete. A server process
+restart does not automatically restart model generation. Old sessions without
+snapshots remain readable and recover their durable messages and tool records.
 
 An ordinary message may return a final answer without calling a tool. Registered
 `read` and `draft` calls may execute automatically. A `write` call stops at
@@ -151,7 +297,13 @@ the capability. While a write remains `approval_required`, posting another
 message to that session returns `409 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
-The production Research Agent currently exposes these automatic capabilities:
+The production Research Agent registers the capabilities below, but the Runner
+selects a bounded subset for each model decision based on the current user
+intent. Ordinary conversation receives no capability schemas; collection
+screening, Source inspection, Finding review, Objective work, and research-plan
+work each receive only their relevant read or draft actions. Write capabilities
+are exposed only for an explicit matching action and still stop for exact user
+approval. The production Research Agent currently exposes these capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
@@ -161,17 +313,33 @@ The production Research Agent currently exposes these automatic capabilities:
   truncated quote as the complete Source. It returns canonical Document and
   Source links; matched content remains inspection material rather than
   verified Evidence;
+- `read_source` reads one exact canonical Source by its Document ID, Source
+  kind, and Source reference. It returns the complete content when it fits the
+  bounded response, a stable complete-Source digest, and a continuation offset
+  for an oversized Source. A paginated excerpt is still inspection material;
+  the Agent must read all required pages before proposing Evidence. Oversized
+  tables should use `inspect_table` for row-aware windows. An offset at or past
+  the end of a non-empty Source returns `source_offset_out_of_range` rather than
+  a successful empty excerpt; offset zero remains valid for an empty parsed
+  Source;
+- `search_sources` searches canonical Source units only inside an explicit
+  Document scope. It returns bounded candidate locations, complete-Source
+  digests, and pagination state. A search hit is an inspection lead, not
+  Evidence or a scientific absence;
+- `inspect_table` returns a small canonical table as complete Markdown. Only a
+  table above the bounded response limit is split into row windows, and every
+  window repeats the canonical headers and complete-table digest;
 - `inspect_research_process` reads each current Document and its latest
-  preparation task. It reports stored, processing, ready, and failed papers plus
+  preparation run. It reports stored, processing, ready, and failed papers plus
   observable stages and warnings. It never exposes model chain-of-thought,
   prompt repair, or retry internals;
 - `start_research_process` is a `write` capability. After exact-argument
   approval, it queues independent preparation for the supplied `document_ids`,
   or for all current Documents when the list is empty. It returns the per-paper
-  task records immediately. Preparation parses paper content and classifies
+  Pipeline Run records immediately. Preparation parses paper content and classifies
   paper type and role. It does not build a Paper Map, discover or confirm an
   Objective, run Objective-specific Evidence extraction, or publish a Finding.
-  Unknown IDs fail before any task is created. A Collection with no
+  Unknown IDs fail before any run is created. A Collection with no
   uploaded papers returns `collection_has_no_papers`;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
@@ -180,6 +348,11 @@ The production Research Agent currently exposes these automatic capabilities:
   and a bounded page of its linked Evidence. This exact read, followed by any
   necessary Source inspection, is required before the Agent proposes a review
   or a new conclusion;
+- `create_finding_draft` records a structured, transient conclusion or
+  abstention proposal in the Chat trajectory. It reuses the canonical Finding
+  authoring input shape but does not validate Evidence bindings, publish a
+  Finding, or modify an Objective analysis. The later formal write remains a
+  distinct approval event;
 - `create_finding_version` is a `write` capability. It accepts the same
   statement, assertion strength, version-local Evidence roles, limitations,
   optional parent Finding, or explicit abstention as the human Finding
@@ -196,6 +369,14 @@ The production Research Agent currently exposes these automatic capabilities:
   `FindingFeedbackService.record_curation()` path as the Finding workbench.
   Service validation preserves Finding identity, paper coverage, Evidence IDs,
   and Source lineage; curation cannot create a new Finding;
+- `create_evidence_draft` records one transient Source-bound Evidence proposal
+  in the Chat trajectory. Before returning it, Lens verifies Collection
+  ownership, exact Source identity, complete-content digest, and verbatim
+  excerpt. It does not publish Evidence, advance an analysis version, or make
+  the proposed scientific fields verified Evidence;
+- `create_evidence_version` is the separate `write` capability for a reviewed
+  Evidence draft. Exact-argument approval invokes the same immutable
+  Source-to-Evidence versioning service used by the human authoring route;
 - `propose_objective_drafts` records at most three focused, single-outcome
   drafts in the Chat trajectory. PaperResearchMap relationships may be reported
   as proposal context, but they are never presented as Evidence and this call
@@ -205,40 +386,111 @@ The production Research Agent currently exposes these automatic capabilities:
   seed-document IDs record where the question came from, not the complete
   analysis scope, support, or Evidence; an empty seed set is valid. The candidate has zero confidence until
   Objective analysis tests it. It never confirms the Objective or starts
-  analysis. Repeating the same approved tool call is idempotent;
+  analysis. Follow-up candidates also preserve the exact parent Objective,
+  published analysis version, and validated Finding/Evidence-gap basis; a stale
+  parent version is rejected before persistence. Repeating the same approved
+  tool call is idempotent;
+- `confirm_objective` is a separate `write` capability. Exact-argument approval
+  changes one reviewed candidate to `confirmed` without allocating an analysis
+  version or starting work. Repeated confirmation is idempotent. This separate
+  confirmation step belongs to the Chat/Agent trajectory; the legacy Objective
+  workspace HTTP Fast Path below intentionally keeps its atomic confirm-and-
+  queue behavior;
 - `preview_research_scope` is a `read` capability. For one proposed material,
   variable, and outcome scope, it projects mapped papers as
   `likely_relevant`, `needs_inspection`, or `confidently_out_of_scope`.
   `insufficient_map` papers always need inspection, and review citation leads
-  can request inspection but cannot establish relevance or Evidence. Results
-  and full counts are bounded independently;
-- `start_objective_analysis` is a `write` capability. A separate exact-argument
-  approval confirms the chosen candidate and calls the same canonical
+  can request inspection but cannot establish relevance or Evidence. Detailed
+  records are bounded per category, while `scope_counts` and every classified
+  Document ID remain complete. `suggested_scope.recommended_document_ids`
+  identifies the complete default analysis selection; it is deliberately not
+  called `seed_document_ids`, because seed papers record question provenance.
+  `scope_complete: true` confirms that detail truncation did not truncate those
+  ID lists, and `returned_record_count` plus `omitted_record_count` describe
+  only the bounded detail projection;
+- `start_objective_analysis` is a `write` capability for an already confirmed
+  Objective. A separate exact-argument approval calls the same canonical
   `ObjectiveAnalysisService.start_analysis()` used by the HTTP route with the
-  exact approved ready `document_ids`. It
+  exact approved ready `document_ids`. An unconfirmed candidate is rejected
+  without allocating an analysis version. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
 - `publish_agent_objective_analysis` is a separate `write` capability for the
   case where the researcher explicitly asks the Agent itself to analyze a
   bounded paper scope. Before proposing the write, the Agent reads exact
-  Sources through `inspect_document_sources` over one or more turns. The
-  approved payload contains one summary and at least one structured Evidence
-  draft for every selected ready Document. The backend revalidates each Source
-  locator, complete-content SHA-256 digest, normalized verbatim excerpt, and
-  Evidence contract before allocating a version. It then publishes one
+  Sources through `read_source`, or complete untruncated
+  `inspect_document_sources` results, over one or more turns. The
+  approved payload contains one summary for every selected ready Document.
+  Papers with supported facts carry structured Evidence drafts. A paper that
+  was inspected but supplied no grounded fact instead carries an explicit
+  `no_grounded_evidence` or `excluded_after_review` disposition, reason, and at
+  least one exact inspected Source locator and digest. A technical read or
+  extraction failure carries `extraction_failed` and its technical reason; it
+  is never treated as a scientific absence. The backend revalidates
+  each Source locator, complete-content SHA-256 digest, normalized verbatim
+  excerpt, Evidence contract, and no-Evidence inspection record before
+  allocating a version. It then publishes one
   `agent_authored` analysis through the existing repository queue, claim, and
-  atomic publication lifecycle. The version contains PaperContributions and
-  Evidence but no Finding; any conclusion requires a later approved
+  atomic publication lifecycle. If every non-excluded paper reports
+  `extraction_failed`, the active version is marked failed and remains retryable;
+  it does not publish `no_grounded_evidence` or advance the published pointer.
+  Mixed scopes may publish surviving Evidence while retaining failed paper
+  contributions. A successful version contains PaperContributions and Evidence
+  but no Finding; any conclusion requires a later approved
   `create_finding_version` call. This capability has no separate HTTP endpoint,
   draft store, background extraction, or Finding-synthesis call;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
-  published-version identity without starting or retrying work.
+  published-version identity without starting or retrying work;
+- `assess_objective_quality` reads the current published Evidence ledger and
+  separates technical extraction failures from scientific incompleteness or
+  non-comparability. It returns bounded exact Source locations for further
+  inspection without creating a new judgment. If a newer active analysis failed
+  before publication, the response exposes that runtime failure separately and
+  retains the last published result without presenting the failed run as a
+  scientific conclusion;
+- `derive_objective` records at most three transient follow-up Objective drafts
+  from exact current Findings, scientific Evidence gaps, or non-failed paper
+  contributions. An `extraction_failed` record is a recovery task and is
+  rejected as scientific basis. Persisting any accepted draft still requires
+  the separate approved `create_objective_candidate` write;
+- `propose_research_plan` records one transient structured plan with hypothesis,
+  variable roles and proposed values, controls, fixed conditions, measurements,
+  replication, analysis, acceptance criteria, feasibility, safety, and
+  limitations. Every literature-derived choice references current Finding and
+  Evidence IDs. The result is not persisted and does not authorize an
+  experiment;
+- `create_research_plan` is the separate `write` capability for that reviewed
+  plan. Its exact approval payload includes the current Finding and Evidence
+  fingerprints. The capability rechecks those snapshots before using the
+  canonical Objective-scoped ExperimentPlan service; changed or unreviewed
+  sources produce no plan record.
 
-Model context is a bounded recent suffix of the durable trajectory. An
-assistant tool call and its following tool result are retained or omitted as one
-protocol unit, so context trimming never sends an orphan tool result to the
-provider.
+Model context is a bounded transient view of the durable trajectory. It retains
+the active user question and selected Source context, then complete recent
+protocol units. One assistant request and all its ordered results form an
+indivisible unit; incomplete units are never sent to the provider. Omitted
+history contributes bounded deterministic IDs, Source references, digests,
+pagination boundaries, and stable error codes to a rollover system message.
+This summary is not persisted as conversation text and contains no Source body
+or new scientific claims. Source text must be read again when needed.
+
+An assistant message exposes `tool_calls`, an ordered array of immutable
+requests containing `tool_call_id`, `name`, `arguments`, and zero-based
+contiguous `position`. It no longer exposes scalar tool name or arguments.
+Only tool-result messages carry the scalar `tool_call_id`. Runtime call rows
+own status and approval, and each call also carries its request position.
+Historical single requests have position `0`. The ordered-call migration
+refuses downgrade if any assistant message has multiple calls; it never drops
+calls to restore the scalar schema.
+
+A model may request independent reads together or one draft/write action.
+Unknown or unavailable capabilities and mixed read/draft/write batches are
+rejected as a whole before side effects, with one result per request. Only
+explicitly declared parallel-safe reads execute concurrently, within the
+configured concurrency limit. Other read batches execute sequentially. A
+failed read does not discard successful peers; results are persisted in request
+order. A single write still requires its exact persisted approval.
 
 The server checkpoints the user message before the first model request, then
 checkpoints model tool intent, running call state, structured tool results, and
@@ -248,17 +500,25 @@ approved write appear never to have started. Lens allocates every durable tool
 call ID; any request-local identifier returned by a model provider is not a
 Chat identity and is not persisted.
 
-Turn status is one of `completed`, `approval_required`,
-`step_limit_reached`, `failed`, or `rejected`. Tool call and result failures are
+Turn status is one of `completed`, `approval_required`, `failed`, or `rejected`.
+Only `completed` has a non-null `completion_reason`: `model_answer`,
+`resource_budget`, `no_progress`, or `emergency_ceiling`. Every turn exposes
+`warnings` as an array. A completed answer may be partial: resource exhaustion,
+repeated identical observations, and the emergency ceiling allow one final
+model request with no tools, using inspected evidence and explicit unread or
+failed scope. It returns `completed` with warnings when an answer is available;
+finalization failure returns `failed` with a sanitized error code.
+
+Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,
 or Evidence status. Provider response objects and internal exceptions are not
-part of the public contract. Reaching the step limit appends a final assistant
-message that explains how the researcher can continue; the trajectory never
-ends on an opaque tool message alone.
+part of the public contract. Limits protect technical resources, not scientific
+completeness. The browser shows completed warnings as non-blocking notices,
+not failed turns.
 
 Tool result status is `succeeded`, `queued`, or `failed`. A `queued` result is a
 successful asynchronous handoff, must include at least one canonical resource
-reference, and does not make the Agent wait for task completion. The final
+reference, and does not make the Agent wait for run completion. The final
 assistant response tells the researcher that work started and where its state
 can be inspected.
 
@@ -268,6 +528,7 @@ can be inspected.
 - `GET /api/v1/collections/{collection_id}/objectives`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/scope`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis/status`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
 Discovery accepts `{"document_ids": [...]}` with one or more unique current
@@ -275,14 +536,14 @@ Documents. The explicit selection is not truncated or divided into independent
 discovery scopes, so candidate formation retains the complete cross-paper
 context. Every selected Document must be `ready` with a preparation fingerprint.
 The command freezes the resolved `(document_id, preparation_fingerprint)`
-values in one collection-scoped `objective_discovery` Task and returns that
-Task immediately. At most one discovery Task may be `queued` or `running` for
-a Collection; a repeated command returns the active Task without scheduling a
+values in one collection-scoped `objective_discovery` Pipeline Run and returns
+that run immediately. At most one discovery run may be `queued` or `running`
+for a Collection; a repeated command returns the active run without scheduling a
 second worker, even when another request reaches a different backend process.
-Clients restore and poll its state through the ordinary Collection Task and
-Task-detail endpoints. On completion they read the replaced candidate set from
-`GET .../objectives`; on failure the terminal Task error remains visible and a
-new command creates a retry Task. A backend restart marks an interrupted Task
+Clients restore and poll its state through the Collection Pipeline Run and
+run-detail endpoints. On completion they read the replaced candidate set from
+`GET .../objectives`; on failure the terminal run error remains visible and a
+new command creates a retry run. A backend restart marks an interrupted run
 failed rather than leaving it permanently active.
 
 The background worker lazily builds or reuses the selected Documents' current
@@ -290,7 +551,7 @@ Paper Maps, reads their Profiles and maps, and replaces the current generated
 candidates. It does not silently include all Collection papers. This is
 research-question formation, not Objective Evidence analysis: analysis still
 requires the later, explicit Objective command. The worker is process-local,
-while admission, progress, completion, and failure are persisted; the Task
+while admission, progress, completion, and failure are persisted; the Pipeline Run
 record is observable execution state rather than an external durable queue.
 
 A Paper Map is preliminary scope metadata: paper type, material and process
@@ -341,6 +602,13 @@ The endpoint performs no LLM call and persists no scope. An unknown Objective
 returns `404`; a Collection with no Paper Maps returns
 `409 objective_scope_not_ready`.
 
+`GET .../analysis/status` is the polling projection for the active analysis.
+It returns only lifecycle state, phase, processed/total document counts, the
+current document, a bounded progress message, terminal error fields, and
+timestamps. It does not include Findings, Evidence, contributions, telemetry,
+or other scientific result payloads. Clients should fetch `GET .../analysis`
+once the status is `succeeded` or `failed`.
+
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
 `analysis_version`. It contains immutable selected `document_inputs`,
 pipeline/model/prompt lineage,
@@ -375,6 +643,10 @@ creates the next analysis version with `queued` status. For an already confirmed
 Objective, it creates or reuses the active analysis normally. The command returns
 immediately, and the frontend polls `GET .../analysis`. Retry allocates a new
 version. A failed active version leaves the prior published version readable.
+This REST command is intentionally the legacy Fast Path exception to the
+Chat/Agent three-step approval lifecycle. For a candidate Objective it
+atomically confirms the Objective and queues automatic analysis; this contract
+does not introduce a separate REST confirmation request.
 Independent Objective analyses,
 including analyses from different collections, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
@@ -529,12 +801,13 @@ An Evidence correction never overwrites the old record. Supplying
 locator; publication clones the complete source snapshot into the next
 immutable analysis version, marks the old record as superseded, and leaves old
 Findings pointing at their original Evidence. A successful command returns
-`201` with the new analysis and Evidence. Stale versions, running analyses,
+  `201` with the new analysis and Evidence. Stale versions, running analyses,
 unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
 already superseded record return `409`; malformed scientific shapes return
-`422`. The Research Agent exposes the same operation as the approved
-`create_evidence_version` write capability and must supply the digest returned
-by `inspect_document_sources`; it does not create a second Evidence identity.
+  `422`. The Research Agent exposes the same operation as the approved
+  `create_evidence_version` write capability and must supply the digest returned
+  by `read_source` or a complete untruncated `inspect_document_sources` result;
+  it does not create a second Evidence identity.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns
@@ -549,6 +822,26 @@ read model contract, while `analysis_version` identifies the published domain
 records from which it was produced. `complete` is true when every included paper
 reached a non-technical analysis outcome. A scientifically valid empty result is
 complete; any paper with `analysis_status=failed` makes it false.
+
+An optional reading summary is available through
+`POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary`.
+The authenticated Collection owner supplies `analysis_version` (positive integer)
+and `language` (`en` or `zh`, default `en`), not browser-provided evidence.
+The service reads the published Finding and all its linked Evidence, then asks
+the configured model for one short paragraph. The response contains `text`,
+`citation_ids`, exact Source `references`, scoped identity, language, model,
+prompt version, and generation time. It has no section arrays or record counts.
+The summary is transient: it creates no analysis version and changes no Finding,
+Evidence, or review. Known citation IDs are checked, not the scientific truth of
+every generated sentence. Original records remain authoritative.
+
+Missing Findings return `404`; a changed or absent published version returns
+`409` with `summary_stale_analysis`, including if it changed during generation.
+Unavailable summaries return `503` with a safe `summary_*` reason code. Missing
+linked Evidence or input exceeding 200 records or the 24,000-token prompt budget
+is rejected explicitly, never silently truncated. Summary failure does not fail
+or replace the published analysis. Clients discard responses after changing the
+Collection, Objective, Finding, version, or language.
 
 A Finding contains:
 
@@ -587,6 +880,11 @@ paper presents the setting without changing its Source grounding. Simulation
 and background attributes remain visible for audit, but cannot by themselves
 close the experimental process-context requirements for a comparable result.
 Historical Evidence without this field is read as `unknown`.
+Test and characterization attributes may also include
+`applies_to_outcomes`, listing only outcomes that the same Source explicitly
+says the method measures or characterizes. An empty list means that the method
+remains auditable paper context but cannot be assumed to apply to a particular
+result.
 
 Failed extraction attempts remain Evidence with their exact Source locator,
 `selection_status=failed`, and a non-empty `failure_reason`. They do not
@@ -682,10 +980,18 @@ formatter (the default column names are already correct):
 - `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 
 Plans are human-editable downstream drafts, not scientific source records.
-New plans are manual and cannot claim Chat-message provenance. Historical plans
-that already reference a migrated Chat message retain their stored
-Finding/Evidence lineage. Reads report whether that snapshot is still current;
-stale historical plans cannot be promoted to `ready_for_review`.
+The HTTP POST creates a manual draft without Chat provenance. The Research
+Agent can propose the same Objective-scoped plan structure and, after exact
+approval, save it through the same `ExperimentPlanService`. Agent-created plans
+store the approved tool-call identity, visible Evidence links, and complete
+Finding/Evidence fingerprints. Reads recheck those snapshots; stale grounded
+plans cannot be promoted to `ready_for_review`. Historical plans that reference
+a migrated Chat message retain their existing lineage and validation rules.
+Saving a plan never schedules or claims that an experiment was executed.
+`PATCH` is a partial update: omitted fields retain their previous values and
+the request must include at least one of `title`, `content`, `status`, or
+`structured_plan`. The service creates a new immutable plan revision; it does
+not mutate the historical revision addressed by `plan_id`.
 
 ### Documents And Source Verification
 
@@ -705,9 +1011,12 @@ parameters, not visible paper titles.
 
 The document-profile list accepts `offset`, `limit`, and optional `query`,
 `doc_type`, and `has_warnings` filters. `query` performs case-insensitive
-matching against the profile title and source filename. `doc_type` accepts
+matching against the profile title. `doc_type` accepts
 `experimental`, `review`, `mixed`, or `uncertain`; `has_warnings` filters by
-whether parsing warnings are present. All active criteria are combined before
+whether profile-classification warnings are present. Profile items contain
+`document_id`, `title`, `doc_type`, `profile_warnings`, and `confidence`;
+collection ownership and filenames remain on the collection's Document records.
+All active criteria are combined before
 pagination. `total` is the number of matching profiles, `count` is the current
 page size, and `summary.total_documents` remains the complete profiled
 collection size.
@@ -737,7 +1046,7 @@ traces and credentials never enter the HTTP response.
 ## Frontend Integration
 
 - Use same-origin requests through the shared API helper.
-- Poll only queued/running task or Objective analysis states.
+- Poll only queued/running Pipeline Run or Objective analysis states.
 - On a failed Objective analysis, show retry while retaining the last published
   Findings if one exists.
 - Paginate Findings and Evidence; do not request a complete Objective object

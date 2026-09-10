@@ -1,3 +1,11 @@
+import { writable } from 'svelte/store';
+import { DOCUMENT_AGENT, type DocumentAgentState } from './documentAgent';
+const agent = writable<DocumentAgentState>({
+	open: false,
+	papers: [],
+	sourceVersion: 0,
+	busy: false
+});
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
@@ -44,11 +52,9 @@ function jsonResponse(body: unknown) {
 function profile(index: number) {
 	return {
 		document_id: `doc-${index}`,
-		collection_id: 'col_123',
 		title: `Paper ${index}`,
-		source_filename: `paper-${index}.pdf`,
 		doc_type: 'experimental',
-		parsing_warnings: [],
+		profile_warnings: [],
 		confidence: 0.9,
 		page_count: 10
 	};
@@ -62,6 +68,7 @@ function requestPath(input: string | URL | Request) {
 
 describe('collections/[id]/documents/+page.svelte', () => {
 	beforeEach(() => {
+		agent.set({ open: false, papers: [], sourceVersion: 0, busy: false });
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/documents')
@@ -69,7 +76,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		fetchMock.mockReset();
 	});
 
-	it('keeps parsed-paper identity, warnings, and Source navigation visible', async () => {
+	it('keeps profile identity, warnings, and Source navigation visible', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				collection_id: 'col_123',
@@ -85,7 +92,6 @@ describe('collections/[id]/documents/+page.svelte', () => {
 						...profile(1),
 						document_id: 'doc_1',
 						title: 'Paper A',
-						source_filename: 'paper-a.pdf',
 						confidence: 0.91,
 						page_count: 12
 					},
@@ -93,9 +99,8 @@ describe('collections/[id]/documents/+page.svelte', () => {
 						...profile(2),
 						document_id: 'abcdef1234567890abcdef1234567890',
 						title: null,
-						source_filename: 'review.pdf',
 						doc_type: 'review',
-						parsing_warnings: ['Missing publication year'],
+						profile_warnings: ['Missing publication year'],
 						confidence: 0.7,
 						page_count: 8
 					}
@@ -103,11 +108,10 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			})
 		);
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('paper-a.pdf')).toBeInTheDocument();
 		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
 		await expect.element(browserPage.getByText('Missing publication year')).toBeInTheDocument();
 		await expect
@@ -138,7 +142,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			})
 		);
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('Paper 1')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('ID: abcdef123456')).not.toBeInTheDocument();
@@ -158,7 +162,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			})
 		);
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 
 		await expect.element(browserPage.getByText('131 paper(s)')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Papers 1–25 of 131').first()).toBeInTheDocument();
@@ -181,7 +185,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			});
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByRole('button', { name: 'Next' }).click();
 
 		await vi.waitFor(() => {
@@ -205,7 +209,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			});
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByLabelText('Search papers').fill('  laser porosity  ');
 		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
 
@@ -241,14 +245,14 @@ describe('collections/[id]/documents/+page.svelte', () => {
 								...profile(91),
 								title: 'Review needing inspection',
 								doc_type: 'review',
-								parsing_warnings: ['insufficient_content']
+								profile_warnings: ['insufficient_content']
 							}
 						]
 					: [profile(1)]
 			});
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByLabelText('Paper type').selectOptions('review');
 		await browserPage.getByLabelText('Has parsing warnings').click();
 		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
@@ -293,7 +297,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			});
 		});
 
-		render(Page);
+		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByLabelText('Paper type').selectOptions('review');
 		await browserPage.getByLabelText('Has parsing warnings').click();
 		await browserPage.getByRole('button', { name: 'Apply filters' }).click();

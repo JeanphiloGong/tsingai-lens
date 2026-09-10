@@ -20,7 +20,10 @@ from application.core.objectives.llm.structured_response import (
 )
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
-    _PaperSignalInput,
+)
+from application.core.objectives.paper_map_aggregation import PaperMapAggregator, PaperMapSignalInput
+from application.core.objectives.paper_map_extraction import (
+    PaperMapExtractionService,
 )
 from domain.core import PaperResearchMap, PaperResearchScope, PaperResearchSignal
 from domain.source import (
@@ -1392,7 +1395,7 @@ def test_single_source_content_recovery_preserves_structured_table_context():
         },
     }
 
-    fragments = PaperResearchMapService._split_single_source_unit_for_retry(source_unit)
+    fragments = PaperMapExtractionService._split_single_source_unit_for_retry(source_unit)
 
     assert len(fragments) == 2
     assert "".join(
@@ -1436,6 +1439,32 @@ def test_semantic_single_source_failure_does_not_trigger_content_splitting():
     ]
 
 
+def test_nonrecoverable_batch_failure_does_not_split_source_units():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("invalid-result-a", "A" * 200, 2, "Results"),
+            _paragraph("invalid-result-b", "B" * 200, 3, "Results"),
+        ]
+    )
+
+    class NonrecoverableBatchExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+            self.payloads.append(payload)
+            raise ValueError("paper research map references unknown Source-unit ids")
+
+    extractor = NonrecoverableBatchExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(skim.source_unit_coverage) == 2
+    assert all(
+        item.status.value == "extraction_failed"
+        for item in skim.source_unit_coverage
+    )
+
+
 @pytest.mark.parametrize(
     ("error", "expected_kind"),
     [
@@ -1463,7 +1492,7 @@ def test_single_source_recovery_classifies_only_density_shaped_failures(
     error: Exception,
     expected_kind: str | None,
 ) -> None:
-    assert PaperResearchMapService._single_source_recovery_kind(error) == expected_kind
+    assert PaperMapExtractionService._single_source_recovery_kind(error) == expected_kind
 
 
 def test_single_source_content_recovery_has_a_fixed_request_bound():
@@ -2410,7 +2439,7 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
         ]
     )
 
-    skim, signals = PaperResearchMapService()._resolve_window_result(
+    skim, signals = PaperMapExtractionService()._resolve_window_result(
         document_id="paper-heat-treatment",
         payload=payload,
         parsed=parsed,
@@ -2477,7 +2506,7 @@ def test_review_cited_experiment_cannot_become_current_work():
         ],
     )
 
-    skim, signals = PaperResearchMapService()._resolve_window_result(
+    skim, signals = PaperMapExtractionService()._resolve_window_result(
         document_id="review-paper",
         payload=payload,
         parsed=parsed,
@@ -2533,7 +2562,7 @@ def test_resolve_window_result_merges_duplicate_relationships_and_preserves_sour
         ],
     )
 
-    skim, signals = PaperResearchMapService()._resolve_window_result(
+    skim, signals = PaperMapExtractionService()._resolve_window_result(
         document_id="paper-duplicate-relationship",
         payload=payload,
         parsed=parsed,
@@ -2671,7 +2700,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
         profiles_by_document_id={
             "paper-1": SimpleNamespace(
                 doc_type="review",
-                parsing_warnings=(),
+                profile_warnings=(),
                 confidence=0.95,
             )
         },
@@ -2833,7 +2862,7 @@ def test_reconciliation_validation_rejects_an_ineligible_returned_signal():
     varied = signal("residence time", "variable", "varied")
     outcome = signal("product yield", "outcome", "not_applicable")
     signal_inputs = tuple(
-        _PaperSignalInput(signal=item, source_contexts=())
+        PaperMapSignalInput(signal=item, source_contexts=())
         for item in (fixed, varied, outcome)
     )
     parsed = StructuredPaperSignalReconciliation.model_validate(
@@ -2855,7 +2884,7 @@ def test_reconciliation_validation_rejects_an_ineligible_returned_signal():
         }
     )
 
-    studies, unresolved = PaperResearchMapService._validate_signal_reconciliation(
+    studies, unresolved = PaperMapAggregator._validate_signal_reconciliation(
         parsed,
         signal_inputs,
         document_id="paper-1",
@@ -3540,7 +3569,7 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
         ),
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3615,7 +3644,7 @@ def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
         ),
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3653,7 +3682,7 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
         for experiment_label in ("experiment A", "experiment B")
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3687,7 +3716,7 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
             )
             for source_ref in ("methods-1", "results-1")
         )
-        return PaperResearchMapService._merge_studies(
+        return PaperMapAggregator._merge_studies(
             studies[0],
             studies[1],
             document_id="paper-1",
@@ -3759,7 +3788,7 @@ def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids
         }
     )
 
-    merged = PaperResearchMapService._merge_studies(
+    merged = PaperMapAggregator._merge_studies(
         existing,
         duplicate,
         document_id="paper-1",
@@ -3821,7 +3850,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
         ),
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3861,7 +3890,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
         ),
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3935,7 +3964,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
         ),
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3956,7 +3985,7 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
         for position in range(4)
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -3974,7 +4003,7 @@ def test_document_profile_owns_the_paper_role_across_windows():
         ),
     ]
 
-    skim = service._consolidate_window_maps(
+    skim = service._paper_map_aggregator.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=SimpleNamespace(doc_type="experimental"),
@@ -4008,7 +4037,7 @@ def test_document_profile_bounds_study_claim_scope(
         }
     )
 
-    skim = PaperResearchMapService()._consolidate_window_maps(
+    skim = PaperMapAggregator().consolidate_window_maps(
         "paper-1",
         [
             PaperResearchMap.from_mapping(

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,11 +28,14 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
 )
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
     ObjectiveDocumentEvidenceArtifacts,
-    ResearchObjectiveService,
-    _paper_map_input_fingerprint,
+    ObjectiveEvidenceAnalysisService,
+)
+from application.core.objectives.objective_input_service import (
+    PAPER_RESEARCH_MAP_POLICY_VERSION,
+    paper_map_input_fingerprint,
 )
 from domain.core import (
     ObjectiveAnalysis,
@@ -74,7 +79,21 @@ def anyio_backend() -> str:
 def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version():
     assert (
         "paper_experiment",
-        "paper-experiment-reconstruction.v13",
+        "paper-experiment-reconstruction.v17",
+    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+
+
+def test_document_evidence_checkpoint_uses_current_source_extraction_version():
+    assert (
+        "source_extraction",
+        "objective_evidence_extraction.v27",
+    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
+
+
+def test_document_evidence_checkpoint_uses_current_materialization_version():
+    assert (
+        "evidence_materialization",
+        "objective-evidence-materialization.v11",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -109,8 +128,8 @@ def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> 
         asset_sha256=None,
     )
 
-    contexts = ResearchObjectiveService._document_contexts_for_evidence(
-        {
+    contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
+        **{
             "blocks_by_document_id": {
                 "paper-1": [
                     SimpleNamespace(
@@ -196,8 +215,8 @@ def test_table_context_can_complete_material_for_result_reconstruction() -> None
             "confidence": 0.9,
         }
     )
-    contexts = ResearchObjectiveService._document_contexts_for_evidence(
-        {
+    contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
+        **{
             "blocks_by_document_id": {},
             "tables_by_document_id": {
                 "paper-ti64": [
@@ -363,51 +382,13 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                 )
 
             baseline, target = result_values[source_ref]
-            if self.calls.count(source_ref) == 1:
-                return StructuredEvidenceExtractions.model_validate(
-                    {
-                        "extractions": [
-                            {
-                                "evidence_role": "direct_result",
-                                "changed_variables": [],
-                                "comparison": None,
-                                "reported_result": {
-                                    "outcome": "relative density",
-                                    "value": target,
-                                    "baseline_value": baseline,
-                                    "target_value": target,
-                                    "unit": "%",
-                                    "direction": "increase",
-                                    "result_text": source_text_by_ref[source_ref],
-                                },
-                                "attribution_scope": "descriptive_only",
-                                "scientific_context": {},
-                                "resolution_status": "partial",
-                                "confidence": 0.8,
-                            }
-                        ]
-                    }
-                )
             return StructuredEvidenceExtractions.model_validate(
                 {
                     "extractions": [
                         {
                             "evidence_role": "direct_result",
-                            "changed_variables": [
-                                {
-                                    "name": "laser power",
-                                    "baseline_value": 100,
-                                    "target_value": 140,
-                                    "unit": "W",
-                                }
-                            ],
-                                "comparison": {
-                                    "baseline_label": "S1",
-                                    "target_label": "S2",
-                                    "axis_names": ["laser power"],
-                                    "comparable": True,
-                                "incomparability_reasons": [],
-                            },
+                            "changed_variables": [],
+                            "comparison": None,
                             "reported_result": {
                                 "outcome": "relative density",
                                 "value": target,
@@ -417,26 +398,10 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                                 "direction": "increase",
                                 "result_text": source_text_by_ref[source_ref],
                             },
-                            "attribution_scope": "isolated_effect",
-                            "scientific_context": {
-                                "material": [
-                                    {"name": "alloy", "value": "Ti-6Al-4V"}
-                                ],
-                                "sample": [
-                                    {"name": "state", "value": "as-built"}
-                                ],
-                                "process": [
-                                    {"name": "process", "value": "LPBF"}
-                                ],
-                                "test": [
-                                    {
-                                        "name": "method",
-                                        "value": "Archimedes density",
-                                    }
-                                ],
-                            },
-                            "resolution_status": "resolved",
-                            "confidence": 0.9,
+                            "attribution_scope": "descriptive_only",
+                            "scientific_context": {},
+                            "resolution_status": "partial",
+                            "confidence": 0.8,
                         }
                     ]
                 }
@@ -556,8 +521,6 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         "paper-b-result",
         "paper-a-methods",
         "paper-b-methods",
-        "paper-a-result",
-        "paper-b-result",
     ]
     finding = findings[0]
     assert finding.direction == "increase"
@@ -654,8 +617,11 @@ def _paper_map_loading_service(
     return service, {
         "documents": (documents[0],),
         "profiles_by_document_id": {"paper-selected": SimpleNamespace()},
+        "blocks_by_document_id": {"paper-selected": []},
+        "tables_by_document_id": {"paper-selected": []},
+        "table_cells_by_document_id": {"paper-selected": []},
+        "figures_by_document_id": {"paper-selected": []},
         "document_trees_by_document_id": {"paper-selected": None},
-        "response_client": SimpleNamespace(),
     }
 
 
@@ -686,25 +652,94 @@ def _ready_objective_facts(
     )
 
 
+async def test_source_inputs_load_without_initializing_a_model(tmp_path, monkeypatch):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection = await collection_service.create_collection("Prepared paper inputs")
+    collection_id = collection["collection_id"]
+    service = _build_research_objective_service(collection_service=collection_service)
+    documents = source_documents_from_records(
+        documents=[
+            {"id": document_id, "title": document_id, "text": "Laser power study."}
+            for document_id in ("paper-1", "paper-2")
+        ],
+        blocks=[
+            {
+                "block_id": f"abstract-{document_id}",
+                "document_id": document_id,
+                "text": "Laser power and relative density were studied.",
+            }
+            for document_id in ("paper-1", "paper-2")
+        ],
+        tables=[],
+    )
+    for document in documents:
+        await service.objective_input_service.source_artifact_repository.replace_document(
+            collection_id, document
+        )
+    await _seed_document_profiles(service, collection_id)
+
+    def unexpected_model_initialization():
+        raise AssertionError("Reading prepared paper data must not initialize a model")
+
+    monkeypatch.setattr(
+        "application.core.objectives.objective_input_service."
+        "build_default_structured_response_client",
+        unexpected_model_initialization,
+    )
+    inputs = await service.objective_input_service.load_source_inputs(
+        collection_id,
+        document_inputs=tuple(
+            PreparedDocumentInput(document.document_id, f"fingerprint-{document.document_id}")
+            for document in documents
+        ),
+    )
+
+    assert set(inputs) == {
+        "documents", "profiles_by_document_id", "blocks_by_document_id",
+        "tables_by_document_id", "table_cells_by_document_id",
+        "figures_by_document_id", "document_trees_by_document_id",
+    }
+    assert inputs["documents"] == documents
+    assert (
+        inputs["blocks_by_document_id"]["paper-1"][0]
+        is inputs["documents"][0].blocks[0]
+    )
+
+    maps = tuple(
+        PaperResearchMap.from_mapping(
+            {"document_id": document.document_id, "doc_role": "experimental"}
+        )
+        for document in documents
+    )
+    selected = service._objective_inputs_for_document(
+        collection_id, {**inputs, "paper_maps": maps}, "paper-2"
+    )
+    assert selected["documents"] == (documents[1],)
+    assert selected["paper_maps"] == (maps[1],)
+    for key in set(inputs) - {"documents"}:
+        assert set(selected[key]) == {"paper-2"}
+        assert selected[key]["paper-2"] is inputs[key]["paper-2"]
+
+
 async def test_selected_document_builds_and_reuses_its_bound_paper_map() -> None:
     paper_map_service = _RecordingPaperMapService()
     service, source_inputs = _paper_map_loading_service(paper_map_service)
 
-    first = await service._load_or_build_paper_maps(
+    first = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=(
             PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
         ),
         source_inputs=source_inputs,
     )
-    second = await service._load_or_build_paper_maps(
+    second = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=(
             PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
         ),
         source_inputs=source_inputs,
     )
-    refreshed = await service._load_or_build_paper_maps(
+    refreshed = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=(
             PreparedDocumentInput("paper-selected", "profile-fingerprint-v2"),
@@ -718,6 +753,63 @@ async def test_selected_document_builds_and_reuses_its_bound_paper_map() -> None
     assert refreshed[0].input_fingerprint != first[0].input_fingerprint
 
 
+@pytest.mark.parametrize(
+    ("coverage_status", "reason", "expected_rebuilds"),
+    [
+        ("extraction_failed", "provider_timeout", 1),
+        ("no_study_signal", "No experimental outcome in this Source.", 0),
+    ],
+)
+async def test_paper_map_retry_distinguishes_failed_reading_from_missing_science(
+    coverage_status, reason, expected_rebuilds,
+) -> None:
+    paper_map_service = _RecordingPaperMapService()
+    service, source_inputs = _paper_map_loading_service(paper_map_service)
+    document_inputs = (
+        PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
+    )
+    cached = PaperResearchMap.from_mapping(
+        {
+            "document_id": "paper-selected",
+            "doc_role": "experimental",
+            "map_status": "insufficient_map",
+            "map_limitations": ["missing_outcome"],
+            "input_fingerprint": paper_map_input_fingerprint(
+                "profile-fingerprint-v1"
+            ),
+            "map_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": "abstract-unit",
+                    "window_id": "overview",
+                    "source_kind": "block",
+                    "source_ref": "abstract",
+                    "status": coverage_status,
+                    "reason": reason,
+                }
+            ],
+        }
+    )
+    await service.paper_map_repository.replace("collection-test", cached)
+
+    recovered = await service.objective_input_service.load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=document_inputs,
+        source_inputs=source_inputs,
+    )
+    reused = await service.objective_input_service.load_or_build_paper_maps(
+        "collection-test",
+        document_inputs=document_inputs,
+        source_inputs=source_inputs,
+    )
+
+    assert recovered[0].coverage_complete
+    assert reused == recovered
+    assert paper_map_service.document_ids == ["paper-selected"] * expected_rebuilds
+    assert recovered[0].input_fingerprint == cached.input_fingerprint
+    assert recovered[0].map_status == "insufficient_map"
+
+
 async def test_paper_map_rebuilds_when_its_scientific_logic_version_changes(
     monkeypatch,
 ) -> None:
@@ -727,17 +819,17 @@ async def test_paper_map_rebuilds_when_its_scientific_logic_version_changes(
         PreparedDocumentInput("paper-selected", "profile-fingerprint-v1"),
     )
 
-    first = await service._load_or_build_paper_maps(
+    first = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=document_inputs,
         source_inputs=source_inputs,
     )
     monkeypatch.setattr(
-        "application.core.objectives.research_objective_service."
+        "application.core.objectives.objective_input_service."
         "PAPER_RESEARCH_MAP_POLICY_VERSION",
         "paper_research_map_policy.changed",
     )
-    refreshed = await service._load_or_build_paper_maps(
+    refreshed = await service.objective_input_service.load_or_build_paper_maps(
         "collection-test",
         document_inputs=document_inputs,
         source_inputs=source_inputs,
@@ -824,9 +916,11 @@ def _paper_map(
             "evidence_density": "high",
             "confidence": 0.9,
             "warnings": [],
-            "input_fingerprint": _paper_map_input_fingerprint(
+            "input_fingerprint": paper_map_input_fingerprint(
                 f"fingerprint-{document_id}"
             ),
+            "map_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
+            "generated_at": "2026-09-08T09:00:00+00:00",
         }
     )
 
@@ -1237,7 +1331,7 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_document(
+    await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
             documents=[
@@ -1327,8 +1421,8 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         collection_service=collection_service,
         response_client=extractor,
     )
-    service.finding_synthesis_service.assertion_judge = service._response_client
-    await service.source_artifact_repository.replace_document(
+    service.finding_synthesis_service.assertion_judge = extractor
+    await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
             documents=[
@@ -1401,7 +1495,6 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
     )
 
     failing_extractor = _FailingRouteExtractor()
-    service._response_client = failing_extractor
     service._objective_evidence_router = failing_extractor
     service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = await service.generate_objective_analysis_artifacts(
@@ -1431,7 +1524,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    await service.source_artifact_repository.replace_document(
+    await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
             documents=[
@@ -1553,7 +1646,7 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         tables=[],
     )
     for document in documents:
-        await service.source_artifact_repository.replace_document(
+        await service.objective_input_service.source_artifact_repository.replace_document(
             collection_id, document
         )
     await _seed_document_profiles(service, collection_id)
@@ -1601,11 +1694,22 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     service.finding_synthesis_service = _FindingSynthesisRecorder()
     extraction_calls: list[str] = []
     paper_2_failures_remaining = 1
+    first_inspection_started = Barrier(2)
 
     def extract_document(**payload):
         nonlocal paper_2_failures_remaining
         document_id = payload["objective_inputs"]["documents"][0].document_id
         extraction_calls.append(document_id)
+        payload["progress_callback"](
+            {
+                "phase": "objective_paper_framing_started",
+                "unit": "documents",
+                "current": 1,
+                "total": 1,
+            }
+        )
+        if payload["analysis"].analysis_version == 1:
+            first_inspection_started.wait(timeout=5)
         if document_id == "paper-2" and paper_2_failures_remaining:
             paper_2_failures_remaining -= 1
             raise RuntimeError("provider unavailable")
@@ -1641,7 +1745,27 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     )
     analysis_service = ObjectiveAnalysisService(
         objective_repository=service.objective_repository,
-        research_objective_service=service,
+        evidence_analysis_service=service,
+        objective_input_service=service.objective_input_service,
+        document_profile_service=service.objective_input_service.document_profile_service,
+    )
+    progress_updates: list[dict[str, Any]] = []
+    update_progress = service.objective_repository.update_analysis_progress
+
+    async def record_progress(collection_id, objective_id, version, **progress):
+        await asyncio.sleep(0)
+        await update_progress(collection_id, objective_id, version, **progress)
+        if progress["phase"] == "objective_document_evidence_completed":
+            checkpoint = next(
+                item
+                for item in service.objective_repository._document_evidence.values()
+                if item.document_id == progress["current_document_id"]
+            )
+            assert checkpoint.status in {"succeeded", "failed"}
+        progress_updates.append({"analysis_version": version, **progress})
+
+    monkeypatch.setattr(
+        service.objective_repository, "update_analysis_progress", record_progress
     )
     first_queued = await analysis_service.queue_analysis(
         collection_id,
@@ -1656,8 +1780,18 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     )
 
     assert first["analysis"].status == "succeeded"
-    assert first["objective"].published_analysis_version == 1
-    assert extraction_calls == ["paper-1", "paper-2"]
+    assert first["objective"].objective.published_analysis_version == 1
+    assert sorted(extraction_calls) == ["paper-1", "paper-2"]
+    assert [
+        update["processed_document_count"]
+        for update in progress_updates
+        if update["phase"] == "objective_paper_framing_started"
+    ] == [0, 0]
+    assert [
+        update["processed_document_count"]
+        for update in progress_updates
+        if update["phase"] == "objective_document_evidence_completed"
+    ] == [1, 2]
     assert [item.analysis_status for item in first["paper_contributions"]] == [
         "analyzed",
         "failed",
@@ -1667,6 +1801,23 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         checkpoint.status
         for checkpoint in service.objective_repository._document_evidence.values()
     ) == ["failed", "succeeded"]
+    failed_checkpoint = next(
+        checkpoint
+        for checkpoint in service.objective_repository._document_evidence.values()
+        if checkpoint.status == "failed"
+    )
+    assert failed_checkpoint.error_message == (
+        "Evidence could not be extracted from this paper. Retry the analysis."
+    )
+    failure_diagnostic = next(
+        record
+        for record in first["analysis"].diagnostics
+        if record["trace_type"] == "objective_analysis_failure"
+    )
+    assert failure_diagnostic["stage"] == "document_evidence_extraction"
+    assert failure_diagnostic["error_type"] == "RuntimeError"
+    assert failure_diagnostic["frames"][-1]["function"] == "extract_document"
+    assert "provider unavailable" not in str(failure_diagnostic)
     assert len(synthesis_calls) == 1
 
     second_queued = await analysis_service.queue_analysis(
@@ -1682,8 +1833,15 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     )
 
     assert second["analysis"].status == "succeeded"
-    assert second["objective"].published_analysis_version == 2
-    assert extraction_calls == ["paper-1", "paper-2", "paper-2"]
+    assert second["objective"].objective.published_analysis_version == 2
+    assert sorted(extraction_calls) == ["paper-1", "paper-2", "paper-2"]
+    assert [
+        update["processed_document_count"]
+        for update in progress_updates
+        if update["phase"] == "objective_document_evidence_completed"
+        and update["analysis_version"] == 2
+    ] == [1, 2]
+    assert all(update["total_document_count"] == 2 for update in progress_updates)
     assert all(
         item.analysis_status == "analyzed"
         for item in second["paper_contributions"]
@@ -1802,9 +1960,9 @@ async def test_objective_source_loading_uses_one_exact_document_batch(tmp_path) 
             raise AssertionError("Objective loading must not read documents one by one")
 
     repository = BatchOnlySourceRepository()
-    service.source_artifact_repository = repository
+    service.objective_input_service.source_artifact_repository = repository
 
-    documents = await service._load_source_documents(
+    documents = await service.objective_input_service._load_source_documents(
         "collection-1",
         document_inputs=requested_inputs,
     )

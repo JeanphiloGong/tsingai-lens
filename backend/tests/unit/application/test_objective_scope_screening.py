@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
-    ResearchObjectiveService,
+    ObjectiveEvidenceAnalysisService,
 )
 from application.core.objectives.scope_screening import screen_objective_scope
 from domain.core import PaperResearchMap, ResearchObjective
@@ -123,6 +123,22 @@ def test_specific_material_conflict_is_confidently_out_of_scope() -> None:
     assert preview.decisions[0].reason == "material_scope_conflict"
 
 
+def test_unregistered_material_identity_requires_inspection_instead_of_exclusion() -> None:
+    preview = screen_objective_scope(
+        (
+            _experimental_map(
+                "paper-unknown-material",
+                material="nickel foam",
+            ),
+        ),
+        objective=_objective(seed_document_ids=()),
+    )
+
+    assert preview.review_document_ids == ("paper-unknown-material",)
+    assert preview.excluded_document_ids == ()
+    assert preview.decisions[0].reason == "partial_scope_match"
+
+
 def test_scope_preview_does_not_truncate_a_131_paper_collection() -> None:
     maps = tuple(_experimental_map(f"paper-{position:03d}") for position in range(131))
 
@@ -210,15 +226,12 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
     paper_map_repository = SimpleNamespace(
         list_collection=lambda collection_id: _async_value(paper_maps)
     )
-    service = ResearchObjectiveService(
+    service = ObjectiveEvidenceAnalysisService(
         collection_service=collection_service,
-        source_artifact_repository=SimpleNamespace(),
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
+        objective_input_service=SimpleNamespace(),
     )
 
     preview = await service.preview_objective_scope("col-1", "obj-1")
@@ -230,13 +243,12 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
 
 
 async def test_service_reports_scope_not_ready_without_collection_paper_maps() -> None:
-    service = ResearchObjectiveService(
+    service = ObjectiveEvidenceAnalysisService(
         collection_service=SimpleNamespace(
             get_collection=lambda collection_id: _async_value(
                 {"collection_id": collection_id}
             )
         ),
-        source_artifact_repository=SimpleNamespace(),
         paper_map_repository=SimpleNamespace(
             list_collection=lambda collection_id: _async_value(())
         ),
@@ -245,10 +257,8 @@ async def test_service_reports_scope_not_ready_without_collection_paper_maps() -
                 _objective()
             )
         ),
-        document_profile_service=SimpleNamespace(),
         finding_synthesis_service=SimpleNamespace(),
-        objective_candidate_service=SimpleNamespace(),
-        paper_map_service=SimpleNamespace(),
+        objective_input_service=SimpleNamespace(),
     )
 
     with pytest.raises(ObjectiveScopeNotReadyError):

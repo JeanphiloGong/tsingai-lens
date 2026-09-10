@@ -8,14 +8,12 @@ from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
-from application.core.objectives.objective_candidate_service import (
-    ObjectiveCandidateService,
-)
+from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveEvidenceAnalysisService,
 )
 from domain.core import (
     DocumentProfile,
@@ -48,10 +46,9 @@ def build_research_objective_service(
     *,
     collection_service,
     **kwargs,
-) -> ResearchObjectiveService:
-    objective_judgments = kwargs.get("response_client")
+) -> ObjectiveEvidenceAnalysisService:
+    objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
-        kwargs.setdefault("axis_equivalence_classifier", objective_judgments)
         kwargs.setdefault("objective_evidence_router", objective_judgments)
         kwargs.setdefault("objective_source_extractor", objective_judgments)
         kwargs.setdefault("objective_source_screener", objective_judgments)
@@ -87,24 +84,32 @@ def build_research_objective_service(
             assertion_judge=objective_judgments,
         ),
     )
-    return ResearchObjectiveService(
+    objective_input_service = kwargs.pop(
+        "objective_input_service",
+        ObjectiveInputService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_map_repository=paper_map_repository,
+            document_profile_service=document_profile_service,
+            paper_map_service=kwargs.pop("paper_map_service", PaperResearchMapService()),
+            response_client=objective_judgments,
+        ),
+    )
+    return ObjectiveEvidenceAnalysisService(
         collection_service=collection_service,
-        source_artifact_repository=source_repository,
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        document_profile_service=document_profile_service,
         finding_synthesis_service=finding_synthesis_service,
-        objective_candidate_service=ObjectiveCandidateService(),
-        paper_map_service=kwargs.pop("paper_map_service", PaperResearchMapService()),
+        objective_input_service=objective_input_service,
         **kwargs,
     )
 
 
 async def seed_document_profiles(
-    service: ResearchObjectiveService,
+    service: ObjectiveEvidenceAnalysisService,
     collection_id: str,
 ) -> None:
-    documents = await service.source_artifact_repository.read_collection_documents(
+    documents = await service.objective_input_service.source_artifact_repository.read_collection_documents(
         collection_id
     )
     current_collection = await service.collection_service.repository.read_collection(
@@ -146,29 +151,27 @@ async def seed_document_profiles(
         )
     profiles: list[DocumentProfile] = []
     for document in documents:
-        metadata = dict(document.metadata)
         title = document.title
         profiles.append(
             DocumentProfile.from_mapping(
                 {
                     "document_id": document.document_id,
-                    "collection_id": collection_id,
                     "title": title,
-                    "source_filename": metadata.get("source_filename"),
                     "doc_type": "review" if "Review" in title else "experimental",
-                    "parsing_warnings": [],
+                    "profile_warnings": [],
                     "confidence": 0.9,
                 }
             )
         )
     for profile in profiles:
-        await service.document_profile_service.document_profile_repository.replace(
+        await service.objective_input_service.document_profile_service.document_profile_repository.replace(
+            collection_id,
             profile
         )
 
 
 async def queue_running_analysis(
-    service: ResearchObjectiveService,
+    service: ObjectiveEvidenceAnalysisService,
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:
@@ -180,7 +183,7 @@ async def queue_running_analysis(
             objective_id,
         )
         assert objective is not None
-        document_inputs = await service.resolve_prepared_document_inputs(
+        document_inputs = await service.objective_input_service.resolve_prepared_document_inputs(
             collection_id,
             tuple(objective.seed_document_ids),
         )

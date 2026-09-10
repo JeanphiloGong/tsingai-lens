@@ -1,10 +1,14 @@
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { authState, fetchCurrentSession, login, logout } from '../../../_shared/auth';
+import { collections } from '../../../_shared/collections';
 
 import type {
 	ChatMessage,
+	ChatResponseSnapshot,
 	ChatToolCall,
+	ChatToolResult,
 	ChatTrajectory,
 	ChatTurn
 } from '../../../_shared/chatSessions';
@@ -41,6 +45,7 @@ vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
+const Conversation = (await import('./ResearchConversation.svelte')).default;
 
 const createdAt = '2026-08-19T08:00:00+00:00';
 const session = {
@@ -114,11 +119,23 @@ function message(
 		content,
 		created_at: createdAt,
 		tool_call_id: null,
-		tool_name: null,
-		tool_arguments: null,
+		tool_calls: [],
+
 		tool_result: null,
 		source_contexts: [],
 		...overrides
+	};
+}
+
+function baseToolResult(toolCallId: string): ChatToolResult {
+	return {
+		tool_call_id: toolCallId,
+		status: 'succeeded',
+		data: {},
+		resource_refs: [],
+		warnings: [],
+		error_code: null,
+		error_message: null
 	};
 }
 
@@ -127,6 +144,7 @@ function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
 		tool_call_id: 'call_write_1',
 		session_id: session.session_id,
 		assistant_message_id: 'msg_call_write',
+		position: 0,
 		name: 'create_objective_candidate',
 		arguments: {
 			question: 'How does energy input affect grain morphology?',
@@ -147,7 +165,7 @@ function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
 }
 
 function installApi({
-	trajectory = { items: [], pending_approval: null },
+	trajectory = { feedback: [], items: [], pending_approval: null },
 	messageTurn,
 	messageDeltas = [],
 	messageDelayMs = 0,
@@ -155,7 +173,7 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: ChatTrajectory;
+	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval'>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -224,18 +242,22 @@ function uploadedDocument(file: File, documentId = 'doc_upload_1') {
 
 function queuedPreparation(documentId = 'doc_upload_1') {
 	return {
-		task_id: `task_${documentId}`,
+		run_id: `run_${documentId}`,
 		collection_id: 'col_123',
-		document_id: documentId,
-		task_type: 'document_preparation',
+		pipeline_name: 'document_preparation',
+		scope_type: 'document',
+		scope_id: documentId,
 		mode: 'standard',
 		input_fingerprint: null,
 		status: 'queued',
-		current_stage: 'queued',
+		current_node: 'queued',
 		progress_percent: 0,
 		progress_detail: { phase: 'queued' },
+		nodes: {},
 		errors: [],
 		warnings: [],
+		stats: {},
+		context: {},
 		created_at: createdAt,
 		updated_at: createdAt,
 		started_at: null,
@@ -245,7 +267,7 @@ function queuedPreparation(documentId = 'doc_upload_1') {
 
 async function renderReady() {
 	render(Page);
-	const composer = browserPage.getByLabelText('Message');
+	const composer = browserPage.getByLabelText('Message', { exact: true });
 	await expect.element(composer).toBeEnabled();
 	return composer;
 }
@@ -260,12 +282,969 @@ describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
 		localStorage.clear();
 		sessionStorage.clear();
+		collections.set([]);
+		authState.set({
+			status: 'authenticated',
+			user: { user_id: session.user_id, email: 'researcher@example.test' }
+		});
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
 	});
+
+	it('uses the current Collection name as metadata arrives and keeps empty conversations unframed', async () => {
+		installApi();
+		await renderReady();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Untitled collection', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123');
+		expect(document.querySelector('.conversation-header')).toBeNull();
+		collections.set([
+			{ id: 'col_other', collection_id: 'col_other', name: 'Other research', documents: [] },
+			{ id: 'col_123', collection_id: 'col_123', name: '316L LPBF comparison', documents: [] }
+		]);
+		await expect
+			.element(browserPage.getByRole('link', { name: '316L LPBF comparison', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123');
+		collections.update((items) =>
+			items.map((item) => (item.id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
+		);
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
+			.toBeVisible();
+	});
+
+	it('keeps received text through a failed stream and failed recovery read, then resumes once', async () => {
+		installApi();
+		const fallback = fetchMock.getMockImplementation()!;
+		const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
+		const partial = 'Match test temperature, specimen orientation, and heat treatment.';
+		const snapshot: ChatResponseSnapshot = {
+			response_id: 'response-1',
+			sequence: 1,
+			started_at: createdAt,
+			updated_at: createdAt,
+			status: 'running',
+			message_id: 'answer-1',
+			message_created_at: createdAt,
+			content: '',
+			progress: { phase: 'responding' },
+			checkpoint_message_id: question.message_id,
+			completion_reason: null,
+			error_code: null,
+			warnings: []
+		};
+		const trajectory: ChatTrajectory = {
+			items: [question],
+			feedback: [],
+			pending_approval: null,
+			branches: [],
+			branch_draft: null,
+			running: true,
+			response: snapshot
+		};
+		let offline = false;
+		let recovering = false;
+		let posts = 0;
+		let output!: ReadableStreamDefaultController<Uint8Array>;
+		const event = (name: string, data: unknown) =>
+			new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path.endsWith('/messages') && requestMethod(input, init) === 'POST') {
+				posts++;
+				return Promise.resolve(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								output = controller;
+								controller.enqueue(event('trajectory', trajectory));
+								controller.enqueue(event('text_delta', { content: partial }));
+							}
+						}),
+						{ headers: { 'Content-Type': 'text/event-stream' } }
+					)
+				);
+			}
+			if (offline) return Promise.reject(new TypeError('Network unavailable'));
+			if (recovering && path.endsWith('/messages')) {
+				return Promise.resolve(
+					jsonResponse({ ...trajectory, response: { ...snapshot, sequence: 2, content: partial } })
+				);
+			}
+			if (path.endsWith('/events')) {
+				return Promise.resolve(
+					new Response(
+						event('trajectory', {
+							...trajectory,
+							running: false,
+							items: [
+								question,
+								message('answer-1', 'assistant', partial + ' Keep mismatches explicit.')
+							],
+							response: {
+								...snapshot,
+								sequence: 3,
+								status: 'completed',
+								message_id: null,
+								content: ''
+							}
+						}),
+						{ headers: { 'Content-Type': 'text/event-stream' } }
+					)
+				);
+			}
+			return fallback(input, init);
+		});
+		await send(question.content);
+		const answer = browserPage.getByTestId('assistant-message');
+		await expect.element(answer).toHaveTextContent(partial);
+		offline = true;
+		output.error(new TypeError('Connection lost'));
+		await expect.element(answer.getByRole('alert')).toBeVisible();
+		await expect.element(answer).toHaveTextContent(partial);
+		offline = false;
+		recovering = true;
+		await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+		await expect.element(answer).toHaveTextContent('Keep mismatches explicit.');
+		await expect.element(answer).toHaveAttribute('data-message-id', 'answer-1');
+		await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		expect(posts).toBe(1);
+	});
+
+	for (const embedded of [false, true]) {
+		it(`starts another session during generation and recovers the original (embedded=${embedded})`, async () => {
+			let created = 0;
+			let controller: ReadableStreamDefaultController<Uint8Array>;
+			let originalSignal: AbortSignal | null | undefined;
+			let completed = false;
+			const originalQuestion = message('question-a', 'user', 'Compare the heat treatments');
+			const originalAnswer = message('answer-a', 'assistant', 'Original research completed');
+			const source = {
+				resource_ref: {
+					resource_type: 'source' as const,
+					resource_id: 'doc_1:methods',
+					href: null
+				},
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'LPBF study',
+				source_kind: 'text_window',
+				source_ref: 'methods',
+				page: 3,
+				quote: 'Samples were heat treated at 1040 C.',
+				heading_path: 'Methods',
+				quote_truncated: false
+			};
+			sessionStorage.setItem(
+				'lens.chatSourceContext.researcher_1:col_123',
+				JSON.stringify({ contexts: [source] })
+			);
+			const submitted: string[] = [];
+			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				const method = requestMethod(input, init);
+				if (path === '/api/v1/chat-sessions') {
+					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
+				}
+				const id = path.split('/')[4];
+				if (!path.endsWith('/messages')) return jsonResponse({ ...session, session_id: id });
+				if (method === 'GET') {
+					return jsonResponse({
+						items: completed ? [originalQuestion, originalAnswer] : [],
+						running: !completed,
+						pending_approval: null,
+						feedback: []
+					});
+				}
+				submitted.push(id);
+				if (id === 'chat_1') {
+					originalQuestion.content = requestBody(input, init).message;
+					originalQuestion.source_contexts = [source];
+					originalSignal = init?.signal;
+					return new Response(
+						new ReadableStream({
+							start(value) {
+								controller = value;
+							}
+						}),
+						{
+							headers: { 'Content-Type': 'text/event-stream' }
+						}
+					);
+				}
+				expect(requestBody(input, init)).not.toHaveProperty('source_contexts');
+				return streamResponse({
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						message('question-b', 'user', 'Check specimen counts', { session_id: id }),
+						message('answer-b', 'assistant', 'Second research completed', { session_id: id })
+					],
+					pending_approval: null,
+					error_code: null
+				});
+			});
+			const view = render(Conversation, { embedded });
+			const composer = browserPage.getByRole('textbox', { name: 'Message', exact: true });
+			const newSession = browserPage.getByRole('button', { name: 'New session', exact: true });
+			await expect.element(composer).toBeEnabled();
+			await send(originalQuestion.content, composer);
+			await expect.element(newSession).toBeDisabled();
+			await vi.waitFor(() => expect(controller).toBeDefined());
+			controller!.enqueue(
+				new TextEncoder().encode(
+					'event: progress\ndata: {"phase":"reading","cycle_index":1,"elapsed_ms":1}\n\n'
+				)
+			);
+			await expect.element(newSession).toBeEnabled();
+			await view.rerender({ sourceContextVersion: 1 });
+			await expect
+				.element(browserPage.getByTestId('pending-source-attachments'))
+				.not.toBeInTheDocument();
+			expect(
+				JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
+			).toMatchObject({
+				contexts: [source],
+				submission: { session_id: 'chat_1' }
+			});
+			await newSession.click();
+			await expect.element(composer).toBeEnabled();
+			expect(created).toBe(2);
+			expect(originalSignal?.aborted).toBe(true);
+			await expect
+				.element(browserPage.getByTestId('pending-source-context'))
+				.not.toBeInTheDocument();
+			await send('Check specimen counts', composer);
+			await expect.element(browserPage.getByText('Second research completed')).toBeVisible();
+			if (embedded) await browserPage.getByRole('button', { name: 'Conversation history' }).click();
+			else if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history' }).click();
+			await browserPage.getByRole('button', { name: /Compare the heat treatments/ }).click();
+			await expect.element(composer).toBeDisabled();
+			await expect.element(newSession).toBeEnabled();
+			await expect
+				.element(browserPage.getByTestId('pending-source-attachments'))
+				.not.toBeInTheDocument();
+			completed = true;
+			await expect.element(browserPage.getByText('Original research completed')).toBeVisible();
+			await expect.element(composer).toBeEnabled();
+			await expect
+				.element(browserPage.getByTestId('pending-source-context'))
+				.not.toBeInTheDocument();
+			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+			expect(submitted).toEqual(['chat_1', 'chat_2']);
+			expect(document.querySelector('[role="alert"]')).toBeNull();
+		});
+	}
+
+	it('uses the saved question as the compact title and preserves the Objective link', async () => {
+		const question = 'Compare the heat-treatment conditions across these LPBF papers';
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/collections/col_123/assistant?objective_id=obj_1')
+		});
+		installApi({
+			trajectory: {
+				feedback: [],
+				items: [message('question', 'user', question)],
+				pending_approval: null
+			}
+		});
+		await renderReady();
+		await expect
+			.element(browserPage.getByRole('heading', { name: question, exact: true }))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open selected objective', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1');
+		expect(document.querySelector('.conversation-header')?.textContent).not.toContain(
+			'Research Agent'
+		);
+	});
+
+	it.each(['manual', 'automatic', 'read failure'])(
+		'keeps an in-flight approval recoverable until its result arrives: %s',
+		async (mode) => {
+			const call = pendingCall();
+			const request = message('request', 'assistant', '', {
+				tool_calls: [
+					{
+						tool_call_id: call.tool_call_id,
+						name: call.name,
+						arguments: call.arguments,
+						position: 0
+					}
+				]
+			});
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
+			const original = fetchMock.getMockImplementation()!;
+			let running = false;
+			let completed = false;
+			let readFails = false;
+			let decisions = 0;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input).endsWith('/decision')) {
+					running = true;
+					decisions += 1;
+					return Promise.reject(new TypeError('Connection lost'));
+				}
+				if (
+					running &&
+					requestPath(input).endsWith('/messages') &&
+					requestMethod(input, init) === 'GET'
+				) {
+					if (readFails) return Promise.reject(new TypeError('Recovery connection lost'));
+					return Promise.resolve(
+						jsonResponse({
+							feedback: [],
+							pending_approval: null,
+							items: completed
+								? [
+										request,
+										message('result', 'tool', '', {
+											tool_call_id: call.tool_call_id,
+											tool_result: baseToolResult(call.tool_call_id)
+										}),
+										message('answer', 'assistant', 'The approved research question was created.')
+									]
+								: [request]
+						})
+					);
+				}
+				return original(input, init);
+			});
+			render(Page);
+			await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+			await browserPage.getByRole('button', { name: 'Retry conversation', exact: true }).click();
+			await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
+			if (mode === 'read failure') {
+				readFails = true;
+				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+				await expect
+					.element(browserPage.getByText('Recovery connection lost', { exact: true }))
+					.toBeVisible();
+				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
+				readFails = false;
+			}
+			completed = true;
+			if (mode !== 'automatic')
+				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect
+				.element(
+					browserPage.getByText('The approved research question was created.', { exact: true })
+				)
+				.toBeVisible();
+			await expect.element(browserPage.getByTestId('research-recovery')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(decisions).toBe(1);
+		}
+	);
+
+	it('aborts recovery and ignores its saved result after logout', async () => {
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [
+				{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }
+			]
+		});
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		installApi({ trajectory: { feedback: [], items: [request], pending_approval: null } });
+		render(Page);
+		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
+		const original = fetchMock.getMockImplementation()!;
+		let finish!: (response: Response) => void;
+		let signal: AbortSignal | null | undefined;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/messages')) {
+				signal = init?.signal;
+				return new Promise<Response>((resolve) => {
+					finish = resolve;
+				});
+			}
+			return original(input, init);
+		});
+		await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+		await logout().catch(() => undefined);
+		await expect.element(browserPage.getByTestId('research-recovery')).not.toBeInTheDocument();
+		expect(signal?.aborted).toBe(true);
+		finish(
+			jsonResponse({
+				feedback: [],
+				pending_approval: null,
+				items: [message('private_answer', 'assistant', 'Private recovered research result')]
+			})
+		);
+		await expect
+			.element(browserPage.getByText('Private recovered research result', { exact: true }))
+			.not.toBeInTheDocument();
+		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBeNull();
+	});
+
+	it.each([false, true])(
+		'recovers a saved approval after a lost response, trajectory unavailable initially: %s',
+		async (unavailable) => {
+			const call = pendingCall();
+			const request = message('approval_request', 'assistant', '', {
+				tool_calls: [
+					{
+						tool_call_id: call.tool_call_id,
+						name: call.name,
+						arguments: call.arguments,
+						position: 0
+					}
+				]
+			});
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
+			const original = fetchMock.getMockImplementation()!;
+			let decisions = 0;
+			let saved = false;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path.endsWith('/decision')) {
+					decisions += 1;
+					saved = true;
+					if (decisions === 1) return Promise.reject(new TypeError('Failed to fetch'));
+					return Promise.resolve(
+						jsonResponse({
+							status: 'completed',
+							messages: [],
+							pending_approval: null,
+							completion_reason: null,
+							warnings: [],
+							error_code: null
+						})
+					);
+				}
+				if (saved && path.endsWith('/messages') && requestMethod(input, init) === 'GET') {
+					if (unavailable && decisions === 1) return Promise.reject(new TypeError('Offline'));
+					return Promise.resolve(
+						jsonResponse({
+							feedback: [],
+							items: [
+								request,
+								message('saved_tool_result', 'tool', '', {
+									tool_call_id: call.tool_call_id,
+									tool_result: baseToolResult(call.tool_call_id)
+								}),
+								message('saved_write', 'assistant', 'The approved research question was created.')
+							],
+							pending_approval: null
+						})
+					);
+				}
+				return original(input, init);
+			});
+			render(Page);
+			const approve = browserPage.getByRole('button', { name: 'Approve and create', exact: true });
+			await approve.click();
+			if (unavailable) {
+				await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
+				await approve.click();
+			}
+			await expect
+				.element(
+					browserPage.getByText('The approved research question was created.', { exact: true })
+				)
+				.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+			expect(decisions).toBe(unavailable ? 2 : 1);
+		}
+	);
+
+	it('keeps an uncertain approval visible as an error until its saved result can be loaded', async () => {
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [
+				{
+					tool_call_id: call.tool_call_id,
+					name: call.name,
+					arguments: call.arguments,
+					position: 0
+				}
+			]
+		});
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
+		const original = fetchMock.getMockImplementation()!;
+		let running = false;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/decision')) {
+				running = true;
+				return Promise.reject(new TypeError('Connection lost'));
+			}
+			if (running && requestPath(input).endsWith('/messages'))
+				return Promise.resolve(
+					jsonResponse({ feedback: [], items: [request], pending_approval: null })
+				);
+			return original(input, init);
+		});
+		render(Page);
+		await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('Connection lost');
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry conversation', exact: true }))
+			.toBeEnabled();
+	});
+
+	it.each([true, false])(
+		'recovers a lost upload through the server, recovery available: %s',
+		async (available) => {
+			const file = new File(['%PDF-1.7'], 'LPBF-study.pdf', { type: 'application/pdf' });
+			let stored = false;
+			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 202));
+			installApi({
+				uploadDocument: () => {
+					if (!stored) {
+						stored = true;
+						return Promise.reject(new TypeError('Failed to fetch'));
+					}
+					return available
+						? jsonResponse(uploadedDocument(file, 'doc_saved'))
+						: jsonResponse({ detail: 'Upload recovery unavailable' }, 503);
+				},
+				prepareDocument: preparation
+			});
+			await renderReady();
+			await browserPage.getByLabelText('Choose PDF papers').upload(file);
+			await browserPage
+				.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true })
+				.click();
+			await browserPage.getByRole('button', { name: 'Retry failed paper', exact: true }).click();
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					String(input).endsWith('/documents?reuse_existing=true')
+				)
+			).toBe(true);
+			if (available) {
+				await expect
+					.element(browserPage.getByText('Preparation queued', { exact: true }))
+					.toBeInTheDocument();
+				expect(preparation.mock.calls).toEqual([['doc_saved']]);
+			} else {
+				await expect
+					.element(browserPage.getByRole('button', { name: 'Retry failed paper', exact: true }))
+					.toBeEnabled();
+				expect(preparation).not.toHaveBeenCalled();
+				await expect
+					.element(browserPage.getByText('Already in this collection', { exact: true }))
+					.not.toBeInTheDocument();
+			}
+		}
+	);
+
+	it.each([true, false])(
+		'reconciles a sent Source after navigation, persisted: %s',
+		async (persisted) => {
+			const source = {
+				resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'LPBF study',
+				source_kind: 'text_window',
+				source_ref: 'results',
+				page: 3,
+				quote: 'The grain size decreased after heat treatment.',
+				heading_path: 'Results',
+				quote_truncated: false
+			};
+			sessionStorage.setItem(
+				'lens.chatSourceContext.researcher_1:col_123',
+				JSON.stringify({ contexts: [source] })
+			);
+			const question = 'Explain this grain-size result';
+			installApi({
+				trajectory: {
+					feedback: [],
+					items: persisted
+						? [
+								message('saved_user', 'user', question, { source_contexts: [source] }),
+								message('saved_answer', 'assistant', 'Persisted answer after navigation')
+							]
+						: [],
+					pending_approval: null
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (
+					path === '/api/v1/chat-sessions' &&
+					requestBody(input, init)?.collection_id === 'col_456'
+				)
+					return Promise.resolve(
+						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 201)
+					);
+				if (path.endsWith('/messages') && requestMethod(input, init) === 'POST')
+					return Promise.resolve(
+						new Response(
+							new ReadableStream({
+								start(controller) {
+									controller.enqueue(
+										new TextEncoder().encode(
+											'event: text_delta\ndata: {"content":"Reading source"}\n\n'
+										)
+									);
+								}
+							}),
+							{ headers: { 'Content-Type': 'text/event-stream' } }
+						)
+					);
+				return original(input, init);
+			});
+			const composer = await renderReady();
+			await send(question, composer);
+			await expect
+				.element(browserPage.getByText('Reading source', { exact: true }))
+				.toBeInTheDocument();
+			setPage({
+				params: { id: 'col_456' },
+				url: new URL('http://localhost/collections/col_456/assistant')
+			});
+			await expect.element(composer).toBeEnabled();
+			setPage({
+				params: { id: 'col_123' },
+				url: new URL('http://localhost/collections/col_123/assistant')
+			});
+			await expect.element(composer).toBeEnabled();
+			const pendingSource = browserPage.getByTestId('pending-source-context');
+			if (persisted) {
+				await expect
+					.element(browserPage.getByText('Persisted answer after navigation'))
+					.toBeInTheDocument();
+				await expect.element(pendingSource).not.toBeInTheDocument();
+			} else {
+				await expect.element(pendingSource).toBeInTheDocument();
+			}
+		}
+	);
+
+	it('keeps a saved rating when approval recovery returns an older feedback snapshot', async () => {
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		const answer = message('answer', 'assistant', 'Review the test temperatures before comparing.');
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [
+				{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }
+			]
+		});
+		installApi({ trajectory: { items: [answer, request], pending_approval: call, feedback: [] } });
+		const original = fetchMock.getMockImplementation()!;
+		let finishFeedback!: (response: Response) => void;
+		let finishRecovery!: (response: Response) => void;
+		const saving = new Promise<Response>((resolve) => {
+			finishFeedback = resolve;
+		});
+		const recovering = new Promise<Response>((resolve) => {
+			finishRecovery = resolve;
+		});
+		let approvalSent = false;
+		let recoveryStarted = false;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path.endsWith('/feedback')) return saving;
+			if (path.endsWith('/decision')) {
+				approvalSent = true;
+				return Promise.reject(new TypeError('Lost approval response'));
+			}
+			if (approvalSent && path.endsWith('/messages')) {
+				recoveryStarted = true;
+				return recovering;
+			}
+			return original(input, init);
+		});
+		render(Page);
+		const helpful = browserPage.getByRole('button', { name: 'Helpful', exact: true });
+		await helpful.click();
+		await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+		await vi.waitFor(() => expect(recoveryStarted).toBe(true));
+		finishFeedback(
+			jsonResponse({
+				feedback_id: 'feedback-1',
+				message_id: answer.message_id,
+				session_id: session.session_id,
+				user_id: session.user_id,
+				rating: 'helpful',
+				reason: null,
+				comment: null,
+				response_digest: 'a'.repeat(64),
+				created_at: createdAt,
+				updated_at: createdAt
+			})
+		);
+		await expect.element(helpful).toHaveAttribute('aria-pressed', 'true');
+		finishRecovery(jsonResponse({ items: [answer], pending_approval: null, feedback: [] }));
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		await expect.element(helpful).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it.each(['collection', 'account'])(
+		'aborts pending feedback and ignores its response after changing %s',
+		async (scope) => {
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({
+				trajectory: {
+					items: [message('answer', 'assistant', 'Compare matching tensile test conditions.')],
+					pending_approval: null,
+					feedback: []
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			let finish!: (response: Response) => void;
+			const pending = new Promise<Response>((resolve) => {
+				finish = resolve;
+			});
+			let signal: AbortSignal | undefined;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input).endsWith('/feedback')) {
+					signal = init?.signal ?? undefined;
+					return pending;
+				}
+				if (requestPath(input) === '/api/v1/chat-sessions')
+					return Promise.resolve(
+						jsonResponse({
+							...session,
+							session_id: 'chat_new',
+							collection_id: scope === 'collection' ? 'col_456' : 'col_123',
+							user_id: scope === 'account' ? 'researcher_2' : session.user_id
+						})
+					);
+				return original(input, init);
+			});
+			render(Page);
+			await browserPage.getByRole('button', { name: 'Helpful', exact: true }).click();
+			await expect.element(browserPage.getByText('Saving...', { exact: true })).toBeVisible();
+			if (scope === 'collection')
+				setPage({
+					params: { id: 'col_456' },
+					url: new URL('http://localhost/collections/col_456/assistant')
+				});
+			else
+				authState.set({
+					status: 'authenticated',
+					user: { user_id: 'researcher_2', email: 'other@example.test' }
+				});
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(signal?.aborted).toBe(true);
+			finish(jsonResponse({ detail: 'Previous feedback failed' }, 503));
+			await new Promise(requestAnimationFrame);
+			await expect
+				.element(browserPage.getByText('Could not save feedback. Please try again.'))
+				.not.toBeInTheDocument();
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Helpful', exact: true }))
+				.not.toBeInTheDocument();
+		}
+	);
+
+	it.each([503, 403, 'offline'] as const)(
+		'retains the selected conversation after %s and retries it',
+		async (failure) => {
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			const history = [
+				{
+					session_id: session.session_id,
+					title: 'Compare LPBF grain morphology',
+					updated_at: createdAt
+				}
+			];
+			localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify(history));
+			installApi({
+				trajectory: {
+					feedback: [],
+					items: [message('restored', 'assistant', 'Original conversation recovered')],
+					pending_approval: null
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			let unavailable = true;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input) === '/api/v1/chat-sessions/chat_1' && unavailable)
+					return failure === 'offline'
+						? Promise.reject(new TypeError('Failed to fetch'))
+						: Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, failure));
+				return original(input, init);
+			});
+			render(Page);
+			await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
+				session.session_id
+			);
+			expect(
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+			).toEqual(history);
+			expect(
+				fetchMock.mock.calls.some(([input, init]) => requestMethod(input, init) === 'POST')
+			).toBe(false);
+			unavailable = false;
+			await browserPage.getByRole('button', { name: 'Retry conversation' }).click();
+			await expect
+				.element(browserPage.getByText('Original conversation recovered'))
+				.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		}
+	);
+
+	it('removes a missing session only after an explicit not-found response', async () => {
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', 'missing');
+		localStorage.setItem(
+			'lens.chatSessionHistory.researcher_1:col_123',
+			JSON.stringify([
+				{ session_id: 'missing', title: 'Missing conversation', updated_at: createdAt }
+			])
+		);
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
+			requestPath(input).endsWith('/missing')
+				? Promise.resolve(jsonResponse({ detail: 'Not found' }, 404))
+				: original(input, init)
+		);
+		await renderReady();
+		expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(session.session_id);
+		await expect.element(browserPage.getByText('Missing conversation')).not.toBeInTheDocument();
+	});
+
+	it('clears private conversation data on logout and isolates the next account', async () => {
+		const privateTitle = 'Unpublished alloy treatment result';
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem(
+			'lens.chatSessionHistory.researcher_1:col_123',
+			JSON.stringify([
+				{ session_id: session.session_id, title: privateTitle, updated_at: createdAt }
+			])
+		);
+		installApi({
+			trajectory: {
+				feedback: [],
+				items: [message('private', 'user', privateTitle)],
+				pending_approval: null
+			}
+		});
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path.endsWith('/auth/logout')) return Promise.resolve(jsonResponse({}));
+			if (path.endsWith('/auth/login'))
+				return Promise.resolve(
+					jsonResponse({ user: { user_id: 'researcher_2', email: 'second@example.test' } })
+				);
+			if (path === '/api/v1/chat-sessions')
+				return Promise.resolve(
+					jsonResponse({ ...session, user_id: 'researcher_2', session_id: 'chat_2' }, 201)
+				);
+			return original(input, init);
+		});
+		await renderReady();
+		await expect.element(browserPage.getByTestId('user-message')).toHaveTextContent(privateTitle);
+		await logout();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
+		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBeNull();
+		await expect.element(browserPage.getByTestId('user-message')).not.toBeInTheDocument();
+		await login('second@example.test', 'test-only');
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		await expect.element(browserPage.getByText(privateTitle)).not.toBeInTheDocument();
+		expect(localStorage.getItem('lens.chatSession.researcher_2:col_123')).toBe('chat_2');
+	});
+
+	it.each([true, false])(
+		'consumes Source handoff only when recovery confirms persistence: %s',
+		async (persisted) => {
+			const source = {
+				resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				document_title: 'LPBF alloy study',
+				source_kind: 'text_window',
+				source_ref: 'results',
+				page: 3,
+				quote: 'The grain size decreased after heat treatment.',
+				heading_path: 'Results',
+				quote_truncated: false
+			};
+			sessionStorage.setItem(
+				'lens.chatSourceContext.researcher_1:col_123',
+				JSON.stringify({ contexts: [source] })
+			);
+			const question = 'Explain this grain-size result';
+			installApi({
+				trajectory: {
+					feedback: [],
+					items: persisted
+						? [
+								message('saved_user', 'user', question, { source_contexts: [source] }),
+								message('saved_answer', 'assistant', 'Recovered persisted answer')
+							]
+						: [],
+					pending_approval: null
+				},
+				messageTurn: {
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						message('next_user', 'user', 'List all papers'),
+						message('next_answer', 'assistant', 'Paper list')
+					],
+					pending_approval: null,
+					error_code: null
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			let submissions = 0;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (
+					requestPath(input).endsWith('/messages') &&
+					requestMethod(input, init) === 'POST' &&
+					++submissions === 1
+				) {
+					return Promise.resolve(
+						new Response('event: text_delta\ndata: {"content":"Partial answer"}\n\n', {
+							headers: { 'Content-Type': 'text/event-stream' }
+						})
+					);
+				}
+				return original(input, init);
+			});
+			const composer = await renderReady();
+			await send(question, composer);
+			await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
+			await expect.element(composer).toBeEnabled();
+			if (persisted) {
+				await expect
+					.element(browserPage.getByText('Recovered persisted answer'))
+					.toBeInTheDocument();
+				expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+				await send('List all papers', composer);
+				await expect
+					.element(browserPage.getByText('Paper list', { exact: true }))
+					.toBeInTheDocument();
+				const posts = fetchMock.mock.calls.filter(
+					([input, init]) =>
+						requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+				);
+				expect(requestBody(posts[1][0], posts[1][1])).not.toHaveProperty('source_contexts');
+			} else {
+				await expect.element(composer).toHaveValue(question);
+				await expect.element(browserPage.getByTestId('pending-source-attachments')).toBeVisible();
+				expect(
+					JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
+				).toMatchObject({ contexts: [source] });
+				expect(
+					JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
+				).not.toHaveProperty('submission');
+			}
+		}
+	);
 
 	it('opens with a welcoming research prompt and a top-left workspace return link', async () => {
 		installApi();
@@ -277,6 +1256,200 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Back to workspace' }))
 			.toHaveAttribute('href', '/collections/col_123');
+	});
+
+	it.each(['creation', 'trajectory', 'failure'])(
+		'ignores a stale session %s after switching collections',
+		async (stage) => {
+			let finish!: (response: Response) => void;
+			const pending = new Promise<Response>((resolve) => {
+				finish = resolve;
+			});
+			if (stage !== 'creation')
+				localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path === '/api/v1/chat-sessions') {
+					return requestBody(input, init).collection_id === 'col_456'
+						? Promise.resolve(
+								jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
+							)
+						: pending;
+				}
+				if (path.endsWith('/messages') || stage === 'failure') return pending;
+				return Promise.resolve(jsonResponse(session));
+			});
+			render(Page);
+			await vi.waitFor(() =>
+				expect(fetchMock).toHaveBeenCalledTimes(stage === 'trajectory' ? 2 : 1)
+			);
+			setPage({
+				params: { id: 'col_456' },
+				url: new URL('http://localhost/collections/col_456/assistant')
+			});
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			finish(
+				stage === 'creation'
+					? jsonResponse(session)
+					: stage === 'failure'
+						? jsonResponse({ detail: 'Old collection unavailable' }, 503)
+						: jsonResponse({
+								feedback: [],
+								items: [message('old', 'assistant', 'Old collection answer')],
+								pending_approval: pendingCall()
+							})
+			);
+			await new Promise(requestAnimationFrame);
+			await new Promise(requestAnimationFrame);
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_456')).toBe('chat_2');
+			expect(
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_456')!)[0]
+					.session_id
+			).toBe('chat_2');
+			await expect.element(browserPage.getByText('Old collection answer')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		}
+	);
+
+	it.each(['message', 'approval'])(
+		'ignores a late %s result in a different collection',
+		async (operation) => {
+			let finish!: (response: Response) => void;
+			const pending = new Promise<Response>((resolve) => {
+				finish = resolve;
+			});
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({
+				trajectory: {
+					feedback: [],
+					items: [],
+					pending_approval: operation === 'approval' ? pendingCall() : null
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input) === '/api/v1/chat-sessions')
+					return Promise.resolve(
+						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
+					);
+				if (requestMethod(input, init) === 'POST') return pending;
+				return original(input, init);
+			});
+			render(Page);
+			if (operation === 'message') {
+				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+				await send(
+					'Compare grain morphology',
+					browserPage.getByLabelText('Message', { exact: true })
+				);
+			} else {
+				await browserPage.getByRole('button', { name: 'Approve and create', exact: true }).click();
+			}
+			const request = fetchMock.mock.calls.find(
+				([input, init]) => requestMethod(input, init) === 'POST'
+			);
+			setPage({
+				params: { id: 'col_456' },
+				url: new URL('http://localhost/collections/col_456/assistant')
+			});
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(request?.[1]?.signal.aborted).toBe(true);
+			const turn: ChatTurn = {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				messages: [message('old', 'assistant', 'Old collection answer')],
+				pending_approval: null,
+				error_code: null
+			};
+			finish(operation === 'message' ? streamResponse(turn) : jsonResponse(turn));
+			await new Promise(requestAnimationFrame);
+			await new Promise(requestAnimationFrame);
+			await expect.element(browserPage.getByText('Old collection answer')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_456')).toBe('chat_2');
+		}
+	);
+
+	it('finishes an active paper in its original collection without starting remaining uploads after navigation', async () => {
+		let finish!: (response: Response) => void;
+		const pending = new Promise<Response>((resolve) => {
+			finish = resolve;
+		});
+		installApi({
+			uploadDocument: () => pending,
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+		});
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (
+				requestPath(input) === '/api/v1/chat-sessions' &&
+				requestBody(input, init)?.collection_id === 'col_456'
+			) {
+				return Promise.resolve(
+					jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
+				);
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		const file = new File(['%PDF-1.7'], 'alloy-study.pdf', { type: 'application/pdf' });
+		await browserPage
+			.getByLabelText('Choose PDF papers')
+			.upload([file, new File(['%PDF-1.7 next'], 'next-study.pdf', { type: 'application/pdf' })]);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 2 papers' }).click();
+		setPage({
+			params: { id: 'col_456' },
+			url: new URL('http://localhost/collections/col_456/assistant')
+		});
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		finish(jsonResponse(uploadedDocument(file), 201));
+		await vi.waitFor(() =>
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					requestPath(input).endsWith('/col_123/documents/doc_upload_1/preparation')
+				)
+			).toBe(true)
+		);
+		await new Promise(requestAnimationFrame);
+		expect(
+			fetchMock.mock.calls.filter(([input]) => requestPath(input).endsWith('/documents'))
+		).toHaveLength(1);
+		await expect.element(browserPage.getByText('alloy-study.pdf')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Preparation queued')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Add papers' })).toBeEnabled();
+	});
+
+	it('does not prepare an uploaded paper after the originating account signs out', async () => {
+		let finish!: (response: Response) => void;
+		const pending = new Promise<Response>((resolve) => {
+			finish = resolve;
+		});
+		installApi({
+			uploadDocument: () => pending,
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+		});
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
+			requestPath(input).endsWith('/auth/logout')
+				? Promise.resolve(jsonResponse({}))
+				: original(input, init)
+		);
+		await renderReady();
+		const file = new File(['%PDF-1.7'], 'alloy-study.pdf', { type: 'application/pdf' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+		await browserPage
+			.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true })
+			.click();
+		await logout();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
+		finish(jsonResponse(uploadedDocument(file), 201));
+		await new Promise(requestAnimationFrame);
+		await new Promise(requestAnimationFrame);
+		expect(
+			fetchMock.mock.calls.some(([input]) => requestPath(input).endsWith('/preparation'))
+		).toBe(false);
+		await expect.element(browserPage.getByText('alloy-study.pdf')).not.toBeInTheDocument();
 	});
 
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
@@ -363,6 +1536,28 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeEnabled();
 	});
 
+	it('marks a paper already in the collection without presenting it as a retryable failure', async () => {
+		installApi({
+			uploadDocument: () =>
+				jsonResponse({ detail: 'document content already exists in collection' }, 400)
+		});
+		await renderReady();
+
+		const file = new File(['%PDF-1.7'], 'already-uploaded.pdf', { type: 'application/pdf' });
+		await browserPage.getByLabelText('Choose PDF papers').upload(file);
+		await browserPage.getByRole('button', { name: 'Upload and prepare 1 paper' }).click();
+
+		await expect
+			.element(browserPage.getByText('Already in this collection', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry failed paper' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('document content already exists in collection'))
+			.not.toBeInTheDocument();
+	});
+
 	it('retries preparation without uploading the paper a second time', async () => {
 		let uploadCalls = 0;
 		let preparationCalls = 0;
@@ -423,17 +1618,22 @@ describe('collections/[id]/assistant Research Agent', () => {
 			collection_id: 'col_123',
 			document_id: 'doc_1',
 			document_title: 'Paper A',
-			source_kind: 'paragraph',
+			source_kind: 'text_window',
 			source_ref: 'results',
 			page: 3,
 			quote: 'Conductivity improved to 12 mS/cm under EIS.',
 			heading_path: 'Results',
 			quote_truncated: true
 		};
-		sessionStorage.setItem('lens.chatSourceContext.col_123', JSON.stringify(sourceContext));
+		sessionStorage.setItem(
+			'lens.chatSourceContext.researcher_1:col_123',
+			JSON.stringify({ contexts: [sourceContext] })
+		);
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_source_user', 'user', 'What does this result support?', {
 						source_contexts: [sourceContext]
@@ -447,6 +1647,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 		const composer = await renderReady();
 		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText(sourceContext.quote)).not.toBeVisible();
+		await browserPage.getByText('Paper A', { exact: true }).click();
 		await expect
 			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
 			.toBeInTheDocument();
@@ -483,42 +1685,55 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('It reports a measured conductivity result.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A', { exact: true })).toBeInTheDocument();
-		expect(sessionStorage.getItem('lens.chatSourceContext.col_123')).toBeNull();
+		await expect.element(browserPage.getByText(sourceContext.quote)).not.toBeVisible();
+		await browserPage.getByText('1 cited passage', { exact: true }).click();
+		await expect.element(browserPage.getByText(sourceContext.quote)).toBeVisible();
+		await expect
+			.element(browserPage.getByRole('link', { name: /Paper A/ }))
+			.toHaveAttribute('href', sourceContext.resource_ref.href);
+		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
 	});
 
 	it('lets the researcher remove handed-off Source context before sending', async () => {
 		sessionStorage.setItem(
-			'lens.chatSourceContext.col_123',
+			'lens.chatSourceContext.researcher_1:col_123',
 			JSON.stringify({
-				resource_ref: {
-					resource_type: 'source',
-					resource_id: 'doc_1:results',
-					href: '/collections/col_123/documents/doc_1?source_ref=results'
-				},
-				collection_id: 'col_123',
-				document_id: 'doc_1',
-				document_title: 'Paper A',
-				source_kind: 'paragraph',
-				source_ref: 'results',
-				page: 3,
-				quote: 'Conductivity improved to 12 mS/cm under EIS.',
-				heading_path: 'Results',
-				quote_truncated: false
+				contexts: [
+					{
+						resource_ref: {
+							resource_type: 'source',
+							resource_id: 'doc_1:results',
+							href: '/collections/col_123/documents/doc_1?source_ref=results'
+						},
+						collection_id: 'col_123',
+						document_id: 'doc_1',
+						document_title: 'Paper A',
+						source_kind: 'text_window',
+						source_ref: 'results',
+						page: 3,
+						quote: 'Conductivity improved to 12 mS/cm under EIS.',
+						heading_path: 'Results',
+						quote_truncated: false
+					}
+				]
 			})
 		);
 		installApi();
 
 		await renderReady();
+		await browserPage.getByText('Paper A', { exact: true }).click();
 		await browserPage.getByRole('button', { name: 'Remove source context' }).click();
 
 		await expect.element(browserPage.getByText('Paper A', { exact: true })).not.toBeInTheDocument();
-		expect(sessionStorage.getItem('lens.chatSourceContext.col_123')).toBeNull();
+		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
 	});
 
 	it('handles ordinary conversation without showing capability activity', async () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Hello'),
 					message('msg_assistant_1', 'assistant', 'Hello. I can help inspect this collection.')
@@ -536,10 +1751,50 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByLabelText('Research activity')).not.toBeInTheDocument();
 	});
 
+	it('keeps a bounded final answer visible without reporting it as a failed turn', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				completion_reason: 'resource_budget',
+				warnings: ['Some papers remain unread.'],
+				messages: [
+					message('msg_user_limited', 'user', 'Compare the papers'),
+					message(
+						'msg_assistant_limited',
+						'assistant',
+						'The inspected Sources support a preliminary comparison; two papers remain unread.'
+					)
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Compare the papers');
+
+		await expect
+			.element(
+				browserPage.getByText(
+					'The inspected Sources support a preliminary comparison; two papers remain unread.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'The Agent reached its reading limit; the answer above is based on the completed inspection.'
+				)
+			)
+			.toBeInTheDocument();
+		expect(document.querySelector('[role="alert"]')).toBeNull();
+	});
+
 	it('allows a second question after the first turn is persisted', async () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_repeat', 'user', 'First question'),
 					message('msg_assistant_repeat', 'assistant', 'First answer')
@@ -552,7 +1807,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const composer = await renderReady();
 		await send('First question', composer);
 		await expect.element(browserPage.getByText('First answer')).toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeEnabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		await send('Follow-up question', composer);
 		await expect.element(browserPage.getByText('First answer')).toBeInTheDocument();
 		expect(
@@ -570,6 +1825,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 			messageDelayMs: 100,
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_stream', 'user', 'Begin'),
 					message('msg_assistant_stream', 'assistant', 'Partial answer complete.')
@@ -595,14 +1852,76 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(new Headers(post?.[1]?.headers).get('Accept')).toBe('text/event-stream');
 	});
 
+	it('updates elapsed time during a live wait and removes progress when the answer finishes', async () => {
+		installApi();
+		const composer = await renderReady();
+		const encoder = new TextEncoder();
+		let output!: ReadableStreamDefaultController<Uint8Array>;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				output = controller;
+			}
+		});
+		fetchMock.mockResolvedValueOnce(
+			new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
+		);
+		await composer.fill('Check the heat-treatment evidence');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+		const progress = browserPage.getByTestId('research-progress');
+		try {
+			for (const elapsed of [15000, 30000]) {
+				output.enqueue(
+					encoder.encode(
+						`event: progress\ndata: ${JSON.stringify({
+							phase: 'waiting',
+							cycle_index: 2,
+							executed_tool_count: 5,
+							elapsed_ms: elapsed
+						})}\n\n`
+					)
+				);
+				await expect.element(progress).toHaveTextContent('Waiting for the research model');
+				await expect.element(progress).toHaveTextContent(`${elapsed / 1000}s`);
+			}
+			const turn: ChatTurn = {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				messages: [
+					message(
+						'msg_wait_answer',
+						'assistant',
+						'The evidence needs separate HT and HIP comparisons.'
+					)
+				],
+				pending_approval: null,
+				error_code: null
+			};
+			output.enqueue(encoder.encode(`event: turn\ndata: ${JSON.stringify(turn)}\n\n`));
+		} finally {
+			output.close();
+		}
+		await expect.element(progress).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The evidence needs separate HT and HIP comparisons.'))
+			.toBeInTheDocument();
+	});
+
 	it('preserves a researcher-expanded activity while the next answer streams', async () => {
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: { query: 'energy input' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: { query: 'energy input' },
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_read_1',
@@ -623,6 +1942,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 			messageDelayMs: 100,
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_stream', 'user', 'Explain the first finding'),
 					message('msg_assistant_stream', 'assistant', 'Following up with source context.')
@@ -631,7 +1952,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 
 		const composer = await renderReady();
 		const activity = document.querySelector<HTMLDetailsElement>(
@@ -658,12 +1979,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'What findings are available?'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: { query: 'energy input' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: { query: 'energy input' },
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_read_1',
@@ -714,19 +2043,28 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('keeps a persisted tool request visible while its result is pending', async () => {
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: { query: 'energy input' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: { query: 'energy input' },
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 
-		await renderReady();
+		render(Page);
+		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 
 		await expect.element(browserPage.getByTestId('research-activity')).toBeInTheDocument();
 		await expect
@@ -741,12 +2079,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Check the published findings'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_read_1',
-						tool_name: 'query_published_findings',
-						tool_arguments: {}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_read_1',
+								name: 'query_published_findings',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_read_1',
@@ -782,16 +2128,24 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Review this finding'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_finding_1',
-						tool_name: 'inspect_published_finding',
-						tool_arguments: {
-							objective_id: 'obj_1',
-							analysis_version: 2,
-							finding_id: 'finding_1'
-						}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_finding_1',
+								name: 'inspect_published_finding',
+								arguments: {
+									objective_id: 'obj_1',
+									analysis_version: 2,
+									finding_id: 'finding_1'
+								},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_finding_1',
@@ -829,12 +2183,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'How far has the collection analysis progressed?'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_process_1',
-						tool_name: 'inspect_research_process',
-						tool_arguments: {}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_process_1',
+								name: 'inspect_research_process',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_process_1',
@@ -909,12 +2271,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Start understanding these papers'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_queued_1',
-						tool_name: 'start_research_process',
-						tool_arguments: {}
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_queued_1',
+								name: 'start_research_process',
+								arguments: {},
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_queued_1',
@@ -924,8 +2294,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 							data: {},
 							resource_refs: [
 								{
-									resource_type: 'document_preparation_task',
-									resource_id: 'task_1',
+									resource_type: 'pipeline_run',
+									resource_id: 'run_1',
 									href: '/collections/col_123'
 								}
 							],
@@ -946,7 +2316,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByText('Literature analysis started')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('In progress')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Task queued. You can continue while it runs.'))
+			.element(browserPage.getByText('Run queued. You can continue while it executes.'))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Open literature analysis' }))
@@ -957,12 +2327,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Suggest objectives'),
 					message('msg_call_1', 'assistant', '', {
-						tool_call_id: 'call_draft_1',
-						tool_name: 'propose_objective_drafts',
-						tool_arguments: { question: 'energy input effects' }
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_draft_1',
+								name: 'propose_objective_drafts',
+								arguments: { question: 'energy input effects' },
+								position: 0
+							}
+						]
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_draft_1',
@@ -1009,17 +2387,179 @@ describe('collections/[id]/assistant Research Agent', () => {
 		).toBe(false);
 	});
 
+	it('shows Source-grounded drafts and complete table results for review', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				messages: [
+					message('msg_user_1', 'user', 'Inspect this table and draft evidence'),
+					message('msg_call_table', 'assistant', '', {
+						tool_call_id: null,
+						tool_calls: [
+							{ tool_call_id: 'call_table', name: 'inspect_table', arguments: {}, position: 0 }
+						]
+					}),
+					message('msg_result_table', 'tool', '', {
+						tool_call_id: 'call_table',
+						tool_result: {
+							...baseToolResult('call_table'),
+							data: {
+								data_row_count: 2,
+								column_count: 3,
+								table_markdown:
+									'| Condition | Result | Unit |\n| --- | --- | --- |\n| P150 | 82 | % |'
+							}
+						}
+					}),
+					message('msg_call_source', 'assistant', '', {
+						tool_call_id: null,
+						tool_calls: [
+							{ tool_call_id: 'call_source', name: 'read_source', arguments: {}, position: 0 }
+						]
+					}),
+					message('msg_result_source', 'tool', '', {
+						tool_call_id: 'call_source',
+						tool_result: {
+							...baseToolResult('call_source'),
+							data: {
+								source_ref: 'results_4',
+								content: 'The P150 condition reached 82% elongation.',
+								content_truncated: true,
+								next_offset: 8
+							}
+						}
+					}),
+					message('msg_call_draft', 'assistant', '', {
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: 'call_draft',
+								name: 'create_evidence_draft',
+								arguments: {},
+								position: 0
+							}
+						]
+					}),
+					message('msg_result_draft', 'tool', '', {
+						tool_call_id: 'call_draft',
+						tool_result: {
+							...baseToolResult('call_draft'),
+							data: {
+								draft: {
+									source_ref: 'table_2',
+									source_kind: 'table',
+									evidence_role: 'direct_result',
+									source_excerpt: 'P150 elongation was 82%.',
+									changed_variables: [{ name: 'preheat', target_value: 150 }]
+								}
+							}
+						}
+					})
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Inspect this table and draft evidence');
+
+		await expect.element(browserPage.getByText('Complete Source table')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('cell', { name: 'P150', exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('cell', { name: '82', exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Complete Source content')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The P150 condition reached 82% elongation.'))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'This Source is bounded; ask the Agent to continue from the returned offset before treating it as complete.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Evidence draft completed' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('table_2')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('P150 elongation was 82%.')).toBeInTheDocument();
+	});
+
+	it('uses the research-plan approval boundary and wording', async () => {
+		const call = pendingCall({
+			tool_call_id: 'call_plan',
+			name: 'create_research_plan',
+			arguments: {
+				objective_id: 'obj_1',
+				title: 'Validate the preheat effect',
+				source_snapshots: [{ finding_id: 'finding_1', analysis_version: 2 }]
+			}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
+				messages: [
+					message('msg_user_1', 'user', 'Save the research plan'),
+					message('msg_call_plan', 'assistant', '', {
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Save the research plan');
+
+		await expect
+			.element(browserPage.getByText('Save research plan', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Persist this research-plan draft only after checking its Finding and Evidence snapshots. The saved plan remains a researcher-reviewable draft.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and save research plan' }))
+			.toBeInTheDocument();
+	});
+
 	it('shows exact write arguments and blocks new messages while approval is pending', async () => {
 		const call = pendingCall();
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Create the grain objective'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1039,7 +2579,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('energy input', { exact: true }))
 			.toBeInTheDocument();
 		expect(document.querySelectorAll('[data-testid="research-activity"]')).toHaveLength(0);
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and create' }))
@@ -1061,12 +2601,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Record this as partly correct'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1113,12 +2661,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Narrow this conclusion'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1160,12 +2716,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Create this conclusion'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1190,7 +2754,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and publish Finding' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
 	it('shows Source-grounded Evidence authoring as a distinct approved action', async () => {
@@ -1226,12 +2790,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Record this source as Evidence'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1302,12 +2874,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Read these papers and analyze the question yourself'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1330,7 +2910,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and publish analysis' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
 	it('presents evidence abstention without implying that a Finding will be created', async () => {
@@ -1353,12 +2933,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Record that these results cannot be compared'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1396,23 +2984,32 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'rejected',
+				completion_reason: null,
+				warnings: [],
 				messages: [],
 				pending_approval: null,
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Reject' }).click();
@@ -1430,12 +3027,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Start understanding these papers'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1469,12 +3074,20 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			messageTurn: {
 				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Analyze this question'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call,
@@ -1499,6 +3112,52 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('requires a separate approval to confirm a research question without starting analysis', async () => {
+		const call = pendingCall({
+			name: 'confirm_objective',
+			arguments: { objective_id: 'obj_energy_1' }
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
+				messages: [
+					message('msg_user_1', 'user', 'Confirm this research question'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Confirm this research question');
+
+		await expect
+			.element(browserPage.getByText('Research question confirmation', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Confirm this reviewed research question without starting its analysis.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve confirmation' }))
+			.toBeInTheDocument();
+	});
+
 	it('records a rejected literature-analysis start without implying that work ran', async () => {
 		const call = pendingCall({
 			name: 'start_research_process',
@@ -1506,23 +3165,32 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'rejected',
+				completion_reason: null,
+				warnings: [],
 				messages: [],
 				pending_approval: null,
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Reject' }).click();
@@ -1539,23 +3207,32 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const call = pendingCall();
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'rejected',
+				completion_reason: null,
+				warnings: [],
 				messages: [],
 				pending_approval: null,
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Reject' }).click();
@@ -1583,17 +3260,26 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const call = pendingCall();
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
 			},
 			decisionTurn: {
 				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
 				messages: [
 					message('msg_result_write', 'tool', '', {
 						tool_call_id: call.tool_call_id,
@@ -1623,7 +3309,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Approve and create' }).click();
@@ -1648,14 +3334,21 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 	it('restores a persisted pending approval after refresh', async () => {
 		const call = pendingCall();
-		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		installApi({
 			trajectory: {
+				feedback: [],
 				items: [
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: call.tool_call_id,
-						tool_name: call.name,
-						tool_arguments: call.arguments
+						tool_call_id: null,
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
 				pending_approval: call
@@ -1667,7 +3360,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Approval required' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		expect(
 			fetchMock.mock.calls.some(
 				([input, init]) =>
@@ -1681,6 +3374,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 		localStorage.setItem('lens.goalSession.col_123', 'goal_legacy_1');
 		localStorage.setItem('lens.goalSessionHistory.col_123', '[{"session_id":"goal_legacy_1"}]');
 		installApi();
+		fetchMock.mockImplementationOnce(() =>
+			Promise.resolve(
+				jsonResponse({ user: { user_id: session.user_id, email: 'researcher@example.test' } })
+			)
+		);
+		await fetchCurrentSession();
 
 		await renderReady();
 

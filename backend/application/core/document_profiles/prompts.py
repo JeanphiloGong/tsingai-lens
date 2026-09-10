@@ -13,7 +13,7 @@ Non-negotiable rules:
 - Return exactly one JSON object and nothing else.
 - Do not write natural-language summaries or explanations.
 - `doc_type` must be one of: experimental, review, mixed, uncertain.
-- `parsing_warnings` may only use: insufficient_content, classification_uncertain.
+- `profile_warnings` may only use: insufficient_content, classification_uncertain.
 - If the input is weak or ambiguous, return `uncertain`.
 """.strip()
 

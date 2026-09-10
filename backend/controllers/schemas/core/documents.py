@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 DocumentType = Literal["experimental", "review", "mixed", "uncertain"]
+ProfileStatus = Literal["completed", "extraction_failed"]
 
 
 class DocumentProfileSummaryResponse(BaseModel):
@@ -14,17 +15,17 @@ class DocumentProfileSummaryResponse(BaseModel):
     total_documents: int = 0
     by_doc_type: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    technical_failure_count: int = 0
 
 
 class DocumentProfileItemResponse(BaseModel):
     """Single document profile item."""
 
     document_id: str
-    collection_id: str
     title: str | None = None
-    source_filename: str | None = None
     doc_type: DocumentType
-    parsing_warnings: list[str] = Field(default_factory=list)
+    profile_status: ProfileStatus = "completed"
+    profile_warnings: list[str] = Field(default_factory=list)
     confidence: float
 
 

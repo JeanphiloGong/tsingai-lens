@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type Page, type Route } from '@playwright/test';
+import type { ChatFeedbackInput, ChatMessageFeedback } from '../src/routes/_shared/chatSessions';
 
 const collectionId = 'col_123';
 const documentId = 'doc_1';
@@ -35,6 +36,1658 @@ test.describe('page interaction audit', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await mockApis(page);
 	});
+
+	for (const width of [390, 1440]) {
+		test(`resumes partial response text on the same message at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 950 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			const first = 'Match test temperature, ';
+			const second = first + 'specimen orientation, and heat treatment.\n\n$\\sigma = F/A$';
+			const started = new Date().toISOString();
+			const snapshot = (content: string, sequence: number, complete = false) => ({
+				response_id: 'response_1',
+				sequence,
+				started_at: started,
+				updated_at: started,
+				status: complete ? 'completed' : 'running',
+				message_id: complete ? null : 'answer_1',
+				message_created_at: complete ? null : started,
+				content: complete ? '' : content,
+				progress: { phase: 'waiting', elapsed_ms: 5000 },
+				checkpoint_message_id: complete ? 'answer_1' : 'question_1',
+				completion_reason: complete ? 'model_answer' : null,
+				error_code: null,
+				warnings: []
+			});
+			let stage = 0;
+			let writes = 0;
+			let releaseNext!: () => void;
+			let releaseFinal!: () => void;
+			const next = new Promise<void>((resolve) => {
+				releaseNext = resolve;
+			});
+			const finish = new Promise<void>((resolve) => {
+				releaseFinal = resolve;
+			});
+			const trajectory = () => ({
+				items: [
+					agentMessage('question_1', 'user', 'Explain matched LPBF tensile conditions', {
+						created_at: started
+					}),
+					...(stage === 2
+						? [agentMessage('answer_1', 'assistant', second, { created_at: started })]
+						: [])
+				],
+				feedback: [],
+				pending_approval: null,
+				branches: [],
+				branch_draft: null,
+				running: stage !== 2,
+				response: snapshot(stage ? second : first, stage + 1, stage === 2)
+			});
+			await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) => {
+				if (route.request().method() === 'POST') writes++;
+				return route.fulfill(json(trajectory()));
+			});
+			await page.route('**/api/v1/chat-sessions/chat_1/events?*', async (route) => {
+				if (stage === 0) {
+					await next;
+					return route.fulfill({
+						contentType: 'text/event-stream',
+						body: `event: snapshot\ndata: ${JSON.stringify(snapshot(second, 2))}\n\nevent: snapshot\ndata: ${JSON.stringify(snapshot(first, 1))}\n\n`
+					});
+				}
+				await finish;
+				return route.fulfill({
+					contentType: 'text/event-stream',
+					body: `event: trajectory\ndata: ${JSON.stringify(trajectory())}\n\n`
+				});
+			});
+			try {
+				await page.goto(`/collections/${collectionId}/assistant`);
+				const answer = page.locator('[data-message-id="answer_1"]');
+				await expect(answer).toContainText(first.trim());
+				await expect(answer.getByTestId('research-progress')).toBeVisible();
+				await page.locator('.back-workspace').click();
+				await page.goto(`/collections/${collectionId}/assistant`);
+				await expect(answer).toContainText(first.trim());
+				await page.reload();
+				await expect(answer).toHaveCount(1);
+				stage = 1;
+				releaseNext();
+				await expect(answer).toContainText('specimen orientation, and heat treatment.');
+				await expect(answer.locator('.katex')).toHaveCount(1);
+				await expect(page.getByTestId('research-progress')).toHaveCount(1);
+				await expect(answer.getByRole('alert')).toBeVisible();
+				await page.getByRole('button', { name: 'Check result', exact: true }).click();
+				await expect(answer.getByRole('alert')).toHaveCount(0);
+				if (screenshotDir)
+					await page.screenshot({ path: join(screenshotDir, `response-resumed-${width}.png`) });
+				stage = 2;
+				releaseFinal();
+				await expect(page.getByTestId('research-progress')).toHaveCount(0);
+				await expect(answer).toHaveCount(1);
+				await expect(answer).toContainText('specimen orientation, and heat treatment.');
+				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+				expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+					true
+				);
+				expect(writes).toBe(0);
+				expect(errors).toEqual([]);
+			} finally {
+				releaseNext();
+				releaseFinal();
+			}
+		});
+	}
+
+	for (const width of [390, 1440]) {
+		test(`restores running research beside its answer and in history at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 950 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			let running = true;
+			let checkpoint = false;
+			let toolResults = false;
+			let unavailable = false;
+			const started = new Date(Date.now() - 65000).toISOString();
+			const question = 'Compare heat treatment conditions';
+			const requests: string[] = [];
+			await page.addInitScript(
+				({ question, started }) => {
+					if (localStorage.getItem('lens.chatSession.user_1:col_123')) return;
+					localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_done');
+					localStorage.setItem(
+						'lens.chatSessionHistory.user_1:col_123',
+						JSON.stringify([
+							{
+								session_id: 'chat_work',
+								title: question,
+								created_at: started,
+								updated_at: started
+							},
+							{
+								session_id: 'chat_done',
+								title: 'Earlier comparison',
+								created_at: started,
+								updated_at: started
+							}
+						])
+					);
+				},
+				{ question, started }
+			);
+			await page.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+				const path = new URL(route.request().url()).pathname;
+				const id = path.split('/')[4];
+				requests.push(route.request().method());
+				if (!path.endsWith('/messages'))
+					return route.fulfill(json({ ...chatSession(), session_id: id }));
+				if (id === 'chat_done')
+					return route.fulfill(
+						json({
+							items: [
+								agentMessage('done-q', 'user', 'Earlier comparison'),
+								agentMessage('done-a', 'assistant', 'Earlier comparison completed')
+							],
+							feedback: [],
+							pending_approval: null,
+							running: false
+						})
+					);
+				if (unavailable)
+					return route.fulfill(json({ detail: 'Progress temporarily unavailable' }, 503));
+				if (!checkpoint)
+					return route.fulfill(json({ items: [], feedback: [], pending_approval: null, running }));
+				const items = [
+					agentMessage('work-q', 'user', question, { session_id: id, created_at: started })
+				];
+				if (toolResults)
+					items.push(
+						agentMessage('work-tools', 'assistant', '', {
+							session_id: id,
+							tool_calls: [
+								{
+									tool_call_id: 'read_a',
+									name: 'query_published_findings',
+									arguments: {},
+									position: 0
+								},
+								{
+									tool_call_id: 'read_b',
+									name: 'query_published_findings',
+									arguments: {},
+									position: 1
+								}
+							]
+						}),
+						agentMessage('result-a', 'tool', '', {
+							session_id: id,
+							tool_result: {
+								tool_call_id: 'read_a',
+								status: 'succeeded',
+								data: {},
+								resource_refs: [],
+								warnings: [],
+								error_code: null,
+								error_message: null
+							}
+						})
+					);
+				if (!running)
+					items.push(
+						agentMessage('result-b', 'tool', '', {
+							session_id: id,
+							tool_result: {
+								tool_call_id: 'read_b',
+								status: 'succeeded',
+								data: {},
+								resource_refs: [],
+								warnings: [],
+								error_code: null,
+								error_message: null
+							}
+						}),
+						agentMessage(
+							'work-a',
+							'assistant',
+							'The reported heat treatments differ; compare matched tensile conditions.',
+							{ session_id: id }
+						)
+					);
+				return route.fulfill(json({ items, feedback: [], pending_approval: null, running }));
+			});
+			const history = () => page.locator('.history-item').filter({ hasText: question });
+			const openHistory = async () => {
+				if (width < 820)
+					await page.getByRole('button', { name: 'Show history', exact: true }).click();
+			};
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByTestId('assistant-message')).toContainText(
+				'Earlier comparison completed'
+			);
+			await openHistory();
+			await expect(history()).toContainText('Working');
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `research-history-${width}.png`) });
+			await history().click();
+			const progress = page.getByTestId('research-progress');
+			await expect(progress).toBeVisible();
+			await expect(page.locator('.assistant-message').filter({ has: progress })).toHaveCount(1);
+			await expect(progress).toContainText('Research in progress');
+			await expect(page.locator('.welcome-state')).toHaveCount(0);
+			await expect(progress.locator('.progress-time')).toHaveCount(0);
+			checkpoint = true;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(page.getByTestId('user-message')).toContainText(question);
+			const elapsed = await progress.locator('.progress-time').innerText();
+			await expect(progress.locator('.progress-time')).not.toHaveText(elapsed);
+			await page.locator('.back-workspace').click();
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(progress).toBeVisible();
+			toolResults = true;
+			await expect(progress).toContainText('1 / 2 research actions');
+			await page.reload();
+			await expect(progress).toHaveCount(1);
+			await expect(progress).toContainText('1 / 2 research actions');
+			await expect(progress).toBeInViewport();
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+				true
+			);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `research-reentry-${width}.png`) });
+			unavailable = true;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(page.getByTestId('research-recovery').getByRole('alert')).toBeVisible();
+			await expect(progress).toContainText('Reconnecting to research');
+			await expect(progress).toBeVisible();
+			unavailable = false;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(page.getByTestId('research-recovery').getByRole('alert')).toHaveCount(0);
+			await openHistory();
+			await page.locator('.history-item').filter({ hasText: 'Earlier comparison' }).click();
+			await expect(page.getByTestId('assistant-message')).toContainText(
+				'Earlier comparison completed'
+			);
+			await openHistory();
+			await expect(history()).toContainText('Working');
+			running = false;
+			await expect(history()).not.toContainText('Working', { timeout: 10000 });
+			await history().click();
+			await expect(page.getByTestId('assistant-message').last()).toContainText(
+				'The reported heat treatments differ'
+			);
+			await expect(progress).toHaveCount(0);
+			expect(requests.every((method) => method === 'GET')).toBe(true);
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const width of [390, 1440]) {
+		test(`keeps document and standalone conversations separate at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			const turns = new Map<string, ReturnType<typeof agentMessage>[]>();
+			const submissions: string[] = [];
+			let created = 0;
+			await page.route('**/api/v1/chat-sessions', (route) => {
+				const id = `scope_${++created}`;
+				turns.set(id, []);
+				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
+			});
+			await page.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+				const parts = new URL(route.request().url()).pathname.split('/');
+				const id = parts[4];
+				if (!turns.has(id)) return route.fulfill(json({ detail: 'Session not found' }, 404));
+				if (parts.at(-1) !== 'messages')
+					return route.fulfill(json({ ...chatSession(), session_id: id }));
+				if (route.request().method() === 'GET')
+					return route.fulfill(
+						json({ items: turns.get(id), feedback: [], pending_approval: null })
+					);
+				const body = route.request().postDataJSON();
+				submissions.push(id);
+				const messages = [
+					agentMessage(`${id}-user-${submissions.length}`, 'user', body.message, {
+						session_id: id,
+						source_contexts: body.source_contexts ?? []
+					}),
+					agentMessage(
+						`${id}-answer-${submissions.length}`,
+						'assistant',
+						`Answer for ${id}. [Read paper](/collections/${collectionId}/documents/${documentId}).`,
+						{ session_id: id }
+					)
+				];
+				turns.set(id, [...turns.get(id)!, ...messages]);
+				return route.fulfill(sseTurn({ messages }));
+			});
+			const openReaderChat = async () => {
+				await page
+					.locator('.reader-header')
+					.getByRole('button', { name: 'Ask research assistant', exact: true })
+					.click();
+				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			};
+			const answers = page.getByTestId('assistant-message');
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await sendAgentMessage(page, 'Compare the heat treatments');
+			await expect(answers).toContainText('Answer for scope_1');
+			await answers.getByRole('link', { name: 'Read paper' }).click();
+			await openReaderChat();
+			expect(created).toBe(2);
+			await expect(answers).toHaveCount(0);
+			await sendAgentMessage(page, 'Inspect the specimen preparation');
+			await expect(answers).toContainText('Answer for scope_2');
+			await page.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await openReaderChat();
+			await expect(answers).toContainText('Answer for scope_2');
+			expect(created).toBe(2);
+
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(answers).toContainText('Answer for scope_1');
+			await page.getByRole('button', { name: 'New session', exact: true }).click();
+			await expect(answers).toHaveCount(0);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			expect(created).toBe(3);
+			await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+			await openReaderChat();
+			await expect(answers).toContainText('Answer for scope_2');
+			await page.reload();
+			await openReaderChat();
+			await expect(answers).toContainText('Answer for scope_2');
+			expect(created).toBe(3);
+			const other = await page.context().newPage();
+			await mockApis(other);
+			await other.route('**/api/v1/chat-sessions', (route) => {
+				const id = `scope_${++created}`;
+				turns.set(id, []);
+				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
+			});
+			await other.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+				const path = new URL(route.request().url()).pathname;
+				return route.fulfill(
+					json(
+						path.endsWith('/messages')
+							? { items: [], feedback: [], pending_approval: null }
+							: { ...chatSession(), session_id: path.split('/')[4] }
+					)
+				);
+			});
+			await other.goto(`/collections/${collectionId}/assistant`);
+			await expect(other.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await other.getByRole('button', { name: 'New session', exact: true }).click();
+			await expect.poll(() => created).toBe(4);
+			await expect(other.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			expect(created).toBe(4);
+			await other.close();
+			await sendAgentMessage(page, 'Check the test temperature too');
+			await expect(answers).toHaveCount(2);
+			await page
+				.locator('.embedded-toolbar')
+				.getByRole('button', { name: 'Conversation history' })
+				.click();
+			await expect(page.locator('.embedded-history button')).toHaveCount(4);
+			await page
+				.locator('.embedded-history')
+				.getByRole('button', { name: 'Compare the heat treatments' })
+				.click();
+			await expect(answers).toContainText('Answer for scope_1');
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(answers).toHaveCount(0);
+			if (width < 820) await page.getByRole('button', { name: 'Show history' }).click();
+			await page
+				.locator('.history-item')
+				.filter({ hasText: 'Inspect the specimen preparation' })
+				.click();
+			await expect(answers).toHaveCount(2);
+			await expect(answers.first()).toContainText('Answer for scope_2');
+			expect(submissions).toEqual(['scope_1', 'scope_2', 'scope_2']);
+			expect(turns.get('scope_1')).toHaveLength(2);
+			expect(turns.get('scope_2')).toHaveLength(4);
+			expect(errors).toEqual([]);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `session-scope-${width}.png`) });
+		});
+	}
+
+	for (const width of [320, 1024, 1440]) {
+		test(`compares paper tabs with independent reading and shared conversation at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 1000 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			const papers = [
+				{
+					id: 'doc_1',
+					title: 'LPBF 316L study A',
+					filename: 'paper-a.pdf',
+					methods:
+						'Specimens were solution treated at 1040 C for 30 minutes and tensile tested at 293 K.'
+				},
+				{
+					id: 'doc_2',
+					title: 'LPBF 316L study B',
+					filename: 'paper-b.pdf',
+					methods:
+						'Specimens were stress relieved at 650 C for 2 hours and tensile tested at 293 K.'
+				}
+			];
+			const reads: string[] = [];
+			let failSecondPaper = true;
+			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) =>
+				route.fulfill(
+					json({
+						...documentProfiles(),
+						items: papers.map((paper) => ({
+							...documentProfile(),
+							document_id: paper.id,
+							title: paper.title
+						})),
+						count: 2,
+						total: 2
+					})
+				)
+			);
+			await page.route(`**/api/v1/collections/${collectionId}/documents/*/*`, (route) => {
+				const parts = new URL(route.request().url()).pathname.split('/');
+				const paper = papers.find((item) => item.id === parts.at(-2));
+				if (!paper) return route.fallback();
+				const kind = parts.at(-1);
+				if (kind !== 'content' && kind !== 'markdown') return route.fallback();
+				reads.push(`${paper.id}:${kind}`);
+				if (paper.id === 'doc_2' && failSecondPaper)
+					return route.fulfill(json({ detail: 'Source temporarily unavailable' }, 503));
+				const blocks = [
+					{
+						block_id: 'methods',
+						block_type: 'paragraph',
+						heading_path: 'Methods',
+						order: 0,
+						text: paper.methods,
+						page: 2,
+						text_unit_ids: []
+					},
+					...Array.from({ length: 20 }, (_, index) => ({
+						block_id: `results-${index}`,
+						block_type: 'paragraph',
+						heading_path: `Results ${index + 1}`,
+						order: index + 1,
+						text: `Measurement ${index + 1}: compare the specimen state, processing history and test conditions before interpreting the reported tensile response.`,
+						page: index + 3,
+						text_unit_ids: []
+					}))
+				];
+				return route.fulfill(
+					json(
+						kind === 'content'
+							? {
+									...documentContent(),
+									document_id: paper.id,
+									title: paper.title,
+									source_filename: paper.filename,
+									blocks
+								}
+							: {
+									...documentMarkdown(),
+									document_id: paper.id,
+									title: paper.title,
+									source_filename: paper.filename,
+									markdown:
+										`# ${paper.title}\n\n` +
+										blocks.map((block) => `## ${block.heading_path}\n\n${block.text}`).join('\n\n'),
+									source_map: blocks.map((block) => ({
+										...documentMarkdown().source_map[0],
+										markdown_anchor: `block-${block.block_id}`,
+										artifact_id: block.block_id,
+										block_id: block.block_id,
+										heading_path: block.heading_path,
+										page: block.page
+									}))
+								}
+					)
+				);
+			});
+			let sessionsCreated = 0;
+			let submitted: {
+				source_contexts: { document_id: string; source_ref: string }[];
+				message: string;
+			} | null = null;
+			await page.route('**/api/v1/chat-sessions', (route) => {
+				sessionsCreated += 1;
+				return route.fulfill(json(chatSession(), 201));
+			});
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
+				submitted = route.request().postDataJSON();
+				return route.fulfill(
+					sseTurn({
+						messages: [
+							agentMessage('compare-user', 'user', submitted!.message, {
+								source_contexts: submitted!.source_contexts
+							}),
+							agentMessage(
+								'compare-answer',
+								'assistant',
+								'The [methods in study A](/collections/col_123/documents/doc_1?source_ref=methods) and [methods in study B](/collections/col_123/documents/doc_2?source_ref=methods) use different heat treatments. The tensile test temperature matches, but the material states are not equivalent.'
+							)
+						],
+						status: 'completed',
+						completion_reason: 'model_answer',
+						pending_approval: null,
+						error_code: null,
+						warnings: []
+					} as Parameters<typeof sseTurn>[0])
+				);
+			});
+			await page.goto(`/collections/${collectionId}/documents`);
+			await page
+				.locator('.paper-row')
+				.filter({ hasText: papers[0].title })
+				.getByRole('link', { name: 'Open paper' })
+				.click();
+			const paneA = page.locator('.reader-pane[data-document-id="doc_1"]');
+			const paneB = page.locator('.reader-pane[data-document-id="doc_2"]');
+			await expect(paneA.getByTestId('markdown-paper-reader')).toBeVisible();
+			await paneA.getByTestId('markdown-paper-reader').evaluate((node) => {
+				node.scrollTop = 640;
+			});
+			const scrollA = await paneA
+				.getByTestId('markdown-paper-reader')
+				.evaluate((node) => node.scrollTop);
+			expect(scrollA).toBeGreaterThan(500);
+			await page.locator('.library-link').click();
+			await page
+				.locator('.paper-row')
+				.filter({ hasText: papers[1].title })
+				.getByRole('link', { name: 'Open paper' })
+				.click();
+			const tabs = page.getByRole('tablist', { name: 'Open papers' });
+			await expect(tabs.getByRole('tab')).toHaveCount(2);
+			await expect(paneB.getByRole('alert')).toBeVisible();
+			failSecondPaper = false;
+			await paneB.getByRole('button', { name: 'Retry loading paper' }).click();
+			await expect(paneB.getByTestId('markdown-paper-reader')).toBeVisible();
+			await tabs.getByRole('tab', { name: papers[0].title }).click();
+			expect(
+				await paneA.getByTestId('markdown-paper-reader').evaluate((node) => node.scrollTop)
+			).toBe(scrollA);
+			await paneA.locator('[data-source-ref="methods"]').click();
+			await tabs.getByRole('tab', { name: papers[1].title }).click();
+			await paneB.locator('[data-source-ref="methods"]').click();
+			await page.getByRole('button', { name: 'Review selected passages', exact: true }).click();
+			await expect(page.locator('.selection-tray li')).toHaveCount(2);
+			await page.locator('.selection-tray li').first().getByRole('link').click();
+			await expect(paneA.getByTestId('markdown-active-source')).toContainText(papers[0].methods);
+			if (width >= 1100) {
+				await page.getByRole('button', { name: 'Compare two papers', exact: true }).click();
+				await expect(paneA).toBeVisible();
+				await expect(paneB).toBeVisible();
+				const divider = page.getByRole('separator', { name: 'Resize paper panes' });
+				await divider.focus();
+				await divider.press('ArrowRight');
+				await expect(divider).toHaveAttribute('aria-valuenow', '55');
+				await divider.press('ArrowLeft');
+			}
+			await page
+				.locator('.workspace-actions')
+				.getByRole('button', { name: 'Ask research assistant', exact: true })
+				.click();
+			await expect(page.getByTestId('pending-source-context')).toHaveCount(2);
+			await expect(page.getByTestId('selected-paper-context')).toHaveCount(0);
+			await sendAgentMessage(page, 'Can I compare the tensile strengths under these conditions?');
+			await expect(page.getByTestId('assistant-message')).toContainText(
+				'material states are not equivalent'
+			);
+			expect(submitted!.source_contexts.map((source) => source.document_id)).toEqual([
+				'doc_1',
+				'doc_2'
+			]);
+			await page.getByRole('link', { name: 'methods in study B', exact: true }).click();
+			await expect(paneB.getByTestId('markdown-active-source')).toContainText(papers[1].methods);
+			await expect(paneB.getByTestId('markdown-active-source')).toBeInViewport();
+			if (width > 820) {
+				await paneB.getByTestId('markdown-paper-reader').evaluate((node) => {
+					node.scrollTop = 900;
+				});
+				await expect(paneB.getByTestId('markdown-active-source')).not.toBeInViewport();
+				await page.getByRole('link', { name: 'methods in study B', exact: true }).click();
+				await expect(paneB.getByTestId('markdown-active-source')).toBeInViewport();
+			}
+			if (width >= 1100) {
+				const left = (await paneA.boundingBox())!;
+				const right = (await paneB.boundingBox())!;
+				const chat = (await page.locator('.agent-pane').boundingBox())!;
+				expect(left.x + left.width).toBeLessThanOrEqual(right.x);
+				expect(right.x + right.width).toBeLessThanOrEqual(chat.x);
+				const separator = page.getByRole('separator', { name: 'Resize conversation pane' });
+				const box = (await separator.boundingBox())!;
+				await page.mouse.move(box.x + 3, box.y + 250);
+				await page.mouse.down();
+				await page.mouse.move(box.x - 30, box.y + 250);
+				await page.mouse.up();
+				expect((await page.locator('.agent-pane').boundingBox())!.width).toBeGreaterThan(
+					chat.width
+				);
+			}
+			await page.mouse.move(0, 0);
+			await expect(
+				tabs.getByRole('button', { name: `Close ${papers[1].title}`, exact: true })
+			).toBeInViewport({ ratio: 1 });
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `document-tabs-${width}.png`) });
+			if (width > 820)
+				await page.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await page.getByRole('button', { name: `Close ${papers[0].title}`, exact: true }).click();
+			await expect(tabs.getByRole('tab')).toHaveCount(1);
+			await expect(paneB).toBeVisible();
+			await tabs.getByRole('tab').focus();
+			await tabs.getByRole('tab').press('Delete');
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			await expect(page.locator('.paper-row')).toHaveCount(2);
+			expect(reads.filter((read) => read === 'doc_1:content')).toHaveLength(1);
+			expect(reads.filter((read) => read === 'doc_2:content')).toHaveLength(2);
+			expect(sessionsCreated).toBe(1);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+				true
+			);
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const width of [320, 1440]) {
+		test(`edits and regenerates saved messages with versions at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const state = await mockMessageBranches(page);
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+			await expect(page.getByTestId('user-message')).toContainText(state.question);
+			await composer.fill('Keep this follow-up draft');
+			await page.getByRole('button', { name: 'Edit message', exact: true }).click();
+			const editor = page.getByRole('textbox', { name: 'Edit message', exact: true });
+			await expect(editor).toBeFocused();
+			await editor.fill('Temporary change');
+			await editor.press('Escape');
+			await expect(editor).toHaveCount(0);
+			expect(state.sent).toHaveLength(0);
+			await page.getByRole('button', { name: 'Edit message', exact: true }).click();
+			await editor.fill('Compare only specimens tested at 293 K.');
+			await editor.press('Shift+Enter');
+			await editor.press('End');
+			await editor.press('KeyA');
+			await expect(editor).toHaveValue('Compare only specimens tested at 293 K.\na');
+			await editor.fill('Compare only specimens tested at 293 K.');
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `chat-edit-${width}.png`) });
+			await editor.press('Enter');
+			await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+			await expect(composer).toHaveValue('Keep this follow-up draft');
+			await expect(page.getByLabel('Version 2 of 2', { exact: true })).toBeVisible();
+			expect(state.sent[0]).toMatchObject({
+				message: 'Compare only specimens tested at 293 K.',
+				branch_revision: true,
+				source_contexts: [state.source]
+			});
+			await page.getByRole('button', { name: 'Previous version', exact: true }).click();
+			await expect(page.getByTestId('user-message')).toContainText(state.question);
+			await expect(page.getByTestId('assistant-message')).toContainText('Original comparison');
+			await expect(composer).toHaveValue('Keep this follow-up draft');
+			await page.getByRole('button', { name: 'Next version', exact: true }).click();
+			await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+			await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 2');
+			await expect(page.getByLabel('Version 3 of 3', { exact: true })).toBeVisible();
+			expect(state.sent[1].message).toBe(state.sent[0].message);
+			expect(state.sent[1].source_contexts).toEqual([state.source]);
+			await page.reload();
+			await expect(page.getByLabel('Version 3 of 3', { exact: true })).toBeVisible();
+			await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 2');
+			expect(state.original[0].content).toBe(state.question);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+				true
+			);
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `chat-versions-${width}.png`) });
+			expect(errors).toEqual([]);
+		});
+	}
+
+	test('recovers a failed branch request and retries a question without an answer', async ({
+		page
+	}) => {
+		const state = await mockMessageBranches(page, { unanswered: true, failCreateOnce: true });
+		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+		await expect(page.getByRole('alert')).toBeVisible();
+		expect(state.sent).toHaveLength(0);
+		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+		await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+		expect(state.requestIds[0]).toBe(state.requestIds[1]);
+		expect(state.sent).toHaveLength(1);
+	});
+
+	test('restores an unsent revision after reload with its Source context', async ({ page }) => {
+		const state = await mockMessageBranches(page, { failCreateOnce: true });
+		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
+		await expect(page.getByRole('alert')).toBeVisible();
+		await page.reload();
+		await page.getByRole('button', { name: 'Next version', exact: true }).click();
+		await expect(page.getByText('Unsent revision', { exact: true })).toBeVisible();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
+		await page.getByRole('button', { name: 'Send revision', exact: true }).click();
+		await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+		expect(state.sent).toHaveLength(1);
+		expect(state.sent[0].source_contexts).toEqual([state.source]);
+	});
+
+	for (const condition of ['running', 'approval'] as const) {
+		test(`disables saved message changes during ${condition}`, async ({ page }) => {
+			await mockMessageBranches(page, { condition });
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('button', { name: 'Edit message', exact: true })).toBeDisabled();
+			await expect(
+				page.getByRole('button', { name: 'Regenerate response', exact: true })
+			).toBeDisabled();
+		});
+	}
+
+	for (const width of [320, 768, 1024, 1440]) {
+		test(`asks across selected papers in a persistent split workspace at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			let created = 0;
+			const turns = new Map<string, ReturnType<typeof agentMessage>[]>();
+			await page.route('**/api/v1/chat-sessions', (route) => {
+				created += 1;
+				expect(route.request().postDataJSON().collection_id).toBe(collectionId);
+				return route.fulfill(
+					json({
+						session_id: `split_${created}`,
+						collection_id: collectionId,
+						user_id: 'user_1',
+						created_at: now(),
+						updated_at: now()
+					})
+				);
+			});
+			await page.route('**/api/v1/chat-sessions/*/messages', (route) => {
+				const id = new URL(route.request().url()).pathname.split('/').at(-2)!;
+				if (route.request().method() === 'GET')
+					return route.fulfill(
+						json({ items: turns.get(id) ?? [], feedback: [], pending_approval: null })
+					);
+				const body = route.request().postDataJSON();
+				expect(body.message).toContain('/documents/doc_1');
+				expect(body.message).toContain('/documents/doc_26');
+				expect(body.message).not.toContain('/documents/doc_2)');
+				const messages = [
+					agentMessage('selected_user', 'user', body.message),
+					agentMessage(
+						'selected_answer',
+						'assistant',
+						'Compare the heat-treatment conditions before combining these measurements.'
+					)
+				];
+				turns.set(id, messages);
+				return route.fulfill(
+					sseTurn({
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						pending_approval: null,
+						error_code: null,
+						warnings: []
+					})
+				);
+			});
+			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) => {
+				const offset = Number(new URL(route.request().url()).searchParams.get('offset') ?? 0);
+				const items = Array.from({ length: offset ? 1 : 25 }, (_, index) => ({
+					...documentProfile(),
+					document_id: `doc_${offset + index + 1}`,
+					title: `LPBF heat-treatment study ${offset + index + 1}`
+				}));
+				return route.fulfill(
+					json({
+						...documentProfiles(),
+						items,
+						count: items.length,
+						total: 26,
+						summary: { total_documents: 26, by_doc_type: {}, warnings: [] }
+					})
+				);
+			});
+			await page.goto(`/collections/${collectionId}/documents`);
+			await page
+				.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
+				.check();
+			await page.getByRole('button', { name: 'Next', exact: true }).click();
+			await page.getByRole('checkbox', { name: 'Select this page', exact: true }).check();
+			await page.getByRole('button', { name: 'Previous', exact: true }).click();
+			await expect(
+				page.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
+			).toBeChecked();
+			await page.getByRole('button', { name: 'Ask research assistant', exact: true }).click();
+			const panel = page.locator('.agent-pane');
+			await expect(panel.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(panel.getByTestId('selected-paper-context')).toContainText('2 papers selected');
+			await sendAgentMessage(page, 'Compare these selected papers');
+			await expect(
+				panel.getByText(
+					'Compare the heat-treatment conditions before combining these measurements.',
+					{ exact: true }
+				)
+			).toBeVisible();
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			if (width > 820) {
+				await expect(page.locator('.document-pane')).toBeVisible();
+				const left = (await page.locator('.document-pane').boundingBox())!;
+				const right = (await panel.boundingBox())!;
+				expect(left.x + left.width).toBeLessThanOrEqual(right.x + 1);
+			}
+			expect(await visibleElementsFitViewport(page, '.agent-pane .composer')).toBe(true);
+			await expect(
+				panel.getByText(
+					'Compare the heat-treatment conditions before combining these measurements.',
+					{ exact: true }
+				)
+			).toBeInViewport();
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `papers-agent-split-${width}.png`) });
+			await panel.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await expect(
+				page.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
+			).toBeChecked();
+			await page.getByRole('button', { name: 'Ask research assistant', exact: true }).click();
+			await expect(
+				panel.getByText(
+					'Compare the heat-treatment conditions before combining these measurements.',
+					{ exact: true }
+				)
+			).toBeVisible();
+			expect(created).toBe(1);
+			await panel.getByRole('button', { name: 'New session', exact: true }).click();
+			await expect(panel.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(panel.getByTestId('user-message')).toHaveCount(0);
+			await expect(panel.getByTestId('selected-paper-context')).toContainText('2 papers selected');
+			expect(created).toBe(2);
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const width of [390, 1440]) {
+		test(`selects several source blocks and requests related passages at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.route(
+				`**/api/v1/collections/${collectionId}/documents/${documentId}/markdown`,
+				(route) =>
+					route.fulfill(
+						json({
+							...documentMarkdown(),
+							source_map: [
+								...documentMarkdown().source_map,
+								{
+									...documentMarkdown().source_map[0],
+									markdown_anchor: 'block-results',
+									artifact_id: 'results',
+									block_id: 'results',
+									page: 3,
+									heading_path: 'Results'
+								}
+							]
+						})
+					)
+			);
+			let sent: Record<string, unknown> | null = null;
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
+				sent = route.request().postDataJSON();
+				const messages = [
+					agentMessage('blocks_user', 'user', String(sent!.message), {
+						source_contexts: sent!.source_contexts as []
+					}),
+					agentMessage(
+						'blocks_answer',
+						'assistant',
+						'The [Results section](/collections/col_123/documents/doc_1?source_ref=results) also specifies the EIS measurement method.'
+					)
+				];
+				return route.fulfill(
+					sseTurn({
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			});
+			await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+			const blocks = page.locator('.source-selectable');
+			await expect(blocks).toHaveCount(2);
+			await expect(page.locator('.source-selection input[type="checkbox"]')).toHaveCount(0);
+			const firstBlock = (await blocks.nth(0).boundingBox())!;
+			await page.mouse.move(firstBlock.x + 4, firstBlock.y + 10);
+			await page.mouse.down();
+			await page.mouse.move(firstBlock.x + 140, firstBlock.y + 10, { steps: 8 });
+			await page.mouse.up();
+			expect(
+				await page.evaluate(() => window.getSelection()?.toString().length ?? 0)
+			).toBeGreaterThan(0);
+			const keyboardSelection = blocks.nth(0).getByRole('button', { name: 'Select source block' });
+			await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'false');
+			await page.evaluate(() => window.getSelection()?.removeAllRanges());
+			await keyboardSelection.focus();
+			await keyboardSelection.press('Space');
+			await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'true');
+			await blocks.nth(1).click();
+			await page
+				.locator('.reader-header')
+				.getByRole('button', { name: /Ask research assistant/ })
+				.click();
+			const panel = page.locator('.agent-pane');
+			await expect(panel.getByTestId('pending-source-context')).toHaveCount(2);
+			const group = panel.locator('.source-group');
+			await expect(group).toHaveCount(1);
+			await expect(group).not.toHaveAttribute('open', '');
+			await expect(panel.getByTestId('pending-source-context').first()).not.toBeVisible();
+			await expect(group.locator('summary')).toContainText('2 passages');
+			await expectNoHorizontalOverflow(page);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `source-attachments-${width}.png`) });
+			await group.locator('summary').click();
+			await expect(panel.getByTestId('pending-source-context').first()).toBeVisible();
+			await panel
+				.getByTestId('pending-source-context')
+				.last()
+				.getByRole('button', { name: 'Remove source context' })
+				.click();
+			await expect(panel.getByTestId('pending-source-context')).toHaveCount(1);
+			await panel.getByRole('button', { name: 'Clear all passages' }).click();
+			await expect(panel.getByTestId('pending-source-attachments')).toHaveCount(0);
+			if (width <= 820) await panel.getByRole('button', { name: 'Back to papers' }).click();
+			await expect(keyboardSelection).toHaveAttribute('aria-pressed', 'false');
+			await blocks.nth(0).click();
+			await blocks.nth(1).click();
+			if (width <= 820)
+				await page
+					.locator('.reader-header')
+					.getByRole('button', { name: /Ask research assistant/ })
+					.click();
+			await expect(
+				panel.getByRole('checkbox', { name: 'Check related sections in these papers' })
+			).toBeChecked();
+			await sendAgentMessage(page, 'Explain how these observations relate');
+			await expect(panel.getByRole('link', { name: 'Results section', exact: true })).toBeVisible();
+			expect(sent!.message).toContain('other relevant sections');
+			expect(
+				(sent!.source_contexts as { source_ref: string }[]).map((source) => source.source_ref)
+			).toEqual(['abstract', 'results']);
+			await expect(panel.getByTestId('pending-source-context')).toHaveCount(0);
+			await expect(panel.locator('.message-sources')).not.toHaveAttribute('open', '');
+			await expect(panel.locator('.message-source').first()).not.toBeVisible();
+			await panel.locator('.message-sources summary').click();
+			await expect(panel.locator('.message-source')).toHaveCount(2);
+			await expect(panel.locator('.message-source').first()).toBeVisible();
+			await expect(panel.locator('.message-source').last()).toHaveAttribute(
+				'href',
+				/source_ref=results/
+			);
+			await panel.locator('.message-sources summary').click();
+			await expect(
+				blocks.nth(0).getByRole('button', { name: 'Select source block', includeHidden: true })
+			).toHaveAttribute('aria-pressed', 'false');
+			if (width > 820) await expect(page.locator('.document-reader-root')).toBeVisible();
+			await expect(page).toHaveURL(new RegExp(`/documents/${documentId}$`));
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `source-citations-${width}.png`) });
+			await panel.getByRole('link', { name: 'Results section', exact: true }).click();
+			await expect(page).toHaveURL(/source_ref=results/);
+			if (width > 820)
+				await expect(
+					panel.getByRole('link', { name: 'Results section', exact: true })
+				).toBeVisible();
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const width of [320, 768, 1024, 1440]) {
+		test(`uses a compact conversation title and named Collection at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const name = '316L LPBF processing, heat treatment and microstructure comparison literature';
+			const question =
+				'Compare the heat-treatment conditions and reported grain sizes across these LPBF papers';
+			const answer =
+				'Compare alloy state, heat treatment and grain-size measurements before combining results.';
+			let messages: ReturnType<typeof agentMessage>[] = [];
+			const pageErrors: string[] = [];
+			page.on('pageerror', (error) => pageErrors.push(error.message));
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ items: messages, feedback: [], pending_approval: null }));
+				messages = [
+					agentMessage('question', 'user', question),
+					agentMessage('answer', 'assistant', answer)
+				];
+				const turn = {
+					messages,
+					status: 'completed',
+					completion_reason: 'model_answer',
+					pending_approval: null,
+					error_code: null,
+					warnings: []
+				};
+				return route.fulfill(sseTurn(turn));
+			});
+			await page.route(
+				(url) =>
+					['/api/v1/collections', `/api/v1/collections/${collectionId}`].includes(url.pathname),
+				(route) => {
+					const record = { ...collection(), name };
+					return route.fulfill(
+						json(
+							new URL(route.request().url()).pathname.endsWith(collectionId)
+								? record
+								: { items: [record] }
+						)
+					);
+				}
+			);
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(page.locator('.conversation-header')).toHaveCount(0);
+			const context = page.locator('#assistant-collection-context');
+			const nameLink = context.getByRole('link', { name, exact: true });
+			await expect(nameLink).toBeVisible();
+			await expect(nameLink).toHaveAttribute('title', name);
+			await expect(nameLink).toHaveAttribute('href', `/collections/${collectionId}`);
+			await expect(context).not.toContainText(collectionId);
+			await sendAgentMessage(page, question);
+			await expect(page.getByText(answer, { exact: true })).toBeVisible();
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			const toolbar = page.locator('.conversation-header');
+			await expect(toolbar.getByRole('heading', { name: question, exact: true })).toBeVisible();
+			await expect(toolbar).not.toContainText('Research Agent');
+			expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(48);
+			expect(
+				(await nameLink.boundingBox())!.x + (await nameLink.boundingBox())!.width
+			).toBeLessThanOrEqual(width);
+			await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `research-agent-named-collection-${width}.png`)
+				});
+			await page.goto(`/collections/${collectionId}/assistant?objective_id=${objectiveId}`);
+			await expect(
+				page.getByRole('link', { name: 'Open selected objective', exact: true })
+			).toHaveAttribute('href', `/collections/${collectionId}/objectives/${objectiveId}`);
+			expect(pageErrors).toEqual([]);
+		});
+	}
+
+	for (const width of [320, 768, 1024, 1440]) {
+		for (const theme of ['light', 'dark']) {
+			test(`renders research tables and equations at ${width}px in ${theme} theme`, async ({
+				page
+			}) => {
+				await page.setViewportSize({ width, height: 1000 });
+				await page.addInitScript((theme) => {
+					localStorage.setItem('retrieval.theme', theme);
+					localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1');
+				}, theme);
+				const errors: string[] = [];
+				page.on('pageerror', (error) => errors.push(error.message));
+				const prompt =
+					'Compare the reported LPBF 316L tensile results and explain the energy calculation.';
+				const answer = [
+					'## LPBF 316L comparison',
+					'',
+					String.raw`The reported $\sigma_\mathrm{UTS}$ values require comparable material states and test directions.`,
+					'',
+					'| Paper | Material state | Power (W) | Speed (mm/s) | Energy (J/mm3) | UTS (MPa) | Test direction |',
+					'| :--- | :--- | ---: | ---: | ---: | ---: | :--- |',
+					'| Paper A | As built | 200 | 800 | 62.5 | **610** | Vertical |',
+					'| Paper B | Stress relieved | 200 | 1000 | 50.0 | **580** | Horizontal |',
+					'',
+					'### Energy calculation',
+					'',
+					String.raw`With hatch spacing \(h = 0.10\,\mathrm{mm}\) and layer thickness \(t = 0.04\,\mathrm{mm}\):`,
+					'',
+					'$$',
+					String.raw`E_v = \frac{P}{vht} = \frac{200}{800\times0.10\times0.04} = 62.5\,\mathrm{J/mm^3}`,
+					'$$',
+					'',
+					'> Different post-processing and test directions prevent attributing the strength difference to energy density alone.',
+					'',
+					'1. Match material state and test direction.',
+					'2. Verify the reported measurements against the [paper Source](/collections/col_123/documents/doc_1?view=parsed-paper).',
+					'',
+					'```python',
+					'energy_density = power / (scan_speed * hatch_spacing * layer_thickness)',
+					'```'
+				].join('\n');
+				const messages = [
+					agentMessage('md_user', 'user', prompt),
+					agentMessage('md_answer', 'assistant', answer)
+				];
+				let saved = false;
+				await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) => {
+					if (route.request().method() === 'GET')
+						return route.fulfill(
+							json({
+								items: saved ? messages : [],
+								feedback: [],
+								pending_approval: null
+							})
+						);
+					saved = true;
+					const turn = {
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						pending_approval: null,
+						error_code: null
+					};
+					return route.fulfill(sseTurn(turn));
+				});
+				await page.goto('/collections/col_123/assistant');
+				await sendAgentMessage(page, prompt);
+				const reply = page.getByTestId('assistant-message').last();
+				await expect(reply.getByRole('cell', { name: '610', exact: true })).toBeVisible();
+				await expect(reply.locator('math')).toHaveCount(4);
+				await expect(reply.locator('.katex-error')).toHaveCount(0);
+				await expect(reply.locator('ol > li')).toHaveCount(2);
+				await expect(reply.locator('pre code')).toContainText('energy_density = power');
+				await page.evaluate(() => document.fonts.ready);
+				expect(
+					await page.evaluate(() =>
+						[...document.fonts].some(
+							(font) => font.family.startsWith('KaTeX') && font.status === 'loaded'
+						)
+					)
+				).toBe(true);
+				const bounds = await reply.getByTestId('message-content').evaluate((element) => ({
+					width: element.getBoundingClientRect().width,
+					parent: element.parentElement!.getBoundingClientRect().width,
+					document: document.documentElement.scrollWidth,
+					viewport: window.innerWidth
+				}));
+				expect(bounds.width).toBeLessThanOrEqual(bounds.parent + 1);
+				expect(bounds.document).toBeLessThanOrEqual(bounds.viewport + 1);
+				const table = reply.getByRole('region', { name: 'Response table' });
+				if (width <= 768) {
+					const widths = await table.evaluate((element) => ({
+						inner: element.scrollWidth,
+						outer: element.clientWidth
+					}));
+					expect(widths.inner).toBeGreaterThan(widths.outer);
+					await table.focus();
+					await page.keyboard.press('ArrowRight');
+					await expect
+						.poll(() => table.evaluate((element) => element.scrollLeft))
+						.toBeGreaterThan(0);
+				}
+				await page.reload();
+				await expect(reply.getByRole('table')).toBeVisible();
+				await expect(reply.locator('math')).toHaveCount(4);
+				await reply.getByRole('heading', { name: 'LPBF 316L comparison' }).scrollIntoViewIfNeeded();
+				await page.evaluate(() => document.fonts.ready);
+				if (screenshotDir)
+					await page.screenshot({
+						path: join(screenshotDir, `research-markdown-${width}-${theme}.png`)
+					});
+				expect(errors).toEqual([]);
+			});
+		}
+	}
+
+	test('waits for a delayed logout before completing a new sign-in', async ({ page }) => {
+		let finish!: () => void;
+		const completion = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		let logins = 0;
+		await page.route('**/api/v1/auth/logout', async (route) => {
+			await completion;
+			return route.fulfill(json({}));
+		});
+		await page.route('**/api/v1/auth/login', (route) => {
+			logins += 1;
+			return route.fulfill(
+				json({
+					user: {
+						user_id: 'user_2',
+						email: 'second@example.test',
+						display_name: 'Second Researcher'
+					}
+				})
+			);
+		});
+		try {
+			await page.goto('/');
+			await page.getByRole('button', { name: 'Log out', exact: true }).click();
+			await expect(page).toHaveURL(/\/login$/);
+			await page.locator('#auth-email').fill('second@example.test');
+			await page.locator('#auth-password').fill('test-only');
+			await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+			await expect(page.getByRole('button', { name: 'Signing in...', exact: true })).toBeDisabled();
+			expect(logins).toBe(0);
+			finish();
+			await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeVisible();
+			expect(logins).toBe(1);
+			expect(new URL(page.url()).pathname).toBe('/');
+		} finally {
+			finish();
+		}
+	});
+
+	test('recovers a lost PDF upload on a plain HTTP installation', async ({ page, baseURL }) => {
+		let uploads = 0;
+		let preparations = 0;
+		await page.route('http://review.lens.test/**', async (route) => {
+			const url = new URL(route.request().url());
+			if (url.pathname.startsWith('/api/')) return route.fallback();
+			const response = await route.fetch({
+				url: new URL(`${url.pathname}${url.search}`, baseURL).toString()
+			});
+			return route.fulfill({ response });
+		});
+		await page.route('**/api/v1/collections/col_123/documents*', async (route) => {
+			if (route.request().method() !== 'POST') return route.fallback();
+			uploads += 1;
+			if (uploads === 1) return route.abort('failed');
+			expect(new URL(route.request().url()).searchParams.get('reuse_existing')).toBe('true');
+			return route.fulfill(json(uploadedFile('uploaded')));
+		});
+		await page.route('**/api/v1/collections/col_123/documents/doc_1/preparation', (route) => {
+			preparations += 1;
+			return route.fulfill(
+				json({ run_id: 'run_1', collection_id: collectionId, status: 'queued' })
+			);
+		});
+		await page.goto('http://review.lens.test/collections/col_123/assistant');
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+		expect(
+			await page.evaluate(() => ({ secure: isSecureContext, subtle: typeof crypto.subtle }))
+		).toEqual({ secure: false, subtle: 'undefined' });
+		await page.getByLabel('Choose PDF papers').setInputFiles({
+			name: 'LPBF-study.pdf',
+			mimeType: 'application/pdf',
+			buffer: Buffer.from('%PDF-1.7')
+		});
+		await page.getByRole('button', { name: 'Upload and prepare 1 paper', exact: true }).click();
+		await page.getByRole('button', { name: 'Retry failed paper', exact: true }).click();
+		await expect(page.getByText('Preparation queued', { exact: true })).toBeVisible();
+		expect(preparations).toBe(1);
+		if (screenshotDir)
+			await page.screenshot({ path: join(screenshotDir, 'http-upload-recovered.png') });
+	});
+
+	for (const width of [390, 1440]) {
+		test(`keeps approval recovery beside the reply after reload at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			const initial = agentTurn('Create the reviewed LPBF research question', 4);
+			let approved = false;
+			let completed = false;
+			let decisions = 0;
+			await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) =>
+				route.fulfill(
+					json({
+						feedback: [],
+						pending_approval: approved ? null : initial.pending_approval,
+						items: completed
+							? [...initial.messages, ...approvedAgentTurn('call_write_1').messages]
+							: initial.messages
+					})
+				)
+			);
+			await page.route(
+				'**/api/v1/chat-sessions/chat_1/tool-calls/call_write_1/decision',
+				(route) => {
+					approved = true;
+					decisions += 1;
+					return route.abort('failed');
+				}
+			);
+			await page.goto('/collections/col_123/assistant');
+			await page.getByRole('button', { name: 'Approve and create', exact: true }).click();
+			await expect(page.getByTestId('research-recovery')).toBeVisible();
+			await page.reload();
+			const recovery = page.getByTestId('research-recovery');
+			await expect(recovery).toBeVisible();
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
+			const activityBox = await page.getByTestId('research-activity').boundingBox();
+			const recoveryBox = await recovery.boundingBox();
+			expect(recoveryBox!.y).toBeGreaterThanOrEqual(activityBox!.y + activityBox!.height);
+			expect(recoveryBox!.x + recoveryBox!.width).toBeLessThanOrEqual(width);
+			if (screenshotDir)
+				await page.screenshot({ path: join(screenshotDir, `approval-recovery-${width}.png`) });
+			completed = true;
+			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect(
+				page.getByText('The objective candidate was created for your review.', { exact: true })
+			).toBeVisible();
+			await expect(recovery).toHaveCount(0);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			expect(decisions).toBe(1);
+		});
+	}
+
+	test('signing out in another tab prevents late replies from restoring private history', async ({
+		page,
+		context
+	}) => {
+		const privateQuestion = 'Unpublished alloy treatment comparison';
+		await page.addInitScript(() =>
+			localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+		);
+		let finish!: () => void;
+		const completion = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			if (route.request().method() === 'GET')
+				return route.fulfill(json({ items: [], pending_approval: null, feedback: [] }));
+			await completion;
+			return route.fulfill(
+				sseTurn({
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						agentMessage('private_user', 'user', privateQuestion),
+						agentMessage('private_answer', 'assistant', 'Private comparison finished after logout')
+					],
+					pending_approval: null,
+					error_code: null
+				})
+			);
+		});
+		const other = await context.newPage();
+		await mockApis(other);
+		await other.route('**/api/v1/auth/logout', (route) => route.fulfill(json({})));
+		try {
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await sendAgentMessage(page, privateQuestion);
+			await expect(page.getByTestId('research-progress')).toBeVisible();
+			await other.goto('/');
+			await other.getByRole('button', { name: 'Log out', exact: true }).click();
+			await expect(other).toHaveURL(/\/login$/);
+			finish();
+			await expect(page).toHaveURL(/\/login$/);
+			await expect(
+				page.getByText('Private comparison finished after logout', { exact: true })
+			).toHaveCount(0);
+			expect(
+				await page.evaluate(() => localStorage.getItem('lens.chatSessionHistory.user_1:col_123'))
+			).toBeNull();
+		} finally {
+			finish();
+			await other.close();
+		}
+	});
+
+	for (const width of [320, 768, 1024, 1440]) {
+		test(`saves, edits and withdraws answer feedback at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			let feedback: ChatMessageFeedback | null = null;
+			let failNext = false;
+			let releaseSave: (() => void) | undefined;
+			let holdSave = false;
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) =>
+				route.fulfill(
+					json({
+						items: [
+							agentMessage(
+								'question',
+								'user',
+								'Can I compare the tensile strength of these LPBF studies?'
+							),
+							agentMessage(
+								'answer',
+								'assistant',
+								'The studies used different tensile test temperatures. Compare results measured under matching conditions before attributing the strength difference to heat treatment.'
+							)
+						],
+						pending_approval: null,
+						feedback: feedback ? [feedback] : []
+					})
+				)
+			);
+			await page.route(
+				`**/api/v1/chat-sessions/${sessionId}/messages/answer/feedback`,
+				async (route) => {
+					expect(route.request().method()).toBe('PUT');
+					const input = route.request().postDataJSON() as ChatFeedbackInput;
+					if (holdSave)
+						await new Promise<void>((resolve) => {
+							releaseSave = resolve;
+						});
+					if (failNext) {
+						failNext = false;
+						return route.fulfill(json({ detail: 'Temporary failure' }, 503));
+					}
+					feedback = input.rating
+						? {
+								feedback_id: feedback?.feedback_id ?? 'feedback-1',
+								message_id: 'answer',
+								session_id: sessionId,
+								user_id: 'user_1',
+								rating: input.rating,
+								reason: input.reason ?? null,
+								comment: input.comment ?? null,
+								response_digest: 'a'.repeat(64),
+								created_at: feedback?.created_at ?? now(),
+								updated_at: now()
+							}
+						: null;
+					await route.fulfill(json(feedback));
+				}
+			);
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const answer = page.getByTestId('assistant-message');
+			const helpful = answer.getByRole('button', { name: 'Helpful', exact: true });
+			const unhelpful = answer.getByRole('button', { name: 'Not helpful', exact: true });
+			await expect(page.getByTestId('message-feedback')).toHaveCount(1);
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'true');
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'false');
+			await unhelpful.click();
+			const reason = answer.getByLabel('What could be better?');
+			const comment = answer.getByLabel('Additional feedback (optional)');
+			await expect(comment).toBeFocused();
+			await reason.selectOption('incomplete');
+			await comment.fill('Please name the test temperatures and link to the original sources.');
+			holdSave = true;
+			failNext = true;
+			await answer.getByRole('button', { name: 'Save', exact: true }).click();
+			await expect(helpful).toBeDisabled();
+			await expect(answer.getByRole('status')).toHaveText('Saving...');
+			await expect.poll(() => Boolean(releaseSave)).toBe(true);
+			holdSave = false;
+			releaseSave!();
+			await expect(answer.getByRole('alert')).toHaveText(
+				'Could not save feedback. Please try again.'
+			);
+			await expect(comment).toHaveValue(
+				'Please name the test temperatures and link to the original sources.'
+			);
+			await expect(unhelpful).toHaveAttribute('aria-pressed', 'true');
+			await answer.getByRole('button', { name: 'Save', exact: true }).click();
+			await expect(comment).toHaveCount(0);
+			await page.reload();
+			await expect(unhelpful).toHaveAttribute('aria-pressed', 'true');
+			await answer.getByRole('button', { name: 'Edit feedback' }).click();
+			await expect(reason).toHaveValue('incomplete');
+			await expect(comment).toHaveValue(
+				'Please name the test temperatures and link to the original sources.'
+			);
+			await expectNoHorizontalOverflow(page);
+			await expect(answer.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `answer-feedback-${width}.png`),
+					fullPage: true
+				});
+			await comment.fill('This is an unsaved change.');
+			await comment.press('Escape');
+			await expect(answer.getByRole('button', { name: 'Edit feedback' })).toBeFocused();
+			await answer.getByRole('button', { name: 'Edit feedback' }).click();
+			await expect(comment).toHaveValue(
+				'Please name the test temperatures and link to the original sources.'
+			);
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'true');
+			await answer.getByRole('button', { name: 'Edit feedback' }).click();
+			await expect(reason).toHaveCount(0);
+			await expect(comment).toHaveValue('');
+			await helpful.click();
+			await expect(helpful).toHaveAttribute('aria-pressed', 'false');
+			await page.reload();
+			await expect(unhelpful).toHaveAttribute('aria-pressed', 'false');
+			await expect(helpful).toHaveAttribute('aria-pressed', 'false');
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const [width, height] of [
+		[390, 844],
+		[375, 667],
+		[390, 540],
+		[1440, 900]
+	]) {
+		test(`keeps composed research context and Send reachable at ${width}x${height}`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height });
+			await page.addInitScript(() =>
+				sessionStorage.setItem(
+					'lens.chatSourceContext.user_1:col_123',
+					JSON.stringify({
+						contexts: [
+							{
+								resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
+								collection_id: 'col_123',
+								document_id: 'doc_1',
+								document_title:
+									'Effect of post-build heat treatment on the microstructure and tensile properties of LPBF alloys',
+								source_kind: 'text_window',
+								source_ref: 'results',
+								page: 3,
+								quote:
+									'The measured grain size and tensile strength depend on both processing conditions and subsequent heat treatment. Compare samples with equivalent measurement conditions.',
+								heading_path: 'Results and discussion',
+								quote_truncated: false
+							}
+						]
+					})
+				)
+			);
+			let sent: Record<string, unknown> | null = null;
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
+				sent = route.request().postDataJSON();
+				return route.fulfill(
+					sseTurn({
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						messages: [
+							agentMessage('composed_user', 'user', String(sent?.message)),
+							agentMessage('composed_answer', 'assistant', 'Comparison request received.')
+						],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			});
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const input = page.getByRole('textbox', { name: 'Message', exact: true });
+			await expect(input).toBeEnabled();
+			await page.getByLabel('Choose PDF papers').setInputFiles(
+				Array.from({ length: 8 }, (_, index) => ({
+					name: `LPBF-study-${index + 1}.pdf`,
+					mimeType: 'application/pdf',
+					buffer: Buffer.from('%PDF-1.7')
+				}))
+			);
+			await input.fill(
+				Array.from(
+					{ length: 10 },
+					(_, index) => `Compare study ${index + 1} under equivalent heat treatment conditions.`
+				).join('\n')
+			);
+			const send = page.getByRole('button', { name: 'Send', exact: true });
+			await expect
+				.poll(async () => (await send.boundingBox())!.y + (await send.boundingBox())!.height)
+				.toBeLessThanOrEqual(height);
+			await expect(send).toBeInViewport({ ratio: 1 });
+			await expect
+				.poll(async () => {
+					const messages = (await page.locator('.message-scroll').boundingBox())!;
+					const composer = (await page.locator('.composer').boundingBox())!;
+					return messages.y + messages.height - composer.y;
+				})
+				.toBeLessThanOrEqual(1);
+			const context = page.locator('.composer-context');
+			await expect(context).toBeVisible();
+			await context.evaluate((element) => {
+				element.scrollTop = element.scrollHeight;
+			});
+			await expect(page.getByTestId('pending-source-attachments')).toBeInViewport();
+			await expectNoHorizontalOverflow(page);
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `research-agent-composed-context-${width}x${height}.png`),
+					fullPage: true
+				});
+			await send.click();
+			await expect(page.getByText('Comparison request received.', { exact: true })).toBeVisible();
+			expect(sent).toHaveProperty('source_contexts');
+			await expect(page.getByTestId('pending-source-context')).toHaveCount(0);
+		});
+	}
 
 	for (const [path, readyText] of routes) {
 		test(`${path} renders usable desktop and mobile viewports`, async ({ page }) => {
@@ -92,6 +1745,8 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByText('Contradicts')).toBeVisible();
 		await expect(page.getByText('1 failed paper')).toBeVisible();
 		await expect(page.getByText('Paper C extraction gap')).toBeVisible();
+		await expect(page.getByText('Conflict', { exact: true })).toBeVisible();
+		await expect(page.getByText('research.findings.synthesis', { exact: false })).toHaveCount(0);
 
 		const sourceLink = page.getByRole('link', { name: 'Table · table-7' });
 		await expect(sourceLink).toHaveAttribute(
@@ -105,6 +1760,89 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('heading', { name: 'Paper A' }).first()).toBeVisible();
 		await page.waitForLoadState('networkidle');
 	});
+
+	for (const width of [390, 1440]) {
+		for (const surface of ['graph', 'finding']) {
+			test(`single-paragraph AI summary on ${surface} at ${width}px`, async ({ page }) => {
+				await page.setViewportSize({ width, height: 1000 });
+				const errors: string[] = [];
+				page.on('pageerror', (error) => errors.push(error.message));
+				page.on('console', (message) => {
+					if (['error', 'warning'].includes(message.type())) errors.push(message.text());
+				});
+				let requests = 0;
+				const text =
+					'Annealing was associated with higher tensile strength in the reported samples. The treatment and test conditions limit how broadly this result can be applied.';
+				await page.route(`**/objectives/${objectiveId}/findings/finding-1/summary`, (route) => {
+					requests += 1;
+					expect(route.request().postDataJSON()).toEqual({ analysis_version: 1, language: 'en' });
+					return route.fulfill(
+						json({
+							collection_id: collectionId,
+							objective_id: objectiveId,
+							finding_id: 'finding-1',
+							analysis_version: 1,
+							language: 'en',
+							text,
+							citation_ids: ['evidence:evidence-1'],
+							references: [
+								{
+									id: 'evidence:evidence-1',
+									kind: 'evidence',
+									label: 'Table 7',
+									document_id: documentId,
+									source_ref: 'table-7',
+									page_numbers: [7],
+									source_excerpt: 'After annealing, tensile strength increased to 620 MPa.'
+								}
+							],
+							model: 'test-model',
+							prompt_version: 'finding-evidence-summary.v1',
+							generated_at: now()
+						})
+					);
+				});
+				const destination =
+					surface === 'graph'
+						? `/collections/${collectionId}/graph?objective_id=${objectiveId}&finding_id=finding-1`
+						: `/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`;
+				await page.goto(destination);
+				const summary = page.locator('.finding-summary');
+				await expect(summary).toBeVisible();
+				expect(requests).toBe(0);
+				await summary.locator('summary').click();
+				await expect(summary.locator('.summary-text')).toHaveCount(1);
+				await expect(summary.locator('.summary-text')).toContainText(text);
+				await expect(summary.getByRole('heading')).toHaveCount(0);
+				expect(await visibleElementsFitViewport(page, '.finding-summary')).toBe(true);
+				const citation = summary.getByRole('link', { name: '[1]' });
+				const href = new URL((await citation.getAttribute('href'))!, page.url());
+				expect(href.searchParams.get('source_ref')).toBe('table-7');
+				expect(href.searchParams.get('return_to')).toBe(destination);
+				await summary.scrollIntoViewIfNeeded();
+				if (screenshotDir) {
+					await page.screenshot({
+						path: join(screenshotDir, `ai-summary-${surface}-${width}.png`),
+						fullPage: true
+					});
+					await summary.screenshot({
+						path: join(screenshotDir, `ai-summary-paragraph-${surface}-${width}.png`)
+					});
+				}
+				if (surface === 'graph') {
+					await expect(page.getByText('1 failed paper', { exact: true })).toBeVisible();
+					await page.getByRole('combobox', { name: 'Finding', exact: true }).selectOption('');
+					await expect(summary).toHaveCount(0);
+					await page
+						.getByRole('combobox', { name: 'Finding', exact: true })
+						.selectOption('finding-1');
+					await expect(summary.locator('.summary-text')).toHaveCount(0);
+				}
+				expect(requests).toBe(1);
+				expect(errors).toEqual([]);
+			});
+		}
+	}
 
 	test('global Research Agent entry asks for a collection workspace', async ({ page }) => {
 		const consoleErrors: string[] = [];
@@ -172,7 +1910,9 @@ test.describe('page interaction audit', () => {
 				return route.fulfill(json(chatSession()));
 			}
 			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'GET') {
-				return route.fulfill(json({ items: trajectory, pending_approval: pendingApproval }));
+				return route.fulfill(
+					json({ feedback: [], items: trajectory, pending_approval: pendingApproval })
+				);
 			}
 			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'POST') {
 				expect(request.headers().accept).toContain('text/event-stream');
@@ -189,10 +1929,23 @@ test.describe('page interaction audit', () => {
 				decisions.push(decision);
 				pendingApproval = null;
 				if (decision.decision === 'rejected') {
+					const rejected = agentMessage('msg_result_rejected', 'tool', '', {
+						tool_call_id: approvedCallId,
+						tool_result: {
+							tool_call_id: approvedCallId,
+							status: 'failed',
+							data: {},
+							resource_refs: [],
+							warnings: [],
+							error_code: 'user_rejected',
+							error_message: 'The user rejected this research action.'
+						}
+					});
+					trajectory = [...trajectory, rejected];
 					return route.fulfill(
 						json({
 							status: 'rejected',
-							messages: [],
+							messages: [rejected],
 							pending_approval: null,
 							error_code: null
 						})
@@ -215,7 +1968,7 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByLabel('Research activity')).toHaveCount(0);
 
 		await sendAgentMessage(page, 'What published findings are available?');
-		await expect(page.getByText('Published findings completed')).toBeVisible();
+		await expect(page.getByText('Published findings completed', { exact: true })).toBeVisible();
 		await expect(page.getByText('1 findings · 3 evidence records')).toBeVisible();
 		await expect(page.getByText('One paper used a different heat treatment.')).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Open finding' })).toHaveAttribute(
@@ -229,16 +1982,17 @@ test.describe('page interaction audit', () => {
 
 		await sendAgentMessage(page, 'Create that objective');
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
-		await expect(page.getByLabel('Message')).toBeDisabled();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
 		await page.getByRole('button', { name: 'Reject' }).click();
 		await expect(page.getByText('The proposed write was rejected.')).toBeVisible();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 
 		await sendAgentMessage(page, 'Create that objective');
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.reload();
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
-		await expect(page.getByLabel('Message')).toBeDisabled();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
 		expect(await visibleElementsFitViewport(page, '.approval')).toBe(true);
 		await page.getByRole('button', { name: 'Approve and create' }).click();
 
@@ -299,7 +2053,7 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/assistant?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { level: 1, name: 'Research Agent' })).toBeVisible();
-		await expect(page.getByLabel('Message')).toBeEnabled();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 		await expect(page.getByRole('heading', { name: 'Processing required' })).toHaveCount(0);
 		expect(consoleErrors).toEqual([]);
 	});
@@ -313,7 +2067,7 @@ test.describe('page interaction audit', () => {
 		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
 			const request = route.request();
 			if (request.method() === 'GET') {
-				return route.fulfill(json({ items: trajectory, pending_approval: null }));
+				return route.fulfill(json({ feedback: [], items: trajectory, pending_approval: null }));
 			}
 			const prompt = String(request.postDataJSON().message ?? '');
 			expect(request.headers().accept).toContain('text/event-stream');
@@ -333,18 +2087,41 @@ test.describe('page interaction audit', () => {
 		});
 
 		await page.setViewportSize({ width: 390, height: 844 });
+		await page.addInitScript(() =>
+			localStorage.setItem(
+				'lens.chatSessionHistory.user_1:col_123',
+				JSON.stringify(
+					Array.from({ length: 12 }, (_, index) => ({
+						session_id: `past_${index}`,
+						title: `Prior alloy comparison ${index}`,
+						created_at: '2026-09-09T08:00:00Z',
+						updated_at: '2026-09-09T08:00:00Z'
+					}))
+				)
+			)
+		);
 		await page.goto(`/collections/${collectionId}/assistant`);
 
 		const composer = page.locator('.composer');
-		const input = page.getByLabel('Message');
+		const input = page.getByRole('textbox', { name: 'Message', exact: true });
 		const sendButton = page.getByRole('button', { name: 'Send' });
 		await expect(composer).toBeVisible();
 		await expect(sendButton).toBeVisible();
+		const historyToggle = page.getByRole('button', { name: 'Show history' });
+		await expect(historyToggle).toBeVisible();
+		await historyToggle.click();
+		await expect(page.getByText('Current collection')).toBeVisible();
+		await expect(
+			page.getByLabel('Research Agent sessions').getByText(collection().name, { exact: true })
+		).toBeVisible();
+		await page.getByRole('button', { name: 'Hide history' }).click();
 		const mobileLayout = await page.evaluate(() => {
 			const inputElement = document.querySelector<HTMLTextAreaElement>('.composer textarea');
-			const buttonElement = document.querySelector<HTMLButtonElement>('.composer button');
-			if (!inputElement || !buttonElement) return null;
+			const addButton = document.querySelector<HTMLButtonElement>('.composer .add-papers');
+			const buttonElement = document.querySelector<HTMLButtonElement>('.composer .send-message');
+			if (!inputElement || !addButton || !buttonElement) return null;
 			const inputRect = inputElement.getBoundingClientRect();
+			const addRect = addButton.getBoundingClientRect();
 			const buttonRect = buttonElement.getBoundingClientRect();
 			const brandHex = getComputedStyle(document.documentElement)
 				.getPropertyValue('--brand-primary')
@@ -352,6 +2129,8 @@ test.describe('page interaction audit', () => {
 			const brandChannels = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(brandHex);
 			return {
 				buttonBottom: buttonRect.bottom,
+				addRight: addRect.right,
+				inputLeft: inputRect.left,
 				buttonColor: getComputedStyle(buttonElement).backgroundColor,
 				brandColor: brandChannels
 					? `rgb(${Number.parseInt(brandChannels[1], 16)}, ${Number.parseInt(brandChannels[2], 16)}, ${Number.parseInt(brandChannels[3], 16)})`
@@ -363,11 +2142,21 @@ test.describe('page interaction audit', () => {
 		});
 		expect(mobileLayout).not.toBeNull();
 		expect(mobileLayout!.buttonBottom).toBeLessThanOrEqual(mobileLayout!.viewportHeight + 1);
+		expect(mobileLayout!.addRight).toBeLessThanOrEqual(mobileLayout!.inputLeft + 1);
 		expect(Math.abs(mobileLayout!.inputCenter - mobileLayout!.buttonCenter)).toBeLessThan(4);
-		expect(mobileLayout!.buttonColor).toBe(mobileLayout!.brandColor);
+		expect(mobileLayout!.buttonColor).not.toBe('rgba(0, 0, 0, 0)');
 
 		await input.fill('First question');
-		await sendButton.click();
+		await input.press('Shift+Enter');
+		await input.press('Shift+Enter');
+		await expect(input).toHaveValue('First question\n\n');
+		expect(
+			await input.evaluate((element) => element.getBoundingClientRect().height)
+		).toBeGreaterThan(60);
+		await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
+		await input.dispatchEvent('keydown', { key: 'Enter', keyCode: 229 });
+		expect(messageRequests).toHaveLength(0);
+		await input.press('Enter');
 		await expect(page.getByText('Mobile reply 1')).toBeVisible();
 		await input.fill('Follow-up question');
 		await sendButton.click();
@@ -378,12 +2167,186 @@ test.describe('page interaction audit', () => {
 		]);
 
 		await page.setViewportSize({ width: 390, height: 520 });
+		await page.getByRole('button', { name: 'Show history' }).click();
+		await expect(page.locator('.history-item')).toHaveCount(12);
+		await expect(sendButton).toBeInViewport();
+		await page.getByRole('button', { name: 'Hide history' }).click();
 		await input.focus();
 		await expect(sendButton).toBeInViewport();
 
 		await page.setViewportSize({ width: 320, height: 568 });
 		await expect(sendButton).toBeInViewport();
 		await expectNoHorizontalOverflow(page);
+	});
+
+	for (const width of [1440, 390]) {
+		test(`research agent preserves long conversation reading at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 844 });
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			const history = Array.from({ length: 60 }, (_, index) =>
+				agentMessage(
+					`history_${index}`,
+					index % 2 ? 'assistant' : 'user',
+					index % 2
+						? `Study ${index}: The reported grain size must be compared under the same heat treatment and measurement conditions.`
+						: `Compare the LPBF process conditions in study ${index}.`
+				)
+			);
+			let finish!: () => void;
+			const pending = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+				if (route.request().method() === 'GET')
+					return route.fulfill(json({ feedback: [], items: history, pending_approval: null }));
+				await pending;
+				return route.fulfill(
+					sseTurn({
+						status: 'completed',
+						completion_reason: 'model_answer',
+						warnings: [],
+						messages: [
+							agentMessage('new_user', 'user', 'Compare the remaining studies'),
+							agentMessage('new_tool_request', 'assistant', '', {
+								tool_calls: [
+									{
+										tool_call_id: 'inspect_1',
+										name: 'get_collection_context',
+										arguments: {},
+										position: 0
+									}
+								]
+							}),
+							agentMessage('new_tool_result', 'tool', '', {
+								tool_call_id: 'inspect_1',
+								tool_result: {
+									tool_call_id: 'inspect_1',
+									status: 'succeeded',
+									data: { collection: { paper_count: 30 } },
+									resource_refs: [],
+									warnings: [],
+									error_code: null,
+									error_message: null
+								}
+							}),
+							agentMessage(
+								'new_answer',
+								'assistant',
+								'The remaining studies require matching heat treatments before comparing grain size.'
+							)
+						],
+						pending_approval: null,
+						error_code: null
+					})
+				);
+			});
+			try {
+				await page.goto(`/collections/${collectionId}/assistant`);
+				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+				await expect(page.getByTestId('user-message')).toHaveCount(10);
+				await expect(
+					page.getByText(history[59].content as string, { exact: true })
+				).toBeInViewport();
+				const earlier = page.getByRole('button', { name: 'Earlier messages' });
+				await earlier.scrollIntoViewIfNeeded();
+				const anchor = page.getByText(history[40].content as string, { exact: true });
+				const before = (await anchor.boundingBox())!.y;
+				await earlier.click();
+				await expect(page.getByTestId('user-message')).toHaveCount(20);
+				await expect
+					.poll(async () => Math.abs((await anchor.boundingBox())!.y - before))
+					.toBeLessThan(3);
+				await sendAgentMessage(page, 'Compare the remaining studies');
+				await expect(page.getByTestId('research-progress')).toBeInViewport();
+				const scroll = page.locator('.message-scroll');
+				await scroll.hover();
+				await page.mouse.wheel(0, -100000);
+				await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+				await expect(page.getByRole('button', { name: 'Latest message' })).toBeVisible();
+				const firstVisibleUser = await page.getByTestId('user-message').first().textContent();
+				finish();
+				await expect(page.getByTestId('research-progress')).toHaveCount(0);
+				await expect(page.getByTestId('user-message').first()).toHaveText(firstVisibleUser!);
+				await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+				await page.getByRole('button', { name: 'Latest message' }).click();
+				await expect(
+					page.getByText(
+						'The remaining studies require matching heat treatments before comparing grain size.',
+						{ exact: true }
+					)
+				).toBeInViewport();
+				await expectNoHorizontalOverflow(page);
+				if (screenshotDir)
+					await page.screenshot({
+						path: join(screenshotDir, `research-agent-long-conversation-${width}.png`),
+						fullPage: true
+					});
+			} finally {
+				finish();
+			}
+		});
+	}
+
+	test('anchors live research progress to the assistant response', async ({ page }) => {
+		let completeTurn!: () => void;
+		const turnCompletion = new Promise<void>((resolve) => {
+			completeTurn = resolve;
+		});
+		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			if (route.request().method() === 'POST') {
+				await turnCompletion;
+				const turn = {
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [
+						agentMessage('msg_progress_user', 'user', 'Track this'),
+						agentMessage('msg_progress_assistant', 'assistant', 'Research complete')
+					],
+					pending_approval: null,
+					error_code: null
+				};
+				return route.fulfill(sseTurn(turn));
+			}
+			return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
+		});
+
+		try {
+			await page.goto(`/collections/${collectionId}/assistant`);
+			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(page.locator('.conversation-header')).toHaveCount(0);
+			await sendAgentMessage(page, 'Track this');
+			await expect(page.getByTestId('research-progress')).toHaveCount(1);
+			await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
+			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
+			await expect(page.locator('.conversation > .status-progress')).toHaveCount(0);
+			if (screenshotDir) {
+				await page.screenshot({
+					path: join(screenshotDir, 'research-agent-inline-progress-desktop.png'),
+					fullPage: true,
+					animations: 'disabled'
+				});
+			}
+
+			await page.setViewportSize({ width: 390, height: 844 });
+			await expect(page.locator('.assistant-message .assistant-progress')).toBeVisible();
+			await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
+			if (screenshotDir) {
+				await page.screenshot({
+					path: join(screenshotDir, 'research-agent-inline-progress-mobile.png'),
+					fullPage: true,
+					animations: 'disabled'
+				});
+			}
+		} finally {
+			completeTurn();
+		}
+
+		await expect(page.getByText('Research complete', { exact: true })).toBeVisible();
+		await expect(page.getByTestId('research-progress')).toHaveCount(0);
+		await expect(page.locator('.conversation-header')).not.toContainText(/Ready|Working/);
 	});
 
 	test('mobile app chrome keeps controls inside the viewport', async ({ page }) => {
@@ -420,7 +2383,7 @@ test.describe('page interaction audit', () => {
 		expect(await visibleElementsFitViewport(page, '.finding-item')).toBe(true);
 	});
 
-	test('shows aggregate preparation progress for active paper tasks', async ({ page }) => {
+	test('shows aggregate preparation progress for active paper runs', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto(`/collections/${collectionId}?audit_state=processing`);
 
@@ -605,6 +2568,150 @@ async function expectVisibleInteractionsHaveNames(page: Page) {
 	expect(unnamed).toEqual([]);
 }
 
+async function mockMessageBranches(
+	page: Page,
+	options: {
+		unanswered?: boolean;
+		failCreateOnce?: boolean;
+		condition?: 'running' | 'approval';
+	} = {}
+) {
+	const question = 'Compare the tensile strengths reported for these LPBF specimens.';
+	const source = {
+		resource_ref: {
+			resource_type: 'source',
+			resource_id: 'doc_1:methods',
+			href: `/collections/${collectionId}/documents/${documentId}?source_ref=methods`
+		},
+		collection_id: collectionId,
+		document_id: documentId,
+		document_title: 'LPBF tensile study',
+		source_kind: 'text_window',
+		source_ref: 'methods',
+		page: 3,
+		quote: 'The specimens were tensile tested at 293 K.',
+		heading_path: 'Methods',
+		quote_truncated: false
+	};
+	const original = [
+		agentMessage('question', 'user', question, { source_contexts: [source] }),
+		...(options.unanswered ? [] : [agentMessage('answer', 'assistant', 'Original comparison')])
+	];
+	const base = {
+		session_id: sessionId,
+		user_id: 'user_1',
+		collection_id: collectionId,
+		created_at: now(),
+		updated_at: now()
+	};
+	const sessions = new Map<string, Record<string, unknown>>([[sessionId, base]]);
+	const trajectories = new Map<string, ReturnType<typeof agentMessage>[]>([[sessionId, original]]);
+	const requestIds: string[] = [];
+	const requests = new Map<string, string>();
+	const sent: Record<string, unknown>[] = [];
+	await page.addInitScript(() =>
+		localStorage.setItem(
+			'lens.chatSession.user_1:col_123',
+			localStorage.getItem('lens.chatSession.user_1:col_123') || 'chat_1'
+		)
+	);
+	await page.route('**/api/v1/chat-sessions**', async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		const method = route.request().method();
+		const parts = path.split('/');
+		const id = parts[4] || sessionId;
+		if (parts[5] === 'branches') {
+			const body = route.request().postDataJSON();
+			requestIds.push(body.request_id);
+			let branchId = requests.get(body.request_id);
+			if (!branchId) {
+				branchId = `branch_${requests.size + 1}`;
+				const originalMessage = trajectories
+					.get(id)!
+					.find((message) => message.message_id === body.message_id)!;
+				sessions.set(branchId, {
+					...base,
+					session_id: branchId,
+					root_session_id: sessionId,
+					parent_session_id: sessionId,
+					fork_message_id: 'question',
+					fork_position: 0,
+					fork_content: body.message ?? originalMessage.content
+				});
+				trajectories.set(branchId, []);
+				requests.set(body.request_id, branchId);
+			}
+			if (options.failCreateOnce && requestIds.length === 1) return route.abort('failed');
+			return route.fulfill(json(sessions.get(branchId)));
+		}
+		if (parts[5] === 'messages') {
+			if (method === 'POST') {
+				const body = route.request().postDataJSON();
+				sent.push(body);
+				const messages = [
+					agentMessage(`${id}-question`, 'user', body.message, {
+						session_id: id,
+						source_contexts: body.source_contexts ?? []
+					}),
+					agentMessage(`${id}-answer`, 'assistant', `Revised comparison ${sent.length}`, {
+						session_id: id
+					})
+				];
+				trajectories.set(id, messages);
+				return route.fulfill(
+					sseTurn({
+						messages,
+						status: 'completed',
+						completion_reason: 'model_answer',
+						pending_approval: null,
+						error_code: null,
+						warnings: []
+					} as Parameters<typeof sseTurn>[0])
+				);
+			}
+			const messages = trajectories.get(id)!;
+			const pending =
+				options.condition === 'approval'
+					? {
+							tool_call_id: 'pending',
+							session_id: id,
+							assistant_message_id: 'request',
+							position: 0,
+							name: 'create_objective_candidate',
+							arguments: { question: 'Compare tensile conditions' },
+							arguments_digest: 'a'.repeat(64),
+							risk: 'write',
+							status: 'approval_required'
+						}
+					: null;
+			return route.fulfill(
+				json({
+					items: messages,
+					feedback: [],
+					pending_approval: pending,
+					running: options.condition === 'running',
+					branches:
+						messages.length && sessions.size > 1
+							? [
+									{
+										message_id: messages[0].message_id,
+										session_ids: [...sessions.keys()],
+										active_session_id: id
+									}
+								]
+							: [],
+					branch_draft:
+						!messages.length && id !== sessionId
+							? { ...original[0], content: sessions.get(id)!.fork_content }
+							: null
+				})
+			);
+		}
+		return route.fulfill(json(sessions.get(id) ?? base));
+	});
+	return { question, original, source, sent, requestIds };
+}
+
 async function mockApis(page: Page) {
 	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
@@ -633,11 +2740,11 @@ async function mockApis(page: Page) {
 				)
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/tasks`) {
+		if (path === `/api/v1/collections/${collectionId}/pipeline-runs`) {
 			return route.fulfill(
 				json(
 					auditState === 'processing'
-						? { collection_id: collectionId, count: 1, items: [processingTask()] }
+						? { collection_id: collectionId, count: 1, items: [processingRun()] }
 						: { collection_id: collectionId, count: 0, items: [] }
 				)
 			);
@@ -711,7 +2818,7 @@ async function mockApis(page: Page) {
 		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
 		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));
 		if (path === `/api/v1/chat-sessions/${sessionId}/messages`) {
-			return route.fulfill(json({ items: [], pending_approval: null }));
+			return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
 		}
 
 		return route.fulfill(json({ detail: `unhandled audit route: ${path}` }, 404));
@@ -725,7 +2832,9 @@ function json(body: unknown, status = 200) {
 function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
 	const finalText = [...(turn.messages ?? [])]
 		.reverse()
-		.find((message) => message.role === 'assistant' && !message.tool_call_id)?.content;
+		.find(
+			(message) => message.role === 'assistant' && !(message.tool_calls as unknown[])?.length
+		)?.content;
 	const events = [];
 	if (typeof finalText === 'string' && finalText) {
 		events.push(`event: text_delta\ndata: ${JSON.stringify({ content: finalText })}`);
@@ -740,7 +2849,7 @@ function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
 }
 
 async function sendAgentMessage(page: Page, text: string) {
-	await page.getByLabel('Message').fill(text);
+	await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
 	await page.getByRole('button', { name: 'Send' }).click();
 }
 
@@ -757,9 +2866,9 @@ function agentMessage(
 		content,
 		created_at: now(),
 		tool_call_id: null,
-		tool_name: null,
-		tool_arguments: null,
+		tool_calls: [],
 		tool_result: null,
+		source_contexts: [],
 		...overrides
 	};
 }
@@ -769,6 +2878,8 @@ function agentTurn(prompt: string, sequence: number) {
 	if (prompt === 'Hello') {
 		return {
 			status: 'completed',
+			completion_reason: 'model_answer',
+			warnings: [],
 			messages: [
 				user,
 				agentMessage(
@@ -786,12 +2897,19 @@ function agentTurn(prompt: string, sequence: number) {
 		const callId = `call_read_${sequence}`;
 		return {
 			status: 'completed',
+			completion_reason: 'model_answer',
+			warnings: [],
 			messages: [
 				user,
 				agentMessage(`msg_call_${sequence}`, 'assistant', '', {
-					tool_call_id: callId,
-					tool_name: 'query_published_findings',
-					tool_arguments: { query: 'energy input' }
+					tool_calls: [
+						{
+							tool_call_id: callId,
+							name: 'query_published_findings',
+							arguments: { query: 'energy input' },
+							position: 0
+						}
+					]
 				}),
 				agentMessage(`msg_result_${sequence}`, 'tool', '', {
 					tool_call_id: callId,
@@ -826,12 +2944,19 @@ function agentTurn(prompt: string, sequence: number) {
 		const callId = `call_draft_${sequence}`;
 		return {
 			status: 'completed',
+			completion_reason: 'model_answer',
+			warnings: [],
 			messages: [
 				user,
 				agentMessage(`msg_call_${sequence}`, 'assistant', '', {
-					tool_call_id: callId,
-					tool_name: 'propose_objective_drafts',
-					tool_arguments: { question: 'energy input effects' }
+					tool_calls: [
+						{
+							tool_call_id: callId,
+							name: 'propose_objective_drafts',
+							arguments: { question: 'energy input effects' },
+							position: 0
+						}
+					]
 				}),
 				agentMessage(`msg_result_${sequence}`, 'tool', '', {
 					tool_call_id: callId,
@@ -876,6 +3001,7 @@ function agentTurn(prompt: string, sequence: number) {
 		tool_call_id: callId,
 		session_id: sessionId,
 		assistant_message_id: `msg_call_${sequence}`,
+		position: 0,
 		name: 'create_objective_candidate',
 		arguments: arguments_,
 		arguments_digest: 'digest_exact_1',
@@ -890,12 +3016,19 @@ function agentTurn(prompt: string, sequence: number) {
 	};
 	return {
 		status: 'approval_required',
+		completion_reason: null,
+		warnings: [],
 		messages: [
 			user,
 			agentMessage(`msg_call_${sequence}`, 'assistant', '', {
-				tool_call_id: callId,
-				tool_name: 'create_objective_candidate',
-				tool_arguments: arguments_
+				tool_calls: [
+					{
+						tool_call_id: callId,
+						name: 'create_objective_candidate',
+						arguments: arguments_,
+						position: 0
+					}
+				]
 			})
 		],
 		pending_approval: approval,
@@ -906,6 +3039,8 @@ function agentTurn(prompt: string, sequence: number) {
 function approvedAgentTurn(callId: string) {
 	return {
 		status: 'completed',
+		completion_reason: 'model_answer',
+		warnings: [],
 		messages: [
 			agentMessage('msg_result_approved', 'tool', '', {
 				tool_call_id: callId,
@@ -1020,16 +3155,17 @@ function processingDocument() {
 	};
 }
 
-function processingTask() {
+function processingRun() {
 	return {
-		task_id: 'task_processing',
+		run_id: 'run_processing',
 		collection_id: collectionId,
-		document_id: 'doc_2',
-		task_type: 'document_preparation',
+		pipeline_name: 'document_preparation',
+		scope_type: 'document',
+		scope_id: 'doc_2',
 		mode: 'standard',
 		input_fingerprint: 'fingerprint-doc-2',
 		status: 'running',
-		current_stage: 'paper_map',
+		current_node: 'paper_map',
 		progress_percent: 40,
 		progress_detail: {
 			phase: 'paper_map',
@@ -1037,6 +3173,9 @@ function processingTask() {
 		},
 		errors: [],
 		warnings: [],
+		nodes: {},
+		stats: {},
+		context: {},
 		created_at: now(),
 		updated_at: now(),
 		started_at: now(),
@@ -1072,7 +3211,7 @@ function documentProfile() {
 		title: 'Paper A',
 		source_filename: 'paper-a.txt',
 		doc_type: 'experimental',
-		parsing_warnings: [],
+		profile_warnings: [],
 		confidence: 0.9,
 		page_count: 3,
 		updated_at: now(),

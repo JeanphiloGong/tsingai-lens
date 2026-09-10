@@ -11,7 +11,7 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
-from domain.ports import EvaluationRepository
+from application.repositories.evaluation_repository import EvaluationRepository
 
 
 DEFAULT_ABSOLUTE_TOLERANCE = 1e-6

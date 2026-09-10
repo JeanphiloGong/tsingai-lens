@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestJson } from './api';
-import { listCollectionDocuments } from './collectionDocuments';
+import { listCollectionDocuments, uploadCollectionDocuments } from './collectionDocuments';
 
-vi.mock('./api', () => ({ requestJson: vi.fn() }));
+vi.mock('./api', async (importActual) => ({
+	...(await importActual<typeof import('./api')>()),
+	requestJson: vi.fn()
+}));
 const request = vi.mocked(requestJson);
 
 describe('collection document API', () => {
@@ -44,5 +47,42 @@ describe('collection document API', () => {
 			profile_fingerprint: 'profile-fingerprint-doc-1',
 			preparation_fingerprint: 'fingerprint-doc-1'
 		});
+	});
+
+	it('continues after a failed file and returns only failed files for retry', async () => {
+		const first = new File(['pdf'], 'first.pdf');
+		const damaged = new File(['pdf'], 'damaged.pdf');
+		const last = new File(['pdf'], 'last.pdf');
+		request
+			.mockResolvedValueOnce({
+				document_id: 'doc_1',
+				original_filename: 'first.pdf',
+				stored_filename: 'first.pdf',
+				storage_key: 'col_1/input/first.pdf',
+				sha256: 'a'.repeat(64),
+				status: 'stored',
+				size_bytes: 3,
+				created_at: '2026-08-27T00:00:00Z',
+				updated_at: '2026-08-27T00:00:00Z'
+			})
+			.mockRejectedValueOnce(new Error('Upload failed.'))
+			.mockResolvedValueOnce({
+				document_id: 'doc_2',
+				original_filename: 'last.pdf',
+				stored_filename: 'last.pdf',
+				storage_key: 'col_1/input/last.pdf',
+				sha256: 'b'.repeat(64),
+				status: 'stored',
+				size_bytes: 3,
+				created_at: '2026-08-27T00:00:00Z',
+				updated_at: '2026-08-27T00:00:00Z'
+			});
+
+		const result = await uploadCollectionDocuments('col_1', [first, damaged, last]);
+
+		expect(request).toHaveBeenCalledTimes(3);
+		expect(result.count).toBe(2);
+		expect(result.items.map((item) => item.original_filename)).toEqual(['first.pdf', 'last.pdf']);
+		expect(result.failures).toEqual([{ file: damaged, message: 'Upload failed.' }]);
 	});
 });

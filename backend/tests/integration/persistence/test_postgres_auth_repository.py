@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from application.repositories.auth_repository import AuthSessionRecord, AuthUserRecord
+
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import os
@@ -22,37 +25,28 @@ async def test_auth_repository_round_trips_users_and_sessions(
     repository = PostgresAuthRepository(postgres_session_factory)
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     token_hash = sha256(b"browser-session-token").hexdigest()
-    user = {
-        "user_id": "user_reader",
-        "email": "reader@example.com",
-        "display_name": "Reader",
-        "password_hash": "synthetic-password-hash",
-        "created_at": now.isoformat(),
-    }
-    session = {
-        "session_id": "session_reader",
-        "user_id": user["user_id"],
-        "token_hash": token_hash,
-        "created_at": now.isoformat(),
-        "expires_at": (now + timedelta(hours=1)).isoformat(),
-        "revoked_at": None,
-    }
+    user = AuthUserRecord(
+        user_id="user_reader", email="reader@example.com", display_name="Reader",
+        password_hash="synthetic-password-hash", created_at=now.isoformat(),
+    )
+    session = AuthSessionRecord(
+        session_id="session_reader", user_id=user.user_id,
+        created_at=now.isoformat(), expires_at=(now + timedelta(hours=1)).isoformat(),
+    )
 
     await repository.add_user(user)
-    await repository.add_session(session)
+    await repository.add_session(session=session, token_hash=token_hash)
 
-    assert await repository.read_user(user["user_id"]) == user
+    assert await repository.read_user(user.user_id) == user
     assert await repository.read_user_by_email("READER@EXAMPLE.COM") == user
-    assert await repository.read_session_by_token_hash(token_hash) == {
-        key: value for key, value in session.items() if key != "token_hash"
-    }
+    assert await repository.read_session_by_token_hash(token_hash) == session
 
     revoked_at = (now + timedelta(minutes=5)).isoformat()
     await repository.revoke_session_by_token_hash(token_hash, revoked_at)
 
     stored = await repository.read_session_by_token_hash(token_hash)
     assert stored is not None
-    assert stored["revoked_at"] == revoked_at
+    assert stored.revoked_at == revoked_at
 
 
 async def test_auth_repository_rejects_duplicate_email_and_token_hash(
@@ -60,32 +54,25 @@ async def test_auth_repository_rejects_duplicate_email_and_token_hash(
 ) -> None:
     repository = PostgresAuthRepository(postgres_session_factory)
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
-    first_user = {
-        "user_id": "user_first",
-        "email": "reader@example.com",
-        "display_name": None,
-        "password_hash": "synthetic-password-hash",
-        "created_at": now.isoformat(),
-    }
+    first_user = AuthUserRecord(
+        user_id="user_first", email="reader@example.com", display_name=None,
+        password_hash="synthetic-password-hash", created_at=now.isoformat(),
+    )
     await repository.add_user(first_user)
 
     with pytest.raises(IntegrityError):
-        await repository.add_user({**first_user, "user_id": "user_second"})
+        await repository.add_user(replace(first_user, user_id="user_second"))
 
     token_hash = sha256(b"one-browser-token").hexdigest()
-    first_session = {
-        "session_id": "session_first",
-        "user_id": first_user["user_id"],
-        "token_hash": token_hash,
-        "created_at": now.isoformat(),
-        "expires_at": (now + timedelta(hours=1)).isoformat(),
-        "revoked_at": None,
-    }
-    await repository.add_session(first_session)
+    first_session = AuthSessionRecord(
+        session_id="session_first", user_id=first_user.user_id,
+        created_at=now.isoformat(), expires_at=(now + timedelta(hours=1)).isoformat(),
+    )
+    await repository.add_session(first_session, token_hash=token_hash)
 
     with pytest.raises(IntegrityError):
         await repository.add_session(
-            {**first_session, "session_id": "session_second"}
+            replace(first_session, session_id="session_second"), token_hash=token_hash,
         )
 
 
@@ -95,59 +82,37 @@ async def test_postgresql_enforces_auth_contract(
 ) -> None:
     repository = PostgresAuthRepository(postgres_session_factory)
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
-    user = {
-        "user_id": "user_constraints",
-        "email": "constraints@example.com",
-        "display_name": None,
-        "password_hash": "synthetic-password-hash",
-        "created_at": now.isoformat(),
-    }
+    user = AuthUserRecord(
+        user_id="user_constraints", email="constraints@example.com", display_name=None,
+        password_hash="synthetic-password-hash", created_at=now.isoformat(),
+    )
     await repository.add_user(user)
 
     with pytest.raises(IntegrityError):
         await repository.add_user(
-            {
-                **user,
-                "user_id": "user_uppercase",
-                "email": "UPPERCASE@example.com",
-            }
+            replace(user, user_id="user_uppercase", email="UPPERCASE@example.com")
         )
 
     token_hash = sha256(b"constraint-token").hexdigest()
-    session = {
-        "session_id": "session_constraints",
-        "user_id": user["user_id"],
-        "token_hash": token_hash,
-        "created_at": now.isoformat(),
-        "expires_at": (now + timedelta(hours=1)).isoformat(),
-        "revoked_at": None,
-    }
-    await repository.add_session(session)
+    session = AuthSessionRecord(
+        session_id="session_constraints", user_id=user.user_id,
+        created_at=now.isoformat(), expires_at=(now + timedelta(hours=1)).isoformat(),
+    )
+    await repository.add_session(session, token_hash=token_hash)
 
     with pytest.raises(IntegrityError):
         await repository.add_session(
-            {
-                **session,
-                "session_id": "session_duplicate_token",
-            }
+            replace(session, session_id="session_duplicate_token"), token_hash=token_hash,
         )
     with pytest.raises(IntegrityError):
         await repository.add_session(
-            {
-                **session,
-                "session_id": "session_orphan",
-                "user_id": "user_missing",
-                "token_hash": sha256(b"orphan-token").hexdigest(),
-            }
+            replace(session, session_id="session_orphan", user_id="user_missing"),
+            token_hash=sha256(b"orphan-token").hexdigest(),
         )
     with pytest.raises(IntegrityError):
         await repository.add_session(
-            {
-                **session,
-                "session_id": "session_invalid_expiry",
-                "token_hash": sha256(b"invalid-expiry-token").hexdigest(),
-                "expires_at": now.isoformat(),
-            }
+            replace(session, session_id="session_invalid_expiry", expires_at=now.isoformat()),
+            token_hash=sha256(b"invalid-expiry-token").hexdigest(),
         )
 
     database_url = os.environ["LENS_TEST_DATABASE_URL"]

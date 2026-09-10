@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from asyncio import to_thread
-import ast
 import json
 import logging
 import math
@@ -16,9 +15,14 @@ from application.core.document_profiles.extraction import (
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
     DocumentProfile,
+    PROFILE_STATUS_EXTRACTION_FAILED,
+    PROFILE_STATUS_COMPLETED,
     summarize_document_profile_collection,
 )
-from domain.ports import DocumentProfileRepository, SourceArtifactRepository
+from application.repositories.document_profile_repository import (
+    DocumentProfileRepository,
+)
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import SourceBlock, SourceDocument, normalize_optional_text
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
@@ -122,14 +126,14 @@ class DocumentProfileService:
                 or normalized_query
                 in " ".join(
                     value
-                    for value in (profile.title, profile.source_filename)
+                    for value in (profile.title,)
                     if value
                 ).casefold()
             )
             and (not normalized_doc_type or profile.doc_type == normalized_doc_type)
             and (
                 has_warnings is None
-                or bool(profile.parsing_warnings) is has_warnings
+                or bool(profile.profile_warnings) is has_warnings
             )
         )
         items = [
@@ -153,10 +157,12 @@ class DocumentProfileService:
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        profiles = await self.read_document_profiles(collection_id)
-        for profile in profiles:
-            if profile.document_id == document_id:
-                return profile.to_record()
+        await self.collection_service.get_collection(collection_id)
+        profile = await self.read_document_profile(collection_id, document_id)
+        if profile is not None:
+            return profile.to_record()
+        if not await self.document_profile_repository.list_collection(collection_id):
+            raise DocumentProfilesNotReadyError(collection_id)
         raise DocumentNotFoundError(collection_id, document_id)
 
     async def get_document_content(
@@ -164,35 +170,23 @@ class DocumentProfileService:
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        await self.collection_service.get_collection(collection_id)
-        try:
-            documents = await self._load_source_documents(collection_id)
-        except FileNotFoundError as exc:
-            raise DocumentContentNotReadyError(collection_id) from exc
-
-        document_records = self._build_document_records(documents)
-        row = next(
-            (
-                record
-                for record in document_records
-                if record["paper_id"] == document_id
-            ),
-            None,
+        collection = await self.collection_service.get_collection(collection_id)
+        document = await self.source_artifact_repository.read_document(
+            collection_id,
+            document_id,
         )
-        if row is None:
+        if document is None:
+            if not await self.source_artifact_repository.has_documents(collection_id):
+                raise DocumentContentNotReadyError(collection_id)
             raise DocumentNotFoundError(collection_id, document_id)
 
-        blocks_by_doc = {
-            document.document_id: list(document.blocks)
-            for document in documents
-        }
-        profile = await self._find_profile(collection_id, document_id)
-        file_lookup = await self._build_collection_file_lookup(collection_id)
+        profile = await self.read_document_profile(collection_id, document_id)
+        file_lookup = self._build_collection_file_lookup(collection)
 
-        full_text = str(row.get("text") or "").strip()
+        full_text = self._document_text(document)
         block_payload = self._build_document_content_blocks(
             full_text=full_text,
-            blocks=blocks_by_doc.get(document_id, []),
+            blocks=list(document.blocks),
         )
         if not full_text and block_payload:
             full_text = "\n\n".join(
@@ -200,13 +194,9 @@ class DocumentProfileService:
             ).strip()
 
         title = profile.title if profile else None
+        source_filename = self._resolve_source_filename(document, file_lookup)
         if title is None:
-            source_filename = self._resolve_source_filename(row, document_id, file_lookup)
-            title = self._resolve_document_title(row, document_id, source_filename, file_lookup)
-        else:
-            source_filename = profile.source_filename
-        if source_filename is None:
-            source_filename = self._resolve_source_filename(row, document_id, file_lookup)
+            title = self._resolve_document_title(document, source_filename, file_lookup)
 
         warnings: list[str] = []
         if not full_text:
@@ -224,22 +214,18 @@ class DocumentProfileService:
             "warnings": warnings,
         }
 
-    # define a method that return the document_profile
     async def read_document_profiles(
         self,
         collection_id: str,
         document_ids: tuple[str, ...] | None = None,
     ) -> tuple[DocumentProfile, ...]:
-        # verifies that the collection exists before reading anything.
         await self.collection_service.get_collection(collection_id)
 
-        # reads the already-generated document profiles from persistence
         profiles = await self.document_profile_repository.list_collection(
             collection_id,
             document_ids,
         )
 
-        # get the document_profile from the document-owned store
         if profiles:
             return profiles
         raise DocumentProfilesNotReadyError(collection_id)
@@ -259,7 +245,7 @@ class DocumentProfileService:
         collection_id: str,
         document_id: str,
     ) -> DocumentProfile:
-        await self.collection_service.get_collection(collection_id)
+        collection = await self.collection_service.get_collection(collection_id)
         document = await self.source_artifact_repository.read_document(
             collection_id,
             document_id,
@@ -269,29 +255,26 @@ class DocumentProfileService:
                 f"source artifacts not ready: {collection_id}/{document_id}"
             )
             raise DocumentProfilesNotReadyError(collection_id) from exc
-        row = self._build_document_records((document,))[0]
-        file_lookup = await self._build_collection_file_lookup(collection_id)
+        file_lookup = self._build_collection_file_lookup(collection)
         logger.info(
             "Document profile build started collection_id=%s document_id=%s block_count=%s",
             collection_id,
             document_id,
             len(document.blocks),
         )
-        profiled = await to_thread(
-            self._profile_document_row,
+        profile = await to_thread(
+            self._profile_document,
             collection_id=collection_id,
-            row=row,
-            blocks=list(document.blocks),
+            document=document,
             file_lookup=file_lookup,
         )
-        profile = DocumentProfile.from_mapping(profiled)
-        await self.document_profile_repository.replace(profile)
+        await self.document_profile_repository.replace(collection_id, profile)
         logger.info(
             "Document profile build finished collection_id=%s document_id=%s doc_type=%s warning_count=%s",
             collection_id,
             document_id,
             profile.doc_type,
-            len(profile.parsing_warnings),
+            len(profile.profile_warnings),
         )
         return profile
 
@@ -300,83 +283,42 @@ class DocumentProfileService:
             self._document_profile_extractor = build_default_document_profile_extractor()
         return self._document_profile_extractor
 
-    async def _load_source_documents(
+    @staticmethod
+    def _document_text(document: SourceDocument) -> str:
+        return (document.text or "").strip() or "\n\n".join(
+            unit.text.strip()
+            for unit in document.text_units
+            if unit.text and unit.text.strip()
+        )
+
+    def _profile_document(
         self,
         collection_id: str,
-    ) -> tuple[SourceDocument, ...]:
-        documents = await self.source_artifact_repository.read_collection_documents(
-            collection_id
-        )
-        if not documents:
-            raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return documents
-
-    def _build_document_records(
-        self,
-        documents: tuple[SourceDocument, ...],
-    ) -> list[dict[str, Any]]:
-        records: list[dict[str, Any]] = []
-        for document in documents:
-            text = str(document.text or "").strip()
-            if not text and document.text_units:
-                text = "\n\n".join(
-                    str(text_unit.text or "").strip()
-                    for text_unit in document.text_units
-                    if str(text_unit.text or "").strip()
-                )
-            records.append(
-                {
-                    "paper_id": document.document_id,
-                    "document_id": document.document_id,
-                    "title": document.title,
-                    "text": text,
-                    "text_unit_ids": list(document.text_unit_ids),
-                    "creation_date": document.creation_date,
-                    "metadata": dict(document.metadata),
-                    "source_filename": document.metadata.get("source_filename"),
-                    "original_filename": document.metadata.get("original_filename"),
-                    "stored_filename": document.metadata.get("stored_filename"),
-                }
-            )
-        return records
-
-    def _profile_document_row(
-        self,
-        collection_id: str,
-        row: Mapping[str, Any],
-        blocks: list[SourceBlock],
-        file_lookup: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        document_id = str(row.get("paper_id") or row.get("document_id") or "")
-        source_filename = self._resolve_source_filename(
-            row=row,
-            document_id=document_id,
-            file_lookup=file_lookup or {},
-        )
+        document: SourceDocument,
+        file_lookup: dict[str, Any],
+    ) -> DocumentProfile:
+        document_id = document.document_id
+        source_filename = self._resolve_source_filename(document, file_lookup)
         title = self._resolve_document_title(
-            row=row,
-            document_id=document_id,
+            document=document,
             source_filename=source_filename,
-            file_lookup=file_lookup or {},
+            file_lookup=file_lookup,
         )
         profile_payload = self._build_document_profile_payload(
             title=title,
             source_filename=source_filename,
-            full_text=str(row.get("text") or ""),
-            blocks=blocks,
+            full_text=self._document_text(document),
+            blocks=list(document.blocks),
         )
         if self._document_profile_payload_is_insufficient(profile_payload):
-            return DocumentProfile.from_mapping(
-                {
-                    "document_id": document_id,
-                    "collection_id": collection_id,
-                    "title": title,
-                    "source_filename": source_filename,
-                    "doc_type": DOC_TYPE_UNCERTAIN,
-                    "parsing_warnings": ["insufficient_content"],
-                    "confidence": 0.0,
-                }
-            ).to_record()
+            return DocumentProfile(
+                document_id=document_id,
+                title=title,
+                doc_type=DOC_TYPE_UNCERTAIN,
+                profile_warnings=("insufficient_content",),
+                confidence=0.0,
+                profile_status=PROFILE_STATUS_COMPLETED,
+            )
 
         extractor = self._get_document_profile_extractor()
         try:
@@ -408,32 +350,27 @@ class DocumentProfileService:
                     separators=(",", ":"),
                 ),
             )
-            return DocumentProfile.from_mapping(
-                {
-                    "document_id": document_id,
-                    "collection_id": collection_id,
-                    "title": title,
-                    "source_filename": source_filename,
-                    "doc_type": DOC_TYPE_UNCERTAIN,
-                    "parsing_warnings": ["document_profile_extraction_failed"],
-                    "confidence": 0.0,
-                }
-            ).to_record()
-        parsing_warnings = list(extracted.parsing_warnings)
-        if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in parsing_warnings:
-            parsing_warnings.append("classification_uncertain")
-        normalized = DocumentProfile.from_mapping(
+            return DocumentProfile(
+                document_id=document_id,
+                title=title,
+                doc_type=DOC_TYPE_UNCERTAIN,
+                profile_warnings=("document_profile_extraction_failed",),
+                confidence=0.0,
+                profile_status=PROFILE_STATUS_EXTRACTION_FAILED,
+            )
+        profile_warnings = list(extracted.profile_warnings)
+        if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in profile_warnings:
+            profile_warnings.append("classification_uncertain")
+        return DocumentProfile.from_mapping(
             {
                 "document_id": document_id,
-                "collection_id": collection_id,
                 "title": title,
-                "source_filename": source_filename,
                 "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
-                "parsing_warnings": parsing_warnings,
+                "profile_warnings": profile_warnings,
                 "confidence": extracted.confidence,
+                "profile_status": PROFILE_STATUS_COMPLETED,
             }
         )
-        return normalized.to_record()
 
     def _build_document_profile_payload(
         self,
@@ -539,21 +476,6 @@ class DocumentProfileService:
         summary = summarize_document_profile_collection(profiles)
         return summary.to_payload()
 
-    async def _find_profile(
-        self,
-        collection_id: str,
-        document_id: str,
-    ) -> DocumentProfile | None:
-        try:
-            profiles = await self.read_document_profiles(collection_id)
-        except DocumentProfilesNotReadyError:
-            return None
-
-        for profile in profiles:
-            if profile.document_id == document_id:
-                return profile
-        return None
-
     def _build_document_content_blocks(
         self,
         full_text: str,
@@ -610,18 +532,13 @@ class DocumentProfileService:
         page = int(number)
         return page if page > 0 and page == number else None
 
-    async def _build_collection_file_lookup(
-        self, collection_id: str
+    @staticmethod
+    def _build_collection_file_lookup(
+        collection: Mapping[str, Any],
     ) -> dict[str, Any]:
-        try:
-            collection = await self.collection_service.get_collection(collection_id)
-            documents = collection["documents"]
-        except FileNotFoundError:
-            documents = []
-
         stored_to_source: dict[str, str] = {}
         resolved_sources: list[str] = []
-        for record in documents:
+        for record in collection["documents"]:
             original = normalize_optional_text(record.get("original_filename"))
             stored = normalize_optional_text(record.get("stored_filename"))
             if original:
@@ -643,93 +560,44 @@ class DocumentProfileService:
 
     def _resolve_document_title(
         self,
-        row: Mapping[str, Any],
-        document_id: str,
+        document: SourceDocument,
         source_filename: str | None,
         file_lookup: dict[str, Any],
     ) -> str | None:
-        for candidate in self._iter_document_title_candidates(row):
-            if candidate == document_id:
+        for key in _TITLE_FIELD_CANDIDATES:
+            candidate = (
+                normalize_optional_text(document.title) if key == "title" else None
+            )
+            candidate = candidate or normalize_optional_text(document.metadata.get(key))
+            if candidate is None or candidate == document.document_id:
                 continue
             if source_filename and candidate == source_filename:
                 continue
-            if candidate in file_lookup.get("stored_to_source", {}):
+            if candidate in file_lookup["stored_to_source"]:
                 continue
-            if candidate in file_lookup.get("source_filenames", set()):
+            if candidate in file_lookup["source_filenames"]:
                 continue
             return candidate
         return None
 
     def _resolve_source_filename(
         self,
-        row: Mapping[str, Any],
-        document_id: str,
+        document: SourceDocument,
         file_lookup: dict[str, Any],
     ) -> str | None:
-        stored_to_source = file_lookup.get("stored_to_source", {})
+        stored_to_source = file_lookup["stored_to_source"]
 
         for key in (
             *_SOURCE_FILENAME_FIELD_CANDIDATES,
             *_SOURCE_PATH_FIELD_CANDIDATES,
         ):
-            candidate = self._extract_row_or_metadata_value(row, key)
+            candidate = normalize_optional_text(document.metadata.get(key))
             filename = Path(candidate).name if candidate else None
-            if filename and filename != document_id:
+            if filename and filename != document.document_id:
                 return stored_to_source.get(filename, filename)
 
-        title_value = normalize_optional_text(row.get("title"))
+        title_value = normalize_optional_text(document.title)
         if title_value and title_value in stored_to_source:
             return stored_to_source[title_value]
 
-        return file_lookup.get("single_source_filename")
-
-    def _iter_document_title_candidates(self, row: Mapping[str, Any]) -> list[str]:
-        seen: set[str] = set()
-        values: list[str] = []
-        for key in _TITLE_FIELD_CANDIDATES:
-            candidate = self._extract_row_or_metadata_value(row, key)
-            if candidate and candidate not in seen:
-                seen.add(candidate)
-                values.append(candidate)
-        return values
-
-    def _extract_row_or_metadata_value(
-        self,
-        row: Mapping[str, Any],
-        key: str,
-    ) -> str | None:
-        if key in row:
-            value = row.get(key)
-            normalized = normalize_optional_text(value)
-            if normalized is not None:
-                return normalized
-
-        metadata = self._coerce_mapping(row.get("metadata"))
-        value = metadata.get(key)
-        normalized = normalize_optional_text(value)
-        if normalized is not None:
-            return normalized
-        return None
-
-    def _coerce_mapping(self, value: Any) -> dict[str, Any]:
-        if isinstance(value, dict):
-            return value
-        if value is None:
-            return {}
-        if isinstance(value, float) and math.isnan(value):
-            return {}
-        if not isinstance(value, str):
-            return {}
-
-        text = value.strip()
-        if not text:
-            return {}
-
-        for loader in (json.loads, ast.literal_eval):
-            try:
-                parsed = loader(text)
-            except (TypeError, ValueError, SyntaxError, json.JSONDecodeError):
-                continue
-            if isinstance(parsed, dict):
-                return parsed
-        return {}
+        return file_lookup["single_source_filename"]

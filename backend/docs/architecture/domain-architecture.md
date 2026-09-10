@@ -14,7 +14,7 @@ Owns Collection membership and one paper's preparation:
 - create, read, and delete Collections;
 - upload and list current Documents;
 - prepare one Document into Source, Profile, and Paper Map;
-- expose per-document task status and failure;
+- expose per-document Pipeline Run status and failure;
 - provide exact Source content for verification.
 
 ### Core
@@ -50,7 +50,7 @@ and Evidence. They are projections, not alternate conclusion identities.
 
 ```text
 controllers/
-  source/       Collection, Document, preparation task, Source reference
+  source/       Collection, Document, preparation command, Source reference
   core/         Document reads, Objectives, Findings, Evidence, review
   chat/         Research Agent sessions and approval
   goal/         intake and experiment plans
@@ -62,7 +62,8 @@ application/
   goal/         research brief and plan use cases
 
 domain/
-  source/       Collection, Document, Source, Task
+  pipeline.py   Pipeline Run and node execution state
+  source/       Collection, Document, Source
   core/         Profile, Paper Map, Objective, Evidence, Finding
   chat/         trajectory and approval records
 

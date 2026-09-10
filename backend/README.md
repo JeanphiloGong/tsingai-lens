@@ -36,11 +36,13 @@ retries only papers whose inspection is missing, failed, or stale.
 
 - `controllers/`: HTTP routes and response schemas.
 - `application/source/`: Collection lifecycle, upload, per-document preparation,
-  task state, and Source reads.
+  run state, and Source reads.
 - `application/core/`: Document profiling, Paper Map creation, Objective
   discovery, Evidence extraction, and Finding synthesis.
 - `application/chat/`: Research Agent trajectory and approved capability calls.
-- `domain/`: Domain records, invariants, and repository ports.
+- `domain/`: Business objects, invariants, and state transitions.
+- [`application/repositories/`](application/repositories/README.md): Repository
+  contracts and their dedicated query results.
 - `infra/`: PostgreSQL, object storage, Source parsing, and model clients.
 - `docs/`: Backend architecture, API, and operations authorities.
 
@@ -71,6 +73,8 @@ Objective discovery and analysis both require an explicit non-empty
   runtime flow.
 - [`docs/architecture/persistence-model.md`](docs/architecture/persistence-model.md):
   current identities and storage rules.
+- [`docs/architecture/database.md`](docs/architecture/database.md): schema
+  catalog grouped by logic flow and module ownership.
 - [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md): local operation.
 
 ## Local Development

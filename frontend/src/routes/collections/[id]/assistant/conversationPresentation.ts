@@ -1,15 +1,56 @@
-import type { ChatMessage } from '../../../_shared/chatSessions';
+import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
+
+export type ChatSessionActivity = 'running' | 'approval' | 'recovering' | 'idle' | 'unavailable';
+
+export function getChatSessionActivity(
+	messages: ChatMessage[],
+	running: boolean,
+	pendingApprovalId: string | null
+): ChatSessionActivity {
+	if (pendingApprovalId) return 'approval';
+	if (running) return 'running';
+	const completed = new Set(messages.map((message) => message.tool_result?.tool_call_id));
+	return messages.some((message) =>
+		message.tool_calls.some((call) => !completed.has(call.tool_call_id))
+	)
+		? 'recovering'
+		: 'idle';
+}
+
+export function getRecoveredChatProgress(messages: ChatMessage[], now: number): ChatProgress {
+	const questionIndex = messages.map((message) => message.role).lastIndexOf('user');
+	const currentTurn = questionIndex < 0 ? [] : messages.slice(questionIndex);
+	const calls = currentTurn.flatMap((message) => message.tool_calls);
+	const completed = new Set(currentTurn.map((message) => message.tool_result?.tool_call_id));
+	const started = Date.parse(currentTurn[0]?.created_at ?? '');
+	return {
+		phase: 'recovering',
+		requested_tool_count: calls.length,
+		executed_tool_count: calls.filter((call) => completed.has(call.tool_call_id)).length,
+		...(Number.isFinite(started) ? { elapsed_ms: Math.max(0, now - started) } : {})
+	};
+}
 
 const reviewableResultTools = new Set([
+	'create_evidence_draft',
 	'create_evidence_version',
+	'create_finding_draft',
 	'create_finding_version',
 	'create_objective_candidate',
+	'confirm_objective',
+	'create_research_plan',
+	'derive_objective',
+	'assess_objective_quality',
+	'inspect_table',
 	'inspect_objective_analysis',
 	'inspect_published_finding',
 	'inspect_research_process',
 	'preview_research_scope',
 	'propose_objective_drafts',
+	'propose_research_plan',
 	'publish_agent_objective_analysis',
+	'read_source',
+	'search_sources',
 	'start_objective_analysis',
 	'start_research_process'
 ]);
@@ -36,28 +77,32 @@ export type ChatPresentationItem =
 	  };
 
 function isToolActivity(message: ChatMessage) {
-	return Boolean(message.tool_call_id || message.tool_result);
+	return Boolean(message.tool_calls.length || message.tool_result);
 }
 
 function operationsFrom(messages: ChatMessage[]) {
 	const operations: ToolActivityOperation[] = [];
 
 	for (const message of messages) {
+		for (const request of message.tool_calls) {
+			operations.push({
+				toolCallId: request.tool_call_id,
+				toolName: request.name,
+				requestMessage: message,
+				resultMessage: null
+			});
+		}
 		const toolCallId = message.tool_result?.tool_call_id ?? message.tool_call_id;
 		if (!toolCallId) continue;
 		let operation = operations.find((candidate) => candidate.toolCallId === toolCallId);
 		if (!operation) {
 			operation = {
 				toolCallId,
-				toolName: message.tool_name,
+				toolName: null,
 				requestMessage: null,
 				resultMessage: null
 			};
 			operations.push(operation);
-		}
-		if (message.role === 'assistant') {
-			operation.requestMessage = message;
-			operation.toolName = message.tool_name;
 		}
 		if (message.tool_result) operation.resultMessage = message;
 	}
@@ -72,7 +117,11 @@ function activityStatus(operations: ToolActivityOperation[]) {
 	if (operations.some((operation) => operation.resultMessage?.tool_result?.status === 'queued')) {
 		return 'in_progress' as const;
 	}
-	if (operations.some((operation) => operation.resultMessage === null)) return 'pending' as const;
+	if (operations.some((operation) => operation.resultMessage === null)) {
+		return operations.some((operation) => operation.resultMessage !== null)
+			? 'in_progress'
+			: 'pending';
+	}
 	return 'completed' as const;
 }
 
@@ -124,4 +173,10 @@ export function buildChatPresentation(
 
 	flushActivity();
 	return items;
+}
+
+export function formatTime(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return '';
+	return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
 }

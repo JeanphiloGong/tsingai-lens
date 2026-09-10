@@ -20,9 +20,12 @@ def test_pipeline_run_tracks_document_preparation_execution() -> None:
     run = PipelineRun.create(
         pipeline_name="document_preparation",
         mode="standard",
-        run_id="task_1",
+        run_id="run_1",
+        collection_id="col_1",
         scope_type="document",
         scope_id="doc_1",
+        input_fingerprint="input-fingerprint",
+        context={"requested_by": "upload"},
         node_dependencies={
             "source_artifacts": (),
             "document_profiles": ("source_artifacts",),
@@ -60,7 +63,10 @@ def test_pipeline_run_tracks_document_preparation_execution() -> None:
         "2026-08-11T01:00:07+00:00",
     )
 
-    assert run.run_id == "task_1"
+    assert run.run_id == "run_1"
+    assert run.collection_id == "col_1"
+    assert run.input_fingerprint == "input-fingerprint"
+    assert run.context == {"requested_by": "upload"}
     assert run.errors == (
         "document_profiles: profile extraction failed",
     )
@@ -115,10 +121,18 @@ def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
     payload = {
         "pipeline_name": "document_preparation",
         "mode": "standard",
-        "run_id": "task_1",
+        "run_id": "run_1",
+        "collection_id": "col_1",
         "scope_type": "document",
         "scope_id": "doc_1",
+        "input_fingerprint": "input-fingerprint",
         "status": "running",
+        "current_node": "source_artifacts",
+        "progress_percent": 45,
+        "progress_detail": {
+            "unit": "document",
+            "message": "Parsing the document.",
+        },
         "nodes": {
             "source_artifacts": {
                 "name": "source_artifacts",
@@ -153,7 +167,10 @@ def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
             "created_at": "2026-08-11T01:00:00+00:00",
             "started_at": "2026-08-11T01:00:01+00:00",
             "finished_at": None,
+            "updated_at": "2026-08-11T01:00:01+00:00",
         },
+        "context": {"requested_by": "upload"},
+        "resumed_from_run_id": None,
     }
 
     assert PipelineRun.from_mapping(payload).to_record() == payload
@@ -165,7 +182,8 @@ def test_pipeline_statuses_reject_unknown_values() -> None:
             {
                 "pipeline_name": "collection_build",
                 "mode": "standard",
-                "run_id": "task_1",
+                "run_id": "run_1",
+                "collection_id": "col_1",
                 "scope_type": "collection",
                 "scope_id": "col_1",
                 "status": "done",
@@ -190,7 +208,8 @@ def test_pipeline_run_rejects_invalid_dependency_graphs() -> None:
     run = PipelineRun.create(
         pipeline_name="document_preparation",
         mode="standard",
-        run_id="task_1",
+        run_id="run_1",
+        collection_id="col_1",
         scope_type="document",
         scope_id="doc_1",
         node_dependencies={"source_artifacts": ()},
@@ -210,9 +229,39 @@ def test_pipeline_run_rejects_invalid_dependency_graphs() -> None:
         PipelineRun.create(
             pipeline_name="document_preparation",
             mode="standard",
-            run_id="task_2",
+            run_id="run_2",
+            collection_id="col_1",
             scope_type="document",
             scope_id="doc_1",
             node_dependencies={"first": ("second",), "second": ("first",)},
             created_at="2026-08-11T01:00:00+00:00",
         )
+
+
+def test_pipeline_run_updates_browser_progress_without_changing_artifacts() -> None:
+    run = PipelineRun.create(
+        pipeline_name="document_preparation",
+        mode="standard",
+        run_id="run_1",
+        collection_id="col_1",
+        scope_type="document",
+        scope_id="doc_1",
+        input_fingerprint="input-fingerprint",
+        node_dependencies={"source_parsing": (), "document_profile": ("source_parsing",)},
+        created_at="2026-08-11T01:00:00+00:00",
+    )
+
+    updated = run.with_progress(
+        current_node="source_parsing",
+        progress_percent=25,
+        progress_detail={"unit": "document", "message": "Parsing the document."},
+    )
+
+    assert updated.current_node == "source_parsing"
+    assert updated.progress_percent == 25
+    assert updated.progress_detail == {
+        "unit": "document",
+        "message": "Parsing the document.",
+    }
+    with pytest.raises(ValueError, match="progress_percent"):
+        run.with_progress(current_node="source_parsing", progress_percent=101)

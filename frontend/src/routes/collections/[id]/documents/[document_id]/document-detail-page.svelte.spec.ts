@@ -1,6 +1,15 @@
+import { get, writable } from 'svelte/store';
+import { DOCUMENT_AGENT, type DocumentAgentState } from '../documentAgent';
+const agent = writable<DocumentAgentState>({
+	open: false,
+	papers: [],
+	sourceVersion: 0,
+	busy: false
+});
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { authState } from '../../../../_shared/auth';
 
 type DocumentDetailPageState = {
 	params: {
@@ -49,7 +58,20 @@ vi.mock('pdfjs-dist/legacy/build/pdf.worker.mjs?url', () => ({
 
 vi.stubGlobal('fetch', fetchMock);
 
-const Page = (await import('./+page.svelte')).default;
+const Page = (await import('./DocumentReader.svelte')).default;
+
+function renderReader() {
+	const state = get(pageStore);
+	return render(Page, {
+		target: document.body.appendChild(document.createElement('div')),
+		context: new Map([[DOCUMENT_AGENT, agent]]),
+		props: {
+			collectionId: state.params.id,
+			documentId: state.params.document_id,
+			search: state.url.search
+		}
+	});
+}
 
 function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	return new Response(JSON.stringify(body), {
@@ -75,7 +97,12 @@ let scrollIntoViewMock: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewO
 
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	beforeEach(() => {
+		agent.set({ open: false, papers: [], sourceVersion: 0, busy: false });
 		sessionStorage.clear();
+		authState.set({
+			status: 'authenticated',
+			user: { user_id: 'researcher_1', email: 'researcher@example.test' }
+		});
 		setPage({
 			params: { id: 'col_123', document_id: 'doc_1' },
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
@@ -353,7 +380,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('hands a traceable parsed-paper Source to the collection research assistant', async () => {
-		render(Page);
+		renderReader();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		const action = document.querySelector<HTMLAnchorElement>(
 			'[data-testid="ask-research-agent-source-results"]'
@@ -362,8 +389,11 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		action?.addEventListener('click', (event) => event.preventDefault(), { capture: true });
 		action?.click();
 
-		expect(action?.getAttribute('href')).toBe('/collections/col_123/assistant');
-		expect(JSON.parse(sessionStorage.getItem('lens.chatSourceContext.col_123') ?? 'null')).toEqual({
+		expect(action?.tagName).toBe('BUTTON');
+		expect(
+			JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? 'null')
+				.contexts[0]
+		).toEqual({
 			resource_ref: {
 				resource_type: 'source',
 				resource_id: 'doc_1:results',
@@ -372,20 +402,158 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			collection_id: 'col_123',
 			document_id: 'doc_1',
 			document_title: 'Paper A',
-			source_kind: 'paragraph',
+			source_kind: 'text_window',
 			source_ref: 'results',
 			page: 3,
 			quote: 'Conductivity improved to 12 mS/cm under EIS.',
 			heading_path: 'Results',
-			quote_truncated: false
+			quote_truncated: false,
+			source_digest: null
 		});
 		expect(
 			fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
 		).toBe(false);
 	});
 
+	it('selects entire paragraphs and tables directly without checkbox controls', async () => {
+		renderReader();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		const paragraph = document.querySelector<HTMLElement>('[data-source-ref="results"]')!;
+		const table = document.querySelector<HTMLElement>('[data-source-ref="table-1"]')!;
+		const pending = () =>
+			JSON.parse(
+				sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? '{"contexts":[]}'
+			).contexts;
+		expect(document.querySelector('.source-selection input[type="checkbox"]')).toBeNull();
+		paragraph.click();
+		await vi.waitFor(() =>
+			expect(paragraph.querySelector('.keyboard-selection')?.getAttribute('aria-pressed')).toBe(
+				'true'
+			)
+		);
+		table.querySelector('td')!.click();
+		await vi.waitFor(() => expect(pending()).toHaveLength(2));
+		expect(pending().map((source: { source_ref: string }) => source.source_ref)).toEqual([
+			'results',
+			'table-1'
+		]);
+		paragraph.click();
+		await vi.waitFor(() => expect(pending()).toHaveLength(1));
+		expect(get(agent).open).toBe(false);
+		agent.update((state) => ({ ...state, busy: true }));
+		await vi.waitFor(() =>
+			expect(paragraph.classList.contains('source-selection-disabled')).toBe(true)
+		);
+		paragraph.click();
+		expect(pending()).toHaveLength(1);
+	});
+
+	it('preserves copying and links while keeping native keyboard selection available', async () => {
+		renderReader();
+		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
+		const paragraph = document.querySelector<HTMLElement>('[data-source-ref="results"]')!;
+		const range = document.createRange();
+		range.selectNodeContents(paragraph);
+		const selection = window.getSelection()!;
+		selection.removeAllRanges();
+		selection.addRange(range);
+		try {
+			paragraph.click();
+			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+		} finally {
+			selection.removeAllRanges();
+		}
+		const link = paragraph.appendChild(document.createElement('a'));
+		link.href = '#source-link';
+		link.textContent = 'Source link';
+		link.addEventListener('click', (event) => event.preventDefault());
+		link.click();
+		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')).toBeNull();
+		const keyboardControl = paragraph.querySelector<HTMLButtonElement>('.keyboard-selection')!;
+		keyboardControl.focus();
+		expect(document.activeElement).toBe(keyboardControl);
+		keyboardControl.click();
+		await vi.waitFor(() => expect(keyboardControl.getAttribute('aria-pressed')).toBe('true'));
+		expect(
+			JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!).contexts
+		).toHaveLength(1);
+	});
+
+	it('locates matching Source references inside the correct mounted paper', async () => {
+		const originalFetch = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			if (!url.includes('/doc_2/')) return originalFetch(input, init);
+			const response = await originalFetch(url.replace('/doc_2/', '/doc_1/'), init);
+			const body = await response.json();
+			return jsonResponse({ ...body, document_id: 'doc_2', title: 'Paper B' });
+		});
+		const first = document.body.appendChild(document.createElement('div'));
+		const second = document.body.appendChild(document.createElement('div'));
+		render(Page, {
+			target: first,
+			context: new Map([[DOCUMENT_AGENT, agent]]),
+			props: { collectionId: 'col_123', documentId: 'doc_1', search: '?source_ref=methods' }
+		});
+		await vi.waitFor(() =>
+			expect(first.querySelector('[data-testid="markdown-active-source"]')).not.toBeNull()
+		);
+		render(Page, {
+			target: second,
+			context: new Map([[DOCUMENT_AGENT, agent]]),
+			props: { collectionId: 'col_123', documentId: 'doc_2', search: '?source_ref=methods' }
+		});
+		await vi.waitFor(() =>
+			expect(second.querySelector('[data-testid="markdown-active-source"]')).not.toBeNull()
+		);
+		await expect
+			.poll(() => scrollIntoViewMock.mock.contexts.some((node) => second.contains(node as Node)))
+			.toBe(true);
+		expect(first.querySelector('[data-testid="markdown-active-source"]')?.textContent).toContain(
+			'annealed at 700 C'
+		);
+		expect(second.querySelector('[data-testid="markdown-active-source"]')?.textContent).toContain(
+			'annealed at 700 C'
+		);
+		expect(second.querySelector('[data-testid="markdown-selected-evidence-quote"]')).toBeNull();
+	});
+
+	it('keeps page navigation inside its PDF pane when two readers are mounted', async () => {
+		const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {});
+		const first = document.body.appendChild(document.createElement('div'));
+		const second = document.body.appendChild(document.createElement('div'));
+		try {
+			render(Page, {
+				target: first,
+				context: new Map([[DOCUMENT_AGENT, agent]]),
+				props: { collectionId: 'col_123', documentId: 'doc_1', search: '?view=pdf-preview&page=2' }
+			});
+			await vi.waitFor(() =>
+				expect(first.querySelectorAll('[data-testid="pdf-page-shell"]')).toHaveLength(4)
+			);
+			render(Page, {
+				target: second,
+				context: new Map([[DOCUMENT_AGENT, agent]]),
+				props: { collectionId: 'col_123', documentId: 'doc_1', search: '?view=pdf-preview&page=3' }
+			});
+			await vi.waitFor(() =>
+				expect(second.querySelectorAll('[data-testid="pdf-page-shell"]')).toHaveLength(4)
+			);
+			await expect
+				.poll(() =>
+					scrollTo.mock.contexts.some((node) => node instanceof Node && second.contains(node))
+				)
+				.toBe(true);
+			expect(first.querySelector('[data-testid="pdf-current-page"]')?.textContent).toBe('2');
+			expect(second.querySelector('[data-testid="pdf-current-page"]')?.textContent).toBe('3');
+			expect(document.querySelectorAll('[id="pdf-page-3"]')).toHaveLength(0);
+		} finally {
+			scrollTo.mockRestore();
+		}
+	});
+
 	it('hands an entire source-mapped table to the Agent as readable Markdown', async () => {
-		render(Page);
+		renderReader();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		const action = document.querySelector<HTMLAnchorElement>(
 			'[data-testid="ask-research-agent-source-table-1"]'
@@ -394,10 +562,12 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		action?.addEventListener('click', (event) => event.preventDefault(), { capture: true });
 		action?.click();
 
-		const context = JSON.parse(sessionStorage.getItem('lens.chatSourceContext.col_123') ?? 'null');
-		expect(context.source_kind).toBe('table');
-		expect(context.source_ref).toBe('table-1');
-		expect(context.quote).toBe(
+		const context = JSON.parse(
+			sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123') ?? 'null'
+		);
+		expect(context.contexts[0].source_kind).toBe('table');
+		expect(context.contexts[0].source_ref).toBe('table-1');
+		expect(context.contexts[0].quote).toBe(
 			'| Sample | Mechanical properties > Yield strength (MPa) | Mechanical properties > Elongation (%) |\n' +
 				'| --- | --- | --- |\n' +
 				'| as-SLM | 920 | 8.4 |\n' +
@@ -406,9 +576,11 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('renders the paper reading workbench without a synthetic local graph', async () => {
-		render(Page);
+		renderReader();
 
-		await expect.element(browserPage.getByRole('link', { name: 'Lens' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Documents', exact: true }))
+			.toHaveAttribute('href', '/collections/col_123/documents');
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		expect(document.querySelector('.graph-column')).toBeNull();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -448,7 +620,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			destroy: vi.fn()
 		}));
 
-		render(Page);
+		renderReader();
 
 		await browserPage.getByRole('tab', { name: 'PDF Preview' }).click();
 		await expect.element(browserPage.getByText('Parsed source fallback')).toBeInTheDocument();
@@ -461,7 +633,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 	});
 
 	it('lets the user view parsed source text while the PDF is available', async () => {
-		render(Page);
+		renderReader();
 
 		await browserPage.getByRole('tab', { name: 'PDF Preview' }).click();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).toBeInTheDocument();
@@ -488,7 +660,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -503,7 +675,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -525,7 +697,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		const activeSource = browserPage.getByTestId('markdown-active-source');
@@ -546,7 +718,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -569,7 +741,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -586,7 +758,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -606,7 +778,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -630,7 +802,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -654,7 +826,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
@@ -690,7 +862,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect
@@ -710,7 +882,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			)
 		});
 
-		render(Page);
+		renderReader();
 
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('2');

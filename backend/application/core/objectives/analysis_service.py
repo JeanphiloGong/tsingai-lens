@@ -2,27 +2,39 @@ from __future__ import annotations
 
 from asyncio import (
     CancelledError,
+    Lock,
     Semaphore,
     Task,
     create_task,
     get_running_loop,
     run_coroutine_threadsafe,
+    to_thread,
 )
 from collections.abc import Coroutine
+from dataclasses import replace
 import logging
 from time import perf_counter
 from typing import Any, Callable
 
+from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
+    record_analysis_failure,
 )
+from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
-from application.core.objectives.research_objective_service import (
-    ObjectiveAnalysisArtifacts,
-    ResearchObjectiveService,
+from application.core.objectives.finding_summary import (
+    MAX_SUMMARY_EVIDENCE,
+    FindingSummaryUnavailable,
+    summarize_finding_evidence,
 )
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveAnalysisArtifacts,
+    ObjectiveEvidenceAnalysisService,
+)
+from application.core.objectives.objective_input_service import ObjectiveInputService
 from domain.core import ObjectiveAnalysis, ResearchObjective
-from domain.ports import ObjectiveRepository
+from application.repositories.objective_repository import ObjectiveRepository
 from infra.llm.usage import capture_llm_usage
 
 
@@ -176,14 +188,18 @@ class ObjectiveAnalysisService:
         self,
         *,
         objective_repository: ObjectiveRepository,
-        research_objective_service: ResearchObjectiveService,
+        evidence_analysis_service: ObjectiveEvidenceAnalysisService,
+        objective_input_service: ObjectiveInputService,
+        document_profile_service: DocumentProfileService,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
         task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("objective analysis concurrency must be positive")
         self.objective_repository = objective_repository
-        self.research_objective_service = research_objective_service
+        self.evidence_analysis_service = evidence_analysis_service
+        self.objective_input_service = objective_input_service
+        self.document_profile_service = document_profile_service
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
@@ -254,7 +270,7 @@ class ObjectiveAnalysisService:
         document_ids: tuple[str, ...],
     ) -> dict[str, Any]:
         document_inputs = (
-            await self.research_objective_service.resolve_prepared_document_inputs(
+            await self.objective_input_service.resolve_prepared_document_inputs(
                 collection_id,
                 document_ids,
             )
@@ -267,7 +283,7 @@ class ObjectiveAnalysisService:
             model_name=None,
             prompt_versions={},
         )
-        return await self._result(collection_id, objective, analysis=analysis)
+        return await self._result(collection_id, objective.objective_id, analysis=analysis)
 
     async def fail_analysis_dispatch(
         self,
@@ -286,15 +302,65 @@ class ObjectiveAnalysisService:
             ),
             expected_status="queued",
         )
-        return await self._result(collection_id, objective, analysis=analysis)
+        return await self._result(collection_id, objective.objective_id, analysis=analysis)
 
     async def get_analysis_state(
         self,
         collection_id: str,
         objective_id: str,
     ) -> dict[str, Any]:
+        return await self._result(collection_id, objective_id)
+
+    async def get_analysis_status(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
+        """Read only the active analysis progress needed for polling."""
+
         objective = await self._require_objective(collection_id, objective_id)
-        return await self._result(collection_id, objective)
+        analysis = await self.objective_repository.read_analysis(
+            collection_id,
+            objective.objective_id,
+            objective.active_analysis_version,
+        )
+        if analysis is None:
+            return {
+                "collection_id": collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": None,
+                "status": None,
+                "phase": None,
+                "processed_document_count": 0,
+                "total_document_count": 0,
+                "current_document_id": None,
+                "progress_message": None,
+                "error_code": None,
+                "error_message": None,
+                "created_at": None,
+                "started_at": None,
+                "completed_at": None,
+            }
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": analysis.analysis_version,
+            "status": analysis.status,
+            "phase": analysis.phase,
+            "processed_document_count": analysis.processed_document_count,
+            "total_document_count": analysis.total_document_count,
+            "current_document_id": analysis.current_document_id,
+            "progress_message": analysis.progress_message,
+            "error_code": analysis.error_code,
+            "error_message": (
+                analysis_error_message(analysis.error_code)
+                if analysis.status == "failed"
+                else analysis.error_message
+            ),
+            "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+            "started_at": analysis.started_at.isoformat() if analysis.started_at else None,
+            "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
+        }
 
     async def list_findings(
         self,
@@ -357,6 +423,37 @@ class ObjectiveAnalysisService:
             "finding": finding.to_record(),
         }
 
+    async def summarize_finding(
+        self,
+        collection_id: str,
+        objective_id: str,
+        finding_id: str,
+        *,
+        analysis_version: int,
+        language: str,
+    ) -> dict[str, Any]:
+        detail = await self.get_finding(
+            collection_id, objective_id, finding_id, analysis_version=analysis_version
+        )
+        records, total = await self.objective_repository.list_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=0,
+            limit=MAX_SUMMARY_EVIDENCE,
+        )
+        if total > MAX_SUMMARY_EVIDENCE:
+            raise FindingSummaryUnavailable("summary_input_too_large")
+        result = await to_thread(
+            summarize_finding_evidence,
+            finding=detail["finding"],
+            evidence=[item.to_record() for item in records],
+            language=language,
+        )
+        await self._published_version(collection_id, objective_id, analysis_version)
+        return result
+
     async def list_evidence(
         self,
         collection_id: str,
@@ -418,11 +515,9 @@ class ObjectiveAnalysisService:
             objective_id,
             version,
         )
-        profiles = await (
-            self.research_objective_service.document_profile_service.read_document_profiles(
-                collection_id,
-                tuple(item.document_id for item in analysis.document_inputs),
-            )
+        profiles = await self.document_profile_service.read_document_profiles(
+            collection_id,
+            tuple(item.document_id for item in analysis.document_inputs),
         )
         return build_objective_evidence_map(
             objective=objective,
@@ -493,7 +588,7 @@ class ObjectiveAnalysisService:
                 analysis_version,
             )
             if claimed is None:
-                return await self._result(collection_id, objective)
+                return await self._result(collection_id, objective.objective_id)
             usage_started_at = perf_counter()
             progress_callback = self._build_progress_callback(claimed)
             with (
@@ -503,13 +598,22 @@ class ObjectiveAnalysisService:
                 artifacts: ObjectiveAnalysisArtifacts | None = None
                 try:
                     artifacts = (
-                        await self.research_objective_service.generate_objective_analysis_artifacts(
+                        await self.evidence_analysis_service.generate_objective_analysis_artifacts(
                             collection_id,
                             claimed,
                             progress_callback=progress_callback,
                         )
                     )
                     self._validate_artifacts(artifacts)
+                except Exception as exc:
+                    record_analysis_failure(
+                        exc,
+                        collection_id=collection_id,
+                        objective_id=objective_id,
+                        analysis_version=analysis_version,
+                        stage="generate_artifacts",
+                    )
+                    raise
                 finally:
                     claimed = await self.objective_repository.update_analysis_execution_stats(
                         collection_id,
@@ -539,13 +643,21 @@ class ObjectiveAnalysisService:
                 abstention_reason=abstention_reason,
                 abstention_note=abstention_note,
             )
-            return await self._result(collection_id, objective, analysis=completed)
+            return await self._result(collection_id, objective.objective_id, analysis=completed)
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s",
+            record_analysis_failure(
+                exc,
+                collection_id=collection_id,
+                objective_id=objective_id,
+                analysis_version=analysis_version,
+                stage="execute_analysis",
+            )
+            logger.error(
+                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
                 collection_id,
                 objective_id,
                 analysis_version,
+                type(exc).__name__,
             )
             current = await self.objective_repository.read_analysis(
                 collection_id,
@@ -558,10 +670,9 @@ class ObjectiveAnalysisService:
                     objective_id,
                     analysis_version,
                     error_code=self._error_code(exc),
-                    error_message=str(exc) or exc.__class__.__name__,
+                    error_message=analysis_error_message(self._error_code(exc)),
                 )
-            objective = await self._require_objective(collection_id, objective_id)
-            return await self._result(collection_id, objective, analysis=current)
+            return await self._result(collection_id, objective_id, analysis=current)
 
     async def _execute_scheduled_analysis(
         self,
@@ -605,22 +716,43 @@ class ObjectiveAnalysisService:
     async def _result(
         self,
         collection_id: str,
-        objective: ResearchObjective,
+        objective_id: str,
         *,
         analysis: ObjectiveAnalysis | None = None,
     ) -> dict[str, Any]:
-        active = analysis or await self.objective_repository.read_analysis(
-            collection_id,
-            objective.objective_id,
-            objective.active_analysis_version,
+        stored_objective = await self.objective_repository.read_objective_record(
+            collection_id, objective_id
         )
-        published = await self.objective_repository.read_published_analysis(
-            collection_id,
-            objective.objective_id,
-        )
+        if stored_objective is None:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            )
+        objective = stored_objective.objective
+        active = analysis
+        if active is None and objective.active_analysis_version is not None:
+            active = await self.objective_repository.read_analysis(
+                collection_id, objective_id, objective.active_analysis_version
+            )
+        published = None
+        if objective.published_analysis_version is not None:
+            if (
+                active is not None
+                and active.analysis_version == objective.published_analysis_version
+            ):
+                published = active
+            else:
+                published = await self.objective_repository.read_analysis(
+                    collection_id, objective_id, objective.published_analysis_version
+                )
         if active is not None and active.error_code == "analysis_interrupted":
             active = None
+        if active is not None and active.status == "failed":
+            active = replace(
+                active,
+                error_message=analysis_error_message(active.error_code),
+            )
         findings = ()
+        finding_total = 0
         paper_contributions = ()
         evidence_records = ()
         warnings: list[str] = []
@@ -630,7 +762,7 @@ class ObjectiveAnalysisService:
                 objective.objective_id,
                 published.analysis_version,
             )
-            findings, _total = await self.objective_repository.list_findings(
+            findings, finding_total = await self.objective_repository.list_findings(
                 collection_id,
                 objective.objective_id,
                 published.analysis_version,
@@ -677,17 +809,30 @@ class ObjectiveAnalysisService:
                     if scoped_reason not in seen_warnings:
                         seen_warnings.add(scoped_reason)
                         warnings.append(scoped_reason)
-        objective_record = await self.objective_repository.read_objective_record(
-            collection_id,
-            objective.objective_id,
-        )
+            for evidence in evidence_records:
+                for warning in evidence.warnings:
+                    scoped_warning = (
+                        f"{evidence.document_id}/{evidence.source_ref}: {warning}"
+                    )
+                    if scoped_warning in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_warning)
+                    warnings.append(scoped_warning)
+            for finding in findings:
+                for warning in finding.warnings:
+                    scoped_warning = f"Finding {finding.finding_id}: {warning}"
+                    if scoped_warning in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_warning)
+                    warnings.append(scoped_warning)
         return {
             "collection_id": collection_id,
-            "objective": objective,
-            "objective_record": objective_record,
+            "objective": stored_objective,
             "analysis": active,
             "published_analysis": published,
             "findings": findings,
+            "finding_total": finding_total,
+            "omitted_finding_count": max(0, finding_total - len(findings)),
             "paper_contributions": paper_contributions,
             "evidence_review": _evidence_review_summary(evidence_records),
             "warnings": warnings,
@@ -726,61 +871,40 @@ class ObjectiveAnalysisService:
         analysis: ObjectiveAnalysis,
     ) -> Callable[[dict[str, Any]], None]:
         loop = get_running_loop()
-        seen_document_ids: set[str] = set()
-        processed_document_count = analysis.processed_document_count
-        total_document_count = analysis.total_document_count
+        completed_document_ids: set[str] = set()
+        progress_lock = Lock()
 
-        def update(progress: dict[str, Any]) -> None:
-            nonlocal processed_document_count
-            active_document_id = (
-                str(progress.get("active_document_id"))
-                if progress.get("active_document_id")
-                else None
-            )
-            if active_document_id:
-                seen_document_ids.add(active_document_id)
-            if progress.get("unit") in {"documents", "frames"}:
-                current = self._safe_int(progress.get("current"))
-                processed_document_count = max(
-                    processed_document_count,
-                    current or 0,
-                )
-            else:
-                processed_document_count = max(
-                    processed_document_count,
-                    len(seen_document_ids),
-                )
-            processed_document_count = min(
-                processed_document_count,
-                total_document_count,
-            )
-            update_future = run_coroutine_threadsafe(
-                self.objective_repository.update_analysis_progress(
+        async def persist_progress(progress: dict[str, Any]) -> None:
+            # Worker events can overlap; count and persist them in the same order.
+            async with progress_lock:
+                active_document_id = progress.get("active_document_id")
+                if (
+                    progress.get("phase") == "objective_document_evidence_completed"
+                    and active_document_id
+                ):
+                    completed_document_ids.add(active_document_id)
+                await self.objective_repository.update_analysis_progress(
                     analysis.collection_id,
                     analysis.objective_id,
                     analysis.analysis_version,
-                    phase=str(progress.get("phase") or "running"),
-                    processed_document_count=processed_document_count,
-                    total_document_count=total_document_count,
-                    current_document_id=active_document_id,
-                    progress_message=(
-                        str(progress.get("message"))
-                        if progress.get("message")
-                        else None
+                    phase=progress.get("phase") or "running",
+                    processed_document_count=max(
+                        analysis.processed_document_count,
+                        len(completed_document_ids),
                     ),
-                ),
+                    total_document_count=analysis.total_document_count,
+                    current_document_id=active_document_id,
+                    progress_message=progress.get("message"),
+                )
+
+        def update(progress: dict[str, Any]) -> None:
+            update_future = run_coroutine_threadsafe(
+                persist_progress(progress),
                 loop,
             )
             update_future.result()
 
         return update
-
-    @staticmethod
-    def _safe_int(value: Any) -> int | None:
-        try:
-            return int(value) if value is not None else None
-        except (TypeError, ValueError):
-            return None
 
     @staticmethod
     def _error_code(exc: Exception) -> str:

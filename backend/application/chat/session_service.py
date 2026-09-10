@@ -29,12 +29,13 @@ from domain.chat import (
     ToolResultStatus,
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
-from application.repositories.chat_repository import ChatRepository, ChatSessionBusyError
+from application.repositories.chat_repository import ChatRepository, ChatResponseSnapshot, ChatSessionBusyError
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 
 
 logger = logging.getLogger(__name__)
 _HEARTBEAT_INTERVAL_SECONDS = 15
+_SNAPSHOT_INTERVAL_SECONDS = 0.25
 
 
 def _now_iso() -> str:
@@ -177,8 +178,17 @@ class ChatSessionService:
 
     async def get_trajectory_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
+        response = await self.repository.read_response_snapshot(session_id)
         # Sample execution before messages, so a just-finished turn still gets a final poll.
         running = await self.repository.is_session_running(session_id)
+        if not running:
+            latest = await self.repository.read_response_snapshot(session_id)
+            if response is not None and response.status == "running":
+                if latest == response:
+                    latest = replace(response, status="interrupted", error_code="chat_response_interrupted")
+            # A snapshot changing during the lock sample needs another update, not an interruption.
+            running = latest is not None and latest.status == "running"
+            response = latest
         messages = await self.repository.read_messages(session_id)
         family = await self.repository.read_session_family(session)
         branches = []
@@ -211,8 +221,39 @@ class ChatSessionService:
             if pending is not None:
                 break
         return {"messages": messages, "branches": branches, "branch_draft": draft,
-                "running": running, "pending_approval": pending,
+                "running": running, "pending_approval": pending, "response": response,
                 "feedback": await self.repository.read_feedback(session_id, user_id)}
+
+    async def stream_updates_for_user(
+        self, session_id: str, user_id: str, *, response_id: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        await self.get_session_for_user(session_id, user_id)
+
+        async def events() -> AsyncIterator[dict[str, Any]]:
+            sequence = -1
+            checkpoint_id = None
+            first = True
+            while True:
+                # Recheck ownership on each sample, including collection deletion/revocation.
+                await self.get_session_for_user(session_id, user_id)
+                snapshot = await self.repository.read_response_snapshot(session_id)
+                running = await self.repository.is_session_running(session_id)
+                if not running or snapshot is None or snapshot.response_id != response_id:
+                    yield {"type": "trajectory", "trajectory": await self.get_trajectory_for_user(session_id, user_id)}
+                    return
+                if snapshot.sequence != sequence:
+                    sequence = snapshot.sequence
+                    if first or snapshot.checkpoint_message_id != checkpoint_id or snapshot.status != "running":
+                        yield {"type": "trajectory", "trajectory": await self.get_trajectory_for_user(session_id, user_id)}
+                        checkpoint_id = snapshot.checkpoint_message_id
+                    else:
+                        yield {"type": "snapshot", "snapshot": snapshot}
+                    first = False
+                if snapshot.status != "running":
+                    return
+                await asyncio.sleep(_SNAPSHOT_INTERVAL_SECONDS)
+
+        return events()
 
     async def set_message_feedback_for_user(
         self,
@@ -267,12 +308,11 @@ class ChatSessionService:
             if branch_revision and len(previous_messages) != session.fork_position:
                 raise ChatBranchAlreadyStartedError("this revision has already been sent")
             await self._ensure_turn_ready(previous_messages)
-            result = await self.runner.run_turn(
-                context=self._context(session),
+            result = await self._run_response(
+                session,
                 previous_messages=previous_messages,
-                user_message=message,
+                message=message,
                 source_contexts=source_contexts,
-                checkpoint=self._trajectory_checkpoint(session),
             )
         return self._turn_record(result, previous_count=len(previous_messages))
 
@@ -302,20 +342,11 @@ class ChatSessionService:
 
         async def events() -> AsyncIterator[dict[str, Any]]:
             queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-            loop = asyncio.get_running_loop()
-            started_at = asyncio.get_running_loop().time()
-            last_progress: dict[str, Any] = {"phase": "waiting", "cycle_index": 0, "elapsed_ms": 0}
+            connected = True
 
-            def emit_progress(payload: dict[str, Any]) -> None:
-                nonlocal last_progress
-                last_progress = dict(payload)
-                queue.put_nowait({"type": "progress", "progress": payload})
-
-            def emit_text_delta(content: str) -> None:
-                loop.call_soon_threadsafe(
-                    queue.put_nowait,
-                    {"type": "text_delta", "content": content},
-                )
+            def emit(event: dict[str, Any]) -> None:
+                if connected:
+                    queue.put_nowait(event)
 
             async def run_turn() -> None:
                 try:
@@ -324,16 +355,11 @@ class ChatSessionService:
                         if branch_revision and len(current_messages) != session.fork_position:
                             raise ChatBranchAlreadyStartedError("this revision has already been sent")
                         await self._ensure_turn_ready(current_messages)
-                        result = await self.runner.run_turn(
-                            context=self._context(session),
-                            previous_messages=current_messages,
-                            user_message=message,
-                            source_contexts=source_contexts,
-                            checkpoint=self._trajectory_checkpoint(session),
-                            text_delta_callback=emit_text_delta,
-                            progress_callback=emit_progress,
+                        result = await self._run_response(
+                            session, previous_messages=current_messages, message=message,
+                            source_contexts=source_contexts, emit=emit,
                         )
-                    await queue.put(
+                    emit(
                         {
                             "type": "turn",
                             "turn": self._turn_record(
@@ -342,12 +368,12 @@ class ChatSessionService:
                             ),
                         }
                     )
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "Research Agent streaming turn failed session_id=%s",
-                        session_id,
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Research Agent streaming turn failed session_id=%s exception_type=%s",
+                        session_id, type(exc).__name__,
                     )
-                    await queue.put(
+                    emit(
                         {
                             "type": "error",
                             "error": {
@@ -359,31 +385,126 @@ class ChatSessionService:
                 finally:
                     await queue.put(None)
 
-            async def heartbeat() -> None:
-                try:
-                    while True:
-                        await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
-                        emit_progress({
-                            **last_progress,
-                            "phase": "waiting",
-                            "elapsed_ms": round((loop.time() - started_at) * 1000),
-                        })
-                except asyncio.CancelledError:
-                    return
-
-            emit_progress(last_progress)
             task = asyncio.create_task(run_turn())
-            heartbeat_task = asyncio.create_task(heartbeat())
             self._active_stream_tasks.add(task)
             task.add_done_callback(self._active_stream_tasks.discard)
             try:
                 while (event := await queue.get()) is not None:
                     yield event
             finally:
-                heartbeat_task.cancel()
-                await asyncio.gather(heartbeat_task, return_exceptions=True)
+                connected = False
 
         return events()
+
+    async def _run_response(
+        self, session: ChatSession, *, previous_messages: tuple[ChatMessage, ...],
+        message: str | None = None, source_contexts: tuple[ChatSourceContext, ...] = (),
+        claimed_call: ChatToolCall | None = None,
+        emit: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentRunResult:
+        # The caller holds the execution lock through the final snapshot write.
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        now = _now_iso()
+        snapshot = ChatResponseSnapshot(
+            response_id=f"response_{uuid4().hex}", sequence=0,
+            started_at=now, updated_at=now,
+            checkpoint_message_id=previous_messages[-1].message_id if previous_messages else None,
+            progress={"phase": "waiting", "cycle_index": 0, "elapsed_ms": 0},
+        )
+        saved_sequence = -1
+        snapshot_lock = asyncio.Lock()
+
+        def update_snapshot(**changes: Any) -> None:
+            nonlocal snapshot
+            snapshot = replace(snapshot, sequence=snapshot.sequence + 1, updated_at=_now_iso(), **changes)
+
+        async def flush_snapshot() -> None:
+            nonlocal saved_sequence
+            async with snapshot_lock:
+                if saved_sequence == snapshot.sequence:
+                    return
+                current = snapshot
+                await self.repository.save_response_snapshot(session.session_id, current)
+                saved_sequence = current.sequence
+
+        def emit_progress(payload: dict[str, Any]) -> None:
+            update_snapshot(progress=dict(payload))
+            if emit:
+                emit({"type": "progress", "progress": payload})
+
+        def start_response(message_id: str, created_at: str) -> None:
+            update_snapshot(message_id=message_id, message_created_at=created_at, content="")
+            emit_progress({**snapshot.progress, "phase": "waiting", "elapsed_ms": round((loop.time() - started_at) * 1000)})
+            if emit:
+                emit({"type": "snapshot", "snapshot": snapshot})
+
+        def emit_text_delta(content: str) -> None:
+            def append() -> None:
+                if snapshot.message_id is not None:
+                    if content and snapshot.progress.get("phase") != "responding":
+                        emit_progress({**snapshot.progress, "phase": "responding", "elapsed_ms": round((loop.time() - started_at) * 1000)})
+                    update_snapshot(content=snapshot.content + content)
+                if emit:
+                    emit({"type": "text_delta", "content": content})
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if current_loop is loop:
+                append()
+            else:
+                loop.call_soon_threadsafe(append)
+
+        async def record_checkpoint(messages: tuple[ChatMessage, ...]) -> None:
+            saved_ids = {item.message_id for item in messages}
+            update_snapshot(
+                checkpoint_message_id=messages[-1].message_id if messages else None,
+                **({"message_id": None, "message_created_at": None, "content": ""}
+                   if snapshot.message_id in saved_ids else {}),
+            )
+            await flush_snapshot()
+            if emit:
+                emit({"type": "trajectory", "trajectory": await self.get_trajectory_for_user(session.session_id, session.user_id)})
+
+        async def save_updates() -> None:
+            heartbeat_at = loop.time()
+            while True:
+                await asyncio.sleep(_SNAPSHOT_INTERVAL_SECONDS)
+                if loop.time() - heartbeat_at >= _HEARTBEAT_INTERVAL_SECONDS:
+                    heartbeat_at = loop.time()
+                    emit_progress({**snapshot.progress, "elapsed_ms": round((loop.time() - started_at) * 1000)})
+                try:
+                    await flush_snapshot()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Chat response snapshot save failed exception_type=%s", type(exc).__name__)
+
+        await flush_snapshot()
+        writer = asyncio.create_task(save_updates())
+        try:
+            arguments = {
+                "context": self._context(session), "previous_messages": previous_messages,
+                "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
+                "text_delta_callback": emit_text_delta, "progress_callback": emit_progress,
+                "response_started_callback": start_response,
+            }
+            if claimed_call is not None:
+                result = await self.runner.resume_claimed_call(**arguments, claimed_call=claimed_call)
+            else:
+                result = await self.runner.run_turn(**arguments, user_message=message, source_contexts=source_contexts)
+            update_snapshot(
+                status=result.status.value, message_id=None, message_created_at=None, content="",
+                completion_reason=result.completion_reason.value if result.completion_reason else None,
+                error_code=result.error_code, warnings=result.warnings,
+            )
+            return result
+        except BaseException:
+            update_snapshot(status="interrupted", error_code="chat_response_interrupted")
+            raise
+        finally:
+            writer.cancel()
+            await asyncio.gather(writer, return_exceptions=True)
+            await flush_snapshot()
 
     async def _ensure_turn_ready(self, messages: tuple[ChatMessage, ...]) -> None:
         for message in messages:
@@ -584,11 +705,10 @@ class ChatSessionService:
                     }
                 raise ValueError("approved research action is already running")
             previous_messages = await self.repository.read_messages(session_id)
-            run_result = await self.runner.resume_claimed_call(
-                context=self._context(session),
+            run_result = await self._run_response(
+                session,
                 previous_messages=previous_messages,
                 claimed_call=claimed,
-                checkpoint=self._trajectory_checkpoint(session),
             )
         return self._turn_record(
             run_result,
@@ -598,6 +718,8 @@ class ChatSessionService:
     def _trajectory_checkpoint(
         self,
         session: ChatSession,
+        *,
+        on_saved: Callable[[tuple[ChatMessage, ...]], Awaitable[None]] | None = None,
     ) -> Callable[
         [
             tuple[ChatMessage, ...],
@@ -622,6 +744,8 @@ class ChatSessionService:
                 tool_calls=tool_calls,
                 tool_results=tool_results,
             )
+            if on_saved is not None:
+                await on_saved(messages)
 
         return save
 

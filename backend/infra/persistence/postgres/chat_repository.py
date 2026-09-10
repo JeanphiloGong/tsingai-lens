@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import json
 from uuid import uuid4
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -20,7 +21,7 @@ from domain.chat import (
     ToolCallStatus,
 )
 from domain.chat.feedback import ChatMessageFeedback
-from application.repositories.chat_repository import ChatSessionBusyError
+from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
 from infra.persistence.postgres.models.chat import (
     ChatMessageFeedbackRow,
     ChatMessageRow,
@@ -54,6 +55,25 @@ class PostgresChatRepository:
             return not await database.scalar(select(func.pg_try_advisory_xact_lock(
                 func.hashtextextended(f"chat-execution:{session_id}", 0),
             )))
+
+    async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None:
+        async with self.session_factory() as database:
+            payload = await database.scalar(select(ChatSessionRow.response_snapshot).where(
+                ChatSessionRow.session_id == session_id,
+            ))
+            if payload is None:
+                return None
+            return ChatResponseSnapshot(**{
+                **payload,
+                "warnings": tuple(payload.get("warnings") or ()),
+            })
+
+    async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None:
+        payload = asdict(snapshot)
+        async with self.session_factory.begin() as database:
+            await database.execute(update(ChatSessionRow).where(
+                ChatSessionRow.session_id == session_id,
+            ).values(response_snapshot=payload))
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
         root_id = session.root_session_id or session.session_id

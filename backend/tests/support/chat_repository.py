@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
+from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 
 
@@ -11,6 +14,30 @@ class MemoryChatRepository:
         self.messages: dict[str, tuple[ChatMessage, ...]] = {}
         self.calls: dict[str, ChatToolCall] = {}
         self.results: dict[str, ChatToolResult] = {}
+        self.active_sessions: set[str] = set()
+        self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
+
+    @asynccontextmanager
+    async def session_execution(self, session_id: str):
+        if session_id in self.active_sessions:
+            raise ChatSessionBusyError()
+        self.active_sessions.add(session_id)
+        try:
+            yield
+        finally:
+            self.active_sessions.remove(session_id)
+
+    async def is_session_running(self, session_id: str) -> bool:
+        return session_id in self.active_sessions
+
+    async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None:
+        return self.response_snapshots.get(session_id)
+
+    async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None:
+        self.response_snapshots[session_id] = snapshot
+
+    async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
+        return (session,)
 
     async def add_session(self, record: ChatSession) -> None:
         self.sessions[record.session_id] = record

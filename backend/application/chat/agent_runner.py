@@ -115,6 +115,9 @@ class AgentRunLimits:
 class _RunProgress:
     limits: AgentRunLimits
     progress_callback: Callable[[dict[str, Any]], None] | None = None
+    response_started_callback: Callable[[str, str], None] | None = None
+    response_message_id: str = ""
+    response_created_at: str = ""
     started_at: float = field(default_factory=lambda: monotonic())
     model_cycles: int = 0
     model_tokens: int = 0
@@ -125,6 +128,12 @@ class _RunProgress:
     seen_observations: set[str] = field(default_factory=set)
     consecutive_no_progress: int = 0
     resource_refs: set[tuple[str, str]] = field(default_factory=set)
+
+    def start_response(self) -> None:
+        self.response_message_id = f"msg_{uuid4().hex[:16]}"
+        self.response_created_at = _now_iso()
+        if self.response_started_callback is not None:
+            self.response_started_callback(self.response_message_id, self.response_created_at)
 
     def remaining_seconds(self) -> float:
         return max(0.0, self.limits.max_elapsed_seconds - (monotonic() - self.started_at))
@@ -237,8 +246,10 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        response_started_callback: Callable[[str, str], None] | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(self.limits, progress_callback=progress_callback)
+        progress = _RunProgress(self.limits, progress_callback=progress_callback,
+                                response_started_callback=response_started_callback)
         messages = [
             *previous_messages,
             ChatMessage.user(
@@ -272,8 +283,10 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        response_started_callback: Callable[[str, str], None] | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(self.limits, progress_callback=progress_callback)
+        progress = _RunProgress(self.limits, progress_callback=progress_callback,
+                                response_started_callback=response_started_callback)
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
         inherited_completed_writes = capability_policy.completed_write_names(messages)
@@ -346,6 +359,7 @@ class ResearchAgentRunner:
                         stop_reason, progress, context, messages, calls, results,
                         checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                     )
+                progress.start_response()
                 try:
                     tool_specs = capability_policy.select_tool_specs(
                         self.capabilities,
@@ -371,7 +385,7 @@ class ResearchAgentRunner:
                             if latest.data["draft_status"] == "needs_finding_review":
                                 lead += "所引用的研究结论仍需研究者审阅。" if chinese else " Its supporting conclusions still require researcher review."
                             content = f"{lead}\n\n{latest.data['content']}"
-                            messages.append(self._assistant(context, content))
+                            messages.append(self._assistant(context, content, progress))
                             await self._checkpoint(checkpoint, messages, calls, results)
                             if text_delta_callback is not None:
                                 text_delta_callback(content)
@@ -480,6 +494,7 @@ class ResearchAgentRunner:
                         self._assistant(
                             context,
                             self._failure_answer(messages, calls, results, review_reason=exc.reason),
+                            progress,
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -507,6 +522,7 @@ class ResearchAgentRunner:
                         self._assistant(
                             context,
                             self._failure_answer(messages, calls, results),
+                            progress,
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -556,7 +572,7 @@ class ResearchAgentRunner:
                         required_tool,
                     )
                     messages.append(
-                        self._assistant(context, self._failure_answer(messages, calls, results))
+                        self._assistant(context, self._failure_answer(messages, calls, results), progress)
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
                     progress.trace(context, phase="terminal", termination_reason="required_research_action_not_completed")
@@ -571,7 +587,7 @@ class ResearchAgentRunner:
 
             if not turn.tool_calls:
                 reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
-                messages.append(self._assistant(context, turn.content))
+                messages.append(self._assistant(context, turn.content, progress))
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True)
                 return self._result(
@@ -585,6 +601,7 @@ class ResearchAgentRunner:
                 messages,
                 turn,
                 allowed_names=set(tool_names),
+                progress=progress,
             )
             batch_start = len(calls)
             calls.extend(call for call, _ in requested)
@@ -900,6 +917,7 @@ class ResearchAgentRunner:
         logger.info(
             "Research Agent final answer reason=%s tools=none", reason.value,
         )
+        progress.start_response()
         try:
             turn = await self._respond(
                 self.context_builder.for_model(
@@ -918,11 +936,11 @@ class ResearchAgentRunner:
             )
             messages.append(self._assistant(context, self._failure_answer(
                 messages, calls, results, review_reason=exc.reason if isinstance(exc, ModelResponseError) else "",
-            )))
+            ), progress))
             progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
             await self._checkpoint(checkpoint, messages, calls, results)
             return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
-        messages.append(self._assistant(context, turn.content))
+        messages.append(self._assistant(context, turn.content, progress))
         progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True)
         await self._checkpoint(checkpoint, messages, calls, results)
         return self._result(
@@ -1011,8 +1029,9 @@ class ResearchAgentRunner:
         turn: Any,
         *,
         allowed_names: set[str],
+        progress: _RunProgress,
     ) -> tuple[tuple[ChatToolCall, Any], ...]:
-        assistant_message_id = self._message_id()
+        assistant_message_id = progress.response_message_id
         requested = []
         for position, model_call in enumerate(turn.tool_calls):
             registered = self.capabilities.get(model_call.name)
@@ -1029,7 +1048,7 @@ class ResearchAgentRunner:
                 session_id=context.session_id,
                 content=turn.content,
                 tool_calls=tuple(call.to_request() for call, _ in requested),
-                created_at=_now_iso(),
+                created_at=progress.response_created_at,
             )
         )
         return tuple(requested)
@@ -1269,12 +1288,12 @@ class ResearchAgentRunner:
         )
 
     @staticmethod
-    def _assistant(context: AgentContext, content: str) -> ChatMessage:
+    def _assistant(context: AgentContext, content: str, progress: _RunProgress) -> ChatMessage:
         return ChatMessage.assistant(
-            message_id=ResearchAgentRunner._message_id(),
+            message_id=progress.response_message_id,
             session_id=context.session_id,
             content=content,
-            created_at=_now_iso(),
+            created_at=progress.response_created_at,
         )
 
     @staticmethod

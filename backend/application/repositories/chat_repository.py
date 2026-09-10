@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Any, Literal, Protocol
 from contextlib import AbstractAsyncContextManager
 
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
@@ -12,10 +13,31 @@ class ChatSessionBusyError(RuntimeError):
         super().__init__("the research response is still running; retry when it finishes")
 
 
+@dataclass(frozen=True)
+class ChatResponseSnapshot:
+    response_id: str
+    sequence: int
+    started_at: str
+    updated_at: str
+    status: Literal["running", "completed", "approval_required", "failed", "interrupted"] = "running"
+    message_id: str | None = None
+    message_created_at: str | None = None
+    content: str = ""
+    progress: dict[str, Any] = field(default_factory=dict)
+    checkpoint_message_id: str | None = None
+    completion_reason: str | None = None
+    error_code: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
 class ChatRepository(Protocol):
     def session_execution(self, session_id: str) -> AbstractAsyncContextManager[None]: ...
 
     async def is_session_running(self, session_id: str) -> bool: ...
+
+    async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None: ...
+
+    async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None: ...
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]: ...
 

@@ -249,7 +249,7 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
         branch["session_id"], app.owner, message=REVISION, branch_revision=True,
     )
     try:
-        assert (await anext(events))["type"] == "progress"
+        assert (await anext(events))["type"] == "trajectory"
         await asyncio.wait_for(entered.wait(), timeout=3)
         await events.aclose()
         saved = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()

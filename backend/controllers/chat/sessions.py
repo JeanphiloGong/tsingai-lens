@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 import json
 from typing import Any, Mapping
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from application.chat.session_service import (
@@ -24,6 +24,7 @@ from controllers.schemas.chat.session import (
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
+    ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionResponse,
     ChatToolCallResponse,
@@ -114,17 +115,43 @@ async def list_chat_messages(
     try:
         user_id = await current_user_id(request)
         trajectory = await request.app.state.chat_session_service.get_trajectory_for_user(session_id, user_id)
-        pending = trajectory["pending_approval"]
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _trajectory_response(trajectory)
+
+
+@router.get("/{session_id}/events", summary="Resume updates for one owned Research Agent response")
+async def stream_chat_updates(
+    session_id: str, request: Request, response_id: str = Query(min_length=1, max_length=128),
+) -> StreamingResponse:
+    try:
+        events = await request.app.state.chat_session_service.stream_updates_for_user(
+            session_id, await current_user_id(request), response_id=response_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return StreamingResponse(
+        _chat_event_stream(events), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _snapshot_response(snapshot: Any) -> ChatResponseSnapshotResponse:
+    return ChatResponseSnapshotResponse.model_validate(vars(snapshot))
+
+
+def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListResponse:
+    pending = trajectory["pending_approval"]
+    response = trajectory.get("response")
     return ChatMessageListResponse(
         items=[_message_response(item) for item in trajectory["messages"]],
         feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in trajectory["feedback"]],
         branches=trajectory["branches"],
         branch_draft=_message_response(trajectory["branch_draft"]) if trajectory["branch_draft"] else None,
         running=trajectory["running"],
+        response=_snapshot_response(response) if response is not None else None,
         pending_approval=(
             ChatToolCallResponse.model_validate(pending.to_record())
             if pending is not None
@@ -246,6 +273,10 @@ async def _chat_event_stream(
             data = {"content": str(item.get("content") or "")}
         elif event_type == "progress":
             data = dict(item.get("progress") or {})
+        elif event_type == "snapshot":
+            data = _snapshot_response(item["snapshot"]).model_dump(mode="json")
+        elif event_type == "trajectory":
+            data = _trajectory_response(item["trajectory"]).model_dump(mode="json")
         else:
             event_type = "error"
             data = item.get("error") or {

@@ -25,7 +25,7 @@ from application.chat.session_service import (
     ChatSessionService,
     ChatSourceContextError,
 )
-from application.repositories.chat_repository import ChatSessionBusyError
+from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
 from application.chat.capabilities.document_sources import ReadSourceCapability
 from domain.chat import (
     ChatMessage,
@@ -128,6 +128,7 @@ class _Repository:
     def __init__(self) -> None:
         self.sessions: dict[str, ChatSession] = {}
         self.active_sessions: set[str] = set()
+        self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
         self.messages: dict[str, tuple[ChatMessage, ...]] = {}
         self.calls: dict[str, ChatToolCall] = {}
         self.results: dict[str, ChatToolResult] = {}
@@ -151,6 +152,18 @@ class _Repository:
 
     async def is_session_running(self, session_id: str) -> bool:
         return session_id in self.active_sessions
+
+    async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None:
+        return self.response_snapshots.get(session_id)
+
+    async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None:
+        self.response_snapshots[session_id] = snapshot
+
+    async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
+        return (session,)
+
+    async def read_feedback(self, session_id: str, user_id: str) -> tuple:
+        return ()
 
     async def read_session(self, session_id: str) -> ChatSession | None:
         return self.sessions.get(session_id)
@@ -559,7 +572,9 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn() -> 
     )
     events = [event async for event in stream]
 
-    assert events[0]["type"] == "progress"
+    assert events[0]["type"] == "trajectory"
+    snapshot = next(event["snapshot"] for event in events if event["type"] == "snapshot")
+    assert snapshot.message_id == events[-1]["turn"]["messages"][-1].message_id
     assert [event for event in events if event["type"] == "text_delta"] == [
         {"type": "text_delta", "content": "逐段"},
         {"type": "text_delta", "content": "回复"},
@@ -571,6 +586,165 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn() -> 
     )
     assert events[-1]["turn"]["messages"][-1].content == "逐段回复"
     assert (await repository.read_messages(session.session_id))[-1].content == "逐段回复"
+
+
+class _PausedResponseModel:
+    first = "Match test temperature, "
+    second = "specimen orientation, and heat treatment.\n\n$\\sigma = F/A$"
+
+    def __init__(self) -> None:
+        self.continue_response = asyncio.Event()
+        self.finish_response = asyncio.Event()
+        self.calls = 0
+
+    async def respond(self, *, text_delta_callback=None, **kwargs):
+        self.calls += 1
+        if text_delta_callback:
+            text_delta_callback(self.first)
+        await self.continue_response.wait()
+        if text_delta_callback:
+            text_delta_callback(self.second)
+        await self.finish_response.wait()
+        return ModelTurn(content=self.first + self.second)
+
+
+async def test_disconnected_response_restores_text_and_continues_with_the_same_message() -> None:
+    repository = _Repository()
+    model = _PausedResponseModel()
+    service = _service(model, repository)
+    reader = _service(model, repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    original = await service.stream_message_for_user(
+        session.session_id, "user-1", message="Explain matched LPBF tensile conditions without tools.",
+    )
+    try:
+        async with asyncio.timeout(5):
+            async for event in original:
+                if event["type"] == "text_delta":
+                    break
+            await original.aclose()
+            while True:
+                saved = await reader.get_trajectory_for_user(session.session_id, "user-1")
+                if saved["response"].content == model.first:
+                    break
+                await asyncio.sleep(0.01)
+            snapshot = saved["response"]
+            assert saved["running"] is True
+            assert snapshot.progress["phase"] == "responding"
+            assert snapshot.content.endswith(" ")
+            assert len(saved["messages"]) == 1
+            updates = await reader.stream_updates_for_user(
+                session.session_id, "user-1", response_id=snapshot.response_id,
+            )
+            initial = await anext(updates)
+            assert initial["trajectory"]["response"].content == model.first
+            model.continue_response.set()
+            next_update = await anext(updates)
+            assert next_update["type"] == "snapshot"
+            continued = next_update["snapshot"]
+            assert continued.content == model.first + model.second
+            assert continued.message_id == snapshot.message_id
+            assert continued.sequence > snapshot.sequence
+            model.finish_response.set()
+            remaining = [event async for event in updates]
+            final = remaining[-1]["trajectory"]
+            assert final["response"].status == "completed"
+            assert final["messages"][-1].message_id == snapshot.message_id
+            assert final["messages"][-1].content == model.first + model.second
+            assert model.calls == 1
+    finally:
+        model.continue_response.set()
+        model.finish_response.set()
+        await asyncio.gather(*service._active_stream_tasks, return_exceptions=True)
+
+
+async def test_interrupted_response_keeps_partial_text_without_claiming_it_completed() -> None:
+    repository = _Repository()
+    model = _PausedResponseModel()
+    service = _service(model, repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    original = await service.stream_message_for_user(session.session_id, "user-1", message="Explain matching conditions without tools.")
+    async for event in original:
+        if event["type"] == "text_delta":
+            break
+    await original.aclose()
+    tasks = tuple(service._active_stream_tasks)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    saved = await service.get_trajectory_for_user(session.session_id, "user-1")
+    assert saved["running"] is False
+    assert saved["response"].status == "interrupted"
+    assert saved["response"].content == model.first
+    assert len(saved["messages"]) == 1
+    with pytest.raises(ChatSessionNotFoundError):
+        await service.stream_updates_for_user(session.session_id, "user-2", response_id=saved["response"].response_id)
+
+
+@pytest.mark.parametrize("transition", ["starts", "completes", "stops"])
+async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(transition, monkeypatch) -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="unused")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    snapshot = ChatResponseSnapshot(
+        response_id="response-1", sequence=1, started_at=session.created_at,
+        updated_at=session.created_at, message_id="answer-1", content="Match test conditions",
+    )
+    if transition != "starts":
+        await repository.save_response_snapshot(session.session_id, snapshot)
+
+    async def sample_execution(_session_id):
+        if transition == "starts":
+            await repository.save_response_snapshot(session.session_id, snapshot)
+        elif transition == "completes":
+            await repository.save_response_snapshot(session.session_id, replace(snapshot, sequence=2, status="completed"))
+        return False
+
+    monkeypatch.setattr(repository, "is_session_running", sample_execution)
+    saved = await service.get_trajectory_for_user(session.session_id, "user-1")
+    assert saved["running"] is (transition == "starts")
+    assert saved["response"].status == {"starts": "running", "completes": "completed", "stops": "interrupted"}[transition]
+    assert saved["response"].content == snapshot.content
+
+
+async def test_approved_continuation_captures_text_without_repeating_the_write() -> None:
+    repository = _Repository()
+    capability = _WriteCapability()
+    service = _service(_Model(ModelTurn(tool_calls=(ModelToolCall(
+        name="create_objective_candidate", arguments={"question": "Compare matched LPBF tensile conditions"},
+    ),))), repository, capability)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    initial = await service.post_message_for_user(session.session_id, "user-1", message="Create an objective candidate for these test conditions.")
+    call = initial["pending_approval"]
+    assert call is not None
+    original_snapshot = await repository.read_response_snapshot(session.session_id)
+    model = _PausedResponseModel()
+    service.runner.model = model
+    decision = asyncio.create_task(service.decide_tool_call_for_user(
+        session.session_id, call.tool_call_id, "user-1", arguments_digest=call.arguments_digest, decision="approved",
+    ))
+    try:
+        async with asyncio.timeout(5):
+            while True:
+                snapshot = await repository.read_response_snapshot(session.session_id)
+                if snapshot.content == model.first:
+                    break
+                await asyncio.sleep(0.01)
+            assert snapshot.response_id != original_snapshot.response_id
+            assert len(capability.executed) == 1
+            updates = await service.stream_updates_for_user(session.session_id, "user-1", response_id=snapshot.response_id)
+            assert (await anext(updates))["trajectory"]["response"].content == model.first
+            await updates.aclose()
+            model.continue_response.set()
+            model.finish_response.set()
+            result = await decision
+            assert result["status"] == "completed"
+            assert result["messages"][-1].message_id == snapshot.message_id
+            assert len(capability.executed) == 1
+    finally:
+        model.continue_response.set()
+        model.finish_response.set()
+        await decision
 
 
 async def test_chat_session_service_checkpoints_every_agent_step() -> None:

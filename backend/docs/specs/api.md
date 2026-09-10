@@ -178,8 +178,8 @@ null), and `running`. These fields survive browser reloads. Execution uses a
 PostgreSQL transaction advisory lock shared by workers and branch creation.
 Each running turn holds one dedicated database connection outside the normal
 checkpoint pool; transaction completion or connection loss releases the lock.
-Browser disconnection does not cancel an already running turn. Apply migration
-`20260909_0057` before running this version against an existing database.
+Browser disconnection does not cancel an already running turn. Apply migrations
+through `20260910_0058` before running this version against an existing database.
 
 Answer usefulness feedback is separate from scientific Finding review. For
 example, a researcher can mark an LPBF comparison answer incomplete, request
@@ -236,13 +236,44 @@ digest.
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
 `{"content": string}` data and are transient presentation updates. `progress`
 events carry phase, cycle, elapsed time, and budget fields while a turn runs;
-they are transient presentation updates and are not durable trajectory records.
+they are presentation updates and are not scientific trajectory records.
+`snapshot` events identify the current response and assistant message before its
+text deltas; `trajectory` events replace the saved messages after checkpoints.
 The stream
 ends with one `turn` event whose data is the complete `ChatTurnResponse` after
 the durable trajectory checkpoints have succeeded. A terminal `error` event
 contains only a stable code and sanitized message. Partial text is never a
-stored Chat message or a scientific result; clients reload the server
-trajectory after an interrupted stream.
+completed Chat message or a scientific result.
+
+`GET /messages` includes a nullable `response` snapshot: `response_id`, monotonic
+`sequence`, start/update timestamps, current `message_id` and
+`message_created_at`, exact partial `content`, latest `progress`,
+`checkpoint_message_id`, status, completion reason, warnings, and error code.
+Partial content preserves whitespace. PostgreSQL stores only the latest snapshot
+on the owned session, at most every 250 ms for text changes and immediately at
+checkpoints and termination. Ordinary submissions and approved continuations use
+the same capture lifecycle. Scientific claim review still withholds unchecked
+text. Completion clears partial content and retains the terminal metadata;
+the saved messages own the final answer. Branches do not copy runtime snapshots.
+
+`GET /api/v1/chat-sessions/{session_id}/events?response_id={response_id}` resumes
+read-only SSE updates, including when another worker owns generation. The
+authenticated user must still own the session and Collection. The endpoint
+samples the shared snapshot every 250 ms, sends the current trajectory first,
+then changed snapshots, and a new trajectory at checkpoints and termination.
+It never submits a question or repeats a tool. The response ID bounds the
+subscription to that execution; a replaced response closes the subscription
+with a current trajectory. Clients replace content by message ID and ignore older
+sequences instead of appending replayed text. The original submission continues
+to deliver low-latency deltas; reconnecting clients receive bounded snapshot
+updates. A lost connection can be retried from `GET /messages`.
+
+The worker saves a heartbeat every 15 seconds without inventing a new research
+phase. Each visible response starts in `waiting`; receiving its first text
+changes the phase to `responding`. A stale running snapshot with no execution lock is returned as
+`interrupted`, preserving the partial text as incomplete. A server process
+restart does not automatically restart model generation. Old sessions without
+snapshots remain readable and recover their durable messages and tool records.
 
 An ordinary message may return a final answer without calling a tool. Registered
 `read` and `draft` calls may execute automatically. A `write` call stops at

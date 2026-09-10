@@ -190,6 +190,22 @@ class ChatMessageFeedbackResponse(BaseModel):
     updated_at: str
 
 
+class ChatResponseSnapshotResponse(BaseModel):
+    response_id: str
+    sequence: int
+    started_at: str
+    updated_at: str
+    status: Literal["running", "completed", "approval_required", "failed", "interrupted"]
+    message_id: str | None = None
+    message_created_at: str | None = None
+    content: str = ""
+    progress: dict[str, Any] = Field(default_factory=dict)
+    checkpoint_message_id: str | None = None
+    completion_reason: str | None = None
+    error_code: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
@@ -197,3 +213,4 @@ class ChatMessageListResponse(BaseModel):
     branches: list[ChatBranchOptions] = Field(default_factory=list)
     branch_draft: ChatMessageResponse | None = None
     running: bool = False
+    response: ChatResponseSnapshotResponse | None = None

@@ -240,6 +240,18 @@ review status of their supporting Findings and unverified feasibility checks.
 - checkpoint durable state after each meaningful transition so refresh and
   interrupted streams remain understandable.
 
+A researcher may leave while the Agent explains the conditions needed to compare
+LPBF tensile results, then return from history to read what has already been
+generated and continue waiting for the answer. `ChatSessionService` captures
+the exact partial response and current progress independently of its browser
+connection. The runner allocates each assistant message ID before emitting text;
+the final checkpoint keeps that identity. A bounded PostgreSQL snapshot permits
+another worker to serve reconnecting readers. Ordinary turns and approved
+continuations share this lifecycle, and reconnecting never repeats either action.
+If execution stops unexpectedly, partial text remains explicitly incomplete.
+Snapshots support observation of the research work; they do not bypass claim
+review, certify a scientific stage, or automatically restart interrupted work.
+
 ## Key Areas
 
 - `session_service.py`: owns session reads, source-context validation, turn

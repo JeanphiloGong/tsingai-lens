@@ -57,16 +57,16 @@ This node owns the Collection route family.
   question. The Collection Agent opens alongside the list or reader and remains
   mounted when collapsed. New session starts a separate Collection-bound
   conversation. The handoff creates no Objective, Evidence, or Finding.
-- `collections/[id]/assistant/+page.svelte`
-  Collection-bound Research Agent conversation with transient streamed text,
-  capability activity, structured results, canonical resource links, and exact
-  write approval. A bounded final answer remains visible with a limited-reading
   The documents layout retains paper tabs and can show two readers beside that
   conversation. `DocumentTabs.svelte` owns tab controls, and
   `documents/[document_id]/DocumentReader.svelte` owns each paper's loading,
   reading mode, and Source selection with explicit document inputs. Source
   navigation stays local to the target reader; closing a tab does not clear
   question context. Narrow screens retain the tabs and show one paper at a time.
+- `collections/[id]/assistant/+page.svelte`
+  Collection-bound Research Agent conversation with transient streamed text,
+  capability activity, structured results, canonical resource links, and exact
+  write approval. A bounded final answer remains visible with a limited-reading
   notice when the Agent reaches its step limit; only a failed turn is presented
   as an error. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.

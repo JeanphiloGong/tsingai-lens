@@ -1309,14 +1309,14 @@ test.describe('page interaction audit', () => {
 		}
 	});
 
-	test('recovers a lost PDF upload on a plain HTTP installation', async ({ page }) => {
+	test('recovers a lost PDF upload on a plain HTTP installation', async ({ page, baseURL }) => {
 		let uploads = 0;
 		let preparations = 0;
 		await page.route('http://review.lens.test/**', async (route) => {
 			const url = new URL(route.request().url());
 			if (url.pathname.startsWith('/api/')) return route.fallback();
 			const response = await route.fetch({
-				url: `http://localhost:4173${url.pathname}${url.search}`
+				url: new URL(`${url.pathname}${url.search}`, baseURL).toString()
 			});
 			return route.fulfill({ response });
 		});
@@ -1929,10 +1929,23 @@ test.describe('page interaction audit', () => {
 				decisions.push(decision);
 				pendingApproval = null;
 				if (decision.decision === 'rejected') {
+					const rejected = agentMessage('msg_result_rejected', 'tool', '', {
+						tool_call_id: approvedCallId,
+						tool_result: {
+							tool_call_id: approvedCallId,
+							status: 'failed',
+							data: {},
+							resource_refs: [],
+							warnings: [],
+							error_code: 'user_rejected',
+							error_message: 'The user rejected this research action.'
+						}
+					});
+					trajectory = [...trajectory, rejected];
 					return route.fulfill(
 						json({
 							status: 'rejected',
-							messages: [],
+							messages: [rejected],
 							pending_approval: null,
 							error_code: null
 						})
@@ -1972,6 +1985,7 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
 		await page.getByRole('button', { name: 'Reject' }).click();
 		await expect(page.getByText('The proposed write was rejected.')).toBeVisible();
+		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 
 		await sendAgentMessage(page, 'Create that objective');
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();

@@ -388,6 +388,9 @@ class ObjectiveAnalysisService:
             "objective_id": objective_id,
             "analysis_version": version,
             "items": [finding.to_record() for finding in findings],
+            "evidence_reviews": await self._finding_evidence_reviews(
+                collection_id, objective_id, version, findings
+            ),
             "offset": offset,
             "limit": limit,
             "total": total,
@@ -421,7 +424,27 @@ class ObjectiveAnalysisService:
             "objective_id": objective_id,
             "analysis_version": version,
             "finding": finding.to_record(),
+            "evidence_review": (await self._finding_evidence_reviews(
+                collection_id, objective_id, version, (finding,)
+            ))[finding.finding_id],
         }
+
+    async def _finding_evidence_reviews(
+        self, collection_id: str, objective_id: str, version: int,
+        findings: tuple[Any, ...],
+    ) -> dict[str, Any]:
+        if not findings:
+            return {}
+        evidence = await self._all_published_evidence(collection_id, objective_id, version)
+        evidence_by_id = {item.evidence_id: item for item in evidence}
+        reviews = {}
+        for finding in findings:
+            replacements = finding.evidence_replacements(evidence_by_id)
+            reviews[finding.finding_id] = {
+                "needs_review": bool(replacements),
+                "evidence_replacements": replacements,
+            }
+        return reviews
 
     async def summarize_finding(
         self,
@@ -483,7 +506,11 @@ class ObjectiveAnalysisService:
             "analysis_version": version,
             "finding_id": finding_id,
             "items": [
-                {**item.to_record(), "supports_finding": item.supports_finding}
+                {
+                    **item.to_record(),
+                    "supports_finding": item.supports_finding,
+                    "eligible_for_finding_authoring": item.eligible_for_finding_authoring,
+                }
                 for item in evidence
             ],
             "offset": offset,

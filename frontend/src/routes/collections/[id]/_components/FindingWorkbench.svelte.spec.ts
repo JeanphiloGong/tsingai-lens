@@ -120,7 +120,8 @@ const evidence = [
 		resolution_status: 'resolved',
 		failure_reason: null,
 		confidence: 0.9,
-		supports_finding: true
+		supports_finding: true,
+		eligible_for_finding_authoring: true
 	}
 ];
 

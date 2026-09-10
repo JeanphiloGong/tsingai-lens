@@ -166,6 +166,7 @@ class EvidenceAuthoringCreateRequest(BaseModel):
 
 
 class EvidenceAuthoringResponse(BaseModel):
+    affected_finding_ids: list[str] = Field(default_factory=list)
     analysis: ObjectiveAnalysisStateResponse
     evidence: ObjectiveEvidenceResponse
 

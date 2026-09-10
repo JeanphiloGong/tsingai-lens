@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
+	import { Bot, PencilLine, AlertCircle } from '@lucide/svelte';
+	import { t } from '../../../_shared/i18n';
 	import FindingEvidenceSummary from './FindingEvidenceSummary.svelte';
 	import { errorMessage } from '../../../_shared/api';
 	import {
@@ -12,10 +14,15 @@
 		type ObjectiveEvidence,
 		type ObjectiveFinding,
 		type ObjectiveFindingPaperContribution,
-		type ObjectiveScientificAttribute
+		type ObjectiveScientificAttribute,
+		type FindingEvidenceReview
 	} from '../../../_shared/researchView';
 
 	export let finding: ObjectiveFinding;
+	export let evidenceReview: FindingEvidenceReview | null = null;
+	export let derivedFindings: ObjectiveFinding[] = [];
+	export let parentFinding: ObjectiveFinding | null = null;
+	export let onSelectFinding: (finding: ObjectiveFinding) => void = () => {};
 	export let evidence: ObjectiveEvidence[] = [];
 	export let collectionId = '';
 	export let documentTitles: Record<string, string> = {};
@@ -92,6 +99,8 @@
 	)
 		feedbackIssue = 'other';
 	$: findingKey = `${finding.objective_id}:${finding.analysis_version}:${finding.finding_id}`;
+	$: reviewHref =
+		`/collections/${encodeURIComponent(collectionId)}/assistant?${new SvelteURLSearchParams({ objective_id: finding.objective_id, review_finding_id: finding.finding_id })}` as `/collections/${string}/assistant`;
 	$: if (findingKey !== feedbackFindingKey) {
 		feedbackFindingKey = findingKey;
 		feedbackRequestSequence += 1;
@@ -464,7 +473,7 @@
 			worsen: '恶化',
 			changed: '发生变化',
 			no_change: '无变化',
-			mixed: '结果不一致',
+			mixed: $t('research.findingReview.mixedDirection'),
 			unknown: '方向未知'
 		}[value];
 	}
@@ -547,9 +556,9 @@
 				? '研究者创建'
 				: item.origin === 'agent_authored'
 					? 'Agent 分析'
-				: item.origin === 'human_revised'
-					? '研究者修订'
-					: '系统提取';
+					: item.origin === 'human_revised'
+						? '研究者修订'
+						: '系统提取';
 		if (item.superseded_by_evidence_id) return `${origin} · 已有更新版本`;
 		return origin;
 	}
@@ -638,6 +647,41 @@
 		</button>
 	</header>
 
+	{#if evidenceReview?.needs_review}
+		<section class="basis-review" aria-label={$t('research.findingReview.basisUpdated')}>
+			<strong
+				><AlertCircle size={16} aria-hidden="true" />{$t(
+					'research.findingReview.basisUpdated'
+				)}</strong
+			>
+			<p>{$t('research.findingReview.basisUpdatedDetail')}</p>
+			<div class="review-actions">
+				<a class="btn btn--primary btn--small" href={resolve(reviewHref)}
+					><Bot size={16} aria-hidden="true" />{$t('research.findingReview.reviewWithAgent')}</a
+				>
+				<button class="btn btn--ghost btn--small" type="button" on:click={() => onDerive(finding)}
+					><PencilLine size={16} aria-hidden="true" />{$t(
+						'research.findingReview.reviseFinding'
+					)}</button
+				>
+			</div>
+		</section>
+	{/if}
+	{#if parentFinding || derivedFindings.length}
+		<nav class="finding-lineage" aria-label={$t('research.findingReview.derivedFindings')}>
+			{#if parentFinding}
+				<button type="button" on:click={() => onSelectFinding(parentFinding!)}
+					>{$t('research.findingReview.parentFinding')}: {parentFinding.statement}</button
+				>
+			{/if}
+			{#each derivedFindings as item (item.finding_id)}
+				<button type="button" on:click={() => onSelectFinding(item)}
+					>{$t('research.findingReview.derivedFindings')}: {item.statement}</button
+				>
+			{/each}
+		</nav>
+	{/if}
+
 	<section class="result-line" aria-label="Finding 核心结果">
 		<div>
 			<span>影响因素</span>
@@ -662,12 +706,14 @@
 		<div><span>直接文献</span><strong>{directPaperCount} 篇</strong></div>
 	</div>
 
-	<FindingEvidenceSummary
-		{collectionId}
-		objectiveId={finding.objective_id}
-		findingId={finding.finding_id}
-		analysisVersion={finding.analysis_version}
-	/>
+	{#if !evidenceReview?.needs_review}
+		<FindingEvidenceSummary
+			{collectionId}
+			objectiveId={finding.objective_id}
+			findingId={finding.finding_id}
+			analysisVersion={finding.analysis_version}
+		/>
+	{/if}
 
 	<section aria-labelledby="evidence-comparison-title">
 		<div class="section-heading">
@@ -1008,6 +1054,39 @@
 </article>
 
 <style>
+	.basis-review {
+		border-block: 1px solid var(--border-default);
+		border-left: 3px solid var(--text-secondary);
+		padding: 14px 16px;
+		margin-block: 12px;
+		background: var(--surface-subtle);
+	}
+	.basis-review strong,
+	.review-actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.basis-review p {
+		margin: 8px 0 12px;
+		color: var(--text-secondary);
+	}
+	.finding-lineage {
+		display: grid;
+		gap: 6px;
+		padding-block: 8px;
+	}
+	.finding-lineage button {
+		background: none;
+		border: 0;
+		text-align: left;
+		padding: 4px 0;
+		color: var(--text-secondary);
+		text-decoration: underline;
+		overflow-wrap: anywhere;
+		cursor: pointer;
+	}
 	.finding-detail {
 		display: grid;
 		gap: 24px;

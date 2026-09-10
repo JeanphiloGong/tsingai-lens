@@ -1410,7 +1410,9 @@ async def test_agent_evidence_write_waits_for_approval_and_reuses_service() -> N
                         ],
                     },
                     supports_finding=True,
+                    eligible_for_finding_authoring=True,
                 ),
+                affected_finding_ids=("finding-affected",),
             )
 
     evidence_service = _EvidenceService()
@@ -1437,6 +1439,7 @@ async def test_agent_evidence_write_waits_for_approval_and_reuses_service() -> N
     result = await capability.execute(_context("call-evidence"), arguments)
     assert capability.spec.risk.value == "write"
     assert result.data["evidence"]["evidence_id"] == "evidence-manual-1"
+    assert result.data["affected_finding_ids"] == ["finding-affected"]
     assert result.resource_refs[0].resource_type == "objective_analysis"
     assert result.resource_refs[1].resource_type == "evidence"
     assert evidence_service.calls[0]["created_by_user_id"] == "user-1"

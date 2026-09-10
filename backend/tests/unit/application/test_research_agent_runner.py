@@ -2102,10 +2102,11 @@ async def test_comparison_requires_source_search_after_paper_map() -> None:
     assert read.executed_arguments == [{}]
 
 
-async def test_exact_finding_inspection_narrows_next_step_to_requested_draft() -> None:
+async def test_finding_revision_keeps_source_discovery_before_required_draft() -> None:
     inspect = _Capability("inspect_published_finding", ToolRisk.READ, _FindingArguments)
     draft = _Capability("create_finding_draft", ToolRisk.DRAFT)
     query = _Capability("query_published_findings", ToolRisk.READ)
+    read = _Capability("read_source", ToolRisk.READ)
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
@@ -2117,6 +2118,7 @@ async def test_exact_finding_inspection_narrows_next_step_to_requested_draft() -
             ),)
         ),
         ModelTurn(content="我会形成一份保留温度边界的修订草案。"),
+        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={}),)),
         ModelTurn(
             tool_calls=(ModelToolCall(
                 name="create_finding_draft",
@@ -2127,7 +2129,7 @@ async def test_exact_finding_inspection_narrows_next_step_to_requested_draft() -
     )
     runner = ResearchAgentRunner(
         model=model,
-        capabilities=CapabilityRegistry((query, inspect, draft)),
+        capabilities=CapabilityRegistry((query, inspect, read, draft)),
     )
 
     result = await runner.run_turn(
@@ -2140,7 +2142,9 @@ async def test_exact_finding_inspection_narrows_next_step_to_requested_draft() -
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names[1] == ("create_finding_draft",)
+    assert any("create_finding_draft" in names and "discover_research_tools" in names for names in model.all_tool_spec_names)
+    assert "create_finding_draft" in model.tool_spec_names[1]
+    assert read.executed_arguments == [{}]
     assert draft.executed_arguments == [{}]
 
 

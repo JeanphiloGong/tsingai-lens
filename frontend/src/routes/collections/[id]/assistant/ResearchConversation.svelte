@@ -86,6 +86,7 @@
 	let error = '';
 	let notice = '';
 	let input = '';
+	let appliedReviewKey = '';
 	let pendingSourceContexts: ChatSourceContext[] = [];
 	let inspectRelated = embedded;
 	let loadedCollectionId = '';
@@ -134,6 +135,24 @@
 			.split('\n')[0] ?? '';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
+	$: queryReviewFindingId = $page.url.searchParams.get('review_finding_id') ?? '';
+	$: reviewKey = `${collectionId}:${queryObjectiveId}:${queryReviewFindingId}`;
+	$: if (
+		!embedded &&
+		session &&
+		!loading &&
+		queryObjectiveId &&
+		queryReviewFindingId &&
+		appliedReviewKey !== reviewKey
+	) {
+		if (!input.trim()) {
+			input = $t('research.findingReview.reviewDraft', {
+				objective: queryObjectiveId,
+				finding: queryReviewFindingId
+			});
+			appliedReviewKey = reviewKey;
+		}
+	}
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (browser && (collectionId !== loadedCollectionId || userId !== loadedUserId)) {
 		sessionActivities = {};

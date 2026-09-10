@@ -336,7 +336,7 @@ class FindingAuthoringService:
         ineligible_ids = {
             evidence_id
             for evidence_id in selected_ids
-            if not evidence_by_id[evidence_id].supports_finding
+            if not evidence_by_id[evidence_id].eligible_for_finding_authoring
         }
         if ineligible_ids:
             raise ValueError(

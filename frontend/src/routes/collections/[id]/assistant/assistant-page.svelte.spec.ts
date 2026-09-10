@@ -316,6 +316,28 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeVisible();
 	});
 
+	it('prefills the exact Finding review without submitting or replacing researcher edits', async () => {
+		installApi();
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL(
+				'http://localhost/collections/col_123/assistant?objective_id=obj_1&review_finding_id=finding-1'
+			)
+		});
+		const composer = await renderReady();
+		await expect
+			.element(composer)
+			.toHaveValue(expect.stringContaining('Finding finding-1 for Objective obj_1'));
+		expect(
+			fetchMock.mock.calls.some(([input]) => requestPath(input).endsWith('/messages/stream'))
+		).toBe(false);
+		await composer.fill('Please only check the test conditions first.');
+		collections.set([
+			{ id: 'col_123', collection_id: 'col_123', name: 'Updated title', documents: [] }
+		]);
+		await expect.element(composer).toHaveValue('Please only check the test conditions first.');
+	});
+
 	it('keeps received text through a failed stream and failed recovery read, then resumes once', async () => {
 		installApi();
 		const fallback = fetchMock.getMockImplementation()!;

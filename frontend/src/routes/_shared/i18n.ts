@@ -574,6 +574,18 @@ const translations: Record<Language, Translations> = {
 			emptyValue: '--',
 			findingReview: {
 				coverage: 'Evidence coverage',
+				basisUpdated: 'Evidence updated, review required',
+				mixedDirection: 'Mixed direction',
+				basisUpdatedDetail:
+					'The cited evidence has changed. This conclusion retains its original evidence and awaits reassessment.',
+				reviewWithAgent: 'Review with Agent',
+				reviewDraft:
+					'Please review Finding {finding} for Objective {objective}. Compare its original and updated evidence against the sources, explain whether the conclusion still holds, and prepare a revised Finding with current evidence. Ask for my approval before saving the new version.',
+				reviseFinding: 'Revise conclusion',
+				derivedFindings: 'Subsequent versions',
+				parentFinding: 'Original conclusion',
+				replacedSelection:
+					'Updated evidence needs a new role assessment before this conclusion can be saved.',
 				coverageCount: '{count} records',
 				gapCount: '{count} to review',
 				coverageTotal: '{count} source records · {results} results',
@@ -3253,6 +3265,17 @@ const translations: Record<Language, Translations> = {
 			emptyValue: '--',
 			findingReview: {
 				coverage: '证据覆盖',
+				basisUpdated: '依据已更新，待复核',
+				mixedDirection: '多种变化方向',
+				basisUpdatedDetail:
+					'引用的证据已有变化。这条结论保留了原有依据，需要重新判断是否仍然成立。',
+				reviewWithAgent: '请 Agent 复核',
+				reviewDraft:
+					'请复核研究问题 {objective} 下的 Finding {finding}。对照原文比较修订前后的证据，说明原结论是否仍然成立，并根据当前证据形成修订后的 Finding 草案。保存新版本前请让我确认。',
+				reviseFinding: '修订结论',
+				derivedFindings: '后续版本',
+				parentFinding: '原结论',
+				replacedSelection: '已有证据更新，保存前需要重新判断更新后的证据承担什么作用。',
 				coverageCount: '{count} 条',
 				gapCount: '{count} 条待核查',
 				coverageTotal: '{count} 条原文记录 · {results} 条结果',

@@ -733,6 +733,23 @@ include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
 
+Finding lists include `evidence_reviews`, keyed by the returned Finding IDs;
+Finding detail includes `evidence_review`. Each contains `needs_review` and
+`evidence_replacements` (referenced Evidence ID to its latest replacement ID,
+or `null` for an unresolved lineage). The projection covers support,
+contradiction, and context/condition references in the selected published
+snapshot. It is separate from the canonical Finding and from expert curation.
+An updated input requires reassessment, not automatic scientific rejection.
+A parent remains a historical judgment even after a child is saved; readers
+can follow `parent_finding_id` to distinguish original and revised conclusions.
+
+Evidence reads expose `eligible_for_finding_authoring`: the Evidence must be
+structurally eligible and not superseded. `supports_finding` retains its
+historical structural meaning. New Finding writes reject superseded Evidence
+in every selected role with `409`; existing Findings retain their original
+Evidence and remain readable. Replacement never transfers a scientific role
+automatically.
+
 Each Finding and Evidence record exposes its `origin`, optional
 `created_by_user_id`, and optional `created_by_tool_call_id`. The tool-call field
 is populated for an `agent_authored` record and for an Agent-assisted revision;
@@ -801,7 +818,15 @@ An Evidence correction never overwrites the old record. Supplying
 locator; publication clones the complete source snapshot into the next
 immutable analysis version, marks the old record as superseded, and leaves old
 Findings pointing at their original Evidence. A successful command returns
-  `201` with the new analysis and Evidence. Stale versions, running analyses,
+`201` with the new analysis, Evidence, and `affected_finding_ids`, including
+Findings referencing earlier ancestors of the corrected Evidence. The Agent
+receives these same IDs. `inspect_published_finding` includes the complete
+linked Evidence page, review metadata, and `replacement_evidence` for that
+page so it can compare old and current facts. It must recheck Sources, roles,
+measurement identity, conditions, and scope before proposing a parent-linked
+Finding draft. Publishing that draft requires a separate exact approval; the
+Evidence approval never authorizes downstream Finding writes.
+Stale versions, running analyses,
 unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
 already superseded record return `409`; malformed scientific shapes return
   `422`. The Research Agent exposes the same operation as the approved

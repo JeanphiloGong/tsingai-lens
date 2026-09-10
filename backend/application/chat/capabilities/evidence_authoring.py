@@ -347,6 +347,8 @@ class CreateEvidenceVersionCapability:
                 "analysis": result.analysis.to_record(),
                 "evidence": evidence.to_record(),
                 "supports_finding": evidence.supports_finding,
+                "eligible_for_finding_authoring": evidence.eligible_for_finding_authoring,
+                "affected_finding_ids": list(result.affected_finding_ids),
             },
             resource_refs=refs,
             warnings=tuple(evidence.warnings),

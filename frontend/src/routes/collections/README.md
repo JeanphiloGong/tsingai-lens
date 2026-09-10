@@ -37,7 +37,13 @@ This node owns the Collection route family.
   immutable analysis snapshot, reloads that version, and selects the authored
   Finding; the prior Finding remains unchanged. The same editor can record an
   explicit evidence abstention without creating a placeholder Finding. The
-  sidebar can export the published Finding dataset as JSON or training JSONL
+  workspace marks Findings whose cited Evidence was replaced as needing review,
+  links original and subsequent Finding versions, and opens an editable Agent
+  review request without submitting it. The authoring editor excludes replaced
+  Evidence from all roles and does not preassign its replacement. An affected
+  historical Finding keeps its original evidence and does not offer a fresh AI
+  summary until the researcher selects a conclusion based on current evidence.
+  The sidebar can export the published Finding dataset as JSON or training JSONL
   with label and dataset-use filters. The collection workspace also exposes
   collection-level Finding JSON/JSONL and expert gold-draft downloads beside
   the original paper archive.

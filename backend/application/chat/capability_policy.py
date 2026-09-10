@@ -336,6 +336,9 @@ def select_tool_specs(
         and call.status is ToolCallStatus.SUCCEEDED
         for call in calls
     )
+    finding_draft_requested = inspected_finding and intent_policy.mentions_terms(
+        user_text, ("结论草案", "修订草案", "finding draft", "draft finding"),
+    )
     # A completed plan proposal belongs to the request that asked for it.
     # Do not let an older turn force its write capability onto a later,
     # unrelated review or reading request in the same Chat trajectory.
@@ -416,11 +419,12 @@ def select_tool_specs(
         allowed_names = {"inspect_research_plans"}
     elif plan_revision_requested and persist_requested and plan_intent:
         allowed_names = {"revise_research_plan"}
-    elif inspected_finding and intent_policy.mentions_terms(
-        user_text,
-        ("结论草案", "修订草案", "finding draft", "draft finding"),
-    ):
-        allowed_names = {"create_finding_draft"}
+    elif finding_draft_requested and not mandatory_stage:
+        # A Finding is the starting point of review, not proof that its Sources
+        # have been checked. Keep discovered readers and discovery available.
+        allowed_names = {"create_finding_draft"} | loaded_names.intersection(
+            intent_policy.SOURCE_READ_CAPABILITIES | {"inspect_published_finding"}
+        )
     elif inspected_finding and plan_intent:
         allowed_names = {"propose_research_plan"}
     elif plan_intent:
@@ -468,7 +472,7 @@ def select_tool_specs(
     if (
         not mandatory_stage
         and capabilities.discovery.tools
-        and (failed_source_read or required_tool_before_answer(
+        and (finding_draft_requested or failed_source_read or required_tool_before_answer(
             tuple(spec.name for spec in selected), successful_results=successful_results,
         ) is None)
     ):
@@ -481,6 +485,13 @@ def required_tool_before_answer(
     *,
     successful_results: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> str | None:
+    if (
+        "create_finding_draft" in tool_names
+        and successful_results is not None
+        and successful_results.get("inspect_published_finding")
+        and not successful_results.get("create_finding_draft")
+    ):
+        return "create_finding_draft"
     reader_names = {"read_source", "inspect_table"}
     source_reader_names = {*reader_names, "inspect_document_sources"}
     if (

@@ -56,6 +56,13 @@ and is lazy: discovery or analysis builds it only for the explicitly selected
 ready Documents, then reuses it while its document and PaperMap policy
 fingerprint still match.
 
+A technical Profile classification failure keeps the parsed Source readable,
+leaves the Document `stored`, and finishes its run as `partial_success` with a
+failed classification node and a retryable warning. Only a completed Profile
+makes the Document `ready`. Retrying checks the actual Source and Profile as
+well as their fingerprints, so historical completed runs cannot hide a failed
+classification. A completed but scientifically uncertain Profile is reusable.
+
 ## Files
 
 - `collection_service.py`: Collection and current Document lifecycle, Figure
@@ -88,6 +95,13 @@ after the request returns; it does not accept a separate unused request ID.
 Preparation failure leaves that Document retryable and does not imply a paper
 lacks scientific evidence. Success only makes it eligible for later selected
 Objective work; preparation does not start discovery automatically.
+
+Dispatch and startup failures share the execution failure boundary. Document
+and run failure writes are attempted independently; a secondary database error
+is logged without replacing the original failure. If storage remains unavailable,
+restart recovery handles the surviving active record. Public run errors use
+stage-specific wording, including for historical records; original exceptions
+remain in internal logs linked by run ID.
 
 ## Tests
 

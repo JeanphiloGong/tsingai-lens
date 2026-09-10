@@ -154,3 +154,22 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
     assert summary.run_id == "history-only"
     assert summary.collection_id == COLLECTION_ID
     assert summary.status == "queued"
+
+
+async def test_artifact_retry_bypasses_completed_run_but_reuses_active_run(
+    source_repository,
+):
+    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    first = _run("run-incomplete-artifacts", "same-input")
+    await runs.add_run(first.start(NOW).finish(PipelineRunStatus.COMPLETED, NOW))
+    retry, created = await runs.get_or_create_document_run(
+        _run("run-retry-artifacts", "same-input"),
+        reuse_completed=False,
+    )
+    assert created
+    active, created = await runs.get_or_create_document_run(
+        _run("run-duplicate-retry", "same-input"),
+        reuse_completed=False,
+    )
+    assert not created
+    assert active.run_id == retry.run_id

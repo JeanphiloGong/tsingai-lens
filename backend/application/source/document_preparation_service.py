@@ -16,12 +16,14 @@ import pandas as pd
 from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.core.document_profiles.service import DocumentProfileService
 from application.pipeline import PipelineRunService
+from application.pipeline.pipeline_run_service import document_preparation_error_message
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import Document, SourceDocument
+from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from infra.source.config.source_runtime_config import (
     CacheConfig,
     InputConfig,
@@ -165,19 +167,56 @@ class DocumentPreparationService:
             document_id=document_id,
             pipeline_name="document_preparation",
             input_fingerprint=fingerprint,
+            reuse_completed=await self._can_reuse_preparation(collection_id, document),
         )
         if created:
-            background = create_task(
-                self.run_document_preparation(
-                    run["run_id"],
-                    collection_id,
-                    document_id,
-                )
+            coroutine = self.run_document_preparation(
+                run["run_id"],
+                collection_id,
+                document_id,
             )
+            try:
+                background = create_task(coroutine)
+            except Exception as exc:
+                coroutine.close()
+                logger.exception(
+                    "Document preparation dispatch failed run_id=%s", run["run_id"]
+                )
+                await self._fail_preparation(
+                    run["run_id"], collection_id, document_id, "dispatch_failed"
+                )
+                raise RuntimeError(
+                    document_preparation_error_message("dispatch_failed")
+                ) from exc
             self._active_workers.add(background)
             background.add_done_callback(self._active_workers.discard)
             background.add_done_callback(self._log_unexpected_failure)
         return run
+
+    async def _can_reuse_preparation(
+        self, collection_id: str, document: Document
+    ) -> bool:
+        source_identity, profile_identity = self.fingerprints_for(document)
+        if (
+            document.status != "ready"
+            or document.preparation_fingerprint != profile_identity
+            or document.profile_fingerprint != profile_identity
+            or document.source_fingerprint != source_identity
+        ):
+            return False
+        profile = await self.document_profile_service.read_document_profile(
+            collection_id,
+            document.document_id,
+        )
+        if profile is None or profile.profile_status != PROFILE_STATUS_COMPLETED:
+            return False
+        return (
+            await self.source_artifact_repository.read_document(
+                collection_id,
+                document.document_id,
+            )
+            is not None
+        )
 
     async def run_document_preparation(
         self,
@@ -186,30 +225,30 @@ class DocumentPreparationService:
         document_id: str,
     ) -> dict[str, Any]:
         async with self._semaphore:
-            document = await self.collection_service.get_document(
-                collection_id,
-                document_id,
-            )
-            source_identity, profile_identity = self.fingerprints_for(document)
-            fingerprint = profile_identity
-            await self.pipeline_run_service.update_run(
-                run_id,
-                status="running",
-                current_node="source_parsing",
-                progress_percent=5,
-                progress_detail={
-                    "phase": "source_parsing",
-                    "unit": "document",
-                    "message": "Parsing the document into traceable Sources.",
-                },
-            )
-            await self.collection_service.update_document_preparation(
-                collection_id,
-                document_id,
-                status="processing",
-            )
+            stage = "source_parsing"
             preparation_warnings: list[str] = []
             try:
+                document = await self.collection_service.get_document(
+                    collection_id, document_id
+                )
+                source_identity, profile_identity = self.fingerprints_for(document)
+                fingerprint = profile_identity
+                await self.pipeline_run_service.update_run(
+                    run_id,
+                    status="running",
+                    current_node=stage,
+                    progress_percent=5,
+                    progress_detail={
+                        "phase": stage,
+                        "unit": "document",
+                        "message": "Parsing the document into traceable Sources.",
+                    },
+                )
+                await self.collection_service.update_document_preparation(
+                    collection_id,
+                    document_id,
+                    status="processing",
+                )
                 source_document = await self.source_artifact_repository.read_document(
                     collection_id,
                     document_id,
@@ -250,6 +289,7 @@ class DocumentPreparationService:
                         source_fingerprint=source_identity,
                         parser_version=SOURCE_PARSER_VERSION,
                     )
+                stage = "document_profile"
                 await self.pipeline_run_service.update_run(
                     run_id,
                     current_node="document_profile",
@@ -263,16 +303,33 @@ class DocumentPreparationService:
                 profile = await self.document_profile_service.read_document_profile(
                     collection_id, document_id
                 )
-                if profile is None or document.profile_fingerprint != profile_identity:
+                if (
+                    profile is None
+                    or document.profile_fingerprint != profile_identity
+                    or profile.profile_status != PROFILE_STATUS_COMPLETED
+                ):
                     profile = await self.document_profile_service.build_document_profile(
                         collection_id,
                         document_id,
                     )
-                    document = await self.collection_service.update_document_preparation(
+                if profile.profile_status != PROFILE_STATUS_COMPLETED:
+                    await self.collection_service.update_document_preparation(
                         collection_id,
                         document_id,
-                        status="processing",
-                        profile_fingerprint=profile_identity,
+                        status="stored",
+                    )
+                    message = document_preparation_error_message("document_profile")
+                    return await self.pipeline_run_service.finish_run(
+                        run_id,
+                        status="partial_success",
+                        current_node="document_profile",
+                        warnings=[*preparation_warnings, message],
+                        errors=[message],
+                        progress_detail={
+                            "phase": "document_profile",
+                            "unit": "document",
+                            "message": message,
+                        },
                     )
                 await self.collection_service.update_document_preparation(
                     collection_id,
@@ -296,31 +353,50 @@ class DocumentPreparationService:
                     },
                     warnings=preparation_warnings,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception(
                     "Document preparation failed collection_id=%s document_id=%s run_id=%s",
                     collection_id,
                     document_id,
                     run_id,
                 )
-                await self.collection_service.update_document_preparation(
-                    collection_id,
-                    document_id,
-                    status="failed",
-                )
-                await self.pipeline_run_service.finish_run(
-                    run_id,
-                    status="failed",
-                    current_node="failed",
-                    progress_percent=100,
-                    errors=[str(exc)],
-                    progress_detail={
-                        "phase": "failed",
-                        "unit": "document",
-                        "message": "Document preparation failed.",
-                    },
-                )
+                await self._fail_preparation(run_id, collection_id, document_id, stage)
                 raise
+
+    async def _fail_preparation(
+        self,
+        run_id: str,
+        collection_id: str,
+        document_id: str,
+        stage: str,
+    ) -> None:
+        # A failed document write must not prevent terminalizing its run.
+        try:
+            await self.collection_service.update_document_preparation(
+                collection_id,
+                document_id,
+                status="failed",
+            )
+        except Exception:
+            logger.exception(
+                "Could not record document preparation failure run_id=%s", run_id
+            )
+        try:
+            await self.pipeline_run_service.finish_run(
+                run_id,
+                status="failed",
+                current_node=stage,
+                errors=[document_preparation_error_message(stage)],
+                progress_detail={
+                    "phase": "failed",
+                    "unit": "document",
+                    "message": document_preparation_error_message(stage),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Could not terminalize failed document preparation run_id=%s", run_id
+            )
 
     @staticmethod
     def preparation_fingerprint_for(document: Document) -> str:

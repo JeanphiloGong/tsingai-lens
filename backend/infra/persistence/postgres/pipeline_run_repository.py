@@ -52,6 +52,8 @@ class PostgresPipelineRunRepository:
     async def get_or_create_document_run(
         self,
         run: PipelineRun,
+        *,
+        reuse_completed: bool = True,
     ) -> tuple[PipelineRun, bool]:
         if run.scope_type != "document" or run.input_fingerprint is None:
             raise ValueError("document run requires document scope and input fingerprint")
@@ -71,6 +73,9 @@ class PostgresPipelineRunRepository:
             active = await self._active_run(session, run)
             if active is not None:
                 return _to_run(active), False
+            if not reuse_completed:
+                session.add(_run_row(run))
+                return run, True
             completed = await session.scalar(
                 select(PipelineRunRow)
                 .where(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from application.pipeline import PipelineRunService
+from application.pipeline.pipeline_run_service import document_preparation_error_message
 from infra.persistence.memory import MemoryPipelineRunRepository
 
 
@@ -76,7 +77,7 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure() -> None
         errors=["invalid PDF"],
     )
     assert failed["status"] == "failed"
-    assert failed["errors"] == ["invalid PDF"]
+    assert failed["errors"] == [document_preparation_error_message("source_parsing")]
     assert failed["nodes"]["source_parsing"]["status"] == "failed"
     assert failed["finished_at"] is not None
     assert failed["updated_at"] == failed["finished_at"]
@@ -147,3 +148,29 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context() ->
     )
     assert retry_created is True
     assert retry["run_id"] != first["run_id"]
+
+
+async def test_historical_preparation_errors_are_safe_without_rewriting_storage():
+    repository = MemoryPipelineRunRepository()
+    service = PipelineRunService(repository)
+    run = await service.create_run(
+        "col_a",
+        "document_preparation",
+        scope_type="document",
+        scope_id="doc_a",
+    )
+    raw_error = "provider failed at /private/provider/config"
+    await service.finish_run(
+        run["run_id"],
+        status="failed",
+        current_node="document_profile",
+        errors=[raw_error],
+    )
+    detail = await service.get_run(run["run_id"])
+    listing = await service.list_runs(collection_id="col_a")
+    assert raw_error not in str(detail)
+    assert raw_error not in str(listing)
+    assert "classification" in detail["errors"][0].lower()
+    assert detail["nodes"]["document_profile"]["errors"] == detail["errors"]
+    stored = await repository.read_run(run["run_id"])
+    assert raw_error in stored.errors

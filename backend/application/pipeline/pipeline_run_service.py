@@ -34,6 +34,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def document_preparation_error_message(stage: str | None) -> str:
+    return {
+        "dispatch_failed": "Document preparation could not be scheduled. Retry preparation.",
+        "source_parsing": "Document parsing failed. Check the file and retry preparation.",
+        "document_profile": "Paper classification failed. Parsed Sources are preserved; retry preparation.",
+        "interrupted": "Document preparation was interrupted by a backend restart. Retry preparation.",
+    }.get(stage, "Document preparation failed. Retry preparation.")
+
+
 class PipelineRunService:
     """Own run admission and telemetry without owning scientific artifacts."""
 
@@ -71,6 +80,7 @@ class PipelineRunService:
         input_fingerprint: str,
         mode: str = "standard",
         context: Mapping[str, Any] | None = None,
+        reuse_completed: bool = True,
     ) -> tuple[dict[str, Any], bool]:
         if not str(document_id).strip() or not str(input_fingerprint).strip():
             raise ValueError("document run requires document and input fingerprint")
@@ -83,7 +93,8 @@ class PipelineRunService:
                 mode=mode,
                 input_fingerprint=input_fingerprint,
                 context=context,
-            )
+            ),
+            reuse_completed=reuse_completed,
         )
         return self._project(run), created
 
@@ -125,7 +136,7 @@ class PipelineRunService:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         return [
-            asdict(run)
+            self._sanitize_preparation_errors(asdict(run))
             for run in await self.repository.list_runs(
                 collection_id=collection_id,
                 status=status,
@@ -275,7 +286,11 @@ class PipelineRunService:
         if not status.is_terminal:
             return updated
 
-        if status is PipelineRunStatus.FAILED:
+        if status is PipelineRunStatus.FAILED or (
+            run.pipeline_name == "document_preparation"
+            and status is PipelineRunStatus.PARTIAL_SUCCESS
+            and errors
+        ):
             failed_name = selected_name or next(
                 (
                     node.name
@@ -330,13 +345,28 @@ class PipelineRunService:
     def _project(run: PipelineRun) -> dict[str, Any]:
         payload = run.to_record()
         timestamps = payload.pop("timestamps")
-        return {
-            **payload,
-            "created_at": timestamps.get("created_at"),
-            "updated_at": timestamps.get("updated_at"),
-            "started_at": timestamps.get("started_at"),
-            "finished_at": timestamps.get("finished_at"),
-        }
+        return PipelineRunService._sanitize_preparation_errors(
+            {
+                **payload,
+                "created_at": timestamps.get("created_at"),
+                "updated_at": timestamps.get("updated_at"),
+                "started_at": timestamps.get("started_at"),
+                "finished_at": timestamps.get("finished_at"),
+            }
+        )
+
+    @staticmethod
+    def _sanitize_preparation_errors(payload: dict[str, Any]) -> dict[str, Any]:
+        if payload["pipeline_name"] != "document_preparation":
+            return payload
+        if payload["errors"]:
+            payload["errors"] = [
+                document_preparation_error_message(payload["current_node"])
+            ]
+        for name, node in payload.get("nodes", {}).items():
+            if node["errors"]:
+                node["errors"] = [document_preparation_error_message(name)]
+        return payload
 
 
 __all__ = ["PipelineRunService"]

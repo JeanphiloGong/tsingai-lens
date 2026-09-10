@@ -33,6 +33,8 @@ class PipelineRunRepository(Protocol):
     async def get_or_create_document_run(
         self,
         run: PipelineRun,
+        *,
+        reuse_completed: bool = True,
     ) -> tuple[PipelineRun, bool]: ...
 
     async def read_run(self, run_id: str) -> PipelineRun | None: ...

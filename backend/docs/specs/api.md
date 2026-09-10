@@ -82,7 +82,9 @@ document-list endpoints when those operational fields are required.
 At most one `document_preparation` run may be queued or running for a Document.
 Repeated requests reuse that active run. A completed run is reusable only when
 its input fingerprint still matches the current document bytes, parser version,
-and Profile version. Source and Profile fingerprints are tracked separately so
+and Profile version, the Document is ready, and its Source and completed Profile
+still exist. A technically failed Profile is never a reusable completed result,
+even when an older run incorrectly recorded success. Source and Profile fingerprints are tracked separately so
 a downstream Profile change resumes from the latest still-valid stage. Different
 Documents may prepare concurrently. Paper Map reuse has its own fingerprint,
 which includes the selected Document preparation fingerprint and Paper Map
@@ -94,7 +96,16 @@ PDF uploads are opened with the Source PDF engine before persistence. A damaged,
 incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
 not added to the collection. This check establishes parser readability only;
 scientific structure extraction happens during that Document's preparation.
-A later parser or Profile failure sets only that Document and run to `failed`.
+A later parser or runtime failure sets only that Document and run to `failed`.
+A recoverable model-classification failure preserves the parsed Source, leaves
+the Document `stored`, and returns a `partial_success` run with a failed
+`document_profile` node and a retryable warning. A subsequent preparation request
+reuses the Source and retries classification. A successfully completed but
+scientifically uncertain classification remains reusable. Only completed
+preparation makes the Document ready for Objective scope selection.
+Run-level and node-level preparation errors use safe stage-specific messages,
+including historical records read through list and detail endpoints. Internal
+exceptions remain in logs and traces rather than the public response.
 Paper Map failures belong to Objective discovery/analysis and do not change the
 Document preparation run. All such failures stay technical; they do not claim
 scientific absence.

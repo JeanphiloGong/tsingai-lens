@@ -33,10 +33,12 @@ class MemoryPipelineRunRepository:
     async def get_or_create_document_run(
         self,
         run: PipelineRun,
+        *,
+        reuse_completed: bool = True,
     ) -> tuple[PipelineRun, bool]:
         if run.scope_type != "document" or run.input_fingerprint is None:
             raise ValueError("document run requires document scope and input fingerprint")
-        return await self._get_or_create(run, reuse_completed=True)
+        return await self._get_or_create(run, reuse_completed=reuse_completed)
 
     async def _get_or_create(
         self,

@@ -80,6 +80,10 @@ class _QueuedModel(_Model):
         super().__init__()
 
     def queue_tool(self, name: str, arguments: dict[str, Any]) -> None:
+        # A completed draft may finish from its tool result without consuming
+        # the scripted closing text. Keep that text out of the next user turn.
+        assert all(isinstance(turn, ModelTurn) and not turn.tool_calls for turn in self.turns)
+        self.turns.clear()
         self.turns.extend(
             (
                 ModelTurn(tool_calls=(ModelToolCall(name=name, arguments=arguments),)),

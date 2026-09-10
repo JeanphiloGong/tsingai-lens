@@ -4,7 +4,12 @@
 	import { t } from '../../../_shared/i18n';
 	import { buildChatPresentation, getRecoveredChatProgress } from './conversationPresentation';
 	import { RotateCw } from '@lucide/svelte';
-	import type { ChatMessage, ChatToolCall, ChatProgress } from '../../../_shared/chatSessions';
+	import type {
+		ChatMessage,
+		ChatToolCall,
+		ChatProgress,
+		ChatResponseSnapshot
+	} from '../../../_shared/chatSessions';
 	import type {
 		ChatFeedbackInput,
 		ChatFeedbackState,
@@ -61,6 +66,7 @@
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let sessionId = '';
 	export let streamingText = '';
+	export let responseSnapshot: ChatResponseSnapshot | null = null;
 	export let pendingApproval: ChatToolCall | null = null;
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
@@ -76,8 +82,34 @@
 		!loading && !sending && !pendingApproval && (running || Boolean(recoveringCallId));
 	$: recoveredProgress = {
 		...getRecoveredChatProgress(messages, now),
+		...(responseSnapshot?.status === 'running'
+			? {
+					...responseSnapshot.progress,
+					elapsed_ms: Math.max(
+						responseSnapshot.progress.elapsed_ms ?? 0,
+						now - Date.parse(responseSnapshot.started_at)
+					)
+				}
+			: {}),
 		...(recoveryError ? { phase: 'reconnecting' } : {})
 	};
+	$: responseMessage =
+		responseSnapshot?.message_id &&
+		!messages.some((message) => message.message_id === responseSnapshot?.message_id)
+			? {
+					message_id: responseSnapshot.message_id,
+					session_id: sessionId,
+					role: 'assistant' as const,
+					content: responseSnapshot.content,
+					created_at: responseSnapshot.message_created_at ?? responseSnapshot.started_at,
+					tool_call_id: null,
+					tool_calls: [],
+					tool_result: null,
+					source_contexts: []
+				}
+			: null;
+	$: showRecoveryRow =
+		recovering && !responseMessage && (!responseSnapshot || responseSnapshot.status === 'running');
 	$: recoveryMessage = {
 		message_id: `local-recovery-${sessionId}`,
 		session_id: sessionId,
@@ -98,7 +130,10 @@
 		'researchAgent.suggestions.findings',
 		'researchAgent.suggestions.objectives'
 	];
-	$: conversationItems = buildChatPresentation(messages, pendingApproval?.tool_call_id ?? null);
+	$: conversationItems = buildChatPresentation(
+		responseMessage ? [...messages, responseMessage] : messages,
+		pendingApproval?.tool_call_id ?? null
+	);
 	let scrollElement: HTMLDivElement;
 	let contentElement: HTMLDivElement;
 	let following = true;
@@ -204,7 +239,7 @@
 				<div class="empty-state" role="status">
 					<h3>{$t('researchAgent.loading')}</h3>
 				</div>
-			{:else if messages.length === 0 && !recovering}
+			{:else if messages.length === 0 && !recovering && !responseMessage}
 				<div class="empty-state welcome-state">
 					<div class="welcome-avatar" aria-hidden="true">AI</div>
 					<p class="welcome-eyebrow">{$t('researchAgent.welcomeEyebrow')}</p>
@@ -246,13 +281,33 @@
 								onRegenerate={questionsByAnswer.has(item.message.message_id)
 									? () => void onRevise(questionsByAnswer.get(item.message.message_id)!)
 									: undefined}
-								streaming={item.message.message_id.startsWith('local-stream-') && sending}
+								streaming={(item.message.message_id.startsWith('local-stream-') && sending) ||
+									(item.message.message_id === responseMessage?.message_id &&
+										responseSnapshot?.status === 'running')}
+								incomplete={item.message.message_id === responseMessage?.message_id}
 								feedbackState={feedbackByMessage[item.message.message_id]}
 								{onFeedback}
-								{streamingText}
-								{progress}
+								streamingText={sending ? streamingText : (responseSnapshot?.content ?? '')}
+								progress={sending
+									? progress
+									: responseMessage && responseSnapshot?.status === 'running'
+										? recoveredProgress
+										: null}
 								{progressHistory}
-							/>{/if}
+							>
+								{#if item.message.message_id === responseMessage?.message_id && recovering}
+									<div class="recovery-controls" data-testid="research-recovery">
+										{#if recoveryError}<p class="recovery-error" role="alert">
+												{recoveryError}
+											</p>{/if}
+										<IconButton
+											label={$t('researchAgent.checkResult')}
+											disabled={recoveryLoading}
+											onClick={onRefreshRecovery}><RotateCw size={14} /></IconButton
+										>
+									</div>
+								{/if}
+							</AssistantMessage>{/if}
 					{:else}<ResearchActivity
 							{item}
 						/>{#each item.artifacts as artifact (artifact.toolCallId)}<ResearchArtifact
@@ -264,7 +319,7 @@
 			{#if pendingApproval}
 				<ApprovalPanel call={pendingApproval} {deciding} onDecide={decide} />
 			{/if}
-			{#if recovering}
+			{#if showRecoveryRow}
 				<AssistantMessage
 					message={recoveryMessage}
 					recovering

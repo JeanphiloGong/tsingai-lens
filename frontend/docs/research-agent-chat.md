@@ -271,13 +271,20 @@ question and counts requested/completed actions from that turn's durable records
 The row refreshes automatically and disappears when the answer is saved; failed
 refreshes retain the reading state and offer retry in the same row. A running
 conversation with no checkpoint yet shows progress without the welcome screen.
-The trajectory endpoint currently returns neither an in-progress response-text
-snapshot nor research-stage history. Text deltas belong to the original stream
-connection, so the recovered row uses a general in-progress label instead of
-inventing the model's current stage. This is a recovery implementation gap,
-not an SSE limitation: restoring partial text would require a server-owned
-snapshot and a way to resume updates for the same response without duplicating
-content. The current status recovery does not provide that text continuation.
+When a response snapshot is available, returning restores its exact partial
+text and latest progress, then subscribes to the owned response's SSE updates.
+The original connection receives text deltas; a resumed connection replaces the
+current text with newer snapshots. Response identity and sequence reject stale
+updates, and the same assistant message ID is used for the final saved answer.
+The view never resends a question to recover it. Switching sessions or signing
+out aborts that view's subscription and prevents late updates from entering the
+new conversation. A connection failure retains partial text and offers retry
+beside the response. Server interruption is explicit and leaves the text marked
+incomplete; it does not claim that generation is still running.
+Snapshots preserve the latest phase, not a replay of every historical stage.
+Older executions without snapshots use the general recovery row derived from
+durable records. Unreviewed scientific text remains withheld by the backend's
+existing claim review.
 Completed writes remain historical observations. A newly proposed write always
 requires a fresh exact-argument approval and cannot reuse a historical call.
 

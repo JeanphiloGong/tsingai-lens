@@ -565,6 +565,8 @@ const translations: Record<Language, Translations> = {
 			researchPlanRejected: 'The proposed research plan was not saved.',
 			agentObjectiveAnalysisRejected: 'The proposed Agent analysis was not published.',
 			turnFailed: 'The Agent turn stopped with error: {code}',
+			responseInterrupted: 'Generation was interrupted. The text shown is incomplete.',
+			responseDisconnected: 'Connection lost. Reconnecting to the response...',
 			turnLimited:
 				'The Agent reached its reading limit; the answer above is based on the completed inspection.'
 		},
@@ -3243,6 +3245,8 @@ const translations: Record<Language, Translations> = {
 			researchPlanRejected: '已取消保存拟议的研究方案。',
 			agentObjectiveAnalysisRejected: '已取消发布 Agent 拟议的分析。',
 			turnFailed: 'Agent 本轮执行停止，错误：{code}',
+			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',
+			responseDisconnected: '连接已断开，正在重新连接回复...',
 			turnLimited: 'Agent 已达到本轮阅读上限；上面的回答仅基于已经完成的检查。'
 		},
 		research: {

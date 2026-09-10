@@ -15,6 +15,7 @@
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let streaming = false;
 	export let recovering = false;
+	export let incomplete = false;
 	export let streamingText = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
@@ -24,6 +25,7 @@
 	class="assistant-message"
 	class:streaming={streaming || recovering}
 	data-testid="assistant-message"
+	data-message-id={message.message_id}
 >
 	<div class="assistant-mark" aria-hidden="true">AI</div>
 	<div class="assistant-content">
@@ -35,7 +37,7 @@
 			<MessageContent content={streaming ? streamingText : message.content} {streaming} />
 		{/if}
 		<slot />
-		{#if !streaming && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}
+		{#if !streaming && !incomplete && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}
 			<div class="answer-actions">
 				{#if onRegenerate}
 					<IconButton

@@ -6,6 +6,7 @@ import { collections } from '../../../_shared/collections';
 
 import type {
 	ChatMessage,
+	ChatResponseSnapshot,
 	ChatToolCall,
 	ChatToolResult,
 	ChatTrajectory,
@@ -313,6 +314,105 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
 			.toBeVisible();
+	});
+
+	it('keeps received text through a failed stream and failed recovery read, then resumes once', async () => {
+		installApi();
+		const fallback = fetchMock.getMockImplementation()!;
+		const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
+		const partial = 'Match test temperature, specimen orientation, and heat treatment.';
+		const snapshot: ChatResponseSnapshot = {
+			response_id: 'response-1',
+			sequence: 1,
+			started_at: createdAt,
+			updated_at: createdAt,
+			status: 'running',
+			message_id: 'answer-1',
+			message_created_at: createdAt,
+			content: '',
+			progress: { phase: 'responding' },
+			checkpoint_message_id: question.message_id,
+			completion_reason: null,
+			error_code: null,
+			warnings: []
+		};
+		const trajectory: ChatTrajectory = {
+			items: [question],
+			feedback: [],
+			pending_approval: null,
+			branches: [],
+			branch_draft: null,
+			running: true,
+			response: snapshot
+		};
+		let offline = false;
+		let recovering = false;
+		let posts = 0;
+		let output!: ReadableStreamDefaultController<Uint8Array>;
+		const event = (name: string, data: unknown) =>
+			new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path.endsWith('/messages') && requestMethod(input, init) === 'POST') {
+				posts++;
+				return Promise.resolve(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								output = controller;
+								controller.enqueue(event('trajectory', trajectory));
+								controller.enqueue(event('text_delta', { content: partial }));
+							}
+						}),
+						{ headers: { 'Content-Type': 'text/event-stream' } }
+					)
+				);
+			}
+			if (offline) return Promise.reject(new TypeError('Network unavailable'));
+			if (recovering && path.endsWith('/messages')) {
+				return Promise.resolve(
+					jsonResponse({ ...trajectory, response: { ...snapshot, sequence: 2, content: partial } })
+				);
+			}
+			if (path.endsWith('/events')) {
+				return Promise.resolve(
+					new Response(
+						event('trajectory', {
+							...trajectory,
+							running: false,
+							items: [
+								question,
+								message('answer-1', 'assistant', partial + ' Keep mismatches explicit.')
+							],
+							response: {
+								...snapshot,
+								sequence: 3,
+								status: 'completed',
+								message_id: null,
+								content: ''
+							}
+						}),
+						{ headers: { 'Content-Type': 'text/event-stream' } }
+					)
+				);
+			}
+			return fallback(input, init);
+		});
+		await send(question.content);
+		const answer = browserPage.getByTestId('assistant-message');
+		await expect.element(answer).toHaveTextContent(partial);
+		offline = true;
+		output.error(new TypeError('Connection lost'));
+		await expect.element(answer.getByRole('alert')).toBeVisible();
+		await expect.element(answer).toHaveTextContent(partial);
+		offline = false;
+		recovering = true;
+		await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+		await expect.element(answer).toHaveTextContent('Keep mismatches explicit.');
+		await expect.element(answer).toHaveAttribute('data-message-id', 'answer-1');
+		await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		expect(posts).toBe(1);
 	});
 
 	for (const embedded of [false, true]) {
@@ -2366,8 +2466,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await send('Inspect this table and draft evidence');
 
 		await expect.element(browserPage.getByText('Complete Source table')).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('cell', { name: 'P150', exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('cell', { name: '82', exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('cell', { name: 'P150', exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('cell', { name: '82', exact: true }))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Complete Source content')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('The P150 condition reached 82% elongation.'))

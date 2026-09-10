@@ -38,6 +38,114 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [390, 1440]) {
+		test(`resumes partial response text on the same message at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 950 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.addInitScript(() =>
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
+			);
+			const first = 'Match test temperature, ';
+			const second = first + 'specimen orientation, and heat treatment.\n\n$\\sigma = F/A$';
+			const started = new Date().toISOString();
+			const snapshot = (content: string, sequence: number, complete = false) => ({
+				response_id: 'response_1',
+				sequence,
+				started_at: started,
+				updated_at: started,
+				status: complete ? 'completed' : 'running',
+				message_id: complete ? null : 'answer_1',
+				message_created_at: complete ? null : started,
+				content: complete ? '' : content,
+				progress: { phase: 'waiting', elapsed_ms: 5000 },
+				checkpoint_message_id: complete ? 'answer_1' : 'question_1',
+				completion_reason: complete ? 'model_answer' : null,
+				error_code: null,
+				warnings: []
+			});
+			let stage = 0;
+			let writes = 0;
+			let releaseNext!: () => void;
+			let releaseFinal!: () => void;
+			const next = new Promise<void>((resolve) => {
+				releaseNext = resolve;
+			});
+			const finish = new Promise<void>((resolve) => {
+				releaseFinal = resolve;
+			});
+			const trajectory = () => ({
+				items: [
+					agentMessage('question_1', 'user', 'Explain matched LPBF tensile conditions', {
+						created_at: started
+					}),
+					...(stage === 2
+						? [agentMessage('answer_1', 'assistant', second, { created_at: started })]
+						: [])
+				],
+				feedback: [],
+				pending_approval: null,
+				branches: [],
+				branch_draft: null,
+				running: stage !== 2,
+				response: snapshot(stage ? second : first, stage + 1, stage === 2)
+			});
+			await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) => {
+				if (route.request().method() === 'POST') writes++;
+				return route.fulfill(json(trajectory()));
+			});
+			await page.route('**/api/v1/chat-sessions/chat_1/events?*', async (route) => {
+				if (stage === 0) {
+					await next;
+					return route.fulfill({
+						contentType: 'text/event-stream',
+						body: `event: snapshot\ndata: ${JSON.stringify(snapshot(second, 2))}\n\nevent: snapshot\ndata: ${JSON.stringify(snapshot(first, 1))}\n\n`
+					});
+				}
+				await finish;
+				return route.fulfill({
+					contentType: 'text/event-stream',
+					body: `event: trajectory\ndata: ${JSON.stringify(trajectory())}\n\n`
+				});
+			});
+			try {
+				await page.goto(`/collections/${collectionId}/assistant`);
+				const answer = page.locator('[data-message-id="answer_1"]');
+				await expect(answer).toContainText(first.trim());
+				await expect(answer.getByTestId('research-progress')).toBeVisible();
+				await page.locator('.back-workspace').click();
+				await page.goto(`/collections/${collectionId}/assistant`);
+				await expect(answer).toContainText(first.trim());
+				await page.reload();
+				await expect(answer).toHaveCount(1);
+				stage = 1;
+				releaseNext();
+				await expect(answer).toContainText('specimen orientation, and heat treatment.');
+				await expect(answer.locator('.katex')).toHaveCount(1);
+				await expect(page.getByTestId('research-progress')).toHaveCount(1);
+				await expect(answer.getByRole('alert')).toBeVisible();
+				await page.getByRole('button', { name: 'Check result', exact: true }).click();
+				await expect(answer.getByRole('alert')).toHaveCount(0);
+				if (screenshotDir)
+					await page.screenshot({ path: join(screenshotDir, `response-resumed-${width}.png`) });
+				stage = 2;
+				releaseFinal();
+				await expect(page.getByTestId('research-progress')).toHaveCount(0);
+				await expect(answer).toHaveCount(1);
+				await expect(answer).toContainText('specimen orientation, and heat treatment.');
+				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+				expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+					true
+				);
+				expect(writes).toBe(0);
+				expect(errors).toEqual([]);
+			} finally {
+				releaseNext();
+				releaseFinal();
+			}
+		});
+	}
+
+	for (const width of [390, 1440]) {
 		test(`restores running research beside its answer and in history at ${width}px`, async ({
 			page
 		}) => {

@@ -114,6 +114,23 @@ export type ChatTrajectory = {
 	branches: ChatBranchOptions[];
 	branch_draft: ChatMessage | null;
 	running: boolean;
+	response?: ChatResponseSnapshot | null;
+};
+
+export type ChatResponseSnapshot = {
+	response_id: string;
+	sequence: number;
+	started_at: string;
+	updated_at: string;
+	status: 'running' | 'completed' | 'approval_required' | 'failed' | 'interrupted';
+	message_id: string | null;
+	message_created_at: string | null;
+	content: string;
+	progress: ChatProgress;
+	checkpoint_message_id: string | null;
+	completion_reason: ChatTurn['completion_reason'];
+	error_code: string | null;
+	warnings: string[];
 };
 
 export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
@@ -243,7 +260,9 @@ export async function streamChatMessage(
 	sourceContexts: ChatSourceContext[] = [],
 	onProgress?: (progress: ChatProgress) => void,
 	signal?: AbortSignal,
-	branchRevision = false
+	branchRevision = false,
+	onSnapshot?: (snapshot: ChatResponseSnapshot) => void,
+	onTrajectory?: (trajectory: ChatTrajectory) => void
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		signal,
@@ -259,6 +278,45 @@ export async function streamChatMessage(
 			...(sourceContexts.length ? { source_contexts: sourceContexts } : {})
 		})
 	});
+	const turn = await readChatEvents(
+		response,
+		{ onTextDelta, onProgress, onSnapshot, onTrajectory },
+		signal
+	);
+	if (turn === null) throw new Error('The research response ended before completion.');
+	return turn;
+}
+
+export async function streamChatUpdates(
+	sessionId: string,
+	responseId: string,
+	onSnapshot: (snapshot: ChatResponseSnapshot) => void,
+	onTrajectory: (trajectory: ChatTrajectory) => void,
+	signal?: AbortSignal
+) {
+	const response = await fetch(
+		buildApiUrl(
+			`${chatSessionPath(sessionId)}/events?${new URLSearchParams({ response_id: responseId })}`
+		),
+		{
+			signal,
+			credentials: 'same-origin',
+			headers: { Accept: 'text/event-stream' }
+		}
+	);
+	await readChatEvents(response, { onSnapshot, onTrajectory }, signal);
+}
+
+async function readChatEvents(
+	response: Response,
+	callbacks: {
+		onTextDelta?: (content: string) => void;
+		onProgress?: (progress: ChatProgress) => void;
+		onSnapshot?: (snapshot: ChatResponseSnapshot) => void;
+		onTrajectory?: (trajectory: ChatTrajectory) => void;
+	},
+	signal?: AbortSignal
+) {
 	if (!response.ok) await throwApiError(response);
 	if (!response.body) throw new Error('The research response stream is unavailable.');
 
@@ -280,7 +338,7 @@ export async function streamChatMessage(
 		const payload = JSON.parse(data) as unknown;
 		if (event === 'text_delta') {
 			if (payload && typeof payload === 'object' && 'content' in payload) {
-				onTextDelta(String(payload.content ?? ''));
+				callbacks.onTextDelta?.(String(payload.content ?? ''));
 			}
 			return;
 		}
@@ -290,8 +348,16 @@ export async function streamChatMessage(
 		}
 		if (event === 'progress') {
 			if (payload && typeof payload === 'object' && 'phase' in payload) {
-				onProgress?.(payload as ChatProgress);
+				callbacks.onProgress?.(payload as ChatProgress);
 			}
+			return;
+		}
+		if (event === 'snapshot') {
+			callbacks.onSnapshot?.(payload as ChatResponseSnapshot);
+			return;
+		}
+		if (event === 'trajectory') {
+			callbacks.onTrajectory?.(payload as ChatTrajectory);
 			return;
 		}
 		if (event === 'error') {
@@ -322,7 +388,6 @@ export async function streamChatMessage(
 			if (done) break;
 		}
 		if (buffer.trim()) consume(buffer);
-		if (turn === null) throw new Error('The research response ended before completion.');
 		return turn;
 	} finally {
 		signal?.removeEventListener('abort', cancelReader);

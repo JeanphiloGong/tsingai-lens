@@ -16,6 +16,7 @@
 		readPendingChatSourceContexts,
 		storePendingChatSourceContexts,
 		streamChatMessage,
+		streamChatUpdates,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
 		type ChatBranchOptions,
@@ -23,6 +24,8 @@
 		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatProgress,
+		type ChatResponseSnapshot,
+		type ChatTrajectory,
 		type ChatSession,
 		type ChatSourceContext,
 		type ChatToolCall,
@@ -76,6 +79,8 @@
 	let progress: ChatProgress | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
+	let responseSnapshot: ChatResponseSnapshot | null = null;
+	let updatesController: AbortController | null = null;
 
 	let deciding = false;
 	let error = '';
@@ -101,6 +106,7 @@
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
 		sessionController?.abort();
+		updatesController?.abort();
 	});
 
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
@@ -306,6 +312,9 @@
 		recoveryLoading = false;
 		recoveryError = '';
 		sessionController?.abort();
+		updatesController?.abort();
+		updatesController = null;
+		responseSnapshot = null;
 		sessionController = null;
 		session = null;
 		messages = [];
@@ -363,12 +372,7 @@
 			} else {
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = trajectory.items;
-				branches = trajectory.branches ?? [];
-				branchDraft = trajectory.branch_draft ?? null;
-				running = trajectory.running ?? false;
-				loadFeedback(trajectory.feedback);
-				pendingApproval = trajectory.pending_approval;
+				acceptTrajectory(trajectory);
 			}
 			session = nextSession;
 			refreshPendingSources();
@@ -401,8 +405,84 @@
 					(call) =>
 						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
+		if (running && responseSnapshot?.status === 'running' && !sending && !recoveryError) {
+			void resumeResponse();
+			return;
+		}
 		if ((recoveringCallId || running) && !destroyed) {
 			recoveryTimer = setTimeout(() => void refreshRecovery(), 3000);
+		}
+	}
+
+	function acceptSnapshot(snapshot: ChatResponseSnapshot) {
+		if (
+			responseSnapshot?.response_id === snapshot.response_id &&
+			(responseSnapshot.sequence > snapshot.sequence ||
+				(responseSnapshot.sequence === snapshot.sequence &&
+					responseSnapshot.status === snapshot.status))
+		)
+			return;
+		responseSnapshot = snapshot;
+		streamingText = snapshot.content;
+		progress = snapshot.progress;
+		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
+		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
+		else if (snapshot.status === 'failed')
+			error = $t('researchAgent.turnFailed', { code: snapshot.error_code ?? 'failed' });
+		else if (snapshot.status === 'completed' && snapshot.warnings.length)
+			notice = $t('researchAgent.turnLimited');
+	}
+
+	function acceptTrajectory(trajectory: ChatTrajectory) {
+		messages = trajectory.items;
+		branches = trajectory.branches ?? [];
+		branchDraft = trajectory.branch_draft ?? null;
+		running = trajectory.running ?? false;
+		loadFeedback(trajectory.feedback);
+		pendingApproval = trajectory.pending_approval;
+		if (trajectory.response) acceptSnapshot(trajectory.response);
+		else responseSnapshot = null;
+	}
+
+	async function resumeResponse() {
+		if (!session || !responseSnapshot || updatesController || destroyed) return;
+		const controller = new AbortController();
+		updatesController = controller;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		const current = () =>
+			isCurrentSession(generation, ownerCollectionId) &&
+			updatesController === controller &&
+			!controller.signal.aborted;
+		try {
+			await streamChatUpdates(
+				session.session_id,
+				responseSnapshot.response_id,
+				(snapshot) => {
+					if (!current()) return;
+					acceptSnapshot(snapshot);
+					recoveryError = '';
+				},
+				(trajectory) => {
+					if (!current()) return;
+					acceptTrajectory(trajectory);
+					recoveryError = '';
+					refreshPendingSources();
+					onSourcesChanged();
+					if (session) upsertHistory(session);
+				},
+				controller.signal
+			);
+			if (current() && running && responseSnapshot?.status === 'running') {
+				recoveryError = $t('researchAgent.responseDisconnected');
+			}
+		} catch (err) {
+			if (current()) recoveryError = errorMessage(err);
+		} finally {
+			if (current()) {
+				updatesController = null;
+				scheduleRecovery();
+			}
 		}
 	}
 
@@ -411,6 +491,8 @@
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		const activeSession = session;
+		updatesController?.abort();
+		updatesController = null;
 		clearTimeout(recoveryTimer);
 		recoveryLoading = true;
 		try {
@@ -419,14 +501,9 @@
 				sessionController?.signal
 			);
 			if (!isCurrentSession(generation, ownerCollectionId)) return;
-			messages = trajectory.items;
-			branches = trajectory.branches ?? [];
-			branchDraft = trajectory.branch_draft ?? null;
-			running = trajectory.running ?? false;
-			loadFeedback(trajectory.feedback);
-			pendingApproval = trajectory.pending_approval;
 			recoveryError = '';
 			error = '';
+			acceptTrajectory(trajectory);
 			failedSessionId = null;
 			session = {
 				...activeSession,
@@ -652,6 +729,7 @@
 			content: ''
 		};
 		messages = [...messages, optimisticMessage, streamingMessage];
+		responseSnapshot = null;
 		streamingText = '';
 		if (!isRevision) input = '';
 		sending = true;
@@ -689,7 +767,22 @@
 					progressHistory = appendChatProgress(progressHistory, nextProgress);
 				},
 				signal,
-				isRevision
+				isRevision,
+				(snapshot) => {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
+					cancelTextFrame();
+					pendingText = '';
+					acceptSnapshot(snapshot);
+					messages = messages.filter((message) => message.message_id !== streamingId);
+					acknowledgeSubmission();
+				},
+				(trajectory) => {
+					if (!isCurrentSession(generation, activeCollectionId)) return;
+					cancelTextFrame();
+					pendingText = '';
+					acceptTrajectory(trajectory);
+					acknowledgeSubmission();
+				}
 			);
 			if (!isCurrentSession(generation, activeCollectionId)) return;
 			cancelTextFrame();
@@ -703,14 +796,16 @@
 			}
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
+			cancelTextFrame();
+			flushText();
+			const receivedResponse = responseSnapshot as ChatResponseSnapshot | null;
+			if (receivedResponse?.status === 'running') {
+				responseSnapshot = { ...receivedResponse, content: streamingText };
+			}
 			try {
 				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = trajectory.items;
-				branches = trajectory.branches ?? [];
-				branchDraft = trajectory.branch_draft ?? null;
-				running = trajectory.running ?? false;
-				pendingApproval = trajectory.pending_approval;
+				acceptTrajectory(trajectory);
 				const persistedMessage = messages
 					.slice(previousMessageCount)
 					.find((message) => message.role === 'user' && message.content === text);
@@ -730,7 +825,8 @@
 				);
 				if (!isRevision) input = draft;
 			}
-			error = errorMessage(err);
+			if (running) recoveryError = errorMessage(err);
+			else if (!error) error = errorMessage(err);
 		} finally {
 			cancelTextFrame();
 			signal?.removeEventListener('abort', cancelTextFrame);
@@ -743,6 +839,7 @@
 				}
 				progress = null;
 				progressHistory = [];
+				scheduleRecovery();
 				if (isRevision) {
 					try {
 						const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
@@ -780,6 +877,8 @@
 		localMessageIds: string[] = [],
 		decidedToolName: string | null = null
 	) {
+		running = false;
+		responseSnapshot = null;
 		const prior = localMessageIds.length
 			? messages.filter((message) => !localMessageIds.includes(message.message_id))
 			: messages;
@@ -831,12 +930,12 @@
 					sessionController?.signal
 				);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = trajectory.items;
-				loadFeedback(trajectory.feedback);
-				pendingApproval = trajectory.pending_approval;
+				acceptTrajectory(trajectory);
 				upsertHistory(activeSession);
-				if (turn) applyTurn({ ...turn, pending_approval: pendingApproval }, [], call.name);
+				if (turn && !running)
+					applyTurn({ ...turn, pending_approval: pendingApproval }, [], call.name);
 				else if (
+					!running &&
 					!messages.some((message) => message.tool_result?.tool_call_id === call.tool_call_id)
 				) {
 					error = errorMessage(decisionError);
@@ -978,6 +1077,7 @@
 			{feedbackByMessage}
 			onFeedback={saveFeedback}
 			{streamingText}
+			{responseSnapshot}
 			{pendingApproval}
 			{progress}
 			{progressHistory}

@@ -149,7 +149,7 @@ class ResearchAxisEquivalenceClassifier:
                 axis_pairs=payload.get("axis_pairs"),
             )
 
-        def build_repair_instruction(repair_detail: str) -> str:
+        def build_retry_prompt(repair_detail: str) -> str:
             return (
                 "Previous axis pair classification was invalid: "
                 f"{repair_detail}. Return one decision for every input pair_id, in "
@@ -159,13 +159,13 @@ class ResearchAxisEquivalenceClassifier:
                 "Return only compact JSON."
             )
 
-        def parse_json_text_with_contract(
+        def complete_json_with_contract(
             **kwargs: Any,
         ) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_axis_accounting,
+                build_retry_prompt=build_retry_prompt,
+                postprocess_response=validate_axis_accounting,
             )
 
         response = self.response_client.complete(
@@ -173,8 +173,8 @@ class ResearchAxisEquivalenceClassifier:
             user_prompt=user_prompt,
             response_model=StructuredAxisCanonicalizationPlan,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_text_with_contract,
-            parsed_validator=validate_axis_accounting,
+            json_completion=complete_json_with_contract,
+            postprocess_response=validate_axis_accounting,
             task_type="research_axis_canonicalization",
             prompt_version=RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
         )

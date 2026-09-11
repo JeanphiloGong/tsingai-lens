@@ -107,16 +107,17 @@ class StructuredResponseClient:
         max_completion_tokens: int | None = None,
         force_json_text: bool = False,
         include_schema_for_forced_json: bool = True,
-        json_text_parser: Callable[..., tuple[BaseModel, str | None]] | None = None,
-        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
-        validation_error_observer: Callable[[Exception], None] | None = None,
+        json_completion: Callable[..., tuple[BaseModel, str | None]] | None = None,
+        postprocess_response: Callable[[BaseModel], BaseModel | None] | None = None,
+        on_validation_error: Callable[[Exception], None] | None = None,
         task_type: str | None = None,
         prompt_version: str | None = None,
         fail_on_output_saturation: bool = False,
     ) -> BaseModel:
+        """Choose the provider parser or JSON-text fallback for one response."""
         if task_type is not None and prompt_version is not None:
             record_llm_prompt_version(task_type, prompt_version)
-        parse_json_text = json_text_parser or self.complete_json
+        json_completion = json_completion or self.complete_json
         messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -139,8 +140,8 @@ class StructuredResponseClient:
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
                     )
-                    if parsed_validator is not None:
-                        validated = parsed_validator(parsed)
+                    if postprocess_response is not None:
+                        validated = postprocess_response(parsed)
                         if validated is not None:
                             parsed = validated
                 except LengthFinishReasonError as exc:
@@ -182,7 +183,7 @@ class StructuredResponseClient:
                         response_model=response_model,
                         include_schema=True,
                     )
-                    parsed, raw_content = parse_json_text(
+                    parsed, raw_content = json_completion(
                         messages=messages,
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
@@ -191,8 +192,8 @@ class StructuredResponseClient:
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
                     )
                 except Exception as exc:
-                    if validation_error_observer is not None:
-                        validation_error_observer(exc)
+                    if on_validation_error is not None:
+                        on_validation_error(exc)
                     logger.warning(
                         "Objective provider parse failed; retrying with json_text "
                         "model=%s response_model=%s",
@@ -216,7 +217,7 @@ class StructuredResponseClient:
                             ),
                         }
                     )
-                    parsed, raw_content = parse_json_text(
+                    parsed, raw_content = json_completion(
                         messages=messages,
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
@@ -234,7 +235,7 @@ class StructuredResponseClient:
                             include_schema=True,
                         )
                     trace_extraction_mode = _EXTRACTION_MODE_JSON_TEXT
-                parsed, raw_content = parse_json_text(
+                parsed, raw_content = json_completion(
                     messages=messages,
                     response_model=response_model,
                     max_completion_tokens=max_completion_tokens,
@@ -327,14 +328,15 @@ class StructuredResponseClient:
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
         max_completion_tokens: int | None,
-        repair_instruction_builder: Callable[[str], str] | None = None,
-        payload_normalizer: Callable[[Any], Any] | None = None,
-        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
-        validation_error_observer: Callable[[Exception], None] | None = None,
+        build_retry_prompt: Callable[[str], str] | None = None,
+        normalize_response_payload: Callable[[Any], Any] | None = None,
+        postprocess_response: Callable[[BaseModel], BaseModel | None] | None = None,
+        on_validation_error: Callable[[Exception], None] | None = None,
         fail_on_output_saturation: bool = False,
         max_attempts: int = 2,
         json_schema_name: str | None = None,
     ) -> tuple[BaseModel, str | None]:
+        """Decode and validate JSON, retrying only when the response is invalid."""
         response_format: dict[str, Any] = {"type": "json_object"}
         if json_schema_name is not None:
             response_format = {
@@ -362,28 +364,12 @@ class StructuredResponseClient:
             attempt_messages = [*messages]
             attempt_kwargs["messages"] = attempt_messages
             if attempt:
-                if isinstance(last_error, ValidationError):
-                    repair_detail = "; ".join(
-                        f"{'.'.join(str(part) for part in error['loc'])}: "
-                        f"{error['msg']}"
-                        for error in last_error.errors(
-                            include_input=False,
-                            include_url=False,
-                        )
-                    )
-                else:
-                    repair_detail = str(last_error or "invalid structured output")
-                if repair_instruction_builder is not None:
-                    retry_instruction = repair_instruction_builder(repair_detail[:1000])
-                else:
-                    retry_instruction = (
-                        "Previous output was invalid. Return only the smallest valid "
-                        "JSON object matching the schema. Do not explain, repeat the "
-                        "prompt, or include markdown. Correct these validation errors: "
-                        f"{repair_detail[:1000]}"
-                    )
+                retry_prompt = self._build_retry_prompt(
+                    last_error,
+                    build_retry_prompt,
+                )
                 attempt_messages.append(
-                    {"role": "user", "content": retry_instruction}
+                    {"role": "user", "content": retry_prompt}
                 )
                 logger.warning(
                     "Retrying structured JSON response model=%s response_model=%s",
@@ -440,14 +426,14 @@ class StructuredResponseClient:
                         "structured extraction returned empty response content"
                     )
                 payload = load_json_payload(extract_json_object(raw_content))
-                if payload_normalizer is not None:
-                    payload = payload_normalizer(payload)
+                if normalize_response_payload is not None:
+                    payload = normalize_response_payload(payload)
                 try:
-                    parsed = response_model.model_validate(payload)
-                    if parsed_validator is not None:
-                        validated = parsed_validator(parsed)
-                        if validated is not None:
-                            parsed = validated
+                    parsed = self._validate_response_payload(
+                        payload,
+                        response_model=response_model,
+                        postprocess_response=postprocess_response,
+                    )
                     attempts.append(
                         self._build_attempt_trace(
                             attempt=attempt + 1,
@@ -462,26 +448,6 @@ class StructuredResponseClient:
                         extra_keys = set(payload) - set(response_model.model_fields)
                         if extra_keys - {"confidence"}:
                             raise
-                        filtered_payload = {
-                            key: value
-                            for key, value in payload.items()
-                            if key in response_model.model_fields
-                        }
-                        if filtered_payload != payload:
-                            parsed = response_model.model_validate(filtered_payload)
-                            if parsed_validator is not None:
-                                validated = parsed_validator(parsed)
-                                if validated is not None:
-                                    parsed = validated
-                            attempts.append(
-                                self._build_attempt_trace(
-                                    attempt=attempt + 1,
-                                    finish_reason=finish_reason,
-                                    raw_content=raw_content,
-                                )
-                            )
-                            self._last_attempts.set(tuple(attempts))
-                            return parsed, raw_content
                     raise
             except StructuredOutputSaturatedError as exc:
                 attempts.append(
@@ -500,8 +466,8 @@ class StructuredResponseClient:
                 ValidationError,
                 json.JSONDecodeError,
             ) as exc:
-                if validation_error_observer is not None:
-                    validation_error_observer(exc)
+                if on_validation_error is not None:
+                    on_validation_error(exc)
                 attempts.append(
                     self._build_attempt_trace(
                         attempt=attempt + 1,
@@ -516,6 +482,62 @@ class StructuredResponseClient:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
+
+    @staticmethod
+    def _build_retry_prompt(
+        last_error: Exception | None,
+        retry_prompt_builder: Callable[[str], str] | None,
+    ) -> str:
+        if isinstance(last_error, ValidationError):
+            repair_detail = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc'])}: "
+                f"{error['msg']}"
+                for error in last_error.errors(
+                    include_input=False,
+                    include_url=False,
+                )
+            )
+        else:
+            repair_detail = str(last_error or "invalid structured output")
+        repair_detail = repair_detail[:1000]
+        if retry_prompt_builder is not None:
+            return retry_prompt_builder(repair_detail)
+        return (
+            "Previous output was invalid. Return only the smallest valid JSON "
+            "object matching the schema. Do not explain, repeat the prompt, or "
+            "include markdown. Correct these validation errors: "
+            f"{repair_detail}"
+        )
+
+    @staticmethod
+    def _validate_response_payload(
+        payload: Any,
+        *,
+        response_model: type[BaseModel],
+        postprocess_response: Callable[[BaseModel], BaseModel | None] | None,
+    ) -> BaseModel:
+        def postprocess(parsed: BaseModel) -> BaseModel:
+            if postprocess_response is None:
+                return parsed
+            processed = postprocess_response(parsed)
+            return processed if processed is not None else parsed
+
+        try:
+            return postprocess(response_model.model_validate(payload))
+        except ValidationError:
+            if not isinstance(payload, dict):
+                raise
+            extra_keys = set(payload) - set(response_model.model_fields)
+            if extra_keys - {"confidence"}:
+                raise
+            filtered_payload = {
+                key: value
+                for key, value in payload.items()
+                if key in response_model.model_fields
+            }
+            if filtered_payload == payload:
+                raise
+            return postprocess(response_model.model_validate(filtered_payload))
 
     def _parse_provider_structured_response(
         self,

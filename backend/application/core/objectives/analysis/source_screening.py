@@ -449,7 +449,7 @@ class ObjectiveSourceScreener:
                 )
             return parsed
 
-        def build_repair_instruction(repair_detail: str) -> str:
+        def build_retry_prompt(repair_detail: str) -> str:
             return (
                 "Previous objective paper framing output had invalid Source-label "
                 f"accounting: {repair_detail}. Return only one compact JSON object. "
@@ -460,12 +460,12 @@ class ObjectiveSourceScreener:
                 "an uncertain source as relevant."
             )
 
-        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def complete_json_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_source_accounting,
-                validation_error_observer=record_source_accounting_error,
+                build_retry_prompt=build_retry_prompt,
+                postprocess_response=validate_source_accounting,
+                on_validation_error=record_source_accounting_error,
             )
 
         try:
@@ -474,9 +474,9 @@ class ObjectiveSourceScreener:
                 user_prompt=user_prompt,
                 response_model=_StructuredPaperFrameModelBatch,
                 max_completion_tokens=_FRAME_MAX_COMPLETION_TOKENS,
-                json_text_parser=parse_json_text_with_contract,
-                parsed_validator=validate_source_accounting,
-                validation_error_observer=record_source_accounting_error,
+                json_completion=complete_json_with_contract,
+                postprocess_response=validate_source_accounting,
+                on_validation_error=record_source_accounting_error,
                 task_type="objective_paper_frame",
                 prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
             )

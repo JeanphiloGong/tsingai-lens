@@ -48,7 +48,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         system_prompt: str,
         user_prompt: str,
         response_model: type[Any],
-        parsed_validator: Any = None,
+        postprocess_response: Any = None,
         **options: Any,
     ) -> Any:
         if response_model.__name__ != "_StructuredPaperFrameModelBatch":
@@ -56,7 +56,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=response_model,
-                parsed_validator=parsed_validator,
+                postprocess_response=postprocess_response,
                 **options,
             )
 
@@ -107,8 +107,8 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             relevant_source_labels=[] if is_review else source_labels,
             excluded_source_labels=source_labels if is_review else [],
         )
-        if parsed_validator is not None:
-            validated = parsed_validator(response)
+        if postprocess_response is not None:
+            validated = postprocess_response(response)
             if validated is not None:
                 response = validated
         return response

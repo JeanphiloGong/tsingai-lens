@@ -375,7 +375,7 @@ class PaperSignalReconciler:
                 signals_by_id=signals_by_id,
             )
 
-        def build_repair_instruction(repair_detail: str) -> str:
+        def build_retry_prompt(repair_detail: str) -> str:
             return (
                 "Previous paper signal reconciliation was invalid: "
                 f"{repair_detail}. Make every relationship context-compatible. "
@@ -387,11 +387,11 @@ class PaperSignalReconciler:
                 f"signal labels: {json.dumps(allowed_labels, ensure_ascii=True)}."
             )
 
-        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def complete_json_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_or_recover_contexts,
+                build_retry_prompt=build_retry_prompt,
+                postprocess_response=validate_or_recover_contexts,
             )
 
         response = self.response_client.complete(
@@ -399,8 +399,8 @@ class PaperSignalReconciler:
             user_prompt=user_prompt,
             response_model=_StructuredModelSignalReconciliation,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_text_with_contract,
-            parsed_validator=validate_or_recover_contexts,
+            json_completion=complete_json_with_contract,
+            postprocess_response=validate_or_recover_contexts,
             task_type="paper_signal_reconciliation",
             prompt_version=PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
         )

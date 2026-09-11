@@ -1458,10 +1458,10 @@ class ObjectiveSourceExtractor:
         system_prompt, user_prompt = build_objective_evidence_prompt(payload)
         narrow_context_field = _objective_route_narrow_context_field(payload)
         response_model: type[BaseModel] = StructuredEvidenceExtractions
-        json_text_parser = self._parse_json_response
+        json_completion = self._complete_json_response
         if narrow_context_field is not None:
             response_model = StructuredRequestedContextFacts
-            json_text_parser = partial(
+            json_completion = partial(
                 self._parse_context_json_response,
                 context_field=narrow_context_field,
             )
@@ -1474,7 +1474,7 @@ class ObjectiveSourceExtractor:
             max_completion_tokens=_SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS,
             force_json_text=True,
             include_schema_for_forced_json=False,
-            json_text_parser=json_text_parser,
+            json_completion=json_completion,
             task_type="objective_evidence_extraction",
             prompt_version=OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
         )
@@ -1491,7 +1491,7 @@ class ObjectiveSourceExtractor:
             raise TypeError("unexpected objective evidence extraction response type")
         return response
 
-    def _parse_json_response(
+    def _complete_json_response(
         self,
         *,
         messages: list[dict[str, str]],
@@ -1527,7 +1527,7 @@ class ObjectiveSourceExtractor:
                 )
             return normalized
 
-        def build_repair_instruction(repair_detail: str) -> str:
+        def build_retry_prompt(repair_detail: str) -> str:
             if "echoed input fields" in repair_detail:
                 return (
                     "Your previous response only echoed the input fields and did "
@@ -1547,8 +1547,8 @@ class ObjectiveSourceExtractor:
             messages=messages,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
-            repair_instruction_builder=build_repair_instruction,
-            payload_normalizer=normalize_payload,
+            build_retry_prompt=build_retry_prompt,
+            normalize_response_payload=normalize_payload,
             max_attempts=3,
             json_schema_name="structured_evidence_extractions",
         )
@@ -1565,7 +1565,7 @@ class ObjectiveSourceExtractor:
             messages=messages,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
-            repair_instruction_builder=partial(
+            build_retry_prompt=partial(
                 _objective_context_repair_instruction,
                 context_field=context_field,
             ),

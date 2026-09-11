@@ -153,7 +153,7 @@ class FakeDomainModelExtractor:
         system_prompt: str,
         user_prompt: str,
         response_model: type[Any],
-        parsed_validator: Callable[[Any], Any | None] | None = None,
+        postprocess_response: Callable[[Any], Any | None] | None = None,
         **_options: Any,
     ) -> Any:
         del system_prompt
@@ -227,13 +227,13 @@ class FakeDomainModelExtractor:
             raise TypeError(
                 f"unsupported fake structured response: {response_model.__name__}"
             )
-        if parsed_validator is not None:
-            validated = parsed_validator(response)
+        if postprocess_response is not None:
+            validated = postprocess_response(response)
             if validated is not None:
                 response = validated
         return response
 
-    def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
+    def extract_document_profile(self, payload: dict[str, Any]) -> DocumentProfileModelOutput:
         title = str(payload.get("title") or "").strip()
         source_filename = str(payload.get("source_filename") or "").strip()
         lead_text = str(payload.get("abstract_or_lead_text") or "")

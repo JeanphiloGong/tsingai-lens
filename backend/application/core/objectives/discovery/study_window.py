@@ -1788,7 +1788,7 @@ class PaperResearchMapExtractor:
             == "review"
         )
 
-        def build_repair_instruction(repair_detail: str) -> str:
+        def build_retry_prompt(repair_detail: str) -> str:
             if is_review:
                 return (
                     "Previous review synthesis output was invalid: "
@@ -1841,16 +1841,16 @@ class PaperResearchMapExtractor:
                 raise ValueError("studies contain duplicate study identities")
             return paper_map
 
-        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def complete_json_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                payload_normalizer=(
+                build_retry_prompt=build_retry_prompt,
+                normalize_response_payload=(
                     _normalize_experimental_paper_map_payload
                     if kwargs.get("response_model") is StructuredExperimentalPaperMap
                     else None
                 ),
-                parsed_validator=validate_output_contract,
+                postprocess_response=validate_output_contract,
                 fail_on_output_saturation=True,
             )
 
@@ -1861,8 +1861,8 @@ class PaperResearchMapExtractor:
                 user_prompt=user_prompt,
                 response_model=response_model,
                 max_completion_tokens=_MAX_COMPLETION_TOKENS,
-                json_text_parser=parse_json_text_with_contract,
-                parsed_validator=validate_output_contract,
+                json_completion=complete_json_with_contract,
+                postprocess_response=validate_output_contract,
                 fail_on_output_saturation=True,
                 task_type="paper_map",
                 prompt_version=PAPER_RESEARCH_MAP_PROMPT_VERSION,
@@ -1888,10 +1888,10 @@ class PaperResearchMapExtractor:
 
         system_prompt, user_prompt = build_paper_source_signal_prompt(payload)
 
-        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def complete_json_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
-                payload_normalizer=_normalize_source_signal_screen_payload,
+                normalize_response_payload=_normalize_source_signal_screen_payload,
                 fail_on_output_saturation=True,
             )
 
@@ -1901,7 +1901,7 @@ class PaperResearchMapExtractor:
                 user_prompt=user_prompt,
                 response_model=StructuredPaperSourceSignalScreen,
                 max_completion_tokens=_SOURCE_SIGNAL_MAX_COMPLETION_TOKENS,
-                json_text_parser=parse_json_text_with_contract,
+                json_completion=complete_json_with_contract,
                 fail_on_output_saturation=True,
                 task_type="paper_source_signal",
                 prompt_version=PAPER_SOURCE_SIGNAL_PROMPT_VERSION,

@@ -148,6 +148,7 @@ handoff record or a second research-result identity.
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/branches`
+- `GET /api/v1/chat-sessions/{session_id}/tree`
 - `PUT /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback`
 - `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
@@ -166,6 +167,24 @@ owned `ChatSession` with `root_session_id`, `parent_session_id`,
 `fork_message_id`, `fork_position`, and `fork_content`; these fields are null
 for an original session. The same UUID and revision return the same branch.
 Reusing a UUID for different content is rejected with 422.
+
+The optional `mode` is `revise` by default. `mode: continue` requires a new
+`message` and retains the selected question's completed answer before starting
+that question on a new branch. Its `fork_message_id` identifies the retained
+assistant answer and `fork_position` is the first position after that answer.
+An incomplete answer cannot be used as a continuation checkpoint (422).
+Continuation drafts have no new Source attachments: earlier messages retain
+their own Source context. Both modes use the existing branch storage and require
+an idle session with no unresolved approvals or tool results.
+
+`GET /tree` returns the owned session family's `root_session_id`, `active_path`
+(canonical user-message IDs), and `nodes`. Each node contains its saved `message`,
+`parent_message_id` (the preceding canonical user turn or null), `answer`,
+`status`, and `can_branch`. Copied prefixes appear once. Status is `completed`,
+`running`, `approval_required`, `failed`, `interrupted`, `incomplete`, or `draft`;
+partial answer text comes only from the server-owned response snapshot. A draft
+is a synthetic user message with stable `draft_{session_id}` identity. The
+endpoint checks current user and Collection ownership and does not mutate state.
 
 Branch creation atomically copies complete turns before the selected question,
 assigning new message and call identities while retaining canonical Source and

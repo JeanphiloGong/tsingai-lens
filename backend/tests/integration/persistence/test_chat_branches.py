@@ -152,6 +152,65 @@ async def test_edit_preserves_sources_history_and_completed_writes(branch_app):
     assert await app.repository.read_messages("original") == original
 
 
+async def test_tree_checkpoint_continuation_preserves_answer_and_excludes_later_turns(branch_app):
+    app = branch_app
+    question = "Compare only specimens with the same heat treatment."
+    payload = {"message_id": "question", "request_id": str(uuid4()),
+               "message": question, "mode": "continue"}
+    before = (await app.client.get(f"{BASE}/original/tree")).json()
+    assert before["active_path"] == ["create", "question", "later"]
+    assert [node["parent_message_id"] for node in before["nodes"]] == [None, "create", "question"]
+    response = await app.client.post(f"{BASE}/original/branches", json=payload)
+    assert response.status_code == 201, response.text
+    branch = response.json()
+    assert branch["fork_position"] == 6 and branch["fork_message_id"] == "answer"
+    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).json() == branch
+    copied = await app.repository.read_messages(branch["session_id"])
+    assert len(copied) == 6 and copied[-1].content == ANSWER
+    assert copied[4].source_contexts[0].quote == QUOTE
+    assert not any(item.content == "What about specimen orientation?" for item in copied)
+    draft = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()["branch_draft"]
+    assert draft["role"] == "user" and draft["source_contexts"] == []
+    await _send(app, branch)
+    saved = await app.repository.read_messages(branch["session_id"])
+    tree = (await app.client.get(f"{BASE}/{branch['session_id']}/tree")).json()
+    assert len(tree["nodes"]) == 4
+    assert tree["active_path"] == ["create", "question", saved[6].message_id]
+    node = next(node for node in tree["nodes"] if node["message"]["content"] == question)
+    assert node["parent_message_id"] == "question"
+    nested = await _branch(app, branch["session_id"], saved[6].message_id, "Compare cooling rates instead.")
+    assert nested["parent_session_id"] == branch["session_id"]
+    await _send(app, nested)
+    original = await app.repository.read_messages("original")
+    assert len(original) == 8 and original[-1].message_id == "later-answer"
+    final_tree = (await app.client.get(f"{BASE}/original/tree")).json()
+    assert len(final_tree["nodes"]) == 5
+    assert sum(node["parent_message_id"] == "question" for node in final_tree["nodes"]) == 3
+
+
+async def test_tree_and_checkpoint_enforce_ownership_busy_and_completed_boundaries(branch_app):
+    app = branch_app
+    payload = {"message_id": "question", "request_id": str(uuid4()),
+               "message": "Compare matched specimens.", "mode": "continue"}
+    async with app.repository.session_execution("original"):
+        tree = (await app.client.get(f"{BASE}/original/tree")).json()
+        assert tree["nodes"][-1]["status"] == "running"
+        assert not any(node["can_branch"] for node in tree["nodes"])
+        assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 409
+    assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message": None})).status_code == 422
+    original = await app.repository.read_messages("original")
+    unanswered = ChatMessage.user(message_id="unanswered", session_id="original",
+                                  content="What about cooling rate?", created_at=NOW)
+    await app.repository.save_trajectory(
+        session=await app.repository.read_session("original"), messages=(*original, unanswered),
+        tool_calls=(), tool_results=(),
+    )
+    assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message_id": "unanswered"})).status_code == 422
+    app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
+    assert (await app.client.get(f"{BASE}/original/tree")).status_code == 404
+    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 404
+
+
 async def test_revision_retries_are_idempotent_and_do_not_repeat_generation(branch_app):
     app = branch_app
     request_id = str(uuid4())

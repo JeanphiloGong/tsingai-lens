@@ -3,7 +3,8 @@ import type { ChatMessage, ChatToolResult } from '../../../_shared/chatSessions'
 import {
 	buildChatPresentation,
 	getChatSessionActivity,
-	getRecoveredChatProgress
+	getRecoveredChatProgress,
+	getCurrentReadings
 } from './conversationPresentation';
 
 function message(
@@ -52,6 +53,139 @@ function result(toolCallId: string, status: ChatToolResult['status'] = 'succeede
 }
 
 describe('buildChatPresentation', () => {
+	it('shows exact pending passage metadata and keeps the latest received fragment during model work', () => {
+		const question = message('question', 'user');
+		const search = message('search-result', 'tool', {
+			toolResult: {
+				...result('search'),
+				data: {
+					matches: [
+						{
+							document_id: 'paper-a',
+							document_title: 'Ti6Al4V treatment study',
+							source_ref: 'results-1',
+							page: 7,
+							heading_path: '3.4 Tensile properties',
+							content: 'Elongation increases at the first treatment level.'
+						}
+					]
+				}
+			}
+		});
+		const read = message('read', 'assistant', { toolCallId: 'read', toolName: 'read_source' });
+		read.tool_calls[0].arguments = {
+			document_id: 'paper-a',
+			source_ref: 'results-1',
+			source_kind: 'text_window'
+		};
+		const messages = [question, search, read];
+		expect(getCurrentReadings(messages)).toEqual([
+			{
+				toolCallId: 'read',
+				kind: 'passage',
+				status: 'reading',
+				title: 'Ti6Al4V treatment study',
+				page: '7',
+				heading: '3.4 Tensile properties',
+				excerpt: 'Elongation increases at the first treatment level.',
+				query: ''
+			}
+		]);
+		const received = message('read-result', 'tool', {
+			toolResult: {
+				...result('read'),
+				data: {
+					document_id: 'paper-a',
+					source_ref: 'results-1',
+					content: 'Complete passage with all comparisons.'
+				}
+			}
+		});
+		expect(getCurrentReadings([...messages, received])[0]).toMatchObject({
+			status: 'received',
+			page: '7',
+			excerpt: 'Complete passage with all comparisons.'
+		});
+		expect(getCurrentReadings([...messages, message('new-question', 'user')])).toEqual([]);
+		expect(
+			getCurrentReadings([
+				...messages,
+				message('failed', 'tool', { toolResult: result('read', 'failed') })
+			])[0]
+		).toMatchObject({ status: 'failed', excerpt: '' });
+	});
+
+	it('does not attach a different paper or source to a parallel pending read', () => {
+		const question = message('question', 'user');
+		const search = message('search-result', 'tool', {
+			toolResult: {
+				...result('search'),
+				data: {
+					matches: [
+						{
+							document_id: 'other-paper',
+							source_ref: 'same-ref',
+							page: 99,
+							content: 'Unrelated passage'
+						}
+					]
+				}
+			}
+		});
+		const reads = message('reads', 'assistant', { toolCallId: 'a', toolName: 'read_source' });
+		reads.tool_calls[0].arguments = { document_id: 'paper-a', source_ref: 'same-ref' };
+		reads.tool_calls.push({
+			tool_call_id: 'b',
+			name: 'inspect_table',
+			arguments: { document_id: 'paper-b', table_ref: 'table-2' },
+			position: 1
+		});
+		const current = getCurrentReadings([question, search, reads]);
+		expect(current).toHaveLength(2);
+		expect(current[0]).toMatchObject({ page: '', excerpt: '', title: '', status: 'reading' });
+		expect(current[1]).toMatchObject({ kind: 'table', status: 'reading' });
+	});
+	it('shows the actual passage returned while reading a section', () => {
+		const read = message('section', 'assistant', {
+			toolCallId: 'section',
+			toolName: 'inspect_document_sources'
+		});
+		read.tool_calls[0].arguments = { document_id: 'paper-a', heading_path: '2. Methods' };
+		const received = message('section-result', 'tool', {
+			toolResult: {
+				...result('section'),
+				data: {
+					document: { document_id: 'paper-a', title: 'Treatment comparison' },
+					heading_path: '2. Methods',
+					sources: [
+						{ source_ref: 'heading', page: 3, heading_path: '2. Methods', content: '2. Methods' },
+						{
+							source_ref: 'method-1',
+							page: 3,
+							heading_path: '2. Methods',
+							content: 'Samples were annealed for two hours.'
+						}
+					]
+				}
+			}
+		});
+		const papers = message('papers-result', 'tool', {
+			toolResult: {
+				...result('papers'),
+				data: { papers: [{ document_id: 'paper-a', filename: 'Annealing study.pdf' }] }
+			}
+		});
+		expect(
+			getCurrentReadings([message('question', 'user'), papers, read, received])[0]
+		).toMatchObject({
+			kind: 'outline',
+			status: 'received',
+			title: 'Annealing study.pdf',
+			page: '3',
+			heading: '2. Methods',
+			excerpt: 'Samples were annealed for two hours.'
+		});
+	});
 	it('recovers only the current question progress and leaves unknown timing unset', () => {
 		const current = message('current', 'user', { content: 'Compare matched tensile conditions' });
 		const messages = [

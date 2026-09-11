@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
-	import { Bot, PencilLine, AlertCircle } from '@lucide/svelte';
+	import { Bot, PencilLine, AlertCircle, RefreshCw } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import FindingEvidenceSummary from './FindingEvidenceSummary.svelte';
 	import { errorMessage } from '../../../_shared/api';
 	import {
 		createFindingFeedback,
 		fetchFindingFeedback,
+		fetchFindingCurations,
+		type FindingCuration,
 		type FindingFeedback,
 		type FindingFeedbackIssueType,
 		type FindingFeedbackStatus,
@@ -68,6 +70,11 @@
 	let feedbackError = '';
 	let feedbackFindingKey = '';
 	let feedbackRequestSequence = 0;
+	let reviewRequestSequence = 0;
+	let reviewLoading = false;
+	let reviewError = '';
+	let savedFeedback: FindingFeedback | null = null;
+	let savedCuration: FindingCuration | null = null;
 
 	const feedbackStatuses: Array<{ value: FindingFeedbackStatus; label: string }> = [
 		{ value: 'correct', label: '正确' },
@@ -98,7 +105,7 @@
 		feedbackIssue === 'none'
 	)
 		feedbackIssue = 'other';
-	$: findingKey = `${finding.objective_id}:${finding.analysis_version}:${finding.finding_id}`;
+	$: findingKey = `${collectionId}:${finding.objective_id}:${finding.analysis_version}:${finding.finding_id}`;
 	$: reviewHref =
 		`/collections/${encodeURIComponent(collectionId)}/assistant?${new SvelteURLSearchParams({ objective_id: finding.objective_id, review_finding_id: finding.finding_id })}` as `/collections/${string}/assistant`;
 	$: if (findingKey !== feedbackFindingKey) {
@@ -106,6 +113,7 @@
 		feedbackRequestSequence += 1;
 		feedbackOpen = false;
 		resetFeedback();
+		void loadReviews();
 	}
 	$: directPaperCount = finding.paper_contributions.filter(
 		(item) => item.supporting_evidence_ids.length || item.contradicting_evidence_ids.length
@@ -573,9 +581,47 @@
 	}
 
 	function applyFeedback(item: FindingFeedback) {
+		savedFeedback = item;
 		feedbackStatus = item.review_status;
 		feedbackIssue = item.issue_type;
 		feedbackNote = item.note ?? '';
+	}
+
+	async function loadReviews() {
+		const sequence = ++reviewRequestSequence;
+		savedFeedback = null;
+		savedCuration = null;
+		reviewLoading = true;
+		reviewError = '';
+		const results = await Promise.allSettled([
+			fetchFindingFeedback(
+				collectionId,
+				finding.objective_id,
+				finding.analysis_version,
+				finding.finding_id
+			),
+			fetchFindingCurations(
+				collectionId,
+				finding.objective_id,
+				finding.analysis_version,
+				finding.finding_id
+			)
+		]);
+		if (sequence !== reviewRequestSequence) return;
+		const [feedback, curations] = results;
+		if (feedback.status === 'fulfilled') {
+			savedFeedback =
+				[...feedback.value].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
+		}
+		if (curations.status === 'fulfilled') {
+			savedCuration =
+				[...curations.value].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
+		}
+		reviewError = results
+			.filter((item) => item.status === 'rejected')
+			.map((item) => errorMessage(item.reason))
+			.join(' ');
+		reviewLoading = false;
 	}
 
 	async function toggleFeedback() {
@@ -635,6 +681,9 @@
 <article class="finding-detail">
 	<header>
 		<div>
+			{#if savedCuration}<p class="review-meta">
+					{$t('research.findingReview.publishedOriginal')}
+				</p>{/if}
 			<span
 				>{originLabel(finding.origin)} · {directPaperCount >= 2
 					? '跨文献研究发现'
@@ -646,6 +695,89 @@
 			基于此 Finding 创建新版本
 		</button>
 	</header>
+
+	<section
+		class="saved-review"
+		aria-label={$t('research.findingReview.savedReview')}
+		aria-busy={reviewLoading}
+	>
+		{#if reviewLoading}<p role="status">{$t('research.findingReview.loadingReview')}</p>{/if}
+		{#if reviewError}
+			<p role="alert">{$t('research.findingReview.reviewLoadFailed')}: {reviewError}</p>
+			<button
+				type="button"
+				class="btn btn--ghost btn--small"
+				on:click={loadReviews}
+				disabled={reviewLoading}
+			>
+				<RefreshCw size={14} aria-hidden="true" />{$t('research.findingReview.retryReview')}
+			</button>
+		{/if}
+		{#if savedFeedback}
+			<div class="saved-feedback">
+				<strong
+					>{$t('research.findingReview.savedFeedback')}: {$t(
+						`research.findingReview.feedbackStatus.${savedFeedback.review_status}`
+					)}</strong
+				>
+				{#if savedFeedback.note}<p>{savedFeedback.note}</p>{/if}
+				<p class="review-meta">
+					{$t('research.findingReview.reviewer')}: {savedFeedback.reviewer ??
+						$t('research.findingReview.unrecorded')} ·
+					<time datetime={savedFeedback.created_at}
+						>{new Date(savedFeedback.created_at).toLocaleString()}</time
+					>
+				</p>
+			</div>
+		{/if}
+		{#if savedCuration}
+			<div class="saved-curation">
+				<h3>
+					{$t('research.findingReview.savedCuration')} · {$t(
+						`research.findingReview.curationStatus.${savedCuration.curated_status}`
+					)}
+				</h3>
+				<p class="curated-statement">{savedCuration.curated_finding.statement}</p>
+				{#if savedCuration.note}<p>
+						{$t('research.findingReview.correctionReason')}: {savedCuration.note}
+					</p>{/if}
+				<p class="review-meta">
+					{$t('research.findingReview.reviewer')}: {savedCuration.reviewer ??
+						$t('research.findingReview.unrecorded')} ·
+					<time datetime={savedCuration.updated_at}
+						>{new Date(savedCuration.updated_at).toLocaleString()}</time
+					>
+				</p>
+				<details>
+					<summary>{$t('research.findingReview.curationScope')}</summary>
+					<p>
+						{savedCuration.curated_finding.factors.join(' + ')} → {savedCuration.curated_finding
+							.outcome} · {directionLabel(savedCuration.curated_finding.direction)}
+					</p>
+					<p>
+						{assertionLabel(savedCuration.curated_finding.assertion_strength)} · {attributionLabel(
+							savedCuration.curated_finding.attribution_scope
+						)} · {synthesisLabel(savedCuration.curated_finding.synthesis_status)}
+					</p>
+					<ul>
+						{#each savedCuration.curated_finding.limitations as limitation, index (index)}<li>
+								{limitation}
+							</li>{/each}
+					</ul>
+					{#each savedCuration.curated_finding.paper_contributions as contribution (contribution.document_id)}
+						{#each evidence.filter( (item) => [...contribution.supporting_evidence_ids, ...contribution.contradicting_evidence_ids, ...contribution.context_evidence_ids, ...contribution.condition_boundary_evidence_ids].includes(item.evidence_id) ) as item (item.evidence_id)}
+							<a href={resolve(sourceHref(item))}
+								>{paperTitle(item.document_id)} · {evidenceSourceLabel(item)}</a
+							>
+						{/each}
+					{/each}
+				</details>
+			</div>
+		{/if}
+		{#if !reviewLoading && !reviewError && !savedFeedback && !savedCuration}
+			<p class="review-meta">{$t('research.findingReview.noSavedReview')}</p>
+		{/if}
+	</section>
 
 	{#if evidenceReview?.needs_review}
 		<section class="basis-review" aria-label={$t('research.findingReview.basisUpdated')}>
@@ -1054,6 +1186,41 @@
 </article>
 
 <style>
+	.saved-review {
+		border-block: 1px solid var(--border-color, #dce3eb);
+		padding-block: 12px;
+	}
+	.saved-feedback,
+	.saved-curation {
+		overflow-wrap: anywhere;
+	}
+	.saved-curation {
+		border-left: 3px solid #27836b;
+		padding-left: 12px;
+		margin-top: 12px;
+	}
+	.saved-review h3 {
+		font-size: 14px;
+		margin: 0 0 8px;
+	}
+	.saved-review p {
+		margin: 6px 0;
+	}
+	.saved-review .curated-statement {
+		font-size: 16px;
+		font-weight: 500;
+	}
+	.saved-review .review-meta {
+		font-size: 12px;
+		color: var(--text-muted, #64748b);
+	}
+	.saved-review details {
+		margin-top: 10px;
+		font-size: 13px;
+	}
+	.saved-review details a {
+		display: block;
+	}
 	.basis-review {
 		border-block: 1px solid var(--border-default);
 		border-left: 3px solid var(--text-secondary);

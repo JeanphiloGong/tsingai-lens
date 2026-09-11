@@ -1874,7 +1874,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(new Headers(post?.[1]?.headers).get('Accept')).toBe('text/event-stream');
 	});
 
-	it('updates elapsed time during a live wait and removes progress when the answer finishes', async () => {
+	it('shows the active paper fragment during streamed reading and clears progress when the answer finishes', async () => {
 		installApi();
 		const composer = await renderReady();
 		const encoder = new TextEncoder();
@@ -1891,6 +1891,86 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 		const progress = browserPage.getByTestId('research-progress');
 		try {
+			const question = message('reading-question', 'user', 'Check the heat-treatment evidence');
+			const navigation = message('navigation', 'tool', '', {
+				tool_call_id: 'search-1',
+				tool_result: {
+					tool_call_id: 'search-1',
+					status: 'succeeded',
+					data: {
+						matches: [
+							{
+								document_id: 'paper-1',
+								document_title: 'Ti6Al4V treatment study',
+								source_ref: 'source-results',
+								page: 7,
+								heading_path: '3.4 Tensile properties',
+								content: 'Elongation depends on the annealing condition.'
+							}
+						]
+					},
+					resource_refs: [],
+					warnings: [],
+					error_code: null,
+					error_message: null
+				}
+			});
+			const reading = message('reading', 'assistant', '', {
+				tool_calls: [
+					{
+						tool_call_id: 'read-1',
+						name: 'read_source',
+						position: 0,
+						arguments: {
+							document_id: 'paper-1',
+							source_ref: 'source-results',
+							source_kind: 'text_window'
+						}
+					}
+				]
+			});
+			const trajectory = {
+				items: [question, navigation, reading],
+				feedback: [],
+				pending_approval: null,
+				running: true
+			};
+			output.enqueue(encoder.encode(`event: trajectory\ndata: ${JSON.stringify(trajectory)}\n\n`));
+			const currentReading = browserPage.getByTestId('current-reading');
+			await expect.element(currentReading).toHaveTextContent('Reading');
+			await expect.element(currentReading).toHaveTextContent('Ti6Al4V treatment study');
+			await expect.element(currentReading).toHaveTextContent('Page 7');
+			await expect.element(currentReading).toHaveTextContent('3.4 Tensile properties');
+			await expect
+				.element(currentReading)
+				.toHaveTextContent('Elongation depends on the annealing condition.');
+			const received = message('read-result', 'tool', '', {
+				tool_call_id: 'read-1',
+				tool_result: {
+					tool_call_id: 'read-1',
+					status: 'succeeded',
+					data: {
+						document_id: 'paper-1',
+						source_ref: 'source-results',
+						page: 7,
+						heading_path: '3.4 Tensile properties',
+						content: 'The full result distinguishes each treatment condition.'
+					},
+					resource_refs: [],
+					warnings: [],
+					error_code: null,
+					error_message: null
+				}
+			});
+			output.enqueue(
+				encoder.encode(
+					`event: trajectory\ndata: ${JSON.stringify({ ...trajectory, items: [...trajectory.items, received] })}\n\n`
+				)
+			);
+			await expect.element(currentReading).toHaveTextContent('Latest retrieved content');
+			await expect
+				.element(currentReading)
+				.toHaveTextContent('The full result distinguishes each treatment condition.');
 			for (const elapsed of [15000, 30000]) {
 				output.enqueue(
 					encoder.encode(

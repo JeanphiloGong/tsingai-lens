@@ -187,6 +187,9 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
+	research_plan?: {
+		steps: Array<{ id: string; status: 'pending' | 'in_progress' | 'completed' | 'blocked' }>;
+	};
 };
 
 export function formatChatElapsed(elapsedMs?: number) {

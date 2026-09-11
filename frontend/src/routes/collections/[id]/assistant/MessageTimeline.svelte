@@ -2,7 +2,11 @@
 	import { onMount, tick } from 'svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
-	import { buildChatPresentation, getRecoveredChatProgress } from './conversationPresentation';
+	import {
+		buildChatPresentation,
+		getRecoveredChatProgress,
+		getCurrentReadings
+	} from './conversationPresentation';
 	import { RotateCw } from '@lucide/svelte';
 	import type {
 		ChatMessage,
@@ -21,6 +25,7 @@
 	import ResearchArtifact from './ResearchArtifact.svelte';
 	import ApprovalPanel from './ApprovalPanel.svelte';
 	export let messages: ChatMessage[] = [];
+	$: readings = getCurrentReadings(messages);
 	export let branches: ChatBranchOptions[] = [];
 	export let revisionDisabled = false;
 	export let onRevise: (message: ChatMessage, content?: string) => Promise<boolean> = async () =>
@@ -110,6 +115,10 @@
 			: null;
 	$: showRecoveryRow =
 		recovering && !responseMessage && (!responseSnapshot || responseSnapshot.status === 'running');
+	$: showReadingRow =
+		sending &&
+		!responseMessage &&
+		!messages.some((message) => message.message_id.startsWith('local-stream-'));
 	$: recoveryMessage = {
 		message_id: `local-recovery-${sessionId}`,
 		session_id: sessionId,
@@ -294,6 +303,7 @@
 										? recoveredProgress
 										: null}
 								{progressHistory}
+								{readings}
 							>
 								{#if item.message.message_id === responseMessage?.message_id && recovering}
 									<div class="recovery-controls" data-testid="research-recovery">
@@ -319,21 +329,23 @@
 			{#if pendingApproval}
 				<ApprovalPanel call={pendingApproval} {deciding} onDecide={decide} />
 			{/if}
-			{#if showRecoveryRow}
+			{#if showRecoveryRow || showReadingRow}
 				<AssistantMessage
 					message={recoveryMessage}
-					recovering
-					progress={recoveredProgress}
+					recovering={showRecoveryRow}
+					streaming={showReadingRow}
+					progress={showReadingRow ? progress : recoveredProgress}
+					{readings}
 					{onFeedback}
 				>
-					<div class="recovery-controls" data-testid="research-recovery">
-						{#if recoveryError}<p class="recovery-error" role="alert">{recoveryError}</p>{/if}
-						<IconButton
-							label={$t('researchAgent.checkResult')}
-							disabled={recoveryLoading}
-							onClick={onRefreshRecovery}><RotateCw size={14} /></IconButton
-						>
-					</div>
+					{#if showRecoveryRow}<div class="recovery-controls" data-testid="research-recovery">
+							{#if recoveryError}<p class="recovery-error" role="alert">{recoveryError}</p>{/if}
+							<IconButton
+								label={$t('researchAgent.checkResult')}
+								disabled={recoveryLoading}
+								onClick={onRefreshRecovery}><RotateCw size={14} /></IconButton
+							>
+						</div>{/if}
 				</AssistantMessage>
 			{/if}
 		</div>

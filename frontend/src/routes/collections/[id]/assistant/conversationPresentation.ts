@@ -31,6 +31,113 @@ export function getRecoveredChatProgress(messages: ChatMessage[], now: number): 
 	};
 }
 
+export type CurrentReading = {
+	toolCallId: string;
+	kind: 'passage' | 'table' | 'search' | 'outline';
+	status: 'reading' | 'received' | 'failed';
+	title: string;
+	page: string;
+	heading: string;
+	excerpt: string;
+	query: string;
+};
+
+export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
+	const questionIndex = messages.map((message) => message.role).lastIndexOf('user');
+	if (questionIndex < 0) return [];
+	const kinds = {
+		read_source: 'passage',
+		inspect_table: 'table',
+		search_sources: 'search',
+		inspect_document_sources: 'outline'
+	} as const;
+	const operations = operationsFrom(messages.slice(questionIndex)).filter(
+		(operation) => operation.toolName && operation.toolName in kinds
+	);
+	const pending = operations.filter((operation) => !operation.resultMessage);
+	const current = pending.length ? pending : operations.slice(-1);
+	const records: Record<string, unknown>[] = [];
+	for (const message of messages) {
+		for (const source of message.source_contexts) records.push(source);
+		const data = message.tool_result?.data;
+		if (!data || message.tool_result?.status !== 'succeeded') continue;
+		const document =
+			data.document && typeof data.document === 'object'
+				? (data.document as Record<string, unknown>)
+				: {};
+		records.push({ ...document, ...data });
+		for (const key of ['sources', 'matches', 'papers', 'evidence']) {
+			if (!Array.isArray(data[key])) continue;
+			for (const item of data[key]) {
+				if (item && typeof item === 'object') records.push({ ...document, ...item });
+			}
+		}
+	}
+	return current.map((operation) => {
+		const request =
+			operation.requestMessage?.tool_calls.find(
+				(call) => call.tool_call_id === operation.toolCallId
+			)?.arguments ?? {};
+		const result = operation.resultMessage?.tool_result;
+		const data = result?.status === 'succeeded' ? result.data : {};
+		const documentId =
+			request.document_id ??
+			(Array.isArray(request.document_ids) && request.document_ids.length === 1
+				? request.document_ids[0]
+				: null);
+		const sourceRef = request.source_ref ?? request.table_ref;
+		const paperRecords = documentId
+			? records.filter((item) => item.document_id === documentId)
+			: [];
+		const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+		const sectionSources = Array.isArray(data.sources)
+			? data.sources.filter(
+					(item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object'
+				)
+			: [];
+		const sectionSource =
+			sectionSources.find(
+				(item) => text(item.content) && text(item.content) !== text(item.heading_path)
+			) ?? sectionSources[0];
+		const source = sourceRef
+			? (Object.assign(
+					{},
+					...paperRecords.filter((item) => (item.source_ref ?? item.table_ref) === sourceRef)
+				) as Record<string, unknown>)
+			: sectionSource;
+		const title =
+			(paperRecords
+				.map((item) => text(item.filename) || text(item.original_filename))
+				.find(Boolean) ||
+				paperRecords
+					.map(
+						(item) => text(item.document_title) || text(item.title) || text(item.original_filename)
+					)
+					.find(Boolean)) ??
+			'';
+		const page = data.page ?? source?.page ?? request.page;
+		return {
+			toolCallId: operation.toolCallId,
+			kind: kinds[operation.toolName as keyof typeof kinds],
+			status: !result ? 'reading' : result.status === 'failed' ? 'failed' : 'received',
+			title,
+			page: typeof page === 'number' || typeof page === 'string' ? String(page) : '',
+			heading: text(data.heading_path ?? source?.heading_path ?? request.heading_path),
+			excerpt:
+				result?.status === 'failed'
+					? ''
+					: text(
+							data.content ??
+								data.table_markdown ??
+								source?.content ??
+								source?.source_excerpt ??
+								source?.excerpt
+						).slice(0, 420),
+			query: text(request.query)
+		};
+	});
+}
+
 const reviewableResultTools = new Set([
 	'create_evidence_draft',
 	'create_evidence_version',

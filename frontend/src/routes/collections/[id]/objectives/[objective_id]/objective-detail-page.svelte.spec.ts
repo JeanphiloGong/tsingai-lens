@@ -707,8 +707,15 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=evidence-1&source_ref=block-7&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1%3Ffinding_id%3Dfinding-1&page=7'
 			);
 		expect(
-			fetchMock.mock.calls.some(([input]) => String(input).includes('/findings/finding-1'))
+			fetchMock.mock.calls.some(([input]) => /\/findings\/finding-1(?:\?|$)/.test(String(input)))
 		).toBe(false);
+		for (const kind of ['feedback', 'curation']) {
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					String(input).includes(`/findings/finding-1/${kind}`)
+				)
+			).toBe(true);
+		}
 	});
 
 	it('downloads the published Finding dataset with the selected filters', async () => {

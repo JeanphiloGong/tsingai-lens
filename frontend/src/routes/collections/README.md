@@ -43,6 +43,12 @@ This node owns the Collection route family.
   Evidence from all roles and does not preassign its replacement. An affected
   historical Finding keeps its original evidence and does not offer a fresh AI
   summary until the researcher selects a conclusion based on current evidence.
+  Selecting a Finding automatically loads its saved feedback and latest curation
+  for the exact Collection, Objective, analysis version, and Finding identity.
+  The workbench keeps the original conclusion visible beside the saved correction,
+  its reason, reviewer, time, scope, and Source links. Loading failures expose a
+  retry; switching identity ignores stale responses. Opening the feedback editor
+  remains an explicit action and refreshes its latest saved decision.
   The sidebar can export the published Finding dataset as JSON or training JSONL
   with label and dataset-use filters. The collection workspace also exposes
   collection-level Finding JSON/JSONL and expert gold-draft downloads beside
@@ -76,6 +82,12 @@ This node owns the Collection route family.
   notice when the Agent reaches its step limit; only a failed turn is presented
   as an error. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.
+  While a turn runs or reconnects, the progress area shows the current paper,
+  page, section and passage excerpt from actual Source requests and results.
+  Parallel reads remain separate. Pending, received and failed reads have
+  distinct labels; failed reads never display a stale successful excerpt.
+  This area remains visible during tool-only trajectory updates before an
+  assistant answer exists. New questions reset it and a final answer removes it.
   Its research-process capability projects the same current Documents and
   persisted per-paper preparation runs used by the Collection page; Chat does
   not own a second progress model or expose model reasoning and retry internals.

@@ -358,7 +358,32 @@ const translations: Record<Language, Translations> = {
 				cycle: 'Cycle {cycle}',
 				actions: '{completed} / {total} research actions',
 				toggleHistory: 'Toggle research progress history',
-				historyLabel: 'Completed research stages'
+				historyLabel: 'Completed research stages',
+				sourceState: {
+					reading: 'Reading',
+					received: 'Latest retrieved content',
+					failed: 'Reading failed'
+				},
+				sourceKind: {
+					passage: 'Passage',
+					table: 'Table',
+					search: 'Source search',
+					outline: 'Document sections'
+				},
+				sourcePage: 'Page {page}',
+				currentPaper: 'Current paper',
+				searchQuery: 'Search: {query}',
+				plan: {
+					title: 'Research plan',
+					status: { pending: 'Waiting', in_progress: 'In progress', completed: 'Completed', blocked: 'Blocked' },
+					steps: {
+						inspect_finding: 'Inspect published Finding',
+						inspect_sources: 'Inspect linked Sources',
+						validate_claim: 'Validate the claim',
+						draft_finding: 'Prepare Finding draft',
+						approval: 'Await researcher approval'
+					}
+				}
 			},
 			upload: {
 				add: 'Add papers',
@@ -607,6 +632,30 @@ const translations: Record<Language, Translations> = {
 			emptyValue: '--',
 			findingReview: {
 				coverage: 'Evidence coverage',
+				savedReview: 'Saved review',
+				loadingReview: 'Loading saved review...',
+				reviewLoadFailed: 'Saved review could not be loaded',
+				retryReview: 'Retry',
+				savedFeedback: 'Recorded feedback',
+				savedCuration: 'Saved human revision',
+				correctionReason: 'Reason for correction',
+				reviewer: 'Reviewer',
+				unrecorded: 'Not recorded',
+				curationScope: 'Revised scope and evidence',
+				noSavedReview: 'No saved review',
+				publishedOriginal: 'Original published conclusion',
+				feedbackStatus: {
+					correct: 'Correct',
+					partial: 'Partially correct',
+					incorrect: 'Incorrect',
+					unclear: 'Unclear'
+				},
+				curationStatus: {
+					supported: 'Supported',
+					limited: 'Limited',
+					conflicted: 'Conflicted',
+					unsupported: 'Unsupported'
+				},
 				basisUpdated: 'Evidence updated, review required',
 				mixedDirection: 'Mixed direction',
 				basisUpdatedDetail:
@@ -3095,7 +3144,23 @@ const translations: Record<Language, Translations> = {
 				cycle: '第 {cycle} 轮',
 				actions: '已完成 {completed} / {total} 个研究动作',
 				toggleHistory: '展开或收起研究进度历史',
-				historyLabel: '已完成的研究阶段'
+				historyLabel: '已完成的研究阶段',
+				sourceState: { reading: '正在读取', received: '最近取得的内容', failed: '读取失败' },
+				sourceKind: { passage: '原文片段', table: '表格', search: '原文检索', outline: '文档章节' },
+				sourcePage: '第 {page} 页',
+				currentPaper: '当前论文',
+				searchQuery: '检索：{query}',
+				plan: {
+					title: '研究计划',
+					status: { pending: '待处理', in_progress: '进行中', completed: '已完成', blocked: '已阻塞' },
+					steps: {
+						inspect_finding: '检查已发布结论',
+						inspect_sources: '检查关联原文',
+						validate_claim: '核对结论依据',
+						draft_finding: '形成结论草案',
+						approval: '等待研究者确认'
+					}
+				}
 			},
 			upload: {
 				add: '添加论文',
@@ -3331,6 +3396,30 @@ const translations: Record<Language, Translations> = {
 			emptyValue: '--',
 			findingReview: {
 				coverage: '证据覆盖',
+				savedReview: '已保存的审阅',
+				loadingReview: '正在读取审阅记录...',
+				reviewLoadFailed: '审阅记录读取失败',
+				retryReview: '重试',
+				savedFeedback: '已记录的反馈',
+				savedCuration: '已保存的人工修订',
+				correctionReason: '修订原因',
+				reviewer: '审阅人',
+				unrecorded: '未记录',
+				curationScope: '修订范围与依据',
+				noSavedReview: '尚无审阅记录',
+				publishedOriginal: '原始发布结论',
+				feedbackStatus: {
+					correct: '正确',
+					partial: '部分正确',
+					incorrect: '不正确',
+					unclear: '暂不确定'
+				},
+				curationStatus: {
+					supported: '有依据支持',
+					limited: '范围受限',
+					conflicted: '存在冲突',
+					unsupported: '缺少支持'
+				},
 				basisUpdated: '依据已更新，待复核',
 				mixedDirection: '多种变化方向',
 				basisUpdatedDetail:

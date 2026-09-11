@@ -12,6 +12,7 @@
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
+		fetchChatTree,
 		appendChatProgress,
 		readPendingChatSourceContexts,
 		storePendingChatSourceContexts,
@@ -29,17 +30,29 @@
 		type ChatSession,
 		type ChatSourceContext,
 		type ChatToolCall,
-		type ChatTurn
+		type ChatTurn,
+		type ChatTree,
+		type ChatTreeNode
 	} from '../../../_shared/chatSessions';
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
 	import ConversationHeader from './ConversationHeader.svelte';
+	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
-	import { Plus, History, X, LoaderCircle, Clock3, CircleAlert } from '@lucide/svelte';
+	import {
+		Plus,
+		History,
+		X,
+		LoaderCircle,
+		Clock3,
+		CircleAlert,
+		GitBranch,
+		ArrowRight
+	} from '@lucide/svelte';
 
 	export let embedded = false;
 	export let selectedPapers: Pick<DocumentProfile, 'document_id' | 'title'>[] = [];
@@ -51,6 +64,23 @@
 		loading || sending || deciding || revising || running || Boolean(recoveringCallId)
 	);
 	let showHistory = false;
+	let showTree = false;
+	let tree: ChatTree | null = null;
+	let treeLoading = false;
+	let treeError = '';
+	let treeController: AbortController | null = null;
+	let treeTimer: ReturnType<typeof setTimeout> | undefined;
+	let checkpointId = '';
+	$: checkpointIndex = messages.findIndex((message) => message.message_id === checkpointId);
+	$: checkpointEnd =
+		checkpointIndex < 0
+			? -1
+			: messages.findIndex((message, index) => index > checkpointIndex && message.role === 'user');
+	$: visibleMessages =
+		checkpointId && checkpointIndex >= 0
+			? messages.slice(0, checkpointEnd < 0 ? messages.length : checkpointEnd)
+			: messages;
+	$: checkpointQuestion = checkpointIndex < 0 ? '' : messages[checkpointIndex].content;
 
 	type StoredChatSession = {
 		session_id: string;
@@ -108,6 +138,8 @@
 		clearTimeout(historyTimer);
 		sessionController?.abort();
 		updatesController?.abort();
+		treeController?.abort();
+		clearTimeout(treeTimer);
 	});
 
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
@@ -322,6 +354,9 @@
 	}
 
 	async function loadSession(requestedSessionId = '') {
+		closeTree();
+		tree = null;
+		checkpointId = '';
 		const activeCollectionId = collectionId;
 		const generation = ++sessionGeneration;
 		clearTimeout(recoveryTimer);
@@ -394,6 +429,16 @@
 				acceptTrajectory(trajectory);
 			}
 			session = nextSession;
+			const savedCheckpoint = window.localStorage.getItem(
+				`${sessionStorageKey()}:checkpoint:${session.session_id}`
+			);
+			if (
+				savedCheckpoint &&
+				messages.some(
+					(message) => message.message_id === savedCheckpoint && message.role === 'user'
+				)
+			)
+				checkpointId = savedCheckpoint;
 			refreshPendingSources();
 			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
@@ -609,7 +654,70 @@
 		if (preserveDraft && userId === owner && activeSessionId === sessionId) input = draft;
 	}
 
-	async function reviseMessage(message: ChatMessage, content?: string): Promise<boolean> {
+	function closeTree() {
+		showTree = false;
+		treeController?.abort();
+		treeController = null;
+		clearTimeout(treeTimer);
+	}
+
+	async function openTree() {
+		if (!session || sessionNavigationDisabled) return;
+		showTree = true;
+		clearTimeout(treeTimer);
+		treeController?.abort();
+		const controller = new AbortController();
+		treeController = controller;
+		treeLoading = true;
+		treeError = '';
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		try {
+			const result = await fetchChatTree(session.session_id, controller.signal);
+			if (!isCurrentSession(generation, ownerCollectionId) || treeController !== controller) return;
+			const checkpoint = result.active_path.indexOf(checkpointId);
+			tree =
+				checkpoint < 0
+					? result
+					: { ...result, active_path: result.active_path.slice(0, checkpoint + 1) };
+		} catch (err) {
+			if (!controller.signal.aborted && isCurrentSession(generation, ownerCollectionId))
+				treeError = errorMessage(err);
+		} finally {
+			if (treeController === controller) {
+				treeLoading = false;
+				if (showTree && tree?.nodes.some((node) => node.status === 'running'))
+					treeTimer = setTimeout(() => void openTree(), 5000);
+			}
+		}
+	}
+
+	function returnToLatest() {
+		checkpointId = '';
+		if (session)
+			window.localStorage.removeItem(`${sessionStorageKey()}:checkpoint:${session.session_id}`);
+	}
+
+	async function selectTreeNode(node: ChatTreeNode) {
+		if (sessionNavigationDisabled) return;
+		const owner = userId;
+		closeTree();
+		await switchSession(node.message.session_id, true);
+		if (owner !== userId || session?.session_id !== node.message.session_id) return;
+		if (node.status === 'completed') {
+			checkpointId = node.message.message_id;
+			window.localStorage.setItem(
+				`${sessionStorageKey()}:checkpoint:${session.session_id}`,
+				checkpointId
+			);
+		} else returnToLatest();
+	}
+
+	async function reviseMessage(
+		message: ChatMessage,
+		content?: string,
+		mode: 'revise' | 'continue' = 'revise'
+	): Promise<boolean> {
 		if (
 			!session ||
 			loading ||
@@ -623,7 +731,7 @@
 			return false;
 		const ownerCollectionId = collectionId;
 		let generation = sessionGeneration;
-		const key = JSON.stringify([session.session_id, message.message_id, content]);
+		const key = JSON.stringify([message.session_id, message.message_id, content, mode]);
 		if (revisionRequest?.key !== key) {
 			const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
 				byte.toString(16).padStart(2, '0')
@@ -634,27 +742,29 @@
 		error = '';
 		try {
 			const branch = await branchChatMessage(
-				session.session_id,
+				message.session_id,
 				message.message_id,
 				revisionRequest.id,
 				content,
-				sessionController?.signal
+				sessionController?.signal,
+				mode
 			);
 			if (!isCurrentSession(generation, ownerCollectionId)) return false;
 			const trajectory = await fetchChatTrajectory(branch.session_id, sessionController?.signal);
 			if (!isCurrentSession(generation, ownerCollectionId)) return false;
 			clearTimeout(recoveryTimer);
+			closeTree();
+			returnToLatest();
+			tree = null;
+			if (mode === 'continue') input = '';
 			sessionController?.abort();
 			sessionController = new AbortController();
 			generation = ++sessionGeneration;
 			session = branch;
-			messages = trajectory.items;
 			feedbackByMessage = {};
-			loadFeedback(trajectory.feedback);
-			branches = trajectory.branches ?? [];
-			branchDraft = trajectory.branch_draft ?? null;
-			running = trajectory.running ?? false;
-			pendingApproval = trajectory.pending_approval;
+			responseSnapshot = null;
+			streamingText = '';
+			acceptTrajectory(trajectory);
 			storeSessionId(branch.session_id);
 			upsertHistory(branch, content ?? message.content);
 			revising = false;
@@ -674,6 +784,10 @@
 
 	async function sendMessage(nextText = input.trim(), revisionSources?: ChatSourceContext[]) {
 		const draft = nextText.trim();
+		if (checkpointId && revisionSources === undefined && draft && checkpointIndex >= 0) {
+			await reviseMessage(messages[checkpointIndex], draft, 'continue');
+			return;
+		}
 		if (branchDraft && revisionSources === undefined) return;
 		if (
 			!session ||
@@ -1040,6 +1154,11 @@
 				<span title={conversationTitle}
 					>{conversationTitle || $t('researchAgent.untitledSession')}</span
 				>
+				<IconButton
+					label={$t('researchAgent.tree.title')}
+					disabled={!session || sessionNavigationDisabled}
+					onClick={openTree}><GitBranch size={17} /></IconButton
+				>
 			</div>
 			{#if showHistory}
 				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
@@ -1068,8 +1187,14 @@
 					{/each}
 				</nav>
 			{/if}
-		{:else if conversationTitle || queryObjectiveId}
-			<ConversationHeader title={conversationTitle} {collectionId} objectiveId={queryObjectiveId} />
+		{:else if conversationTitle || queryObjectiveId || branchDraft}
+			<ConversationHeader
+				title={conversationTitle || branchDraft?.content || ''}
+				{collectionId}
+				objectiveId={queryObjectiveId}
+				disabled={!session || sessionNavigationDisabled}
+				onOpenTree={openTree}
+			/>
 		{/if}
 
 		{#if error}
@@ -1087,30 +1212,42 @@
 		{/if}
 		<MessageTimeline
 			sessionId={activeSessionId}
-			{messages}
+			messages={visibleMessages}
 			{branches}
-			{running}
-			revisionDisabled={revising}
+			running={!checkpointId && running}
+			revisionDisabled={revising ||
+				Boolean(checkpointId && (running || sending || pendingApproval || recoveringCallId))}
 			onRevise={reviseMessage}
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
 			onFeedback={saveFeedback}
-			{streamingText}
-			{responseSnapshot}
-			{pendingApproval}
-			{progress}
-			{progressHistory}
-			{recoveringCallId}
-			{recoveryLoading}
-			{recoveryError}
+			streamingText={checkpointId ? '' : streamingText}
+			responseSnapshot={checkpointId ? null : responseSnapshot}
+			pendingApproval={checkpointId ? null : pendingApproval}
+			progress={checkpointId ? null : progress}
+			progressHistory={checkpointId ? [] : progressHistory}
+			recoveringCallId={checkpointId ? null : recoveringCallId}
+			recoveryLoading={!checkpointId && recoveryLoading}
+			recoveryError={checkpointId ? '' : recoveryError}
 			onRefreshRecovery={refreshRecovery}
 			{loading}
-			{sending}
+			sending={!checkpointId && sending}
 			{deciding}
 			ready={Boolean(session) && !branchDraft}
 			onSend={sendMessage}
 			{decide}
 		/>
+		{#if checkpointId}
+			<div class="checkpoint-bar" role="status">
+				<GitBranch size={15} />
+				<div>
+					<strong>{$t('researchAgent.tree.checkpoint')}</strong><span>{checkpointQuestion}</span>
+				</div>
+				<button type="button" on:click={returnToLatest}
+					>{$t('researchAgent.tree.latest')}<ArrowRight size={14} /></button
+				>
+			</div>
+		{/if}
 		{#if branchDraft && !sending}
 			<div class="revision-draft" role="status">
 				<div>
@@ -1146,14 +1283,14 @@
 					deciding ||
 					Boolean(pendingApproval) ||
 					Boolean(recoveringCallId)}
-				{pendingSourceContexts}
-				hasExtraContext={selectedPapers.length > 0}
+				pendingSourceContexts={checkpointId ? [] : pendingSourceContexts}
+				hasExtraContext={!checkpointId && selectedPapers.length > 0}
 				onInput={handleComposerInput}
 				onSend={sendMessage}
 				onRemovePendingSourceContexts={removePendingSourceContexts}
 				onClearPendingSourceContexts={clearPendingSources}
 			>
-				{#if pendingSourceContexts.length}
+				{#if !checkpointId && pendingSourceContexts.length}
 					<label class="related-sources"
 						><input
 							type="checkbox"
@@ -1162,7 +1299,7 @@
 						/>{$t('researchAgent.paperScope.related')}</label
 					>
 				{/if}
-				{#if selectedPapers.length}
+				{#if !checkpointId && selectedPapers.length}
 					<details class="paper-scope" open data-testid="selected-paper-context">
 						<summary
 							>{$t('researchAgent.paperScope.selected', { count: selectedPapers.length })}</summary
@@ -1189,7 +1326,60 @@
 	</main>
 </section>
 
+{#if showTree}
+	<ConversationTree
+		{tree}
+		loading={treeLoading}
+		error={treeError}
+		disabled={sessionNavigationDisabled || treeLoading || Boolean(treeError)}
+		onClose={closeTree}
+		onRefresh={openTree}
+		onSelect={selectTreeNode}
+		onRevise={(node, content) => reviseMessage(node.message, content)}
+	/>
+{/if}
+
 <style>
+	.checkpoint-bar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0 auto;
+		padding: 10px 18px;
+		width: min(100%, 936px);
+		box-sizing: border-box;
+		border-top: 1px solid var(--border-default);
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+	.checkpoint-bar > div {
+		display: grid;
+		gap: 2px;
+		flex: 1;
+		min-width: 0;
+	}
+	.checkpoint-bar strong {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--brand-primary);
+	}
+	.checkpoint-bar span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.checkpoint-bar button {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		flex-shrink: 0;
+		padding: 8px 0;
+		border: 0;
+		background: transparent;
+		color: var(--brand-primary);
+		font-size: 12px;
+		cursor: pointer;
+	}
 	.research-agent :global(.session-state) {
 		display: inline-flex;
 		align-items: center;

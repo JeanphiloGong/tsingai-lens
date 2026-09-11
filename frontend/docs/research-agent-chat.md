@@ -86,6 +86,7 @@ GET  /api/v1/chat-sessions/{session_id}
 GET  /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/branches
+GET  /api/v1/chat-sessions/{session_id}/tree
 PUT  /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 ```
@@ -292,6 +293,43 @@ requires a fresh exact-argument approval and cannot reuse a historical call.
 selection. `UserMessage.svelte` owns the local edit draft and keyboard/focus
 behavior; `MessageTimeline.svelte` associates each answer with its user turn.
 No second runtime or client-side conversation store is introduced.
+
+## Conversation Tree
+
+A researcher has compared LPBF tensile results, then discussed specimen
+orientation. They return to the earlier comparison to ask about matched heat
+treatments while preserving the orientation discussion as a separate path.
+The conversation header and embedded reader toolbar open `ConversationTree.svelte`:
+an owned-session tree of saved question/answer turns, with shared prefixes shown
+once. Selecting a node previews its question, Source context, answer, and status.
+Previewing and closing do not change the active conversation or create a branch.
+Desktop shows a top-down node graph and preview side by side. Shared prefixes
+appear once, sibling questions are laid out as parallel branches, and the
+active path uses the accent connector. The graph has zoom, fit, and locate
+controls; on narrow screens it remains a pannable overview before opening the
+selected preview with a return-to-tree control. Escape closes the dialog and
+restores focus to its opener; editing captures Escape to cancel the local draft
+first.
+
+Switching to a completed node shows the conversation through that answer and a
+compact historical-checkpoint row. The cursor survives reload in the same
+user/Collection/workspace scope; returning to latest restores the full trajectory.
+Sending a new question from this cursor creates a `continue` branch through the
+selected answer, excluding later turns. Editing a node instead creates a
+`revise` branch before its question. Both use existing durable branch drafts,
+idempotent submission, authorization, and approval boundaries. Unrelated composer
+drafts and pending Source handoffs are not consumed by node edits. A historical
+continuation inherits the saved context through its answer, not pending selections
+from the latest conversation; those selections remain available outside checkpoint
+mode. Busy sessions remain viewable but cannot be branched until their current
+turn and pending approvals are resolved.
+
+Tree loading and failure have explicit states and retry; running nodes refresh
+while the dialog is open. Switching session, Collection, or user aborts stale tree
+reads. Tool calls remain within their saved turn rather than becoming separate
+checkpoints. This is conversation navigation: it never rolls back uploaded papers,
+published Evidence, Findings, or completed writes. The tree is derived from saved
+session lineage and messages; no graph persistence or database migration is added.
 
 ## Presentation Architecture
 

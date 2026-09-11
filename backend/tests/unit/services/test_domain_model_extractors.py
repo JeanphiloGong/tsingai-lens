@@ -14,7 +14,7 @@ from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
 )
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
     ObjectiveEvidenceRouter,
     StructuredEvidenceSelections,
@@ -4831,7 +4831,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
         }
     )
 
-    assert profile == StructuredDocumentProfile(
+    assert profile == DocumentProfileModelOutput(
         doc_type="experimental",
         profile_warnings=[],
         confidence=0.91,

@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
@@ -116,9 +116,9 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
     def extract_document_profile(
         self,
         payload: dict[str, Any],
-    ) -> StructuredDocumentProfile:
+    ) -> DocumentProfileModelOutput:
         title = str(payload.get("title") or payload.get("source_filename") or "")
-        return StructuredDocumentProfile(
+        return DocumentProfileModelOutput(
             doc_type="review" if "review" in title.casefold() else "experimental",
             profile_warnings=[],
             confidence=0.95,

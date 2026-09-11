@@ -7,7 +7,7 @@ import pytest
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
 )
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
@@ -330,7 +330,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
                 raise DocumentProfileExtractionError(
                     "document profile model returned invalid structured output"
                 )
-            return StructuredDocumentProfile(
+            return DocumentProfileModelOutput(
                 doc_type="experimental",
                 profile_warnings=[],
                 confidence=0.9,

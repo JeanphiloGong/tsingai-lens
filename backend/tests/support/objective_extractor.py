@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
@@ -83,9 +83,9 @@ class FakeObjectiveExtractor:
     def extract_document_profile(
         self,
         payload: dict[str, Any],
-    ) -> StructuredDocumentProfile:
+    ) -> DocumentProfileModelOutput:
         title = str(payload.get("title") or "")
-        return StructuredDocumentProfile(
+        return DocumentProfileModelOutput(
             doc_type="review" if "Review" in title else "experimental",
             profile_warnings=[],
             confidence=0.9,

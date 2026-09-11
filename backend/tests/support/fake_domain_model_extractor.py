@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
@@ -314,7 +314,7 @@ class FakeDomainModelExtractor:
             doc_type = "uncertain"
             warnings.append("classification_uncertain")
 
-        return StructuredDocumentProfile(
+        return DocumentProfileModelOutput(
             doc_type=doc_type,
             profile_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,

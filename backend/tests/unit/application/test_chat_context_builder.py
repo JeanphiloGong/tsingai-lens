@@ -10,6 +10,100 @@ from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ChatToo
 from application.chat import ChatContextBuilder
 
 
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def test_context_token_budget_preserves_complete_call_result_batches():
+    active = _user("active", "Compare elongation under the same annealing conditions.")
+    pairs = [_tool_pair(call_id=f"source-{i}", payload={
+        "content": "Ti-6Al-4V Methods and Results at 850 and 950 C. " * 100,
+    }) for i in range(5)]
+    messages = (active, *(message for pair in pairs for message in pair))
+    view = ChatContextBuilder().for_model(messages, max_input_tokens=6000)
+    assert active in view.messages
+    assert len(view.messages) < len(messages)
+    assert sum(ChatContextBuilder.estimate_tokens(ChatContextBuilder.model_message(message))
+               for message in view.messages) + ChatContextBuilder.estimate_tokens(view.rollover_summary) <= 6000
+    for call, result in pairs:
+        assert (call in view.messages) == (result in view.messages)
+
+
+@pytest.mark.anyio
+async def test_compaction_preserves_research_notes_and_full_archived_history():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+    from tests.unit.application.test_chat_research_claim_review import _ReviewModel
+
+    active = _user("active", "Correct the elongation comparison; do not save.")
+    old = _tool_pair(call_id="methods", payload={
+        "document_id": "paper-A", "source_ref": "methods-A", "page": 3,
+        "content": "Same material and test method; annealing temperatures differ.",
+    })
+    recent = _tool_pair(call_id="results", payload={"source_ref": "results-A", "page": 10})
+    messages = (active, *old, *recent)
+    notes = {"scope": active.content, "checks": [{
+        "statement": "Paper A methods-A p3 establishes material and tensile method.",
+        "conditions": "Temperature comparison, not time; same baseline required.",
+        "basis_message_ids": [old[1].message_id], "unresolved": "Read the exact result before correcting the Finding.",
+    }], "next_actions": ["Re-read methods-A together with results-A before the final judgment."]}
+    model = _ReviewModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    view = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert view.messages == (active, *recent)
+    assert json.loads(view.working_summary) == notes
+    assert progress.compacted_message_ids == {message.message_id for message in old}
+    assert messages == (active, *old, *recent)
+    assert old[1].tool_result.data["content"].startswith("Same material")
+    assert model.contexts[0].compacting
+    again = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert again == view
+    assert len(model.contexts) == 1
+
+
+@pytest.mark.anyio
+async def test_failed_compaction_does_not_discard_archived_observations():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
+    from application.chat.agent_runner import _RunProgress
+    from tests.unit.application.test_chat_research_claim_review import _ReviewModel
+
+    active = _user("active", "Check the same measurement.")
+    messages = (active, *_tool_pair(call_id="old"), *_tool_pair(call_id="new"))
+    invalid = ModelTurn(content=json.dumps({"scope": "same measurement", "checks": [{
+        "statement": "Claim", "conditions": "", "basis_message_ids": ["invented"], "unresolved": "",
+    }], "next_actions": []}))
+    model = _ReviewModel(invalid, invalid)
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    with pytest.raises(ModelResponseError, match="working notes"):
+        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert not progress.compacted_message_ids
+    assert progress.working_summary == ""
+
+
+@pytest.mark.anyio
+async def test_repeated_compaction_has_a_visible_failure_exit():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
+    from application.chat.agent_runner import _RunProgress
+    from tests.unit.application.test_chat_research_claim_review import _ReviewModel
+
+    active = _user("active", "Keep checking the selected paper.")
+    messages = (active, *_tool_pair(call_id="old", payload={"text": "x" * 5000}),
+                *_tool_pair(call_id="new", payload={"text": "y" * 5000}))
+    notes = {"scope": "selected paper", "checks": [], "next_actions": []}
+    model = _ReviewModel(*(ModelTurn(content=json.dumps(notes)) for _ in range(3)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits, compaction_attempts=3)
+    with pytest.raises(ModelResponseError, match="compacted"):
+        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert messages[2].tool_result is not None
+
+
 def _user(message_id: str, content: str) -> ChatMessage:
     return ChatMessage.user(
         message_id=message_id,

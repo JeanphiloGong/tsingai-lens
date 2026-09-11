@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -28,12 +29,19 @@ class CreateFindingVersionArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
-    source_analysis_version: int = Field(ge=1)
-    statement: str | None = Field(default=None, max_length=3_000)
-    assertion_strength: FindingAssertionStrength | None = None
-    supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
+    source_analysis_version: int = Field(ge=1, description="Inspected published analysis version supplying the Evidence; do not add analysis_version.")
+    statement: str | None = Field(default=None, max_length=3_000, description="Concise proposed conclusion, not the quoted erroneous parent. Put the correction rationale and unread scope in limitations.")
+    assertion_strength: FindingAssertionStrength | None = Field(
+        default=None,
+        description=(
+            "Required for every non-abstention Finding. Choose exactly one of "
+            "causal, associative, or descriptive. Omit only when abstention_reason "
+            "is provided."
+        ),
+    )
+    supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=100, description="Evidence supporting the proposed statement, required unless abstaining. Evidence that disproves the old parent can support its corrected statement; roles are relative to the new statement.")
     contradicting_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=100
+        default_factory=list, max_length=100, description="Evidence contradicting the proposed statement, not the old disputed parent."
     )
     context_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
     condition_boundary_evidence_ids: list[str] = Field(
@@ -73,7 +81,7 @@ class CreateFindingVersionArguments(BaseModel):
         if self.assertion_strength is None:
             raise ValueError("Finding assertion strength is required")
         if not self.supporting_evidence_ids:
-            raise ValueError("Finding requires supporting Evidence")
+            raise PydanticCustomError("finding_supporting_evidence_required", "Finding requires supporting Evidence")
         return self
 
 

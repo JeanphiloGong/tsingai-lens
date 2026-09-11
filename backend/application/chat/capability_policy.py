@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import json
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -183,6 +184,12 @@ def select_tool_specs(
     # for later decisions in this request, just like explicitly discovered tools.
     loaded_names.update(set(successful_results).intersection(capabilities.discovery.tools))
     allowed_names = loaded_names | requested_names.intersection(intent_policy.WRITE_CAPABILITIES)
+    finding_draft_requested = bool(
+        successful_results.get("inspect_published_finding")
+        and intent_policy.mentions_terms(
+            user_text, ("结论草案", "修订草案", "finding draft", "draft finding"),
+        )
+    )
     completed_writes = {
         call.name
         for call in calls
@@ -220,12 +227,18 @@ def select_tool_specs(
         and not successful_results.get("inspect_published_finding")
     )
     source_grounded_intent = source_grounded_intent and not finding_review_pending
+    if (source_grounded_intent and "inspect_document_sources" in registered_names
+            and not finding_draft_requested
+            and _pending_document_overviews(successful_results, calls)):
+        return tuple(spec for spec in specs if spec.name == "inspect_document_sources")
+    if source_grounded_intent and _pending_finding_sources(successful_results, calls) and "read_source" in registered_names:
+        return tuple(spec for spec in specs if spec.name in {"read_source", "inspect_table"})
     has_attached_source_context = bool(
         latest_user is not None and latest_user.source_contexts
     )
     if source_grounded_intent and "browse_collection_papers" in registered_names and not successful_results.get(
         "browse_collection_papers"
-    ) and not has_attached_source_context:
+    ) and not has_attached_source_context and not successful_results.get("inspect_published_finding"):
         allowed_names = registered_names.intersection({"browse_collection_papers"})
         mandatory_stage = True
     elif source_grounded_intent and has_attached_source_context:
@@ -318,13 +331,7 @@ def select_tool_specs(
     inspected_finding = bool(
         successful_results.get("inspect_published_finding")
     )
-    persist_requested = (
-        intent_policy.mentions_terms(user_text, intent_policy.PERSIST_TERMS)
-        or bool(requested_names.intersection({"create_research_plan", "revise_research_plan"}))
-    ) and (
-        not intent_policy.mentions_terms(user_text, intent_policy.NO_WRITE_PHRASES)
-        or intent_policy.has_explicit_immutable_write(user_text)
-    )
+    persist_requested = bool(requested_names.intersection(intent_policy.WRITE_CAPABILITIES))
     proposed_plan = bool(successful_results.get("propose_research_plan"))
     proposed_plan_this_turn = any(
         call.name == "propose_research_plan"
@@ -335,9 +342,6 @@ def select_tool_specs(
         call.name == "create_finding_draft"
         and call.status is ToolCallStatus.SUCCEEDED
         for call in calls
-    )
-    finding_draft_requested = inspected_finding and intent_policy.mentions_terms(
-        user_text, ("结论草案", "修订草案", "finding draft", "draft finding"),
     )
     # A completed plan proposal belongs to the request that asked for it.
     # Do not let an older turn force its write capability onto a later,
@@ -422,9 +426,16 @@ def select_tool_specs(
     elif finding_draft_requested and not mandatory_stage:
         # A Finding is the starting point of review, not proof that its Sources
         # have been checked. Keep discovered readers and discovery available.
-        allowed_names = {"create_finding_draft"} | loaded_names.intersection(
-            intent_policy.SOURCE_READ_CAPABILITIES | {"inspect_published_finding"}
-        )
+        if _finding_review_sources_sufficient(successful_results, calls):
+            # The linked source basis is now bounded. Do not let the model turn
+            # a correction into an unbounded literature crawl; unresolved or
+            # unavailable material remains explicit in the draft.
+            allowed_names = {"create_finding_draft"}
+            mandatory_stage = True
+        else:
+            allowed_names = {"create_finding_draft"} | loaded_names.intersection(
+                intent_policy.SOURCE_READ_CAPABILITIES | {"inspect_published_finding"}
+            )
     elif inspected_finding and plan_intent:
         allowed_names = {"propose_research_plan"}
     elif plan_intent:
@@ -485,6 +496,14 @@ def required_tool_before_answer(
     *,
     successful_results: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> str | None:
+    if tuple(tool_names) == ("inspect_document_sources",) and _pending_document_overviews(successful_results or {}):
+        return "inspect_document_sources"
+    review_writes = {"record_finding_feedback", "curate_finding"}.intersection(tool_names)
+    if review_writes and not (successful_results or {}).get("create_finding_version") and (
+        set(tool_names).issubset(review_writes | {"discover_research_tools"})
+        or (successful_results is not None and successful_results.get("inspect_published_finding"))
+    ):
+        return next(name for name in tool_names if name in review_writes)
     if (
         "create_finding_draft" in tool_names
         and successful_results is not None
@@ -505,6 +524,7 @@ def required_tool_before_answer(
         if (
             successful_results is not None
             and not _pending_source_search_candidates(successful_results)
+            and not _pending_finding_sources(successful_results)
             and has_successful_exact_source_read(successful_results)
         ):
             return None
@@ -561,6 +581,160 @@ def _pending_source_search_candidates(
         if candidates and not inspected:
             return tuple(candidates)
     return ()
+
+
+def _pending_document_overviews(
+    successful_results: Mapping[str, list[Mapping[str, Any]]],
+    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
+) -> tuple[str, ...]:
+    if not successful_results.get("inspect_published_finding") or not any(
+        item.get("source_inspection_required") is True
+        for item in successful_results.get("discover_research_tools", ())
+    ):
+        return ()
+    inspected = {
+        str(item.get("document", {}).get("document_id") or "")
+        for item in successful_results.get("inspect_document_sources", ())
+        if "document_outline" in item
+    }
+    failed = {
+        str(call.arguments.get("document_id") or "") for call in calls
+        if call.name == "inspect_document_sources" and call.status is ToolCallStatus.FAILED
+    }
+    documents = []
+    for result in successful_results.get("inspect_published_finding", ()):
+        items = [*result.get("evidence", ()), *result.get("replacement_evidence", ())]
+        finding = result.get("finding")
+        if isinstance(finding, Mapping):
+            items.extend(finding.get("paper_contributions", ()))
+        documents.extend(str(item.get("document_id") or "") for item in items if isinstance(item, Mapping))
+    documents.extend(str(item.get("document_id") or "")
+                     for item in successful_results.get("read_source", ()))
+    documents.extend(str(document_id)
+                     for item in successful_results.get("search_sources", ())
+                     for document_id in item.get("document_ids", ()))
+    return tuple(dict.fromkeys(item for item in documents if item and item not in inspected | failed))
+
+
+def _pending_finding_sources(
+    successful_results: Mapping[str, list[Mapping[str, Any]]],
+    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
+) -> tuple[tuple[str, str, str], ...]:
+    if not any(item.get("source_inspection_required") is True
+               for item in successful_results.get("discover_research_tools", ())):
+        return ()
+    failed = {
+        tuple(str(call.arguments.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
+        for call in calls if call.name == "read_source" and call.status is ToolCallStatus.FAILED
+    }
+    pending = []
+    for result in successful_results.get("inspect_published_finding", ()):
+        for item in (*result.get("evidence", ()), *result.get("replacement_evidence", ())):
+            candidate = tuple(str(item.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
+            if (all(candidate) and candidate not in failed and candidate not in pending
+                    and not has_successful_exact_source_read(successful_results, (candidate,))):
+                pending.append(candidate)
+        finding = result.get("finding")
+        contribution_documents = {
+            str(item.get("document_id") or "").strip()
+            for item in (finding.get("paper_contributions", ()) if isinstance(finding, Mapping) else ())
+            if isinstance(item, Mapping) and item.get("document_id")
+        }
+        read_documents = {
+            str(item.get("document_id") or "").strip()
+            for name in ("read_source", "inspect_table")
+            for item in successful_results.get(name, ())
+            if item.get("document_id")
+        }
+        failed_documents = {
+            str(call.arguments.get("document_id") or "").strip()
+            for call in calls
+            if call.name in {"read_source", "inspect_table"}
+            and call.status is ToolCallStatus.FAILED
+            and call.arguments.get("document_id")
+        }
+        # Contributions without Evidence still need one bounded Source check;
+        # otherwise a challenged paper such as ELI could be silently skipped.
+        for overview in successful_results.get("inspect_document_sources", ()):
+            document = overview.get("document")
+            document_id = str(document.get("document_id") or "").strip() if isinstance(document, Mapping) else ""
+            if not document_id or document_id not in contribution_documents or document_id in read_documents | failed_documents:
+                continue
+            for source in overview.get("sources", ()):
+                if not isinstance(source, Mapping):
+                    continue
+                candidate = tuple(str(source.get(key) or "").strip() for key in ("document_id", "source_kind", "source_ref"))
+                if all(candidate) and candidate not in pending:
+                    pending.append(candidate)
+                    break
+    return tuple(pending)
+
+
+def _finding_review_sources_sufficient(
+    successful_results: Mapping[str, list[Mapping[str, Any]]],
+    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
+) -> bool:
+    """Return whether the review has a bounded source basis for drafting.
+
+    A correction request must inspect the exact Sources linked to the published
+    Finding before proposing a replacement. Once every linked Source is either
+    completely read or has a recorded failed read, further broad navigation is
+    not a prerequisite for a draft; the draft can carry the unresolved gap.
+    """
+    if not any(item.get("source_inspection_required") is True
+               for item in successful_results.get("discover_research_tools", ())):
+        return False
+    if not successful_results.get("inspect_published_finding"):
+        return False
+    if _pending_finding_sources(successful_results, calls):
+        return False
+    if has_successful_exact_source_read(successful_results):
+        return True
+    linked = {
+        tuple(str(item.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
+        for result in successful_results.get("inspect_published_finding", ())
+        for item in (*result.get("evidence", ()), *result.get("replacement_evidence", ()))
+        if isinstance(item, Mapping)
+    }
+    return any(
+        call.name in {"read_source", "inspect_table"}
+        and call.status is ToolCallStatus.FAILED
+        and tuple(str(call.arguments.get(key) or "") for key in ("document_id", "source_kind", "source_ref")) in linked
+        for call in calls
+    )
+
+
+def _section_reading_progress(
+    successful_results: Mapping[str, list[Mapping[str, Any]]],
+) -> list[dict[str, Any]]:
+    completed = complete_source_reads(successful_results)
+    outlines = {}
+    sections: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    sources = []
+    for result in successful_results.get("inspect_document_sources", ()):
+        document_id = str(result.get("document", {}).get("document_id") or "")
+        if "document_outline" in result:
+            outlines[document_id] = result
+        sources.extend({**item, "document_id": document_id} for item in result.get("sources", ()))
+    sources.extend(successful_results.get("read_source", ()))
+    sources.extend({**item, "source_kind": "table", "source_ref": item.get("table_ref")}
+                   for item in successful_results.get("inspect_table", ()))
+    for source in sources:
+        identity = tuple(str(source.get(key) or "") for key in
+                         ("document_id", "source_kind", "source_ref", "source_digest"))
+        if identity in completed:
+            key = (identity[0], " ".join(str(source.get("heading_path") or "").split()))
+            sections.setdefault(key, set()).add((identity[1], identity[2]))
+    return [{
+        "document_id": document_id,
+        "outline_truncated": overview.get("outline_truncated", False),
+        "sections": [{
+            "heading_path": section["heading_path"],
+            "pages": section["pages"],
+            "available_passages": section["source_count"],
+            "completely_read_passages": len(sections.get((document_id, section["heading_path"]), ())),
+        } for section in overview["document_outline"]],
+    } for document_id, overview in outlines.items()]
 
 
 def has_successful_exact_source_read(
@@ -707,21 +881,109 @@ def stage_instruction(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
 ) -> str | None:
     content: str | None = None
-    source_candidates = _pending_source_search_candidates(successful_results)
+    pending_documents = _pending_document_overviews(successful_results, calls)
+    failed_finding_draft = next(
+        (
+            call
+            for call in reversed(calls)
+            if call.name == "create_finding_draft"
+            and call.status is ToolCallStatus.FAILED
+            and call.error_code == "invalid_tool_arguments"
+        ),
+        None,
+    )
+    if tuple(tool_names) == ("inspect_document_sources",) and pending_documents:
+        return (
+            "Inspect the prepared document outline before completing this Finding review. "
+            "Call inspect_document_sources for one of these exact document_ids with no query, "
+            "page or heading filter and limit=1: " + ", ".join(pending_documents[:12]) + ". "
+            "The outline identifies available sections; the first returned passage is not the "
+            "whole paper. Next inspect the relevant methods, comparisons and results in their "
+            "document order, using the actual headings and Source references."
+        )
+    review_writes = {"record_finding_feedback", "curate_finding"}.intersection(tool_names)
+    if review_writes and not successful_results.get("create_finding_version"):
+        content = (
+            "The researcher requested saving a Finding review. Call the appropriate review write to "
+            "prepare an exact approval; this call does not execute the write without approval. "
+            "Do not replace the real approval request with a prose table asking for confirmation. "
+            "Discover and inspect the exact Finding first if its identity or canonical fields are missing. "
+            "Feedback and curation are separate approvals; propose only the requested action."
+        )
+    finding_sources = _pending_finding_sources(successful_results, calls)
+    source_candidates = finding_sources or _pending_source_search_candidates(successful_results)
     if (
         source_candidates
         and tool_names
         and set(tool_names).issubset({"read_source", "inspect_table"})
     ):
         content = (
-            "The prior Source search returned the following exact reading "
-            "candidates. Read one of these records now; do not call a broad "
+            "The inspected Finding or Source search provides these exact reading "
+            "references. Read one of these records now; do not call a broad "
             "page inspection and do not invent identifiers:\n"
             + "\n".join(
                 f"- document_id={document_id}, source_kind={source_kind}, "
                 f"source_ref={source_ref}"
                 for document_id, source_kind, source_ref in source_candidates[:12]
             )
+        )
+    if "inspect_document_sources" in tool_names:
+        coverage = _section_reading_progress(successful_results)
+        if coverage:
+            content = (
+                (content + "\n\n" if content else "")
+                + "Do not repeat a completed Source batch. The deterministic reading ledger below "
+                "counts complete passages by document and heading. Select an unread heading, "
+                "paper, or exact next_offset; if no relevant prepared Source remains, state the "
+                "coverage gap instead of rereading the same content:\n"
+                + json.dumps(coverage, ensure_ascii=False)
+            )
+    elif ("create_finding_draft" in tool_names
+          and successful_results.get("inspect_published_finding")
+          and not has_successful_exact_source_read(successful_results)):
+        content = (
+            "The exact Finding and its Evidence have already been retrieved. Continue the active "
+            "request instead of reading the same Finding again. If the researcher asks to recheck "
+            "the original papers, discover inspect_document_sources, read_source and inspect_table "
+            "with source_inspection_required=true, then inspect the linked papers and the relevant "
+            "methods/results. The flag describes the whole research request, including work after "
+            "Finding inspection. If the request only reformulates saved records, use their actual "
+            "content and clearly attribute the resulting draft to those records."
+        )
+    elif failed_finding_draft is not None and "create_finding_draft" in tool_names:
+        content = (
+            "The previous create_finding_draft call was rejected by argument validation. "
+            "Submit the complete structured draft again, preserving the supported Evidence IDs. "
+            "For a normal correction include draft_id, objective_id, source_analysis_version, "
+            "statement, assertion_strength (exactly causal, associative, or descriptive), "
+            "and at least one supporting_evidence_ids value. Include limitations for unresolved "
+            "or unavailable checks. Use abstention_reason only when there is no defensible "
+            "statement, and then omit statement, assertion_strength, and all Evidence role IDs."
+        )
+    elif (
+        "create_finding_draft" in tool_names
+        and _finding_review_sources_sufficient(successful_results, calls)
+    ):
+        content = (
+            "The linked Source review is complete for this bounded correction. "
+            "Call create_finding_draft now with the supported correction and explicit "
+            "unresolved or unavailable checks; do not broaden the literature search."
+        )
+    elif "create_finding_draft" in tool_names and has_successful_exact_source_read(successful_results):
+        content = (
+            "Complete the researcher's investigation before the Finding revision. Use each document_outline "
+            "to locate sections that can resolve the disputed material state, treatment, comparator, "
+            "measurement and result. Read these relevant sections progressively with heading_path, "
+            "page and next_offset; inspect the cited results tables when needed. One complete Source "
+            "only means that passage was read. When relevant body text is available but unchecked, "
+            "continue reading instead of replacing the requested check with an unread-paper disclaimer. "
+            "Once each question is resolved or blocked by unavailable content, call create_finding_draft "
+            "with the supported correction and explicit unfinished checks. An untruncated outline lists "
+            "all prepared sections; if only front matter exists, read its relevant passage once and "
+            "continue with other papers. Additional searches cannot recover an unprepared body. "
+            "The following counts record complete passage reads, not scientific verification. "
+            "Use unread relevant methods/results, not already read passages or irrelevant front matter:\n"
+            + json.dumps(_section_reading_progress(successful_results), ensure_ascii=False)
         )
     elif tool_names == ("inspect_objective_analysis",):
         objective_ids = _confirmed_objective_ids(successful_results)

@@ -85,6 +85,20 @@ class _QueuedModel(_Model):
     def __init__(self) -> None:
         super().__init__()
 
+    async def respond(self, **kwargs):
+        context = kwargs["context"]
+        if context.compacting:
+            return ModelTurn(content=json.dumps({
+                "scope": "Continue the approved P002 preheating comparison and research plan.",
+                "checks": [{
+                    "statement": "Earlier collection records are retained in the full trajectory.",
+                    "conditions": "P002 preheated and non-preheated samples; maintain their testing context.",
+                    "basis_message_ids": [context.messages[0].message_id],
+                    "unresolved": "Re-read exact Sources for any new scientific claim.",
+                }], "next_actions": ["Complete the currently requested action using its exact records."],
+            }))
+        return await super().respond(**kwargs)
+
     def queue_tool(self, name: str, arguments: dict[str, Any]) -> None:
         # A completed draft may finish from its tool result without consuming
         # the scripted closing text. Keep that text out of the next user turn.
@@ -1125,6 +1139,7 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
             ),
             InspectPublishedFindingCapability(
                 collection_service=collection_service, objective_analysis_service=objective_analysis_service,
+                finding_feedback_service=finding_feedback_service,
             ),
             CreateEvidenceDraftCapability(
                 collection_service=collection_service, source_artifact_repository=source_repository,

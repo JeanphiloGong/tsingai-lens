@@ -197,7 +197,7 @@ invalid revision or stale Source.
 
 To execute the saved revision, `POST /messages` accepts `branch_revision: true`
 with the exact `fork_content`. The backend restores Source contexts from the
-original question, validates them against current Sources, and accepts this
+original question for revisions (none for continuations), validates them against current Sources, and accepts this
 branch's initial turn at most once. A repeated send returns 409
 `chat_branch_already_started`; the client reads the saved trajectory to recover.
 Both ordinary JSON and SSE submission support this behavior.
@@ -331,7 +331,22 @@ approval. The production Research Agent currently exposes these capabilities:
   canonical content and a `content_truncated` flag; callers must not treat a
   truncated quote as the complete Source. It returns canonical Document and
   Source links; matched content remains inspection material rather than
-  verified Evidence;
+  verified Evidence. `document_outline` lists up to 80 prepared headings with
+  pages, Source counts, kinds, canonical character lengths, estimated tokens
+  and the first Source reference;
+  `outline_section_total` and `outline_truncated` expose outline truncation.
+  This overview and `prepared_source_pages` are independent of search filters
+  and describe prepared content, not the original PDF's total pages. The optional
+  exact `heading_path` filter, with `offset` and `next_offset`, supports reading
+  a section progressively. Omitting `limit` permits up to 200 complete records,
+  packed to the current context allowance; explicit `limit` remains a record cap.
+  `batch_token_budget` and `returned_source_count` describe the actual batch.
+  An oversized first Source is returned without text and with
+  `content_truncated=true`; use its exact reference with `read_source` or
+  `inspect_table`. `next_offset` continues after the returned records, and must
+  not be interpreted as proof that a truncated record was completely read.
+  An empty filtered result does not prove scientific
+  absence or mean that the document has no body;
 - `read_source` reads one exact canonical Source by its Document ID, Source
   kind, and Source reference. It returns the complete content when it fits the
   bounded response, a stable complete-Source digest, and a continuation offset
@@ -340,7 +355,8 @@ approval. The production Research Agent currently exposes these capabilities:
   tables should use `inspect_table` for row-aware windows. An offset at or past
   the end of a non-empty Source returns `source_offset_out_of_range` rather than
   a successful empty excerpt; offset zero remains valid for an empty parsed
-  Source;
+  Source. Successful reads include the canonical `document_title`, page and
+  heading for displaying the current reading location;
 - `search_sources` searches canonical Source units only inside an explicit
   Document scope. It returns bounded candidate locations, complete-Source
   digests, and pagination state. A search hit is an inspection lead, not
@@ -364,14 +380,18 @@ approval. The production Research Agent currently exposes these capabilities:
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
 - `inspect_published_finding` returns one complete canonical published Finding
-  and a bounded page of its linked Evidence. This exact read, followed by any
+  and a bounded page of its linked Evidence, plus saved `feedback_records` and
+  `curation_records` for the exact Finding identity. These review records remain
+  separate from the original published Finding. This exact read, followed by any
   necessary Source inspection, is required before the Agent proposes a review
   or a new conclusion;
 - `create_finding_draft` records a structured, transient conclusion or
   abstention proposal in the Chat trajectory. It reuses the canonical Finding
   authoring input shape but does not validate Evidence bindings, publish a
   Finding, or modify an Objective analysis. The later formal write remains a
-  distinct approval event;
+  distinct approval event. The runner checks its scientific claims before
+  execution; a successful final draft appears as the exact structured result
+  with a deterministic unsaved-status message, without another model rewrite;
 - `create_finding_version` is a `write` capability. It accepts the same
   statement, assertion strength, version-local Evidence roles, limitations,
   optional parent Finding, or explicit abstention as the human Finding

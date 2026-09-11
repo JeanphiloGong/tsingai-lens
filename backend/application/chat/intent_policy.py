@@ -145,6 +145,7 @@ NO_TOOL_PHRASES = (
     "without tools",
 )
 NO_WRITE_PHRASES = (
+    "只读", "read-only", "不要写入", "不写入",
     "不要保存",
     "不保存",
     "先不要保存",
@@ -411,35 +412,51 @@ PERSIST_TERMS = (
     "record",
     "publish",
 )
-REVIEW_ACTION_TERMS = (
-    "mark",
-    "review",
-    "correct",
-    "overclaim",
-    "partly correct",
-    "部分正确",
-    "标记",
-    "复核",
-    "纠正",
-    "质疑",
-)
+def _write_targets(text: str) -> set[str]:
+    targets: set[str] = set()
+    if mentions_terms(text, ("反馈", "标注", "feedback")):
+        targets.add("record_finding_feedback")
+    if mentions_terms(text, ("修订", "curation", "curate", "revision")):
+        targets.add("curate_finding")
+    if mentions_terms(text, ("分析", "analysis")):
+        targets.update({"start_objective_analysis", "publish_agent_objective_analysis"})
+    if mentions_terms(text, ("方案", "计划", "plan")):
+        targets.difference_update({"curate_finding"})
+        targets.update({"create_research_plan", "revise_research_plan"})
+    if mentions_terms(text, ("新版本", "new version", "新 finding", "新finding", "独立", "new finding")):
+        if not targets.intersection({"start_objective_analysis", "publish_agent_objective_analysis"}):
+            targets.discard("curate_finding")
+            targets.add("create_evidence_version" if mentions_terms(text, ("evidence", "证据")) else "create_finding_version")
+    return targets
 
 
-def has_explicit_immutable_write(text: str) -> bool:
-    # Keeping an old version immutable permits creating a new one, but never
-    # overrides an explicit prohibition on saving, creating, or publishing it.
-    if mentions_terms(text, tuple(
-        phrase for phrase in NO_WRITE_PHRASES
-        if not mentions_terms(phrase, ("修改", "modifying", "modify"))
-    )):
-        return False
-    return mentions_terms(
-        text,
-        ("新版本", "new version", "immutable version"),
-    ) and mentions_terms(
-        text,
-        ("保存", "创建", "记录", "写入", "save", "create", "record", "persist"),
-    )
+def _write_request_scope(text: str) -> tuple[str, set[str]]:
+    # Negation belongs to an action, not every write mentioned in the message.
+    # Unscoped no-save/read-only requests still prohibit all persistence.
+    negations = "|".join(re.escape(term) for term in sorted(NO_WRITE_PHRASES, key=len, reverse=True))
+    clauses = re.split(rf"[，。；,;.!?\n]|\bbut\b|但是|(?={negations})", text, flags=re.IGNORECASE)
+    affirmative: list[str] = []
+    forbidden: set[str] = set()
+    for clause in clauses:
+        if not mentions_terms(clause, NO_WRITE_PHRASES):
+            affirmative.append(clause)
+            continue
+        if mentions_terms(clause, ("只读", "read-only", "任何", "anything")):
+            forbidden.update(WRITE_CAPABILITIES)
+        elif mentions_terms(clause, ("修改", "modify", "modifying")) and mentions_terms(
+            clause, ("原", "旧", "original", "old"),
+        ):
+            # Immutable authorship preserves the original by contract.
+            forbidden.add("curate_finding")
+        elif targets := _write_targets(clause):
+            forbidden.update(targets)
+        elif mentions_terms(clause, ("保存", "saving", "save", "写入")):
+            forbidden.update(WRITE_CAPABILITIES)
+        elif mentions_terms(clause, ("发布", "publish", "publishing")):
+            forbidden.update({"create_finding_version", "create_evidence_version", "publish_agent_objective_analysis"})
+        else:
+            forbidden.update(WRITE_CAPABILITIES)
+    return " ".join(affirmative), forbidden
 
 
 def capability_names_for_intent(
@@ -557,14 +574,16 @@ def capability_names_for_intent(
             elif tool_name in PROCESS_CAPABILITIES:
                 allowed.update(PROCESS_CAPABILITIES)
 
-    write_permitted = (
-        not mentions(NO_WRITE_PHRASES)
-        or has_explicit_immutable_write(user_text)
-    )
-    persist_intent = mentions(PERSIST_TERMS) and write_permitted
-    if persist_intent and objective_intent:
+    write_text, forbidden_writes = _write_request_scope(user_text)
+    def write_mentions(terms: tuple[str, ...]) -> bool:
+        return mentions_terms(write_text, terms)
+
+    persist_intent = write_mentions(PERSIST_TERMS)
+    if persist_intent and objective_intent and not _write_targets(write_text).intersection({
+        "record_finding_feedback", "curate_finding", "create_finding_version",
+    }):
         allowed.add("create_objective_candidate")
-    confirm_requested = mentions(
+    confirm_requested = write_mentions(
         (
             "确认目标",
             "确认这个目标",
@@ -595,12 +614,12 @@ def capability_names_for_intent(
         )
     )
     if (
-        mentions(("开始分析", "启动分析", "分析这个目标", "start analysis"))
+        write_mentions(("开始分析", "启动分析", "分析这个目标", "start analysis"))
         and not analysis_explicitly_deferred
     ):
         allowed.update(PROCESS_CAPABILITIES)
         allowed.add("start_objective_analysis")
-    if not analysis_explicitly_deferred and mentions(
+    if not analysis_explicitly_deferred and write_mentions(
         (
             "analyze this",
             "分析这个研究问题",
@@ -610,7 +629,7 @@ def capability_names_for_intent(
         )
     ):
         allowed.add("start_objective_analysis")
-    if mentions(
+    if write_mentions(
         (
             "start understanding",
             "开始理解",
@@ -619,27 +638,27 @@ def capability_names_for_intent(
         )
     ):
         allowed.add("start_research_process")
-    if mentions(("准备论文", "处理论文", "重新处理", "重试论文", "prepare papers")):
+    if write_mentions(("准备论文", "处理论文", "重新处理", "重试论文", "prepare papers")):
         allowed.add("start_research_process")
     if persist_intent and plan_intent:
         allowed.add("create_research_plan")
-    if plan_intent and mentions(("修改", "修订", "调整", "revise", "update")):
+    if plan_intent and write_mentions(("修改", "修订", "调整", "revise", "update")):
         allowed.add("revise_research_plan")
     if finding_intent and persist_intent:
-        allowed.update(
-            {
+        finding_writes = {
                 "record_finding_feedback",
                 "curate_finding",
                 "create_finding_version",
-            }
-        )
+        }
+        targets = _write_targets(write_text)
+        allowed.update(finding_writes.intersection(targets) if targets else finding_writes)
     if finding_intent and mentions(
         ("结论草案", "修订草案", "finding draft", "draft finding")
     ):
         allowed.add("create_finding_draft")
-    if finding_intent and mentions(REVIEW_ACTION_TERMS):
+    if finding_intent and write_mentions(("标记", "标为", "mark")):
         allowed.add("record_finding_feedback")
-    evidence_write_intent = mentions(
+    evidence_write_intent = write_mentions(
         (
             "记录证据",
             "保存证据",
@@ -650,13 +669,15 @@ def capability_names_for_intent(
             "correct evidence",
             "update evidence",
         )
-    ) or (persist_intent and "evidence" in user_text)
+    ) or (
+        persist_intent and write_mentions(("evidence", "证据"))
+        and (not _write_targets(write_text) or "create_evidence_version" in _write_targets(write_text))
+    )
     if evidence_write_intent:
         allowed.add("create_evidence_version")
-    if mentions(("发布分析", "保存分析")) or (
-        mentions(("publish",)) and mentions(("analysis",))
+    if write_mentions(("发布分析", "保存分析")) or (
+        write_mentions(("publish",)) and write_mentions(("analysis",))
     ):
         allowed.add("publish_agent_objective_analysis")
-    if not write_permitted:
-        allowed.difference_update(WRITE_CAPABILITIES)
+    allowed.difference_update(forbidden_writes)
     return allowed

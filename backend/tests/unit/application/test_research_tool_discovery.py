@@ -65,8 +65,7 @@ async def test_empty_provider_response_retains_exact_read_and_unread_papers():
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
         ModelTurn(tool_calls=(ModelToolCall(name="read_source"),)),
-        ModelResponseError("private-provider-content", reason="empty_response"),
-        ModelResponseError("private-provider-content", reason="empty_response"),
+        *(ModelResponseError("private-provider-content", reason="empty_response") for _ in range(6)),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((browse, read))).run_turn(
         context=_context(), previous_messages=(), user_message="Inspect these authors' measurements.",
@@ -128,8 +127,7 @@ async def test_filtered_filename_miss_is_not_reported_as_an_empty_collection():
     })
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
-        ModelResponseError("empty", reason="empty_response"),
-        ModelResponseError("empty", reason="empty_response"),
+        *(ModelResponseError("empty", reason="empty_response") for _ in range(6)),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((browse,))).run_turn(
         context=_context(), previous_messages=(), user_message="Locate that filename.",

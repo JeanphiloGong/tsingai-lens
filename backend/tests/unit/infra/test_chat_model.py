@@ -159,7 +159,7 @@ async def test_research_review_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.9"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.14"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -359,6 +359,20 @@ async def test_rollover_is_a_separate_system_message_without_mutating_history() 
     assert context.rollover_summary in provider_messages[1]["content"]
     assert context.messages == messages
     assert messages[0].content == "你好"
+
+
+@pytest.mark.parametrize("review", [False, True])
+async def test_total_context_guard_includes_prompts_tools_and_review_input(review):
+    from dataclasses import replace
+    client, completions = _client(_completion(content="unreachable"))
+    context = replace(ChatModelContext((_message(),)), max_context_tokens=2000,
+                      research_review={"observations": ["Ti-6Al-4V elongation " * 2000]} if review else None)
+    with pytest.raises(ModelResponseError) as caught:
+        await OpenAIChatModel(client=client, model="test-model").respond(
+            context=context, tool_specs=(), max_output_tokens=512,
+        )
+    assert caught.value.reason == "context_window_exceeded"
+    assert completions.calls == []
 
 
 async def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evidence() -> None:

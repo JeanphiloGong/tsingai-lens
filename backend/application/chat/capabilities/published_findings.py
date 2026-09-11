@@ -279,7 +279,8 @@ class InspectPublishedFindingCapability:
         name="inspect_published_finding",
         description=(
             "Read one exact complete published Finding and a bounded page of its "
-            "Source-linked Evidence. Use this before proposing feedback, curation, or a "
+            "Source-linked Evidence, saved feedback and associated human curations. "
+            "Use this to recall saved corrections or before proposing feedback, curation, or a "
             "new Finding derived from this parent. Includes updated Evidence for "
             "reassessing replaced inputs. The complete Finding object is the "
             "only valid basis for a curation or parent-derived authoring write; do not "
@@ -289,9 +290,11 @@ class InspectPublishedFindingCapability:
         input_model=InspectPublishedFindingArguments,
     )
 
-    def __init__(self, *, collection_service: Any, objective_analysis_service: Any) -> None:
+    def __init__(self, *, collection_service: Any, objective_analysis_service: Any,
+                 finding_feedback_service: Any) -> None:
         self.collection_service = collection_service
         self.objective_analysis_service = objective_analysis_service
+        self.finding_feedback_service = finding_feedback_service
 
     async def execute(
         self,
@@ -309,6 +312,10 @@ class InspectPublishedFindingCapability:
             analysis_version=arguments.analysis_version,
         )
         version = int(detail["analysis_version"])
+        review_key = dict(collection_id=context.collection_id, objective_id=arguments.objective_id,
+                          analysis_version=version, finding_id=arguments.finding_id)
+        feedback = await self.finding_feedback_service.list_feedback(**review_key)
+        curations = await self.finding_feedback_service.list_curations(**review_key)
         evidence = await self.objective_analysis_service.list_evidence(
             context.collection_id,
             arguments.objective_id,
@@ -366,6 +373,8 @@ class InspectPublishedFindingCapability:
                 "objective_id": arguments.objective_id,
                 "analysis_version": version,
                 "finding": dict(detail["finding"]),
+                "feedback_records": [item.to_record() for item in feedback],
+                "curation_records": [item.to_record() for item in curations],
                 "evidence_review": review,
                 "replacement_evidence": replacement_evidence,
                 "finding_is_published": True,

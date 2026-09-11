@@ -9,12 +9,14 @@ from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, Mo
 from application.chat import capability_policy
 from application.chat.capabilities import CreateEvidenceDraftCapability
 from application.chat.capabilities.document_sources import (
+    InspectDocumentSourcesArguments,
     InspectDocumentSourcesCapability,
     InspectTableCapability,
     ReadSourceCapability,
     SearchSourcesCapability,
 )
 from domain.chat import ChatToolCall, ChatToolResult, ToolRisk
+from application.chat.capabilities.contracts import CapabilityExecutionContext
 from tests.unit.application.test_chat_p002_source_fixture import _P002CollectionService, _P002SourceRepository
 from tests.unit.application.test_research_agent_runner import _Model
 
@@ -31,6 +33,74 @@ TABLE = "tbl_doc_ef59d1f3a006_2_table_2"
 
 def _call(name, **arguments):
     return ModelTurn(tool_calls=(ModelToolCall(name=name, arguments=arguments),))
+
+
+@pytest.mark.anyio
+async def test_document_outline_survives_empty_search_and_supports_section_reading():
+    repository = _P002SourceRepository()
+    capability = InspectDocumentSourcesCapability(
+        collection_service=_P002CollectionService(), source_artifact_repository=repository,
+    )
+    context = CapabilityExecutionContext("session-p002", "researcher-1", "collection-p002", "outline")
+    overview = await capability.execute(context, InspectDocumentSourcesArguments(
+        document_id=DOCUMENT, query="a phrase that is not in this paper", limit=1,
+    ))
+    assert overview.data["match_total"] == 0
+    methods = next(block for block in repository.document.blocks if block.block_id == METHODS)
+    heading = " ".join(str(methods.heading_path).split())
+    assert heading in {item["heading_path"] for item in overview.data["document_outline"]}
+    first = await capability.execute(context, InspectDocumentSourcesArguments(
+        document_id=DOCUMENT, heading_path=heading, limit=1,
+    ))
+    assert first.data["sources"]
+    assert all(" ".join(str(item["heading_path"]).split()) == heading for item in first.data["sources"])
+    progress = capability_policy._section_reading_progress({"inspect_document_sources": [overview.data, first.data, first.data]})
+    section = next(item for item in progress[0]["sections"] if item["heading_path"] == heading)
+    assert section["completely_read_passages"] == sum(not item["content_truncated"] for item in first.data["sources"])
+    assert section["available_passages"] >= len(first.data["sources"])
+    if first.data["next_offset"] is not None:
+        second = await capability.execute(context, InspectDocumentSourcesArguments(
+            document_id=DOCUMENT, heading_path=heading, limit=1, offset=first.data["next_offset"],
+        ))
+        assert second.data["sources"][0]["source_ref"] != first.data["sources"][0]["source_ref"]
+
+
+def test_finding_review_checks_document_structure_even_after_an_abstract_search():
+    results = {
+        "discover_research_tools": [{"source_inspection_required": True}],
+        "inspect_published_finding": [{"evidence": [{"document_id": "paper-a"}]}],
+        "search_sources": [{"document_ids": ["paper-b"], "matches": [], "match_total": 0}],
+    }
+    assert capability_policy._pending_document_overviews(results) == ("paper-a", "paper-b")
+    results["inspect_document_sources"] = [{"document": {"document_id": "paper-a"}, "document_outline": []}]
+    assert capability_policy._pending_document_overviews(results) == ("paper-b",)
+    assert capability_policy.required_tool_before_answer(("inspect_document_sources",), successful_results=results) == "inspect_document_sources"
+    results["inspect_document_sources"].append({"document": {"document_id": "paper-b"}, "document_outline": []})
+    assert capability_policy._pending_document_overviews(results) == ()
+
+
+def test_finding_review_requires_a_source_check_for_evidence_free_contributions():
+    source = {
+        "document_id": "paper-b", "source_kind": "text_window",
+        "source_ref": "abstract-1", "source_digest": "digest-b",
+        "content_truncated": False,
+    }
+    results = {
+        "discover_research_tools": [{"source_inspection_required": True}],
+        "inspect_published_finding": [{
+            "finding": {"paper_contributions": [{"document_id": "paper-a"}, {"document_id": "paper-b"}]},
+            "evidence": [{"document_id": "paper-a", "source_kind": "text_window", "source_ref": "results-1"}],
+        }],
+        "inspect_document_sources": [{"document": {"document_id": "paper-b"}, "sources": [source], "document_outline": []}],
+        "read_source": [{
+            "document_id": "paper-a", "source_kind": "text_window", "source_ref": "results-1",
+            "source_digest": "digest-a", "content_truncated": False,
+        }],
+    }
+    assert capability_policy._pending_finding_sources(results) == (("paper-b", "text_window", "abstract-1"),)
+    results["discover_research_tools"] = [{"source_inspection_required": False}]
+    results.pop("inspect_document_sources")
+    assert capability_policy._pending_document_overviews(results) == ()
 
 
 @pytest.mark.anyio

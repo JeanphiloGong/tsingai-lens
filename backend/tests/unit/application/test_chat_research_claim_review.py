@@ -49,6 +49,102 @@ def _messages(request):
 
 
 @pytest.mark.anyio
+async def test_working_notes_still_trigger_review_but_cannot_be_its_evidence():
+    from application.chat.agent_runner import _RunProgress
+    model = _ReviewModel(ModelTurn(content="The previous comparison needs an exact Source recheck."), _report())
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    context = ChatModelContext(_messages("Correct the old comparison."),
+                               working_summary="UNVERIFIED_NOTES: all papers agree, source-A needs re-reading.")
+    await runner._respond(context, (), _RunProgress(runner.limits), None)
+    assert len(model.contexts) == 2
+    review = model.contexts[1].research_review
+    assert review is not None
+    assert "UNVERIFIED_NOTES" not in json.dumps(review)
+
+
+@pytest.mark.anyio
+async def test_finding_review_can_return_to_source_reading_before_producing_the_draft():
+    from application.chat.agent_runner import _RunProgress
+    from application.chat.capabilities.document_sources import ReadSourceArguments
+
+    draft = ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", {"statement": "All treatments improve ductility."}),))
+    read = ModelTurn(content="Unverified draft preamble", tool_calls=(ModelToolCall("read_source", {
+        "document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-3",
+    }),))
+    model = _ReviewModel(
+        _report("paper_scope", "The available result section must resolve the treatment comparison.",
+                candidate_path="/tool_calls/0/arguments/statement"), read,
+    )
+    reader = _Capability("read_source", ToolRisk.READ, ReadSourceArguments)
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((reader,)))
+    chunks = []
+    result = await runner._review_research_turn(
+        draft, ChatModelContext(_messages("Check the treatment conditions and correct this Finding.")),
+        (reader.spec,), _RunProgress(runner.limits), chunks.append,
+    )
+    assert result.tool_calls == read.tool_calls
+    assert result.content == ""
+    assert reader.executed_arguments == []
+    assert chunks == []
+    assert len(model.contexts) == 2
+
+
+@pytest.mark.anyio
+async def test_finding_draft_is_checked_before_it_is_recorded_and_finishes_without_rewriting():
+    from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability
+
+    arguments = {"draft_id": "correction", "objective_id": "objective-1", "source_analysis_version": 1,
+                 "statement": "All three papers report reduced elongation.", "assertion_strength": "descriptive",
+                 "supporting_evidence_ids": ["evidence-1"], "limitations": ["The other two papers remain unchecked."]}
+    corrected = {**arguments, "statement": "The inspected result reports reduced elongation under its stated treatment."}
+
+    class Model(_Model):
+        reviews = 0
+
+        async def respond(self, **kwargs):
+            if kwargs["context"].research_review is not None:
+                self.reviews += 1
+                return (_report("paper_scope", "Only one result supports the treatment comparison.",
+                                candidate_path="/tool_calls/0/arguments/statement") if self.reviews == 1 else _report())
+            return await super().respond(**kwargs)
+
+    model = Model(ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", arguments),)),
+                  ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", corrected),)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((CreateFindingDraftCapability(),)))
+    result = await runner.run_turn(context=_context(), previous_messages=(),
+                                   user_message="Draft a correction of the elongation conclusion. Do not save.")
+    assert result.status == "completed"
+    assert model.reviews == 2
+    drafts = [item for item in result.tool_results if "draft" in item.data]
+    assert len(drafts) == 1 and drafts[0].data["draft"]["statement"] == corrected["statement"]
+    assert "not been saved or published" in result.messages[-1].content
+    assert result.pending_approval is None
+    assert not model.turns
+
+
+@pytest.mark.anyio
+async def test_exhausted_reading_is_available_to_claim_review_and_answer_repair():
+    from application.chat.agent_runner import _RunProgress
+
+    model = _ReviewModel(
+        _report("paper_scope", "Keep the original body check unresolved."),
+        ModelTurn(content="The abstract reports improvement; no body section is prepared here."),
+        _report(),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    result = await runner._review_research_turn(
+        ModelTurn(content="The paper never reports a decrease."),
+        ChatModelContext(_messages("Recheck this Finding and its original conditions.")),
+        (), _RunProgress(runner.limits), None, finalizing=True,
+    )
+    assert "no body section is prepared" in result.content
+    assert "reading allowance" in model.contexts[0].research_review["coverage"]
+    assert "reading allowance is exhausted" in model.contexts[1].messages[-1].content
+    assert "return the necessary read" not in model.contexts[1].messages[-1].content
+    assert not result.tool_calls
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(("category", "research_request", "bad", "good"), [
     ("paper_scope", "A and B report a decrease; C does not report a worsening condition.",
      "All three report a decrease.", "A and B report a decrease; C is unresolved."),
@@ -315,6 +411,43 @@ def test_observation_fields_preserve_empty_null_and_zero_without_inventing_missi
     })
     assert fields == {"/evidence": "[]", "/value": "null", "/count": "0", "/metadata": "{}"}
     assert "/not_reported" not in fields
+
+
+def test_review_can_cite_an_observed_evidence_list_or_its_exact_member():
+    from application.chat.model import ResearchClaimReview
+
+    observed = {"finding": {"supporting_evidence_ids": ["evidence-1"]}}
+    fields = ResearchAgentRunner._review_candidate_fields(observed)
+    assert json.loads(fields["/finding/supporting_evidence_ids"]) == ["evidence-1"]
+    assert fields["/finding/supporting_evidence_ids/0"] == "evidence-1"
+    report = ResearchClaimReview.model_validate_json(_report(
+        "paper_scope", "Only one supporting result was returned.", reference="read",
+        field_path="/finding/supporting_evidence_ids",
+    ).content)
+    ResearchAgentRunner._validate_research_review(report, {"/content": "All papers agree."}, {
+        "read": {"kind": "inspect_published_finding", "data": observed},
+    })
+
+
+@pytest.mark.anyio
+async def test_invalid_review_reference_is_repaired_before_scientific_correction():
+    from application.chat.agent_runner import _RunProgress
+
+    model = _ReviewModel(
+        _report("gap_scope", "Unsupported.", field_path="/missing"),
+        _report("gap_scope", "Limit the claim to the inspected collection."),
+        ModelTurn(content="The inspected collection does not establish this result."), _report(),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    result = await runner._review_research_turn(
+        ModelTurn(content="Nobody has ever tested this."),
+        ChatModelContext(_messages("Only this collection was inspected.")), (),
+        _RunProgress(runner.limits), None,
+    )
+    assert "inspected collection" in result.content
+    assert model.contexts[1].research_review["validation_feedback"]
+    assert model.contexts[1].research_review["candidate"] == model.contexts[0].research_review["candidate"]
+    assert model.contexts[2].research_review is None
 
 
 @pytest.mark.anyio

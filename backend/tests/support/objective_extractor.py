@@ -24,7 +24,9 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import StructuredPaperResearchMap
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
+    StructuredPaperResearchMap,
+)
 
 
 def source_unit_ids_from_payload(payload: dict[str, Any]) -> list[str]:

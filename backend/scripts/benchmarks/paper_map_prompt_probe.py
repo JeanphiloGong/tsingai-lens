@@ -26,12 +26,19 @@ from _common import (
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ensure_backend_root_on_path(_BACKEND_ROOT)
 
-_study_window = importlib.import_module(
-    "application.core.objectives.discovery.study_window"
+_paper_understanding_workflow = importlib.import_module(
+    "application.core.objectives.discovery.paper_understanding.workflow"
 )
-ExperimentalPaperMapModelOutput = _study_window.ExperimentalPaperMapModelOutput
-_paper_map_model_payload = _study_window._paper_map_model_payload
-build_paper_research_map_prompt = _study_window.build_paper_research_map_prompt
+_paper_understanding_outputs = importlib.import_module(
+    "application.core.objectives.discovery.paper_understanding.paper_map_outputs"
+)
+ExperimentalPaperMapModelOutput = (
+    _paper_understanding_outputs.ExperimentalPaperMapModelOutput
+)
+_paper_map_model_payload = _paper_understanding_workflow._paper_map_model_payload
+build_paper_research_map_prompt = (
+    _paper_understanding_workflow.build_paper_research_map_prompt
+)
 
 
 VariantRequestMode = Literal["json_object", "provider_parse"]

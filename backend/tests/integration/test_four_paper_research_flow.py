@@ -20,8 +20,10 @@ from application.core.objectives.analysis.source_extraction import (
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
 )
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
+)
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
 from tests.support.fake_domain_model_extractor import (

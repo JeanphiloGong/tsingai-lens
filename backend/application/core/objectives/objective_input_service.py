@@ -17,7 +17,7 @@ from application.core.objectives.discovery.signal_reconciliation import (
     PaperSignalReconciler,
     PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
 )
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.workflow import (
     PAPER_RESEARCH_MAP_PROMPT_VERSION,
     PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
     PaperResearchMapExtractor,

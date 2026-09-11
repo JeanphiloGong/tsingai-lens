@@ -9,7 +9,7 @@ from typing import Any
 from application.core.objectives.discovery.signal_reconciliation import (
     PaperSignalReconciler,
 )
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
 from application.core.objectives.paper_map_aggregation import (

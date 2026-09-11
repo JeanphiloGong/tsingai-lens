@@ -15,13 +15,15 @@ from time import monotonic
 from typing import Any
 
 from application.core.objectives import property_matching
-from application.core.objectives.discovery.study_window import (
-    PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT,
-    PaperResearchMapExtractor,
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
     StructuredPaperResearchRelationship,
     StructuredPaperResearchScope,
     StructuredReviewSynthesisMap,
+)
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT,
+    PaperResearchMapExtractor,
     _review_synthesis_only,
 )
 from application.core.objectives.llm.structured_response import (

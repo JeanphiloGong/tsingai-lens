@@ -49,13 +49,17 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
     build_paper_signal_reconciliation_prompt,
 )
-from application.core.objectives.discovery.study_window import (
-    PaperResearchMapExtractor,
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
-    StructuredPaperResearchMap,
     StructuredPaperSourceSignal,
     PaperSourceSignalScreenModelOutput,
     ReviewPaperMapModelOutput,
+)
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
+    StructuredPaperResearchMap,
+)
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
     build_paper_research_map_prompt,
     build_paper_source_signal_prompt,
 )
@@ -1640,7 +1644,7 @@ def test_paper_research_map_saturation_logs_bounded_source_trace(caplog):
 
     with caplog.at_level(
         "WARNING",
-        logger="application.core.objectives.discovery.study_window",
+        logger="application.core.objectives.discovery.paper_understanding.workflow",
     ), pytest.raises(StructuredOutputSaturatedError):
         extractor.extract(
             {

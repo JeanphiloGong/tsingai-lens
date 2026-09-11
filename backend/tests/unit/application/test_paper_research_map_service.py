@@ -11,8 +11,10 @@ import pytest
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
+)
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
 from application.core.objectives.llm.structured_response import (

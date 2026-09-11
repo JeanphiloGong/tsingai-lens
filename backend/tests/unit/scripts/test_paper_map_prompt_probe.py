@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     StructuredPaperMapRelationship,
     StructuredPaperMapStudy,
 )

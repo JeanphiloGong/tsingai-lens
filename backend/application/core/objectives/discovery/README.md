@@ -5,13 +5,16 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
 
 ## Reading Order
 
-1. `study_window.py` maps one bounded group of high-level Source units into the
-   paper-owned material, intervention, and outcome axes that can support an
-   Objective candidate. A returned relationship describes stated research
-   scope, not a validated effect or comparable experiment. If structured
-   mapping fails after subdivision reaches one Source, the compact contract
-   retains only explicit axes for bounded reconciliation. Review papers retain
-   only synthesis explicitly authored by the review; individually cited
+1. `paper_understanding/` maps one bounded group of high-level Source units
+   into the paper-owned material, intervention, and outcome axes that can
+   support an Objective candidate. `paper_map_outputs.py` owns the model-output
+   contracts; `paper_map_results.py` owns normalized Paper Map results;
+   `workflow.py` owns prompts, Source binding,
+   bounded repair, and the extraction call. A returned relationship describes
+   stated research scope, not a validated effect or comparable experiment. If
+   structured mapping fails after subdivision reaches one Source, the compact
+   contract retains only explicit axes for bounded reconciliation. Review papers
+   retain only synthesis explicitly authored by the review; individually cited
    experiments remain leads back to primary literature. The backend binds
    Source identity. One high-level experimental study may retain up to six
    explicitly linked factor-to-outcome relationships so that a dense abstract
@@ -41,12 +44,14 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
 
 ## Ownership
 
-`study_window.py`, `signal_reconciliation.py`, and `axis_equivalence.py` each
-keep one model judgment's prompt, response schema, validation, repair policy,
-token bounds, and call next to each other. The full-window and compact
-single-Source contracts in `study_window.py` have different responsibilities:
-the former maps explicitly linked paper-scope axes, while the latter screens
-only explicit variable and outcome signals. Neither reconstructs samples,
+`paper_understanding/`, `signal_reconciliation.py`, and `axis_equivalence.py`
+each keep one model judgment's prompt, response schema, validation, repair
+policy, token bounds, and call next to each other. Within `paper_understanding/`,
+`paper_map_outputs.py` contains window-local model responses and
+`paper_map_results.py` contains Source-bound normalized results. The full-window
+and compact single-Source responses have different responsibilities: the former
+maps explicitly linked paper-scope axes, while the latter screens only explicit
+variable and outcome signals. Neither reconstructs samples,
 controls, fixed conditions, test settings, or measurement values. Review
 `PaperResearchMap` retains only review-author synthesis; individually cited
 studies are primary-literature navigation leads and do not become map scopes or

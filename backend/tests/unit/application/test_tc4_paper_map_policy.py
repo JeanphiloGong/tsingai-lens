@@ -7,7 +7,7 @@ from typing import Any
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
 from application.core.objectives.paper_research_map_service import (

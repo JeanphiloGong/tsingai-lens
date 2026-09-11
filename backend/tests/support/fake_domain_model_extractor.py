@@ -29,10 +29,12 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
-    StructuredPaperResearchMap,
     ReviewPaperMapModelOutput,
+)
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
+    StructuredPaperResearchMap,
 )
 from tests.support.objective_extractor import paper_research_map_scope_outputs
 

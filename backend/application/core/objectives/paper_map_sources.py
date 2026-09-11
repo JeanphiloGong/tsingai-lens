@@ -8,7 +8,7 @@ import json
 from typing import Any, Callable
 
 from application.core.objectives import property_matching
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.workflow import (
     PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT,
     PaperResearchMapExtractor,
 )

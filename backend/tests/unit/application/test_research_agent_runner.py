@@ -367,6 +367,25 @@ async def test_usage_exhaustion_records_unexecuted_intent_then_finalizes() -> No
     assert result.tool_results[-1].error_code == "resource_budget"
 
 
+async def test_provider_retries_are_visible_in_progress_trace() -> None:
+    traces = []
+    result = await ResearchAgentRunner(
+        model=_Model(
+            ModelResponseError("empty", reason="empty_response", retryable=True),
+            ModelResponseError("empty", reason="empty_response", retryable=True),
+            ModelTurn(content="The inspected scope is reported."),
+        ),
+        capabilities=CapabilityRegistry(()),
+    ).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Summarize the inspected scope.", progress_callback=traces.append,
+    )
+    retries = [item for item in traces if item["phase"] == "model_retry"]
+    assert result.status is AgentRunStatus.COMPLETED
+    assert [item["retry_attempt"] for item in retries] == [1, 2]
+    assert all(item["retry_reason"] == "empty_response" for item in retries)
+
+
 @pytest.mark.parametrize("tokens", [100, 120])
 async def test_usage_exhaustion_preserves_final_text_without_another_request(tokens: int) -> None:
     model = _Model(ModelTurn(content="Only the first paper was inspected.",
@@ -2936,6 +2955,62 @@ def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None
 def test_finding_writes_respect_each_requested_action(request_text, writes) -> None:
     names = intent_policy.capability_names_for_intent(request_text, has_source_context=False, prior_tool_names=set())
     assert names.intersection(intent_policy.WRITE_CAPABILITIES) == writes
+
+
+def test_failed_curation_gets_canonical_repair_instruction() -> None:
+    failed = ChatToolCall.requested(
+        tool_call_id="curate-1", session_id="chat-1", assistant_message_id="msg-1",
+        name="curate_finding", arguments={}, risk=ToolRisk.WRITE,
+    ).fail("invalid_tool_arguments", "2026-09-10T00:00:00Z")
+    instruction = capability_policy.stage_instruction(
+        ("curate_finding",), [failed], successful_results={}
+    )
+    assert instruction is not None
+    assert "complete top-level object" in instruction
+    assert "limitations" in instruction
+    assert "value types" in instruction
+
+
+def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
+    from tests.unit.application.test_chat_research_capabilities import _canonical_finding_record
+
+    canonical = _canonical_finding_record()
+    inspect_request = ChatToolCall.requested(
+        tool_call_id="inspect-1", session_id="chat-1", assistant_message_id="inspect-call",
+        name="inspect_published_finding", arguments={}, risk=ToolRisk.READ,
+    ).start("2026-09-10T00:00:00Z").succeed("2026-09-10T00:00:01Z").to_request()
+    inspect_call = ChatMessage.assistant_tool_calls(
+        message_id="inspect-call", session_id="chat-1", content="", tool_calls=(
+            inspect_request,
+        ), created_at="2026-09-10T00:00:00Z",
+    )
+    inspected = ChatMessage.from_tool_result(
+        message_id="inspect-result", session_id="chat-1", created_at="2026-09-10T00:00:00Z",
+        result=ChatToolResult(
+            tool_call_id="inspect-1", status=ToolResultStatus.SUCCEEDED,
+            data={"finding": canonical},
+        ),
+    )
+    candidate = {
+        "objective_id": canonical["objective_id"],
+        "analysis_version": canonical["analysis_version"],
+        "finding_id": canonical["finding_id"],
+        "curated_finding": {
+            "statement": "The reported effect is limited to the inspected condition.",
+            "limitation": ["Only one paper was checked."],
+        },
+    }
+    repaired = ResearchAgentRunner._complete_curation_shape(
+        candidate, [ChatMessage.user(
+            message_id="user-1", session_id="chat-1", content="Revise this Finding.",
+            created_at="2026-09-10T00:00:00Z",
+        ), inspect_call, inspected],
+    )
+    finding = repaired["curated_finding"]
+    assert finding["collection_id"] == canonical["collection_id"]
+    assert finding["paper_contributions"] == canonical["paper_contributions"]
+    assert finding["limitations"] == ["Only one paper was checked."]
+    assert "limitation" not in finding
 
 
 @pytest.mark.parametrize("name", ["record_finding_feedback", "curate_finding"])

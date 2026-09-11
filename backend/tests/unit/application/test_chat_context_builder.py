@@ -59,6 +59,7 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
     assert messages == (active, *old, *recent)
     assert old[1].tool_result.data["content"].startswith("Same material")
     assert model.contexts[0].compacting
+    assert progress.compaction_attempts == 0
     again = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
     assert again == view
     assert len(model.contexts) == 1

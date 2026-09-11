@@ -90,6 +90,10 @@ for confirmation is not a completed deliverable. Discovery remains available
 when the target needs identification. Their successful
 approval replies render the saved result directly, without a model continuation
 that could incorrectly report another pending approval.
+Before a curation write, the runner carries forward the complete Finding envelope
+from the exact inspection. Only the proposed scientific wording and other
+reviewed fields may change; identity, Evidence bindings, paper coverage, and
+lineage remain subject to the canonical validator and the user's approval.
 
 Discovery also records whether the request needs a particular paper's claims
 or measurements inspected. That model-selected obligation survives later

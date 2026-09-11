@@ -330,7 +330,8 @@ class _RunProgress:
 
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
               requested_count: int = 0, new_resources: int = 0,
-              termination_reason: str | None = None, final_answer: bool = False) -> None:
+              termination_reason: str | None = None, final_answer: bool = False,
+              retry_attempt: int | None = None, retry_reason: str | None = None) -> None:
         payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
@@ -346,6 +347,7 @@ class _RunProgress:
                                        if self.limits.max_model_tokens is not None else None),
             "research_plan": [dict(item) for item in self.research_plan] if self.research_plan else None,
             "termination_reason": termination_reason, "final_answer_present": final_answer,
+            "retry_attempt": retry_attempt, "retry_reason": retry_reason,
         }
         logger.info("Research Agent cycle %s", json.dumps(payload, separators=(",", ":")))
         if self.progress_callback is not None:
@@ -669,6 +671,12 @@ class ResearchAgentRunner:
                         and response_retries < _MODEL_RESPONSE_RETRY_LIMIT
                     ):
                         response_retries += 1
+                        progress.trace(
+                            context,
+                            phase="model_retry",
+                            retry_attempt=response_retries,
+                            retry_reason=exc.reason,
+                        )
                         logger.info(
                             "Retrying Research Agent model response model=%s "
                             "attempt=%d",
@@ -711,6 +719,12 @@ class ResearchAgentRunner:
                         and progress.remaining_seconds() > 0
                     ):
                         response_retries += 1
+                        progress.trace(
+                            context,
+                            phase="model_retry",
+                            retry_attempt=response_retries,
+                            retry_reason=type(exc).__name__.lower(),
+                        )
                         logger.info(
                             "Retrying Research Agent provider response model=%s "
                             "attempt=%d",
@@ -1042,6 +1056,11 @@ class ResearchAgentRunner:
             else:
                 raise ModelResponseError("Research working notes could not be preserved.",
                                          reason="context_compaction_unavailable", retryable=False)
+            # A successful compaction closes this failure streak. The counter
+            # guards consecutive failed attempts, not the lifetime of a long
+            # investigation; otherwise later evidence would be forced into a
+            # stale recent-only view after three successful compactions.
+            progress.compaction_attempts = 0
             progress.working_summary = summary
             progress.compacted_message_ids.update(message.message_id for message in batch)
             units = [unit for unit in units if unit[0].message_id not in progress.compacted_message_ids]
@@ -1358,7 +1377,10 @@ class ResearchAgentRunner:
             messages,
             calls,
             results,
-            budget_exhausted=True,
+            budget_exhausted=reason in {
+                AgentCompletionReason.RESOURCE_BUDGET,
+                AgentCompletionReason.EMERGENCY_CEILING,
+            },
         )
         logger.info(
             "Research Agent final answer reason=%s tools=none", reason.value,
@@ -1482,6 +1504,8 @@ class ResearchAgentRunner:
         seen_requests: set[tuple[str, str]] = set()
         for position, model_call in enumerate(turn.tool_calls):
             arguments = dict(model_call.arguments)
+            if model_call.name == "curate_finding":
+                arguments = self._complete_curation_shape(arguments, messages)
             if model_call.name == "create_finding_draft":
                 # Drafts are transient and researcher-reviewed. Models often omit
                 # this conservative classification even though the schema marks it
@@ -1531,6 +1555,47 @@ class ResearchAgentRunner:
             )
         )
         return tuple(requested)
+
+    @staticmethod
+    def _complete_curation_shape(
+        arguments: dict[str, Any], messages: list[ChatMessage],
+    ) -> dict[str, Any]:
+        """Preserve the canonical Finding envelope after it was read.
+
+        Curation may revise the researcher's requested statement and limitations,
+        but identity, lineage, evidence bindings, and context serialization come
+        from the exact Finding inspection. This prevents a model from losing
+        provenance while still leaving scientific text subject to normal
+        validation and approval.
+        """
+        # Curation commonly follows a separate feedback/approval turn. Keep the
+        # exact Finding inspection from the full trajectory available; active
+        # turn scoping would discard it before the second approval.
+        inspected = capability_policy._successful_results_by_name(messages).get(
+            "inspect_published_finding", ()
+        )
+        canonical = next(
+            (result.get("finding") for result in reversed(inspected)
+             if isinstance(result.get("finding"), Mapping)
+             and str(result["finding"].get("objective_id") or "") == str(arguments.get("objective_id") or "")
+             and str(result["finding"].get("finding_id") or "") == str(arguments.get("finding_id") or "")
+             and str(result["finding"].get("analysis_version") or "") == str(arguments.get("analysis_version") or "")),
+            None,
+        )
+        candidate = dict(arguments.get("curated_finding") or {})
+        if not canonical or not candidate:
+            return arguments
+        # A common model typo is singular ``limitation``. It is a structural
+        # alias only; no scientific value is synthesized.
+        if "limitations" not in candidate and "limitation" in candidate:
+            candidate["limitations"] = candidate.pop("limitation")
+        editable = {"statement", "limitations", "certainty", "direction",
+                    "assertion_strength", "attribution_scope", "synthesis_status",
+                    "factors", "outcome"}
+        for key, value in canonical.items():
+            if key not in editable or key not in candidate:
+                candidate[key] = value
+        return {**arguments, "curated_finding": candidate}
 
 
     async def _execute_read_batch(

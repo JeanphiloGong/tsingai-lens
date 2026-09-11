@@ -63,7 +63,15 @@ class CurateFindingArguments(BaseModel):
     curated_finding: dict[str, Any] = Field(
         description=(
             "The complete canonical Finding object read from the published analysis, "
-            "with only the researcher-reviewed scientific fields revised. Identity, "
+            "with only the researcher-reviewed scientific fields revised. Required "
+            "top-level keys include collection_id, objective_id, analysis_version, "
+            "finding_id, statement, factors, outcome, direction, assertion_strength, "
+            "attribution_scope, synthesis_status, certainty, display_rank, mechanisms, "
+            "scientific_context, limitations, paper_contributions, origin, "
+            "source_analysis_version, parent_finding_id, created_by_user_id, and "
+            "created_by_tool_call_id. Preserve canonical field names and value types; "
+            "for example use `limitations` (plural), and keep numeric values numeric. "
+            "Identity, "
             "paper coverage, Evidence IDs, and Source relationships must be preserved."
         )
     )
@@ -75,8 +83,18 @@ class CurateFindingArguments(BaseModel):
         candidate = Finding.from_mapping(self.curated_finding)
         self._parsed_finding = candidate
         if candidate.to_record() != self.curated_finding:
+            canonical = candidate.to_record()
+            missing = sorted(set(canonical) - set(self.curated_finding))
+            unexpected = sorted(set(self.curated_finding) - set(canonical))
+            details = []
+            if missing:
+                details.append("missing keys: " + ", ".join(missing[:8]))
+            if unexpected:
+                details.append("unexpected keys: " + ", ".join(unexpected[:8]))
+            details.append("preserve canonical value types and field names")
             raise ValueError(
-                "curated_finding must use the complete canonical Finding contract"
+                "curated_finding must use the complete canonical Finding contract; "
+                + "; ".join(details)
             )
         if candidate.objective_id != self.objective_id:
             raise ValueError("curated Finding belongs to another Objective")

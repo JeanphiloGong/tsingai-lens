@@ -66,7 +66,8 @@ def validate_batch(
             )
         except ValidationError as exc:
             details = "; ".join(
-                f"{'.'.join(str(part) for part in error['loc']) or 'arguments'} ({error['type']})"
+                f"{'.'.join(str(part) for part in error['loc']) or 'arguments'}: "
+                f"{error['type']}: {str(error.get('msg') or error['type'])[:240]}"
                 for error in exc.errors(include_input=False, include_url=False)[:8]
             )
             return (
@@ -892,6 +893,16 @@ def stage_instruction(
         ),
         None,
     )
+    failed_finding_curation = next(
+        (
+            call
+            for call in reversed(calls)
+            if call.name == "curate_finding"
+            and call.status is ToolCallStatus.FAILED
+            and call.error_code == "invalid_tool_arguments"
+        ),
+        None,
+    )
     if tuple(tool_names) == ("inspect_document_sources",) and pending_documents:
         return (
             "Inspect the prepared document outline before completing this Finding review. "
@@ -902,7 +913,18 @@ def stage_instruction(
             "document order, using the actual headings and Source references."
         )
     review_writes = {"record_finding_feedback", "curate_finding"}.intersection(tool_names)
-    if review_writes and not successful_results.get("create_finding_version"):
+    if failed_finding_curation is not None and "curate_finding" in tool_names:
+        content = (
+            "The previous curation proposal was rejected by the canonical Finding validator. "
+            "Call curate_finding again only after reading the exact published Finding. Copy its "
+            "complete top-level object verbatim, including collection_id, objective_id, "
+            "analysis_version, finding_id, display_rank, scientific_context, limitations, and "
+            "paper_contributions. Preserve field names (use limitations, plural) and value types; "
+            "change only the supported scientific fields. Do not invent, omit, or retype identity, "
+            "lineage, Evidence IDs, or paper coverage. The validator's field-level error is a repair "
+            "hint, not scientific evidence."
+        )
+    elif review_writes and not successful_results.get("create_finding_version"):
         content = (
             "The researcher requested saving a Finding review. Call the appropriate review write to "
             "prepare an exact approval; this call does not execute the write without approval. "

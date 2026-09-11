@@ -34,7 +34,7 @@ The new benchmark surface made one production problem explicit:
 the current provider is reachable and fast enough for single-call work, but the
 production prompt and response contract still allow too many schema-invalid
 outputs to reach local `model_validate_json(...)` validation on the text-window
-`StructuredTextWindowMentions` contract or the table-row mention contract.
+`TextWindowMentionsModelOutput` contract or the table-row mention contract.
 
 The benchmark evidence collected on April 24, 2026 showed:
 

@@ -35,21 +35,21 @@ from application.core.objectives.discovery.study_window import (
     StructuredReviewPaperMap,
 )
 from application.core.paper_facts.schemas import (
-    MeasurementValuePayload,
-    StructuredTableBatchMentions,
-    StructuredTableBatchRowMentions,
-    StructuredTableRowMentions,
-    StructuredTextWindowMentions,
-    TableRowBaselineMentionPayload,
-    TableRowFactMentionPayload,
-    TableRowResultClaimPayload,
-    TableRowSubjectMentionPayload,
-    TextWindowBaselineMentionPayload,
-    TextWindowConditionMentionPayload,
-    TextWindowMaterialMentionPayload,
-    TextWindowMethodMentionPayload,
-    TextWindowResultClaimPayload,
-    TextWindowVariantMentionPayload,
+    MeasurementValueModelOutput,
+    TableBatchMentionsModelOutput,
+    TableBatchRowMentionsModelOutput,
+    TableRowMentionsModelOutput,
+    TextWindowMentionsModelOutput,
+    TableRowBaselineMentionModelOutput,
+    TableRowFactMentionModelOutput,
+    TableRowResultClaimModelOutput,
+    TableRowSubjectMentionModelOutput,
+    TextWindowBaselineMentionModelOutput,
+    TextWindowConditionMentionModelOutput,
+    TextWindowMaterialMentionModelOutput,
+    TextWindowMethodMentionModelOutput,
+    TextWindowResultClaimModelOutput,
+    TextWindowVariantMentionModelOutput,
 )
 from tests.support.objective_extractor import paper_research_map_scope_outputs
 
@@ -687,7 +687,7 @@ class FakeDomainModelExtractor:
             )
         return StructuredEvidenceExtractions()
 
-    def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
+    def extract_text_window_mentions(self, payload: dict[str, Any]) -> TextWindowMentionsModelOutput:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
         text_window = payload.get("text_window") or {}
@@ -700,7 +700,7 @@ class FakeDomainModelExtractor:
             and "experimental section" not in text.lower()
             and window_role != "methods"
         ):
-            return StructuredTextWindowMentions()
+            return TextWindowMentionsModelOutput()
 
         material_system = self._infer_material_system(document_title, text)
         process_context = self._extract_process_context(text)
@@ -708,17 +708,17 @@ class FakeDomainModelExtractor:
         baseline_label = self._extract_baseline_label(text)
         first_statement = self._first_statement(text)
 
-        method_mentions: list[TextWindowMethodMentionPayload] = []
-        material_mentions: list[TextWindowMaterialMentionPayload] = []
-        variant_mentions: list[TextWindowVariantMentionPayload] = []
-        condition_mentions: list[TextWindowConditionMentionPayload] = []
-        baseline_mentions: list[TextWindowBaselineMentionPayload] = []
-        result_claims: list[TextWindowResultClaimPayload] = []
+        method_mentions: list[TextWindowMethodMentionModelOutput] = []
+        material_mentions: list[TextWindowMaterialMentionModelOutput] = []
+        variant_mentions: list[TextWindowVariantMentionModelOutput] = []
+        condition_mentions: list[TextWindowConditionMentionModelOutput] = []
+        baseline_mentions: list[TextWindowBaselineMentionModelOutput] = []
+        result_claims: list[TextWindowResultClaimModelOutput] = []
 
         if window_role == "methods":
             if first_statement:
                 method_mentions.append(
-                    TextWindowMethodMentionPayload(
+                    TextWindowMethodMentionModelOutput(
                         method_role="process",
                         method_name="sample preparation",
                         details=first_statement,
@@ -732,7 +732,7 @@ class FakeDomainModelExtractor:
                 evidence_quote = first_statement or text[:160]
                 if evidence_quote:
                     method_mentions.append(
-                        TextWindowMethodMentionPayload(
+                        TextWindowMethodMentionModelOutput(
                         method_role="characterization",
                         method_name=method_name,
                         details=text[:400],
@@ -756,7 +756,7 @@ class FakeDomainModelExtractor:
             )
             if material_system.get("family") and material_system.get("family") != "unspecified material system":
                 material_mentions.append(
-                    TextWindowMaterialMentionPayload(
+                    TextWindowMaterialMentionModelOutput(
                         material_label=material_label,
                         family=material_system.get("family"),
                         composition=material_system.get("composition"),
@@ -768,7 +768,7 @@ class FakeDomainModelExtractor:
         if first_statement:
             for temperature in process_context.get("temperatures_c") or []:
                 condition_mentions.append(
-                    TextWindowConditionMentionPayload(
+                    TextWindowConditionMentionModelOutput(
                         condition_type="temperature",
                         condition_text=first_statement,
                         normalized_value=temperature,
@@ -779,7 +779,7 @@ class FakeDomainModelExtractor:
                 )
             for duration in process_context.get("durations") or []:
                 condition_mentions.append(
-                    TextWindowConditionMentionPayload(
+                    TextWindowConditionMentionModelOutput(
                         condition_type="duration",
                         condition_text=duration,
                         normalized_value=None,
@@ -790,7 +790,7 @@ class FakeDomainModelExtractor:
                 )
             if process_context.get("atmosphere"):
                 condition_mentions.append(
-                    TextWindowConditionMentionPayload(
+                    TextWindowConditionMentionModelOutput(
                         condition_type="atmosphere",
                         condition_text=first_statement,
                         normalized_value=process_context.get("atmosphere"),
@@ -802,7 +802,7 @@ class FakeDomainModelExtractor:
 
         if property_sentences and baseline_label:
             baseline_mentions.append(
-                TextWindowBaselineMentionPayload(
+                TextWindowBaselineMentionModelOutput(
                     baseline_label=baseline_label,
                     baseline_type="as-built" if baseline_label == "as-built" else "untreated" if "untreated" in baseline_label.lower() else "reference",
                     evidence_quote=property_sentences[0],
@@ -822,7 +822,7 @@ class FakeDomainModelExtractor:
                 result_type, value_payload, unit = parsed
                 value_text = sentence if value_payload.model_dump(exclude_none=True) else None
             result_claims.append(
-                TextWindowResultClaimPayload(
+                TextWindowResultClaimModelOutput(
                     claim_text=sentence,
                     property_normalized=property_name,
                     result_type=result_type,
@@ -835,7 +835,7 @@ class FakeDomainModelExtractor:
                 )
             )
 
-        return StructuredTextWindowMentions(
+        return TextWindowMentionsModelOutput(
             method_mentions=method_mentions,
             material_mentions=material_mentions,
             variant_mentions=variant_mentions,
@@ -844,7 +844,7 @@ class FakeDomainModelExtractor:
             result_claims=result_claims,
         )
 
-    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> StructuredTableBatchMentions:
+    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> TableBatchMentionsModelOutput:
         document_title = str(payload.get("document_title") or "")
         document_profile = payload.get("document_profile") or {}
         supporting_windows = (
@@ -858,9 +858,9 @@ class FakeDomainModelExtractor:
             else []
         )
         if str(document_profile.get("doc_type") or "") == "review":
-            return StructuredTableBatchMentions()
+            return TableBatchMentionsModelOutput()
 
-        row_results: list[StructuredTableBatchRowMentions] = []
+        row_results: list[TableBatchRowMentionsModelOutput] = []
         for row in target_rows:
             if not isinstance(row, dict):
                 continue
@@ -871,12 +871,12 @@ class FakeDomainModelExtractor:
                 supporting_windows=supporting_windows,
             )
             row_results.append(
-                StructuredTableBatchRowMentions(
+                TableBatchRowMentionsModelOutput(
                     row_index=row_index,
                     **mentions.model_dump(),
                 )
             )
-        return StructuredTableBatchMentions(row_results=row_results)
+        return TableBatchMentionsModelOutput(row_results=row_results)
 
     def _extract_table_row_mentions(
         self,
@@ -884,7 +884,7 @@ class FakeDomainModelExtractor:
         document_title: str,
         row: dict[str, Any],
         supporting_windows: list[Any],
-    ) -> StructuredTableRowMentions:
+    ) -> TableRowMentionsModelOutput:
         row_summary = str(row.get("row_summary") or "")
         cells = row.get("cells") if isinstance(row.get("cells"), list) else []
         support_text = "\n\n".join(
@@ -925,14 +925,14 @@ class FakeDomainModelExtractor:
                 variable_value = self._normalize_numeric_or_text(value)
 
         if not property_cells:
-            return StructuredTableRowMentions()
+            return TableRowMentionsModelOutput()
 
         variant_label = sample_label or self._default_variant_label(
             material_system.get("family"),
             document_title,
         )
         row_subjects = [
-            TableRowSubjectMentionPayload(
+            TableRowSubjectMentionModelOutput(
                 variant_label=variant_label,
                 family=material_system.get("family"),
                 composition=material_system.get("composition"),
@@ -942,10 +942,10 @@ class FakeDomainModelExtractor:
             )
         ]
 
-        process_mentions: list[TableRowFactMentionPayload] = []
+        process_mentions: list[TableRowFactMentionModelOutput] = []
         for temperature in process_context.get("temperatures_c") or []:
             process_mentions.append(
-                TableRowFactMentionPayload(
+                TableRowFactMentionModelOutput(
                     name="temperature_c",
                     value_text=temperature,
                     unit="C",
@@ -954,7 +954,7 @@ class FakeDomainModelExtractor:
             )
         for duration in process_context.get("durations") or []:
             process_mentions.append(
-                TableRowFactMentionPayload(
+                TableRowFactMentionModelOutput(
                     name="duration",
                     value_text=duration,
                     unit=None,
@@ -963,7 +963,7 @@ class FakeDomainModelExtractor:
             )
         if process_context.get("atmosphere"):
             process_mentions.append(
-                TableRowFactMentionPayload(
+                TableRowFactMentionModelOutput(
                     name="atmosphere",
                     value_text=process_context.get("atmosphere"),
                     unit=None,
@@ -972,7 +972,7 @@ class FakeDomainModelExtractor:
             )
 
         test_condition_mentions = [
-            TableRowFactMentionPayload(
+            TableRowFactMentionModelOutput(
                 name="method",
                 value_text=method,
                 unit=None,
@@ -982,13 +982,13 @@ class FakeDomainModelExtractor:
         ]
 
         baseline_mentions = [
-            TableRowBaselineMentionPayload(
+            TableRowBaselineMentionModelOutput(
                 baseline_label=baseline_label,
                 quote=baseline_label,
             )
         ] if baseline_label else []
 
-        result_claims: list[TableRowResultClaimPayload] = []
+        result_claims: list[TableRowResultClaimModelOutput] = []
         for index, (property_name, value, unit) in enumerate(property_cells, start=1):
             parsed_value = self._normalize_numeric_or_text(value)
             if property_name == "retention":
@@ -997,7 +997,7 @@ class FakeDomainModelExtractor:
             else:
                 result_type = "scalar"
             result_claims.append(
-                TableRowResultClaimPayload(
+                TableRowResultClaimModelOutput(
                     claim_text=f"{variant_label} reported {property_name} of {parsed_value} {unit or ''}".strip(),
                     property_normalized=property_name,
                     result_type=result_type,
@@ -1010,7 +1010,7 @@ class FakeDomainModelExtractor:
                 )
             )
 
-        return StructuredTableRowMentions(
+        return TableRowMentionsModelOutput(
             row_subjects=row_subjects,
             process_mentions=process_mentions,
             test_condition_mentions=test_condition_mentions,
@@ -1109,7 +1109,7 @@ class FakeDomainModelExtractor:
     def _parse_result_sentence(
         self,
         sentence: str,
-    ) -> tuple[str, MeasurementValuePayload, str | None] | None:
+    ) -> tuple[str, MeasurementValueModelOutput, str | None] | None:
         property_name = self._infer_property(sentence)
         if property_name is None:
             return None
@@ -1121,7 +1121,7 @@ class FakeDomainModelExtractor:
         if property_name == "retention":
             return (
                 "retention",
-                MeasurementValuePayload(
+                MeasurementValueModelOutput(
                     retention_percent=numeric_value,
                     statement=sentence,
                 ),
@@ -1129,7 +1129,7 @@ class FakeDomainModelExtractor:
             )
         return (
             "scalar",
-            MeasurementValuePayload(
+            MeasurementValueModelOutput(
                 value=numeric_value,
                 statement=sentence,
             ),

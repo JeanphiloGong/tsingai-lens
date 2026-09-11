@@ -56,7 +56,7 @@ Scripts in this directory should follow these rules:
   validation
 - `raw_text_plus_validate`
   Same request as `raw_text`, followed by local
-  `StructuredExtractionBundle.model_validate_json(...)`
+  `ExtractionBundleModelOutput.model_validate_json(...)`
 - `provider_structured_parse`
   Same prompt path as `raw_text`, plus provider-native
   `beta.chat.completions.parse(...)` for diagnostic comparison

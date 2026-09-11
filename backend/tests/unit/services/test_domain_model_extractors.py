@@ -66,9 +66,9 @@ from application.core.objectives.llm.structured_response import (
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.paper_facts.prompts import build_table_matrix_repair_prompt
 from application.core.paper_facts.schemas import (
-    StructuredExtractionBundle,
-    StructuredTableBatchMentions,
-    StructuredTextWindowMentions,
+    ExtractionBundleModelOutput,
+    TableBatchMentionsModelOutput,
+    TextWindowMentionsModelOutput,
 )
 from domain.pipeline import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
@@ -1270,7 +1270,7 @@ def test_domain_model_extractors_validate_json_text_response():
         }
     )
 
-    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert isinstance(mentions, TextWindowMentionsModelOutput)
     assert mentions.result_claims == []
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
@@ -1452,13 +1452,13 @@ def test_domain_model_extractors_ignores_top_level_extra_json_text_fields():
         }
     )
 
-    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert isinstance(mentions, TextWindowMentionsModelOutput)
     assert mentions.result_claims == []
 
 
 def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    parsed_mentions = StructuredTextWindowMentions()
+    parsed_mentions = TextWindowMentionsModelOutput()
     client = _FakeOpenAIClient("unused", parsed=parsed_mentions)
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
@@ -1474,7 +1474,7 @@ def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
     assert client.chat.completions.calls == []
     assert len(client.beta.chat.completions.calls) == 1
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredTextWindowMentions
+    assert parse_call["response_format"] is TextWindowMentionsModelOutput
     assert "JSON schema:" not in parse_call["messages"][1]["content"]
     assert parse_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -2080,7 +2080,7 @@ def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
         }
     )
 
-    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert isinstance(mentions, TextWindowMentionsModelOutput)
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
 
@@ -4794,7 +4794,7 @@ def test_domain_model_extractors_caps_provider_parse_completion_tokens_for_table
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
+    client = _FakeOpenAIClient("unused", parsed=TableBatchMentionsModelOutput())
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
     mentions = extractor.extract_table_batch_mentions(
@@ -4806,9 +4806,9 @@ def test_domain_model_extractors_caps_provider_parse_completion_tokens_for_table
         }
     )
 
-    assert mentions == StructuredTableBatchMentions()
+    assert mentions == TableBatchMentionsModelOutput()
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredTableBatchMentions
+    assert parse_call["response_format"] is TableBatchMentionsModelOutput
     assert parse_call["max_completion_tokens"] == 4096
     assert parse_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -4850,7 +4850,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
 def test_domain_model_extractors_keep_thinking_disabled_when_legacy_env_is_set(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
-    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
+    client = _FakeOpenAIClient("unused", parsed=TableBatchMentionsModelOutput())
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
     extractor.extract_table_batch_mentions(
@@ -5572,7 +5572,7 @@ def test_domain_model_extractors_validates_lightweight_table_batch_mentions():
 
 
 def test_structured_bundle_defaults_null_backend_metadata():
-    bundle = StructuredExtractionBundle.model_validate(
+    bundle = ExtractionBundleModelOutput.model_validate(
         {
             "sample_variants": [
                 {
@@ -5616,7 +5616,7 @@ def test_domain_model_extractors_accepts_empty_table_batch_mentions():
         }
     )
 
-    assert mentions == StructuredTableBatchMentions()
+    assert mentions == TableBatchMentionsModelOutput()
 
 
 def test_domain_model_extractors_still_rejects_unknown_table_batch_extra_keys():

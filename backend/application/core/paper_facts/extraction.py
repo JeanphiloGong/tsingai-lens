@@ -19,9 +19,9 @@ from application.core.paper_facts.prompts import (
     build_text_window_extraction_prompt,
 )
 from application.core.paper_facts.schemas import (
-    StructuredTableBatchMentions,
-    StructuredTableMatrixRepair,
-    StructuredTextWindowMentions,
+    TableBatchMentionsModelOutput,
+    TableMatrixRepairModelOutput,
+    TextWindowMentionsModelOutput,
 )
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -72,27 +72,27 @@ class PaperFactsExtractor:
     def extract_text_window_mentions(
         self,
         payload: dict[str, Any],
-    ) -> StructuredTextWindowMentions:
+    ) -> TextWindowMentionsModelOutput:
         system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
         return self._extract(
             task_type="paper_fact_text_window",
             prompt_version=PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredTextWindowMentions,
+            response_model=TextWindowMentionsModelOutput,
         )
 
     def extract_table_batch_mentions(
         self,
         payload: dict[str, Any],
-    ) -> StructuredTableBatchMentions:
+    ) -> TableBatchMentionsModelOutput:
         system_prompt, user_prompt = build_table_batch_mentions_prompt(payload)
         return self._extract(
             task_type="paper_fact_table_batch",
             prompt_version=PAPER_FACT_TABLE_BATCH_PROMPT_VERSION,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredTableBatchMentions,
+            response_model=TableBatchMentionsModelOutput,
             provider_max_completion_tokens=(
                 _TABLE_BATCH_PROVIDER_MAX_COMPLETION_TOKENS
             ),
@@ -101,14 +101,14 @@ class PaperFactsExtractor:
     def repair_table_matrix(
         self,
         payload: dict[str, Any],
-    ) -> StructuredTableMatrixRepair:
+    ) -> TableMatrixRepairModelOutput:
         system_prompt, user_prompt = build_table_matrix_repair_prompt(payload)
         return self._extract(
             task_type="paper_fact_table_matrix_repair",
             prompt_version=PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredTableMatrixRepair,
+            response_model=TableMatrixRepairModelOutput,
             provider_max_completion_tokens=(
                 _TABLE_MATRIX_REPAIR_PROVIDER_MAX_COMPLETION_TOKENS
             ),
@@ -122,7 +122,7 @@ class PaperFactsExtractor:
         messages = self._build_messages(
             system_prompt,
             user_prompt,
-            StructuredTableMatrixRepair,
+            TableMatrixRepairModelOutput,
             include_schema=True,
         )
         try:

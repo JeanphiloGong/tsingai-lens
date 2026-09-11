@@ -205,9 +205,9 @@ def load_text_window_components(
 ) -> tuple[Any, type[Any]]:
     ensure_backend_root_on_path(backend_root)
     from application.core.paper_facts.prompts import build_text_window_extraction_prompt
-    from application.core.paper_facts.schemas import StructuredExtractionBundle
+    from application.core.paper_facts.schemas import ExtractionBundleModelOutput
 
-    return build_text_window_extraction_prompt, StructuredExtractionBundle
+    return build_text_window_extraction_prompt, ExtractionBundleModelOutput
 
 
 def bundle_counts(bundle: Any) -> dict[str, int]:

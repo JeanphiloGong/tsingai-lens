@@ -12,7 +12,9 @@ Source artifacts.
   Calls the configured model provider for text windows and table batches and
   owns paper-fact completion limits, retry behavior, and extraction traces.
 - `prompts.py` and `schemas.py`
-  Define paper-fact prompts and their validated response contracts.
+  Define paper-fact prompts and validated `*ModelOutput` response contracts.
+  The contracts stay separate because this package has three distinct model
+  tasks: text-window mentions, table-row mentions, and table-matrix repair.
 
 ## Boundary
 

@@ -33,7 +33,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
 )
-from application.core.paper_facts.schemas import StructuredTableMatrixRepair
+from application.core.paper_facts.schemas import TableMatrixRepairModelOutput
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -11626,9 +11626,9 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
         def repair_table_matrix(
             self,
             payload: dict[str, Any],
-        ) -> StructuredTableMatrixRepair:
+        ) -> TableMatrixRepairModelOutput:
             self.payloads.append(payload)
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["100) HIP-SLM (100/100)", "98.15"],
@@ -11697,7 +11697,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
         def repair_table_matrix(
             self,
             payload: dict[str, Any],
-        ) -> StructuredTableMatrixRepair:
+        ) -> TableMatrixRepairModelOutput:
             self.payloads.append(payload)
             markdown = str(payload["source"]["table_markdown"])
             rows = [
@@ -11709,7 +11709,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
                 ["HIP-SLM (100/100)" if cell == "HIP-SLM (100/" else cell for cell in row]
                 for row in rows
             ]
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=rows,
                 confidence=0.9,
             )
@@ -11775,7 +11775,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
 def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
     class NumericChangingRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["HIP-SLM (100/100)", "98.25"],
@@ -11846,7 +11846,7 @@ def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
 def test_research_objective_table_repair_rejects_reordered_source_labels():
     class LabelReorderingRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Yield Strength (MPa)"],
                     ["condition B (two)", "100 (+/- 1)"],
@@ -11896,7 +11896,7 @@ def test_research_objective_table_repair_rejects_reordered_source_labels():
 def test_research_objective_table_repair_rejects_invented_label_tokens():
     class InventingRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["Invented-SLM (100/100)", "98.15"],
@@ -11977,7 +11977,7 @@ def test_research_objective_table_repair_accepts_multiple_parser_fragment_merges
 
     class RepairingPaperFactsExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=repaired_matrix,
                 confidence=0.95,
             )
@@ -12050,7 +12050,7 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
         def repair_table_matrix(self, _payload):
             model_matrix = [list(row) for row in repaired_matrix]
             model_matrix[-1][1] = "162.4 (+/- 5.5)"
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=model_matrix,
                 confidence=0.95,
             )
@@ -12256,7 +12256,7 @@ def test_research_objective_table_repair_recovers_complete_p004_table_4_sequence
                 )
             # This is the real split cell that made one production replay fail.
             repaired[10][2] = "130.9 +/-"
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=repaired,
                 confidence=0.9,
             )
@@ -12329,7 +12329,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
         def repair_table_matrix(
             self,
             payload: dict[str, Any],
-        ) -> StructuredTableMatrixRepair:
+        ) -> TableMatrixRepairModelOutput:
             source_ref = str(payload["source"]["source_ref"])
             self.source_refs.append(source_ref)
             if source_ref == "table-a":
@@ -12339,7 +12339,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
                     response=Response(400, request=request),
                     body=None,
                 )
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["HIP-SLM (100/100)", "98.15"],
@@ -12458,7 +12458,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
 ):
     class UnusableRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=repaired_table_matrix,
                 confidence=0.9,
             )

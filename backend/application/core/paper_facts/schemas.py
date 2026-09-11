@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any, Literal
 
 from pydantic import (
@@ -18,9 +19,12 @@ ClaimScope = Literal[
     "unclear",
 ]
 
-_METHOD_FACT_METHOD_ROLES = {"process", "characterization", "test"}
+# These vocabularies describe the wire format accepted from the model. They
+# are kept next to the validators so the normalization policy is visible at
+# the model boundary, rather than being mistaken for domain enums.
+_METHOD_FACT_METHOD_ROLES = frozenset({"process", "characterization", "test"})
 _TEXT_WINDOW_METHOD_ROLES = _METHOD_FACT_METHOD_ROLES | {"other"}
-_TEXT_WINDOW_CONDITION_TYPES = {
+_TEXT_WINDOW_CONDITION_TYPES = frozenset({
     "temperature",
     "duration",
     "atmosphere",
@@ -29,37 +33,52 @@ _TEXT_WINDOW_CONDITION_TYPES = {
     "location",
     "direction",
     "other",
-}
-_TEXT_WINDOW_BASELINE_TYPES = {
+})
+_TEXT_WINDOW_BASELINE_TYPES = frozenset({
     "control",
     "untreated",
     "as-built",
     "reference",
     "without-treatment",
     "other",
-}
-_CLAIM_SCOPES = {
+})
+_CLAIM_SCOPES = frozenset({
     "current_work",
     "prior_work",
     "literature_summary",
     "review_summary",
     "unclear",
-}
-_EVIDENCE_SOURCE_TYPES = {"text", "method", "table", "figure"}
-_VALUE_ORIGINS = {"reported", "derived", "estimated"}
+})
+_EVIDENCE_SOURCE_TYPES = frozenset({"text", "method", "table", "figure"})
+_VALUE_ORIGINS = frozenset({"reported", "derived", "estimated"})
 
 
-def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
+def _normalize_literal_choice(
+    value: object,
+    *,
+    allowed: Collection[str],
+    default: str,
+) -> str:
     lowered = str(value or "").strip().lower()
     return lowered if lowered in allowed else default
 
 
-def _normalize_hyphenated_choice(value: object, *, allowed: set[str], default: str) -> str:
+def _normalize_hyphenated_choice(
+    value: object,
+    *,
+    allowed: Collection[str],
+    default: str,
+) -> str:
     lowered = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
     return lowered if lowered in allowed else default
 
 
-def _normalize_underscored_choice(value: object, *, allowed: set[str], default: str) -> str:
+def _normalize_underscored_choice(
+    value: object,
+    *,
+    allowed: Collection[str],
+    default: str,
+) -> str:
     lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     return lowered if lowered in allowed else default
 
@@ -67,7 +86,7 @@ def _normalize_underscored_choice(value: object, *, allowed: set[str], default: 
 def _normalize_optional_underscored_choice(
     value: object,
     *,
-    allowed: set[str],
+    allowed: Collection[str],
 ) -> str | None:
     lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     return lowered if lowered in allowed else None
@@ -102,12 +121,12 @@ class _StrictModel(BaseModel):
         )
 
 
-class MaterialSystemPayload(_StrictModel):
+class MaterialSystemModelOutput(_StrictModel):
     family: str | None = None
     composition: str | None = None
 
 
-class ProcessContextPayload(_StrictModel):
+class ProcessContextModelOutput(_StrictModel):
     temperatures_c: list[float] = Field(default_factory=list)
     durations: list[str] = Field(default_factory=list)
     atmosphere: str | None = None
@@ -139,11 +158,11 @@ class ProcessContextPayload(_StrictModel):
         )
 
 
-class BaselineContextPayload(_StrictModel):
+class BaselineContextModelOutput(_StrictModel):
     control: str | None = None
 
 
-class TestContextPayload(_StrictModel):
+class TestContextModelOutput(_StrictModel):
     methods: list[str] = Field(default_factory=list)
     method: str | None = None
 
@@ -153,10 +172,10 @@ class TestContextPayload(_StrictModel):
         return _normalize_list_container(value)
 
 
-class ConditionContextPayload(_StrictModel):
-    process: ProcessContextPayload = Field(default_factory=ProcessContextPayload)
-    baseline: BaselineContextPayload = Field(default_factory=BaselineContextPayload)
-    test: TestContextPayload = Field(default_factory=TestContextPayload)
+class ConditionContextModelOutput(_StrictModel):
+    process: ProcessContextModelOutput = Field(default_factory=ProcessContextModelOutput)
+    baseline: BaselineContextModelOutput = Field(default_factory=BaselineContextModelOutput)
+    test: TestContextModelOutput = Field(default_factory=TestContextModelOutput)
 
     @field_validator("process", "baseline", "test", mode="before")
     @classmethod
@@ -164,7 +183,7 @@ class ConditionContextPayload(_StrictModel):
         return _normalize_object_container(value)
 
 
-class EvidenceAnchorPayload(_StrictModel):
+class EvidenceAnchorModelOutput(_StrictModel):
     quote: str | None = None
     source_type: Literal["text", "method", "table", "figure"] = "text"
     page: int | None = None
@@ -182,7 +201,7 @@ class EvidenceAnchorPayload(_StrictModel):
         return lowered if lowered in _EVIDENCE_SOURCE_TYPES else "text"
 
 
-class MethodPayloadModel(_StrictModel):
+class MethodModelOutput(_StrictModel):
     temperatures_c: list[float] = Field(default_factory=list)
     durations: list[str] = Field(default_factory=list)
     atmosphere: str | None = None
@@ -216,11 +235,11 @@ class MethodPayloadModel(_StrictModel):
         )
 
 
-class MethodFactPayload(_StrictModel):
+class MethodFactModelOutput(_StrictModel):
     method_role: Literal["process", "characterization", "test"] = "process"
     method_name: str
-    method_payload: MethodPayloadModel = Field(default_factory=MethodPayloadModel)
-    anchors: list[EvidenceAnchorPayload] = Field(default_factory=list)
+    method_payload: MethodModelOutput = Field(default_factory=MethodModelOutput)
+    anchors: list[EvidenceAnchorModelOutput] = Field(default_factory=list)
     confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
 
@@ -244,13 +263,13 @@ class MethodFactPayload(_StrictModel):
         return _normalize_list_container(value)
 
 
-class SampleVariantPayload(_StrictModel):
+class SampleVariantModelOutput(_StrictModel):
     variant_label: str
-    host_material_system: MaterialSystemPayload | None = None
+    host_material_system: MaterialSystemModelOutput | None = None
     composition: str | None = None
     variable_axis_type: str | None = None
     variable_value: str | int | float | None = None
-    process_context: ProcessContextPayload = Field(default_factory=ProcessContextPayload)
+    process_context: ProcessContextModelOutput = Field(default_factory=ProcessContextModelOutput)
     confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
     source_kind: Literal["text_window", "table_row"] = "text_window"
@@ -261,7 +280,7 @@ class SampleVariantPayload(_StrictModel):
         return _normalize_object_container(value)
 
 
-class TestConditionPayloadModel(_StrictModel):
+class TestConditionModelOutput(_StrictModel):
     method: str | None = None
     methods: list[str] = Field(default_factory=list)
     temperatures_c: list[float] = Field(default_factory=list)
@@ -291,9 +310,9 @@ class TestConditionPayloadModel(_StrictModel):
         return _normalize_list_container(value)
 
 
-class ExtractedTestConditionPayload(_StrictModel):
+class ExtractedTestConditionModelOutput(_StrictModel):
     property_type: str
-    condition_payload: TestConditionPayloadModel = Field(default_factory=TestConditionPayloadModel)
+    condition_payload: TestConditionModelOutput = Field(default_factory=TestConditionModelOutput)
     confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
 
@@ -303,13 +322,13 @@ class ExtractedTestConditionPayload(_StrictModel):
         return _normalize_object_container(value)
 
 
-class BaselineReferencePayload(_StrictModel):
+class BaselineReferenceModelOutput(_StrictModel):
     baseline_label: str
     confidence: float = 0.85
     epistemic_status: str = "normalized_from_evidence"
 
 
-class MeasurementValuePayload(_StrictModel):
+class MeasurementValueModelOutput(_StrictModel):
     value: float | None = None
     min: float | None = None
     max: float | None = None
@@ -331,15 +350,15 @@ class MeasurementValuePayload(_StrictModel):
         )
 
 
-class MeasurementResultPayload(_StrictModel):
+class MeasurementResultModelOutput(_StrictModel):
     claim_text: str
     property_normalized: str
     result_type: str
-    value_payload: MeasurementValuePayload = Field(default_factory=MeasurementValuePayload)
+    value_payload: MeasurementValueModelOutput = Field(default_factory=MeasurementValueModelOutput)
     unit: str | None = None
     variant_label: str | None = None
     baseline_label: str | None = None
-    anchors: list[EvidenceAnchorPayload] = Field(default_factory=list)
+    anchors: list[EvidenceAnchorModelOutput] = Field(default_factory=list)
     claim_scope: ClaimScope = "current_work"
     confidence: float = 0.85
 
@@ -363,7 +382,7 @@ class MeasurementResultPayload(_StrictModel):
         return _normalize_list_container(value)
 
 
-class TextWindowMethodMentionPayload(_StrictModel):
+class TextWindowMethodMentionModelOutput(_StrictModel):
     method_role: Literal["process", "characterization", "test", "other"] = "process"
     method_name: str
     details: str | None = None
@@ -380,7 +399,7 @@ class TextWindowMethodMentionPayload(_StrictModel):
         )
 
 
-class TextWindowMaterialMentionPayload(_StrictModel):
+class TextWindowMaterialMentionModelOutput(_StrictModel):
     material_label: str
     family: str | None = None
     composition: str | None = None
@@ -388,7 +407,7 @@ class TextWindowMaterialMentionPayload(_StrictModel):
     confidence: float = 0.85
 
 
-class TextWindowVariantMentionPayload(_StrictModel):
+class TextWindowVariantMentionModelOutput(_StrictModel):
     variant_label: str
     variable_axis_type: str | None = None
     variable_value: str | int | float | None = None
@@ -396,7 +415,7 @@ class TextWindowVariantMentionPayload(_StrictModel):
     confidence: float = 0.85
 
 
-class TextWindowConditionMentionPayload(_StrictModel):
+class TextWindowConditionMentionModelOutput(_StrictModel):
     condition_type: Literal[
         "temperature",
         "duration",
@@ -423,7 +442,7 @@ class TextWindowConditionMentionPayload(_StrictModel):
         )
 
 
-class TextWindowBaselineMentionPayload(_StrictModel):
+class TextWindowBaselineMentionModelOutput(_StrictModel):
     baseline_label: str
     baseline_type: Literal[
         "control",
@@ -446,7 +465,7 @@ class TextWindowBaselineMentionPayload(_StrictModel):
         )
 
 
-class TextWindowResultClaimPayload(_StrictModel):
+class TextWindowResultClaimModelOutput(_StrictModel):
     claim_text: str
     property_normalized: str
     result_type: str
@@ -472,13 +491,13 @@ class TextWindowResultClaimPayload(_StrictModel):
         return str(value or "").strip()
 
 
-class StructuredTextWindowMentions(_StrictModel):
-    method_mentions: list[TextWindowMethodMentionPayload] = Field(default_factory=list)
-    material_mentions: list[TextWindowMaterialMentionPayload] = Field(default_factory=list)
-    variant_mentions: list[TextWindowVariantMentionPayload] = Field(default_factory=list)
-    condition_mentions: list[TextWindowConditionMentionPayload] = Field(default_factory=list)
-    baseline_mentions: list[TextWindowBaselineMentionPayload] = Field(default_factory=list)
-    result_claims: list[TextWindowResultClaimPayload] = Field(default_factory=list)
+class TextWindowMentionsModelOutput(_StrictModel):
+    method_mentions: list[TextWindowMethodMentionModelOutput] = Field(default_factory=list)
+    material_mentions: list[TextWindowMaterialMentionModelOutput] = Field(default_factory=list)
+    variant_mentions: list[TextWindowVariantMentionModelOutput] = Field(default_factory=list)
+    condition_mentions: list[TextWindowConditionMentionModelOutput] = Field(default_factory=list)
+    baseline_mentions: list[TextWindowBaselineMentionModelOutput] = Field(default_factory=list)
+    result_claims: list[TextWindowResultClaimModelOutput] = Field(default_factory=list)
 
     @field_validator(
         "method_mentions",
@@ -494,7 +513,7 @@ class StructuredTextWindowMentions(_StrictModel):
         return _normalize_list_container(value)
 
 
-class TableRowSubjectMentionPayload(_StrictModel):
+class TableRowSubjectMentionModelOutput(_StrictModel):
     variant_label: str
     family: str | None = None
     composition: str | None = None
@@ -503,19 +522,19 @@ class TableRowSubjectMentionPayload(_StrictModel):
     quote: str | None = None
 
 
-class TableRowFactMentionPayload(_StrictModel):
+class TableRowFactMentionModelOutput(_StrictModel):
     name: str
     value_text: str | int | float | None = None
     unit: str | None = None
     quote: str | None = None
 
 
-class TableRowBaselineMentionPayload(_StrictModel):
+class TableRowBaselineMentionModelOutput(_StrictModel):
     baseline_label: str
     quote: str | None = None
 
 
-class TableRowResultClaimPayload(_StrictModel):
+class TableRowResultClaimModelOutput(_StrictModel):
     property_normalized: str
     result_type: str = "scalar"
     value_text: str | int | float | None = None
@@ -541,12 +560,12 @@ class TableRowResultClaimPayload(_StrictModel):
         return str(value or "").strip()
 
 
-class StructuredTableRowMentions(_StrictModel):
-    row_subjects: list[TableRowSubjectMentionPayload] = Field(default_factory=list)
-    process_mentions: list[TableRowFactMentionPayload] = Field(default_factory=list)
-    test_condition_mentions: list[TableRowFactMentionPayload] = Field(default_factory=list)
-    baseline_mentions: list[TableRowBaselineMentionPayload] = Field(default_factory=list)
-    result_claims: list[TableRowResultClaimPayload] = Field(default_factory=list)
+class TableRowMentionsModelOutput(_StrictModel):
+    row_subjects: list[TableRowSubjectMentionModelOutput] = Field(default_factory=list)
+    process_mentions: list[TableRowFactMentionModelOutput] = Field(default_factory=list)
+    test_condition_mentions: list[TableRowFactMentionModelOutput] = Field(default_factory=list)
+    baseline_mentions: list[TableRowBaselineMentionModelOutput] = Field(default_factory=list)
+    result_claims: list[TableRowResultClaimModelOutput] = Field(default_factory=list)
 
     @field_validator(
         "row_subjects",
@@ -561,12 +580,12 @@ class StructuredTableRowMentions(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredTableBatchRowMentions(StructuredTableRowMentions):
+class TableBatchRowMentionsModelOutput(TableRowMentionsModelOutput):
     row_index: int
 
 
-class StructuredTableBatchMentions(_StrictModel):
-    row_results: list[StructuredTableBatchRowMentions] = Field(default_factory=list)
+class TableBatchMentionsModelOutput(_StrictModel):
+    row_results: list[TableBatchRowMentionsModelOutput] = Field(default_factory=list)
 
     @field_validator("row_results", mode="before")
     @classmethod
@@ -574,7 +593,7 @@ class StructuredTableBatchMentions(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredTableMatrixRepairItem(_StrictModel):
+class TableMatrixRepairItemModelOutput(_StrictModel):
     row_index: int | None = None
     column: str | None = None
     before: str | None = None
@@ -582,9 +601,9 @@ class StructuredTableMatrixRepairItem(_StrictModel):
     reason: str | None = None
 
 
-class StructuredTableMatrixRepair(_StrictModel):
+class TableMatrixRepairModelOutput(_StrictModel):
     repaired_table_matrix: list[list[str]] = Field(default_factory=list)
-    repairs: list[StructuredTableMatrixRepairItem] = Field(default_factory=list)
+    repairs: list[TableMatrixRepairItemModelOutput] = Field(default_factory=list)
     confidence: float = 0.0
     warnings: list[str] = Field(default_factory=list)
 
@@ -600,12 +619,12 @@ class StructuredTableMatrixRepair(_StrictModel):
 
 
 
-class StructuredExtractionBundle(_StrictModel):
-    method_facts: list[MethodFactPayload] = Field(default_factory=list)
-    sample_variants: list[SampleVariantPayload] = Field(default_factory=list)
-    test_conditions: list[ExtractedTestConditionPayload] = Field(default_factory=list)
-    baseline_references: list[BaselineReferencePayload] = Field(default_factory=list)
-    measurement_results: list[MeasurementResultPayload] = Field(default_factory=list)
+class ExtractionBundleModelOutput(_StrictModel):
+    method_facts: list[MethodFactModelOutput] = Field(default_factory=list)
+    sample_variants: list[SampleVariantModelOutput] = Field(default_factory=list)
+    test_conditions: list[ExtractedTestConditionModelOutput] = Field(default_factory=list)
+    baseline_references: list[BaselineReferenceModelOutput] = Field(default_factory=list)
+    measurement_results: list[MeasurementResultModelOutput] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod

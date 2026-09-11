@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
+from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
     DocumentPreparationService,

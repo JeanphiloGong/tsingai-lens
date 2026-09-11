@@ -4847,7 +4847,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_domain_model_extractors_can_opt_in_to_provider_thinking(monkeypatch):
+def test_domain_model_extractors_keep_thinking_disabled_when_legacy_env_is_set(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
     client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
@@ -4862,7 +4862,9 @@ def test_domain_model_extractors_can_opt_in_to_provider_thinking(monkeypatch):
         }
     )
 
-    assert "extra_body" not in client.beta.chat.completions.calls[0]
+    assert client.beta.chat.completions.calls[0]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
 
 
 def test_domain_model_extractors_leave_reasoning_effort_unset_by_default(monkeypatch):

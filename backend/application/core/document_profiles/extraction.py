@@ -53,12 +53,6 @@ class DocumentProfileExtractor:
             model or os.getenv("LLM_MODEL", "gpt-4o-mini")
         ).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
-        self.enable_thinking = os.getenv("LLM_ENABLE_THINKING", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
         self.reasoning_effort = (
             os.getenv("LLM_REASONING_EFFORT", "").strip() or None
         )
@@ -276,13 +270,13 @@ class DocumentProfileExtractor:
         ]
 
     def _provider_request_options(self) -> dict[str, Any]:
-        options: dict[str, Any] = {}
-        if not self.enable_thinking:
-            options["extra_body"] = {
-                "chat_template_kwargs": {
-                    "enable_thinking": False,
-                }
+        # Core extraction needs compact schema output; provider thinking is
+        # intentionally disabled and is not a runtime configuration option.
+        options: dict[str, Any] = {
+            "extra_body": {
+                "chat_template_kwargs": {"enable_thinking": False}
             }
+        }
         if self.reasoning_effort is not None:
             options["reasoning_effort"] = self.reasoning_effort
         return options

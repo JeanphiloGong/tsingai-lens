@@ -68,8 +68,8 @@ inputs allowed to reconstruct experiment context or create Evidence.
   publication state, and reads.
 - `objectives/analysis/`: framing, routing, extraction, grounding, paper-level
   experiment binding, and cross-paper Finding synthesis.
-- `paper_facts/`: extraction helpers used inside Objective analysis, including
-  model-assisted table repair; it is not a persisted paper-fact aggregate.
+- `paper_facts/`: model-assisted table repair used inside Objective analysis;
+  it is not a separate fact-extraction pipeline or persisted aggregate.
 
 Read [`objectives/README.md`](objectives/README.md) for the entry methods and
 modification map. Source preparation calls

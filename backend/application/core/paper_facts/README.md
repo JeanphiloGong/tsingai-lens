@@ -1,23 +1,24 @@
 # Paper Facts
 
-This package owns reusable, document-scoped facts extracted from normalized
-Source artifacts.
+This package retains the model-assisted table-structure repair used by
+Objective analysis. It does not run a separate paper-fact extraction pipeline.
 
 ## Owner
 
-- `service.py`
-  Builds and reads evidence anchors, methods, sample variants, test
-  conditions, baselines, measurements, and characterization observations.
 - `extraction.py`
-  Calls the configured model provider for text windows and table batches and
-  owns paper-fact completion limits, retry behavior, and extraction traces.
-- `prompts.py` and `schemas.py`
-  Define paper-fact prompts and validated `*ModelOutput` response contracts.
-  The contracts stay separate because this package has three distinct model
-  tasks: text-window mentions, table-row mentions, and table-matrix repair.
+  Owns the table-repair prompt, the two `TableMatrixRepair*ModelOutput`
+  contracts, model requests, completion limits, retries, and traces.
+- [`../objectives/analysis/table_repair.py`](../objectives/analysis/table_repair.py)
+  Selects tables needing repair and checks that repaired labels, headers,
+  numeric sequences, and units preserve the Source before extraction continues.
 
 ## Boundary
 
-Paper facts are reusable inputs for comparison and research views. They do not
-own Objective confirmation, versioned Objective analysis, Finding synthesis,
-HTTP schemas, or persistence implementations.
+Text and table facts are extracted by
+[`../objectives/analysis/source_extraction.py`](../objectives/analysis/source_extraction.py)
+for a confirmed Objective. The former text-window and table-batch mention
+contracts, complete fact bundle, and their benchmark have been removed.
+
+Table repair changes parsed layout, not scientific values. It does not own
+Objective confirmation, versioned analysis, Finding synthesis, HTTP schemas,
+or persistence implementations.

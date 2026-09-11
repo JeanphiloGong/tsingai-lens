@@ -7,22 +7,9 @@ from time import perf_counter
 from typing import Any, TypeVar
 
 from openai import OpenAI
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 import tiktoken
 
-from application.core.paper_facts.prompts import (
-    PAPER_FACT_TABLE_BATCH_PROMPT_VERSION,
-    PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION,
-    PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION,
-    build_table_batch_mentions_prompt,
-    build_table_matrix_repair_prompt,
-    build_text_window_extraction_prompt,
-)
-from application.core.paper_facts.schemas import (
-    TableBatchMentionsModelOutput,
-    TableMatrixRepairModelOutput,
-    TextWindowMentionsModelOutput,
-)
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
     extract_json_object,
@@ -38,14 +25,112 @@ _JSON_TEXT = "json_text"
 _PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _PROVIDER_PARSE
 _SUPPORTED_EXTRACTION_MODES = {_JSON_TEXT, _PROVIDER_PARSE}
-_TABLE_BATCH_PROVIDER_MAX_COMPLETION_TOKENS = 4096
 _TABLE_MATRIX_REPAIR_PROVIDER_MAX_COMPLETION_TOKENS = 4096
 
 ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
 
 
+class TableMatrixRepairItemModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    row_index: int | None = None
+    column: str | None = None
+    before: str | None = None
+    after: str | None = None
+    reason: str | None = None
+
+
+class TableMatrixRepairModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    repaired_table_matrix: list[list[str]] = Field(default_factory=list)
+    repairs: list[TableMatrixRepairItemModelOutput] = Field(default_factory=list)
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("repaired_table_matrix", "repairs", "warnings", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return [] if value is None else value
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_default_confidence(cls, value: object) -> object:
+        return 0.0 if value is None else value
+
+
+PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v5"
+
+_TABLE_MATRIX_REPAIR_SYSTEM_PROMPT = """
+You are repairing parsed table structure for a materials-literature backend.
+
+Non-negotiable rules:
+- This is table repair only, not fact extraction.
+- Return exactly one JSON object and nothing else.
+- Use only the provided table source; do not use outside knowledge.
+- Preserve the table's row order, column order, numeric values, units, and headers.
+- Repair fragmented cells, dangling parentheses/brackets, and row-label spillover only when supported by nearby table cells.
+- If repair is uncertain, preserve the original cell and add a warning.
+""".strip()
+
+
+def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    model_payload = {
+        "table_role": payload.get("table_role"),
+        "repair_focus": list(payload.get("repair_focus") or ()),
+        "source": {
+            key: source[key]
+            for key in (
+                "caption_text",
+                "heading_path",
+                "column_headers",
+                "table_markdown",
+                "table_visual_text",
+            )
+            if source.get(key) not in (None, "", [], {})
+        },
+    }
+    user_prompt = (
+        "Repair this parsed table matrix before objective evidence extraction.\n\n"
+        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with `repaired_table_matrix`, "
+        "`repairs`, `confidence`, and `warnings`.\n"
+        "Repair structure only. Do not extract measurements, comparisons, or "
+        "interpretations.\n"
+        "Read the complete continuous table or table slice from "
+        "`source.table_markdown`. Its first row is the canonical flattened header "
+        "from `source.column_headers`; caption and heading context apply to every "
+        "row in the slice.\n"
+        "`source.table_visual_text` is an additional clipped view of the same "
+        "PDF table region. Use it to resolve visual line wrapping, but never "
+        "change a value that is not present in either supplied table view.\n"
+        "`repaired_table_matrix` must contain that header followed by every logical "
+        "data row in the Markdown, in the same order and with the same logical "
+        "columns. Do not add, reorder, summarize, or truncate logical data rows. "
+        "A final row containing only a carried specimen-label fragment and a "
+        "carried uncertainty fragment may be merged into the preceding logical row "
+        "and omitted; record that merge in `repairs`.\n"
+        "For a mean-plus-uncertainty result column, preserve the complete numeric "
+        "sequence from top to bottom. A leading uncertainty fragment before a new "
+        "mean belongs to the preceding unresolved mean; the new mean receives the "
+        "next uncertainty fragment in that column. Never duplicate one uncertainty "
+        "to fill another row.\n"
+        "Nearby complete rows may support joining a cell fragment with an adjacent "
+        "fragment from the same table. Preserve every label token that is present "
+        "in the supplied table and do not invent specimen names, process labels, "
+        "or numeric levels. A token may move into its structurally repaired cell "
+        "only when the token already occurs in the supplied table slice.\n"
+        "Record each changed cell in `repairs` with its Markdown-local row_index "
+        "(header is row 0), column, before, after, and reason. If no confident "
+        "repair is possible, return the Markdown matrix unchanged and explain the "
+        "uncertainty in `warnings`."
+    )
+    return _TABLE_MATRIX_REPAIR_SYSTEM_PROMPT, user_prompt
+
+
 class PaperFactsExtractor:
-    """Extract document-scoped paper facts through paper-fact contracts."""
+    """Repair table structure before Objective evidence extraction."""
 
     def __init__(
         self,
@@ -67,35 +152,6 @@ class PaperFactsExtractor:
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
-        )
-
-    def extract_text_window_mentions(
-        self,
-        payload: dict[str, Any],
-    ) -> TextWindowMentionsModelOutput:
-        system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
-        return self._extract(
-            task_type="paper_fact_text_window",
-            prompt_version=PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=TextWindowMentionsModelOutput,
-        )
-
-    def extract_table_batch_mentions(
-        self,
-        payload: dict[str, Any],
-    ) -> TableBatchMentionsModelOutput:
-        system_prompt, user_prompt = build_table_batch_mentions_prompt(payload)
-        return self._extract(
-            task_type="paper_fact_table_batch",
-            prompt_version=PAPER_FACT_TABLE_BATCH_PROMPT_VERSION,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=TableBatchMentionsModelOutput,
-            provider_max_completion_tokens=(
-                _TABLE_BATCH_PROVIDER_MAX_COMPLETION_TOKENS
-            ),
         )
 
     def repair_table_matrix(
@@ -276,24 +332,7 @@ class PaperFactsExtractor:
                         "structured extraction returned empty response content"
                     )
                 payload = load_json_payload(extract_json_object(raw_content))
-                try:
-                    return response_model.model_validate(payload), raw_content
-                except ValidationError:
-                    if isinstance(payload, dict):
-                        extra_keys = set(payload) - set(response_model.model_fields)
-                        if extra_keys - {"confidence"}:
-                            raise
-                        filtered_payload = {
-                            key: value
-                            for key, value in payload.items()
-                            if key in response_model.model_fields
-                        }
-                        if filtered_payload != payload:
-                            return (
-                                response_model.model_validate(filtered_payload),
-                                raw_content,
-                            )
-                    raise
+                return response_model.model_validate(payload), raw_content
             except (
                 RuntimeError,
                 ValueError,

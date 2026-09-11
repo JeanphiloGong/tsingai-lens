@@ -1,8 +1,7 @@
 # Benchmark Scripts
 
 This directory owns backend-local benchmark scripts for Core LLM connectivity,
-single-unit extraction latency, and collection-level paper-facts extraction
-cost.
+Paper Map prompts, Source parsing, and Source retrieval.
 
 These scripts should be the canonical repo-local benchmark entrypoints. They
 should replace ad hoc date-folder probes that depend on brittle `../backend`
@@ -12,18 +11,12 @@ path assumptions or a fixed `backend/.env` location.
 
 - `llm_connectivity_probe.py`
   Minimal provider connectivity and small chat latency checks
-- `text_window_probe.py`
-  One prompt, one payload, multiple execution modes for comparing raw text,
-  local validation, and provider-native structured parsing
 - `paper_map_prompt_probe.py`
   Offline token audit and optional live scientific-boundary A/B matrix for the
   current Paper Map prompt in JSON fallback and provider-native modes, compact
   JSON-object guidance, and compact provider-native structured parsing. Use
   `--scenario-file` to replay real Source payloads without adding production
   artifacts or paper text to the repository.
-- `paper_facts_collection_benchmark.py`
-  Collection-level extraction cost benchmark with window-pruning and
-  table-row accounting
 - `source_parser_benchmark.py`
   Offline Source parser benchmark for the active Docling path and optional
   MinerU CLI comparison without changing production parser behavior
@@ -45,28 +38,11 @@ Scripts in this directory should follow these rules:
 - write machine-readable JSON summaries so before/after runs can be compared
   without reformatting shell output
 
-## Current Text-Window Modes
-
-`text_window_probe.py` currently exposes these modes:
-
-- `connectivity`
-  Minimal small-chat latency check
-- `raw_text`
-  `chat.completions.create` with the canonical text-window prompt, no local
-  validation
-- `raw_text_plus_validate`
-  Same request as `raw_text`, followed by local
-  `ExtractionBundleModelOutput.model_validate_json(...)`
-- `provider_structured_parse`
-  Same prompt path as `raw_text`, plus provider-native
-  `beta.chat.completions.parse(...)` for diagnostic comparison
-
 ## Example Usage
 
 ```bash
 cd backend
 python scripts/benchmarks/llm_connectivity_probe.py --help
-python scripts/benchmarks/text_window_probe.py --help
 python scripts/benchmarks/paper_map_prompt_probe.py --execution offline
 python scripts/benchmarks/paper_map_prompt_probe.py --execution both --repeat 1
 python scripts/benchmarks/paper_map_prompt_probe.py \
@@ -74,7 +50,6 @@ python scripts/benchmarks/paper_map_prompt_probe.py \
   --scenario-file /tmp/paper-map-scenarios.json \
   --variant current_provider_parse \
   --variant compact_provider_parse
-python scripts/benchmarks/paper_facts_collection_benchmark.py --help
 python scripts/benchmarks/source_parser_benchmark.py --help
 ```
 

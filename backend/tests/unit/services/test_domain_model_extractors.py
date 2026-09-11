@@ -63,12 +63,10 @@ from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,
 )
-from application.core.paper_facts.extraction import PaperFactsExtractor
-from application.core.paper_facts.prompts import build_table_matrix_repair_prompt
-from application.core.paper_facts.schemas import (
-    ExtractionBundleModelOutput,
-    TableBatchMentionsModelOutput,
-    TextWindowMentionsModelOutput,
+from application.core.paper_facts.extraction import (
+    PaperFactsExtractor,
+    TableMatrixRepairModelOutput,
+    build_table_matrix_repair_prompt,
 )
 from domain.pipeline import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
@@ -1247,40 +1245,32 @@ def _paper_facts_extractor(client: _FakeOpenAIClient) -> PaperFactsExtractor:
     )
 
 
-def test_domain_model_extractors_validate_json_text_response():
+def test_table_repair_validates_json_text_response():
     client = _FakeOpenAIClient(
-        """```json
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": []
-        }
-        ```"""
+        '```json\n{"repaired_table_matrix":'
+        '[["Sample", "Strength (MPa)"], ["A", "560"]]}\n```'
     )
     extractor = _paper_facts_extractor(client)
 
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
+    repaired = extractor.repair_table_matrix(
+        {"source": {"table_markdown": "| Sample | Strength (MPa) |\n| A | 560 |"}}
     )
 
-    assert isinstance(mentions, TextWindowMentionsModelOutput)
-    assert mentions.result_claims == []
+    assert isinstance(repaired, TableMatrixRepairModelOutput)
+    assert repaired.repaired_table_matrix == [["Sample", "Strength (MPa)"], ["A", "560"]]
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
-    assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
-    assert client.chat.completions.calls[0]["response_format"] == {
-        "type": "json_object"
-    }
-    assert client.chat.completions.calls[0]["extra_body"] == {
+    request = client.chat.completions.calls[0]
+    assert "JSON schema:" in request["messages"][1]["content"]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "available"
+    assert trace["response_model"] == "TableMatrixRepairModelOutput"
+    assert trace["parsed_output"]["repaired_table_matrix"] == repaired.repaired_table_matrix
+    assert extractor.consume_last_trace() is None
 
 
 def test_domain_model_extractors_record_provider_reported_usage() -> None:
@@ -1288,8 +1278,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
         '{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}'
     )
     facts_client = _FakeOpenAIClient(
-        '{"method_mentions":[],"material_mentions":[],"variant_mentions":[],'
-        '"condition_mentions":[],"baseline_mentions":[],"result_claims":[]}'
+        '{"repaired_table_matrix":[]}'
     )
     objective_client = _FakeOpenAIClient(
         "unused",
@@ -1300,13 +1289,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
         _document_profile_extractor(document_client).extract_document_profile(
             {"title": "Paper", "abstract_or_lead_text": "Experimental study."}
         )
-        _paper_facts_extractor(facts_client).extract_text_window_mentions(
-            {
-                "document_title": "Paper",
-                "document_profile": {"doc_type": "experimental"},
-                "text_window": {"text": "Laser power was 200 W."},
-            }
-        )
+        _paper_facts_extractor(facts_client).repair_table_matrix({"source": {}})
         FindingAssertionJudge(
             StructuredResponseClient(
                 client=objective_client,
@@ -1326,7 +1309,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
         "finding_synthesis": "finding_synthesis.v15",
-        "paper_fact_text_window": "paper_fact_text_window.v1",
+        "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v5",
     }
 
 
@@ -1428,53 +1411,23 @@ def test_document_profile_extractor_does_not_hide_programming_errors():
         )
 
 
-def test_domain_model_extractors_ignores_top_level_extra_json_text_fields():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": [],
-          "confidence": 0.9
-        }
-        """
-    )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
-    )
-
-    assert isinstance(mentions, TextWindowMentionsModelOutput)
-    assert mentions.result_claims == []
-
-
-def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
+def test_table_repair_defaults_to_provider_parse_mode(monkeypatch):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    parsed_mentions = TextWindowMentionsModelOutput()
-    client = _FakeOpenAIClient("unused", parsed=parsed_mentions)
+    parsed = TableMatrixRepairModelOutput(
+        repaired_table_matrix=[["Sample", "Strength (MPa)"], ["A", "560"]]
+    )
+    client = _FakeOpenAIClient("unused", parsed=parsed)
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
+    repaired = extractor.repair_table_matrix(
+        {"source": {"table_markdown": "| Sample | Strength (MPa) |\n| A | 560 |"}}
     )
 
-    assert mentions == parsed_mentions
+    assert repaired == parsed
     assert client.chat.completions.calls == []
     assert len(client.beta.chat.completions.calls) == 1
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is TextWindowMentionsModelOutput
+    assert parse_call["response_format"] is TableMatrixRepairModelOutput
     assert "JSON schema:" not in parse_call["messages"][1]["content"]
     assert parse_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -2056,31 +2009,14 @@ def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
     assert "Return only labels present in `context_evidence`" in user_prompt
 
 
-def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
+def test_table_repair_allows_explicit_json_text_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "json_text")
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": []
-        }
-        """
-    )
+    client = _FakeOpenAIClient('{"repaired_table_matrix":[]}')
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
-    )
+    repaired = extractor.repair_table_matrix({"source": {}})
 
-    assert isinstance(mentions, TextWindowMentionsModelOutput)
+    assert repaired == TableMatrixRepairModelOutput()
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
 
@@ -4681,138 +4617,17 @@ def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields
         )
 
 
-def test_domain_model_extractors_sanitizes_json_text_and_coerces_text_window_enums():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [
-            {
-              "method_role": "simulation",
-              "method_name": "finite element model",
-              "details": null,
-              "evidence_quote": "finite element model",
-              "confidence": 0.82
-            },
-          ],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [
-            {
-              "condition_type": "heating",
-              "condition_text": "with in situ heating",
-              "normalized_value": null,
-              "unit": null,
-              "evidence_quote": "with in situ heating",
-              "confidence": 0.8
-            },
-          ],
-          "baseline_mentions": [
-            {
-              "baseline_label": "as-built sample",
-              "baseline_type": "as built",
-              "evidence_quote": "as-built sample",
-              "confidence": 0.76
-            }
-          ],
-          "result_claims": [
-            {
-              "claim_text": "Prior work reported lower residual stress.",
-              "property_normalized": "residual stress",
-              "result_type": "trend",
-              "value_text": null,
-              "unit": null,
-              "claim_scope": "prior work",
-              "eligible_for_measurement_result": false,
-              "evidence_quote": "Prior work reported lower residual stress.",
-              "confidence": 0.74
-            },
-          ],
-        }
-        """
-    )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {
-                "text": "Prior work reported lower residual stress with in situ heating.",
-                "heading_path": "Introduction",
-            },
-        }
-    )
-
-    assert mentions.method_mentions[0].method_role == "other"
-    assert mentions.condition_mentions[0].condition_type == "other"
-    assert mentions.baseline_mentions[0].baseline_type == "as-built"
-    assert mentions.result_claims[0].claim_scope == "prior_work"
-
-
-def test_domain_model_extractors_accepts_null_result_property_names():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": [
-            {
-              "claim_text": "The behavior was improved.",
-              "property_normalized": null,
-              "result_type": "trend",
-              "value_text": null,
-              "unit": null,
-              "claim_scope": "current_work",
-              "eligible_for_measurement_result": false,
-              "evidence_quote": "The behavior was improved.",
-              "confidence": 0.7
-            }
-          ]
-        }
-        """
-    )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {
-                "text": "The behavior was improved.",
-                "heading_path": "Results",
-            },
-        }
-    )
-
-    assert mentions.result_claims[0].property_normalized == ""
-
-
-def test_domain_model_extractors_caps_provider_parse_completion_tokens_for_table_batches(
-    monkeypatch,
-):
+def test_table_repair_caps_provider_parse_completion_tokens(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=TableBatchMentionsModelOutput())
+    client = _FakeOpenAIClient("unused", parsed=TableMatrixRepairModelOutput())
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
-            "supporting_text_windows": [],
-        }
-    )
+    repaired = extractor.repair_table_matrix({"source": {}})
 
-    assert mentions == TableBatchMentionsModelOutput()
+    assert repaired == TableMatrixRepairModelOutput()
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is TableBatchMentionsModelOutput
+    assert parse_call["response_format"] is TableMatrixRepairModelOutput
     assert parse_call["max_completion_tokens"] == 4096
-    assert parse_call["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
 
 
 def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_json_text(
@@ -4847,20 +4662,13 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_domain_model_extractors_keep_thinking_disabled_when_legacy_env_is_set(monkeypatch):
+def test_table_repair_keeps_thinking_disabled_when_legacy_env_is_set(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
-    client = _FakeOpenAIClient("unused", parsed=TableBatchMentionsModelOutput())
+    client = _FakeOpenAIClient("unused", parsed=TableMatrixRepairModelOutput())
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [],
-            "supporting_text_windows": [],
-        }
-    )
+    extractor.repair_table_matrix({"source": {}})
 
     assert client.beta.chat.completions.calls[0]["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -5507,140 +5315,54 @@ def test_objective_evidence_repair_prompt_requires_role_result_consistency():
     assert "A fixed control does not make the comparison incomparable" in repair_prompt
 
 
-def test_domain_model_extractors_validates_lightweight_table_batch_mentions():
+def test_table_repair_normalizes_null_optional_output_containers():
     client = _FakeOpenAIClient(
-        """
-        {
-          "row_results": [
-            {
-              "row_index": 1,
-              "row_subjects": [
-                {
-                  "variant_label": "Sample A",
-                  "family": null,
-                  "composition": null,
-                  "variable_axis_type": null,
-                  "variable_value": null,
-                  "quote": "Sample A"
-                }
-              ],
-              "process_mentions": null,
-              "test_condition_mentions": [
-                {
-                  "name": "test temperature",
-                  "value_text": "25",
-                  "unit": "C",
-                  "quote": "25 C"
-                }
-              ],
-              "baseline_mentions": [],
-              "result_claims": [
-                {
-                  "property_normalized": "hardness",
-                  "result_type": "scalar",
-                  "value_text": "210",
-                  "unit": "HV",
-                  "variant_label": "Sample A",
-                  "baseline_label": null,
-                  "claim_scope": "current work",
-                  "claim_text": "Hardness reached 210 HV.",
-                  "quote": "210 HV"
-                }
-              ]
-            }
-          ]
-        }
-        """
+        '{"repaired_table_matrix":null,"repairs":null,"warnings":null,"confidence":null}'
     )
+
+    repaired = _paper_facts_extractor(client).repair_table_matrix({"source": {}})
+
+    assert repaired.model_dump() == {
+        "repaired_table_matrix": [],
+        "repairs": [],
+        "warnings": [],
+        "confidence": 0.0,
+    }
+    assert len(client.chat.completions.calls) == 1
+
+
+def test_table_repair_rejects_unknown_extra_keys_after_bounded_retry():
+    client = _FakeOpenAIClient('{"keywords":["yield strength"],"repaired_table_matrix":[]}')
     extractor = _paper_facts_extractor(client)
 
-    mentions = extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 210 HV", "cells": []}],
-            "supporting_text_windows": [],
-        }
-    )
+    with pytest.raises(ValidationError, match="keywords"):
+        extractor.repair_table_matrix({"source": {}})
 
-    row_result = mentions.row_results[0]
-    assert row_result.row_index == 1
-    assert row_result.row_subjects[0].variant_label == "Sample A"
-    assert row_result.process_mentions == []
-    assert row_result.test_condition_mentions[0].name == "test temperature"
-    assert row_result.result_claims[0].claim_scope == "current_work"
+    assert len(client.chat.completions.calls) == 2
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "failed"
+    assert trace["response_model"] == "TableMatrixRepairModelOutput"
 
 
-def test_structured_bundle_defaults_null_backend_metadata():
-    bundle = ExtractionBundleModelOutput.model_validate(
-        {
-            "sample_variants": [
-                {
-                    "variant_label": "Sample A",
-                    "confidence": None,
-                    "epistemic_status": None,
-                }
-            ],
-            "measurement_results": [
-                {
-                    "claim_text": "Hardness reached 210 HV.",
-                    "property_normalized": "hardness",
-                    "result_type": "scalar",
-                    "confidence": None,
-                }
-            ],
-        }
-    )
-
-    assert bundle.sample_variants[0].confidence == 0.85
-    assert bundle.sample_variants[0].epistemic_status == "normalized_from_evidence"
-    assert bundle.measurement_results[0].confidence == 0.85
-
-
-def test_domain_model_extractors_accepts_empty_table_batch_mentions():
+def test_table_repair_falls_back_to_json_when_provider_parse_is_unavailable():
     client = _FakeOpenAIClient(
-        """
-        {
-          "row_results": []
-        }
-        """
+        '{"repaired_table_matrix":[["Sample","Strength (MPa)"],["A","560"]]}',
+        parse_error=RuntimeError("provider parse unavailable"),
     )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [{"row_index": 1, "row_summary": "Sample A | no grounded result", "cells": []}],
-            "supporting_text_windows": [],
-        }
+    extractor = PaperFactsExtractor(
+        client=client, model="fake-model", extraction_mode="provider_parse"
     )
 
-    assert mentions == TableBatchMentionsModelOutput()
-
-
-def test_domain_model_extractors_still_rejects_unknown_table_batch_extra_keys():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "keywords": ["yield strength"],
-          "row_results": []
-        }
-        """
+    repaired = extractor.repair_table_matrix(
+        {"source": {"table_markdown": "| Sample | Strength (MPa) |\n| A | 560 |"}}
     )
-    extractor = _paper_facts_extractor(client)
 
-    with pytest.raises(ValidationError) as exc_info:
-        extractor.extract_table_batch_mentions(
-            {
-                "document_title": "LPBF Paper",
-                "document_profile": {"doc_type": "experimental"},
-                "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
-                "supporting_text_windows": [],
-            }
-        )
-
-    assert "keywords" in str(exc_info.value)
+    assert repaired.repaired_table_matrix[1] == ["A", "560"]
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "available"
+    assert trace["extraction_mode"] == "provider_parse->json_text"
 
 
 def test_domain_model_extractors_falls_back_to_default_for_invalid_mode(monkeypatch, caplog):

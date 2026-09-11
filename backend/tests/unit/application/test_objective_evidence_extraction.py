@@ -33,7 +33,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
 )
-from application.core.paper_facts.schemas import TableMatrixRepairModelOutput
+from application.core.paper_facts.extraction import TableMatrixRepairModelOutput
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,

@@ -21,7 +21,11 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import StructuredPaperResearchMap
 from application.core.objectives.llm.structured_response import StructuredResponseClient
-from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.core.paper_facts.extraction import (
+    PaperFactsExtractor,
+    TableMatrixRepairItemModelOutput,
+    TableMatrixRepairModelOutput,
+)
 
 
 def test_model_clients_are_owned_by_their_domains() -> None:
@@ -63,6 +67,13 @@ def test_objective_judgments_own_their_response_contracts() -> None:
     )
 
 
+def test_paper_facts_retains_only_the_active_table_repair_contract() -> None:
+    assert TableMatrixRepairModelOutput.__module__ == PaperFactsExtractor.__module__
+    assert TableMatrixRepairItemModelOutput.__module__ == PaperFactsExtractor.__module__
+    assert not hasattr(PaperFactsExtractor, "extract_text_window_mentions")
+    assert not hasattr(PaperFactsExtractor, "extract_table_batch_mentions")
+
+
 def test_shared_structured_extraction_package_only_owns_json_support() -> None:
     core_path = Path(__file__).parents[3] / "application" / "core"
     shared_path = core_path / "structured_extraction"
@@ -74,11 +85,9 @@ def test_shared_structured_extraction_package_only_owns_json_support() -> None:
     assert "openai" not in (shared_path / "json_support.py").read_text().lower()
 
     for domain in ("document_profiles", "paper_facts"):
-        assert {
-            "extraction.py",
-            "prompts.py",
-            "schemas.py",
-        } <= {path.name for path in (core_path / domain).glob("*.py")}
+        files = {path.name for path in (core_path / domain).glob("*.py")}
+        assert "extraction.py" in files
+        assert not {"prompts.py", "schemas.py"} & files
 
     objectives_path = core_path / "objectives"
     assert not {

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import tiktoken
 from openai import LengthFinishReasonError
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
@@ -51,11 +51,11 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import (
     PaperResearchMapExtractor,
-    StructuredExperimentalPaperMap,
+    ExperimentalPaperMapModelOutput,
     StructuredPaperResearchMap,
     StructuredPaperSourceSignal,
-    StructuredPaperSourceSignalScreen,
-    StructuredReviewPaperMap,
+    PaperSourceSignalScreenModelOutput,
+    ReviewPaperMapModelOutput,
     build_paper_research_map_prompt,
     build_paper_source_signal_prompt,
 )
@@ -73,7 +73,7 @@ from infra.llm.usage import capture_llm_usage
 
 
 def test_paper_research_map_contract_bounds_model_output():
-    experimental_schema = StructuredExperimentalPaperMap.model_json_schema()
+    experimental_schema = ExperimentalPaperMapModelOutput.model_json_schema()
     schema = experimental_schema["properties"]
 
     assert schema["studies"]["maxItems"] == 2
@@ -128,7 +128,7 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "review_synthesis" not in schema
     assert schema["warnings"]["items"]["maxLength"] == 240
 
-    review_model_schema = StructuredReviewPaperMap.model_json_schema()
+    review_model_schema = ReviewPaperMapModelOutput.model_json_schema()
     review_schema = review_model_schema["$defs"]["StructuredReviewMapSynthesis"][
         "properties"
     ]
@@ -169,13 +169,30 @@ def test_experimental_paper_map_accepts_five_unresolved_signals_without_failure(
         "confidence": 0.8,
     }
 
-    parsed = StructuredExperimentalPaperMap.model_validate(payload)
+    parsed = ExperimentalPaperMapModelOutput.model_validate(payload)
 
     assert len(parsed.unresolved_signals) == 5
 
 
+@pytest.mark.parametrize(
+    ("response_model", "field_name", "value"),
+    [
+        (ExperimentalPaperMapModelOutput, "doc_role", "experimental-paper"),
+        (PaperSourceSignalScreenModelOutput, "evidence_density", "dense"),
+        (StructuredPaperResearchMap, "doc_role", "experimental-paper"),
+    ],
+)
+def test_paper_map_rejects_unknown_enum_values_instead_of_downgrading_them(
+    response_model: type[BaseModel],
+    field_name: str,
+    value: str,
+):
+    with pytest.raises(ValidationError):
+        response_model.model_validate({field_name: value})
+
+
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
-    model_schema = StructuredPaperSourceSignalScreen.model_json_schema()
+    model_schema = PaperSourceSignalScreenModelOutput.model_json_schema()
     schema = model_schema["properties"]
     signal_schema = model_schema["$defs"]["StructuredPaperSourceSignal"][
         "properties"
@@ -287,7 +304,7 @@ def test_paper_source_signal_contract_requires_scientific_variable_role(
     signal_type: str,
     variable_role: str,
 ):
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
+    parsed = PaperSourceSignalScreenModelOutput.model_validate(
         {
             "signals": [
                 {
@@ -347,7 +364,7 @@ def test_paper_source_signal_identity_preserves_distinct_experiment_context(
         "material_scope": ["Ti-6Al-4V"],
     }
 
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
+    parsed = PaperSourceSignalScreenModelOutput.model_validate(
         {
             "signals": [
                 {**common, **left_context},
@@ -360,7 +377,7 @@ def test_paper_source_signal_identity_preserves_distinct_experiment_context(
 
 
 def test_paper_source_signal_screen_isolates_one_malformed_signal():
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
+    parsed = PaperSourceSignalScreenModelOutput.model_validate(
         {
             "signals": [
                 {
@@ -396,7 +413,7 @@ def test_paper_source_signal_screen_isolates_one_malformed_signal():
 
 
 def test_paper_source_signal_screen_marks_all_malformed_signals_incomplete():
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
+    parsed = PaperSourceSignalScreenModelOutput.model_validate(
         {
             "signals": [
                 {
@@ -2600,7 +2617,7 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
     }
     client = _FakeOpenAIClient(
         json.dumps(valid),
-        parsed=StructuredExperimentalPaperMap.model_validate(invalid),
+        parsed=ExperimentalPaperMapModelOutput.model_validate(invalid),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 

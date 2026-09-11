@@ -12,7 +12,7 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import (
-    StructuredExperimentalPaperMap,
+    ExperimentalPaperMapModelOutput,
     StructuredPaperResearchMap,
 )
 from application.core.objectives.llm.structured_response import (
@@ -45,7 +45,7 @@ def test_experimental_paper_map_accepts_bounded_unresolved_signal_overflow() -> 
         for index in range(9)
     ]
 
-    parsed = StructuredExperimentalPaperMap.model_validate(
+    parsed = ExperimentalPaperMapModelOutput.model_validate(
         {"unresolved_signals": signals}
     )
 

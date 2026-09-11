@@ -93,7 +93,7 @@ def test_scientific_evaluator_accepts_joint_factor_scope() -> None:
         for item in probe.default_scenarios()
         if item.scenario_id == "joint_factors"
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [
@@ -174,7 +174,7 @@ def test_scientific_evaluator_rejects_broad_outcome_as_complete_relationship() -
         claim_scope="current_work",
         relationships=[relationship],
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_construct(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_construct(
         studies=[study],
         unresolved_signals=[],
         output_saturated=False,
@@ -193,7 +193,7 @@ def test_scientific_evaluator_rejects_cited_work_as_current_work() -> None:
         for item in probe.default_scenarios()
         if item.scenario_id == "cited_background"
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [
@@ -288,7 +288,7 @@ def test_structural_evaluator_accepts_schema_valid_saturated_stress_output() -> 
         },
         expectation={"kind": "structural", "allow_output_saturated": True},
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [],
@@ -319,7 +319,7 @@ def test_structural_evaluator_requires_unsaturated_current_window() -> None:
         payload={"source_units": [{"source_unit_id": "source-unit-1"}]},
         expectation={"kind": "structural"},
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [],
@@ -356,7 +356,7 @@ def test_scientific_evaluator_requires_each_explicit_configuration_relationship(
             ],
         },
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [],
@@ -396,7 +396,7 @@ def test_scientific_evaluator_rejects_mechanisms_and_invented_study_splits() -> 
             "forbidden_outcome_contains": ["energy distribution"],
         },
     )
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [
@@ -547,7 +547,7 @@ def test_live_case_preserves_provider_metadata_when_validation_fails() -> None:
 def test_live_provider_case_matches_production_reasoning_controls() -> None:
     probe = _load_probe_module()
     calls: list[dict[str, object]] = []
-    parsed = probe.StructuredExperimentalPaperMap.model_validate(
+    parsed = probe.ExperimentalPaperMapModelOutput.model_validate(
         {
             "doc_role": "experimental",
             "studies": [],

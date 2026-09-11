@@ -30,9 +30,9 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import (
-    StructuredExperimentalPaperMap,
+    ExperimentalPaperMapModelOutput,
     StructuredPaperResearchMap,
-    StructuredReviewPaperMap,
+    ReviewPaperMapModelOutput,
 )
 from tests.support.objective_extractor import paper_research_map_scope_outputs
 
@@ -139,13 +139,13 @@ class FakeDomainModelExtractor:
     ) -> Any:
         del system_prompt
         payload = _input_payload(user_prompt)
-        if response_model is StructuredExperimentalPaperMap:
+        if response_model is ExperimentalPaperMapModelOutput:
             skim = self.extract(payload)
-            response = StructuredExperimentalPaperMap.model_validate(
+            response = ExperimentalPaperMapModelOutput.model_validate(
                 skim.model_dump(exclude={"review_synthesis"})
             )
-        elif response_model is StructuredReviewPaperMap:
-            response = StructuredReviewPaperMap(
+        elif response_model is ReviewPaperMapModelOutput:
+            response = ReviewPaperMapModelOutput(
                 evidence_density="low",
                 confidence=0.72,
             )

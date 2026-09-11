@@ -21,7 +21,7 @@ from application.core.objectives.analysis.source_extraction import (
     StructuredEvidenceExtractions,
 )
 from application.core.objectives.discovery.study_window import (
-    StructuredExperimentalPaperMap,
+    ExperimentalPaperMapModelOutput,
     StructuredPaperResearchMap,
 )
 from tests.support.fake_domain_model_extractor import (
@@ -127,7 +127,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
     def extract(
         self,
         payload: dict[str, Any],
-    ) -> StructuredExperimentalPaperMap | StructuredPaperResearchMap:
+    ) -> ExperimentalPaperMapModelOutput | StructuredPaperResearchMap:
         title = str(payload.get("title") or "").casefold()
         source_text = " ".join(
             str(source.get("content") or "")
@@ -186,7 +186,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
                     "confidence": 0.94,
                 }
             ]
-        return StructuredExperimentalPaperMap(
+        return ExperimentalPaperMapModelOutput(
             doc_role="experimental",
             studies=studies,
             unresolved_signals=[],

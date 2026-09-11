@@ -71,9 +71,6 @@ _MODEL_HIDDEN_CONTENT_KEYS = {
 
 _MAX_COMPLETION_TOKENS = 2048
 _SOURCE_SIGNAL_MAX_COMPLETION_TOKENS = 2048
-_DOC_ROLES = {"experimental", "review", "modeling", "mixed", "uncertain"}
-_EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
-
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """
@@ -98,11 +95,6 @@ Non-negotiable rules:
 - Copy only supplied short `source_labels`; the backend owns real Source identity.
 - A citation points to primary literature; it is not review-owned evidence.
 """.strip()
-
-
-def _normalize_choice(value: object, *, allowed: set[str], default: str) -> str:
-    lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    return lowered if lowered in allowed else default
 
 
 def _normalize_list(value: object) -> object:
@@ -563,7 +555,108 @@ class StructuredPaperMapSignal(_PaperResearchMapResponse):
         return self
 
 
-class StructuredExperimentalPaperMap(_PaperResearchMapResponse):
+def _downgrade_unresolved_relationships(value: object) -> object:
+    if not isinstance(value, Mapping):
+        return value
+    studies = value.get("studies")
+    unresolved_signals = value.get("unresolved_signals")
+    if not isinstance(studies, list):
+        return value
+    if unresolved_signals is not None and not isinstance(unresolved_signals, list):
+        return value
+
+    retained_studies: list[object] = []
+    downgraded_signals: list[dict[str, object]] = []
+    changed = False
+    for study in studies:
+        if not isinstance(study, Mapping):
+            retained_studies.append(study)
+            continue
+        relationships = study.get("relationships")
+        if not isinstance(relationships, list):
+            retained_studies.append(study)
+            continue
+
+        retained_relationships: list[object] = []
+        study_changed = False
+        for relationship in relationships:
+            if not isinstance(relationship, Mapping):
+                retained_relationships.append(relationship)
+                continue
+            factor_values = (
+                relationship.get("factor_assertions")
+                if "factor_assertions" in relationship
+                else relationship.get("varied_factors")
+            )
+            has_varied_factor = not isinstance(factor_values, list) or (
+                bool(factor_values)
+                and all(
+                    0
+                    < len(
+                        str(
+                            item.get("label") if isinstance(item, Mapping) else item
+                        ).strip()
+                    )
+                    <= 80
+                    for item in factor_values
+                )
+            )
+            outcome = str(relationship.get("outcome") or "").strip()
+            if has_varied_factor and not property_matching.outcome_label_requires_resolution(
+                outcome
+            ):
+                retained_relationships.append(relationship)
+                continue
+            lineage_field = (
+                "source_labels" if "source_labels" in relationship else "source_unit_ids"
+            )
+            lineage_values = relationship.get(lineage_field)
+            if (
+                not outcome
+                or len(outcome) > 80
+                or not isinstance(lineage_values, list)
+                or not any(str(item).strip() for item in lineage_values)
+            ):
+                retained_relationships.append(relationship)
+                continue
+
+            signal = {
+                "signal_type": "outcome",
+                "label": outcome,
+                "variable_role": "not_applicable",
+                lineage_field: list(lineage_values),
+                "confidence": relationship.get("confidence", study.get("confidence")),
+            }
+            for field_name in (
+                "experiment_label",
+                "design_type",
+                "claim_scope",
+                "material_scope",
+                "process_context",
+            ):
+                if field_name in study:
+                    signal[field_name] = study[field_name]
+            downgraded_signals.append(signal)
+            study_changed = True
+            changed = True
+
+        if retained_relationships or not study_changed:
+            retained_study = dict(study)
+            retained_study["relationships"] = retained_relationships
+            retained_studies.append(retained_study)
+
+    if not changed:
+        return value
+    normalized = dict(value)
+    normalized["studies"] = retained_studies
+    normalized["unresolved_signals"] = [
+        *(unresolved_signals or []),
+        *downgraded_signals,
+    ]
+    return normalized
+
+
+class ExperimentalPaperMapModelOutput(_PaperResearchMapResponse):
     """Compact high-level scope contract for non-review papers."""
 
     doc_role: Literal["experimental", "modeling", "mixed", "uncertain"] = "uncertain"
@@ -585,7 +678,7 @@ class StructuredExperimentalPaperMap(_PaperResearchMapResponse):
     @model_validator(mode="before")
     @classmethod
     def _downgrade_unresolved_relationships(cls, value: object) -> object:
-        return StructuredPaperResearchMap._downgrade_unresolved_relationships(value)
+        return _downgrade_unresolved_relationships(value)
 
     @field_validator("studies", "unresolved_signals", mode="before")
     @classmethod
@@ -596,21 +689,6 @@ class StructuredExperimentalPaperMap(_PaperResearchMapResponse):
     @classmethod
     def _normalize_diagnostic_warnings(cls, value: object) -> object:
         return _normalize_warnings(value)
-
-    @field_validator("doc_role", mode="before")
-    @classmethod
-    def _normalize_doc_role(cls, value: object) -> str:
-        return _normalize_choice(
-            value,
-            allowed={"experimental", "modeling", "mixed", "uncertain"},
-            default="uncertain",
-        )
-
-    @field_validator("evidence_density", mode="before")
-    @classmethod
-    def _normalize_evidence_density(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
-
 
 class StructuredPaperSourceSignal(_PaperResearchMapResponse):
     """One explicit scientific axis from one Source, before relationship assembly."""
@@ -691,7 +769,7 @@ class StructuredPaperSourceSignal(_PaperResearchMapResponse):
         return self
 
 
-class StructuredPaperSourceSignalScreen(_PaperResearchMapResponse):
+class PaperSourceSignalScreenModelOutput(_PaperResearchMapResponse):
     """Bounded source-local signals used when paper-scope mapping fails."""
 
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
@@ -754,18 +832,8 @@ class StructuredPaperSourceSignalScreen(_PaperResearchMapResponse):
     def _normalize_diagnostic_warnings(cls, value: object) -> object:
         return _normalize_warnings(value)
 
-    @field_validator("doc_role", mode="before")
-    @classmethod
-    def _normalize_doc_role(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_DOC_ROLES, default="uncertain")
-
-    @field_validator("evidence_density", mode="before")
-    @classmethod
-    def _normalize_evidence_density(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
-
     @model_validator(mode="after")
-    def _validate_signal_identities(self) -> StructuredPaperSourceSignalScreen:
+    def _validate_signal_identities(self) -> PaperSourceSignalScreenModelOutput:
         identities = [signal.identity_key() for signal in self.signals]
         if len(identities) != len(set(identities)):
             raise ValueError("source signal screen contains duplicate signal identities")
@@ -922,7 +990,7 @@ class StructuredReviewSynthesisMap(_PaperResearchMapResponse):
         return _normalize_list(value)
 
 
-class StructuredReviewPaperMap(_PaperResearchMapResponse):
+class ReviewPaperMapModelOutput(_PaperResearchMapResponse):
     """Review-author knowledge without duplicate study or signal output."""
 
     doc_role: Literal["review"] = "review"
@@ -940,12 +1008,6 @@ class StructuredReviewPaperMap(_PaperResearchMapResponse):
     @classmethod
     def _normalize_diagnostic_warnings(cls, value: object) -> object:
         return _normalize_warnings(value)
-
-    @field_validator("evidence_density", mode="before")
-    @classmethod
-    def _normalize_evidence_density(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
-
 
 class StructuredPaperResearchMap(_PaperResearchMapResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
@@ -972,114 +1034,7 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
     @model_validator(mode="before")
     @classmethod
     def _downgrade_unresolved_relationships(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        studies = value.get("studies")
-        unresolved_signals = value.get("unresolved_signals")
-        if not isinstance(studies, list):
-            return value
-        if unresolved_signals is not None and not isinstance(
-            unresolved_signals,
-            list,
-        ):
-            return value
-
-        retained_studies: list[object] = []
-        downgraded_signals: list[dict[str, object]] = []
-        changed = False
-        for study in studies:
-            if not isinstance(study, Mapping):
-                retained_studies.append(study)
-                continue
-            relationships = study.get("relationships")
-            if not isinstance(relationships, list):
-                retained_studies.append(study)
-                continue
-
-            retained_relationships: list[object] = []
-            study_changed = False
-            for relationship in relationships:
-                if not isinstance(relationship, Mapping):
-                    retained_relationships.append(relationship)
-                    continue
-                factor_values = (
-                    relationship.get("factor_assertions")
-                    if "factor_assertions" in relationship
-                    else relationship.get("varied_factors")
-                )
-                has_varied_factor = not isinstance(factor_values, list) or (
-                    bool(factor_values)
-                    and all(
-                        0
-                        < len(
-                            str(
-                                item.get("label")
-                                if isinstance(item, Mapping)
-                                else item
-                            ).strip()
-                        )
-                        <= 80
-                        for item in factor_values
-                    )
-                )
-                outcome = str(relationship.get("outcome") or "").strip()
-                if has_varied_factor and not (
-                    property_matching.outcome_label_requires_resolution(outcome)
-                ):
-                    retained_relationships.append(relationship)
-                    continue
-                lineage_field = (
-                    "source_labels"
-                    if "source_labels" in relationship
-                    else "source_unit_ids"
-                )
-                lineage_values = relationship.get(lineage_field)
-                if (
-                    not outcome
-                    or len(outcome) > 80
-                    or not isinstance(lineage_values, list)
-                    or not any(str(item).strip() for item in lineage_values)
-                ):
-                    retained_relationships.append(relationship)
-                    continue
-
-                signal = {
-                    "signal_type": "outcome",
-                    "label": outcome,
-                    "variable_role": "not_applicable",
-                    lineage_field: list(lineage_values),
-                    "confidence": relationship.get(
-                        "confidence",
-                        study.get("confidence"),
-                    ),
-                }
-                for field_name in (
-                    "experiment_label",
-                    "design_type",
-                    "claim_scope",
-                    "material_scope",
-                    "process_context",
-                ):
-                    if field_name in study:
-                        signal[field_name] = study[field_name]
-                downgraded_signals.append(signal)
-                study_changed = True
-                changed = True
-
-            if retained_relationships or not study_changed:
-                retained_study = dict(study)
-                retained_study["relationships"] = retained_relationships
-                retained_studies.append(retained_study)
-
-        if not changed:
-            return value
-        normalized = dict(value)
-        normalized["studies"] = retained_studies
-        normalized["unresolved_signals"] = [
-            *(unresolved_signals or []),
-            *downgraded_signals,
-        ]
-        return normalized
+        return _downgrade_unresolved_relationships(value)
 
     @field_validator("studies", "unresolved_signals", mode="before")
     @classmethod
@@ -1090,16 +1045,6 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
     @classmethod
     def _normalize_warnings(cls, value: object) -> object:
         return _normalize_warnings(value)
-
-    @field_validator("doc_role", mode="before")
-    @classmethod
-    def _normalize_doc_role(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_DOC_ROLES, default="uncertain")
-
-    @field_validator("evidence_density", mode="before")
-    @classmethod
-    def _normalize_evidence_density(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
 
     @model_validator(mode="after")
     def _validate_study_identities(self) -> StructuredPaperResearchMap:
@@ -1315,21 +1260,21 @@ def _source_unit_ids_from_labels(
 
 def _paper_map_response_model(
     payload: Mapping[str, Any],
-) -> type[StructuredExperimentalPaperMap] | type[StructuredReviewPaperMap]:
+) -> type[ExperimentalPaperMapModelOutput] | type[ReviewPaperMapModelOutput]:
     profile = payload.get("document_profile")
     if (
         isinstance(profile, Mapping)
         and str(profile.get("doc_type") or "").strip() == "review"
     ):
-        return StructuredReviewPaperMap
-    return StructuredExperimentalPaperMap
+        return ReviewPaperMapModelOutput
+    return ExperimentalPaperMapModelOutput
 
 
 def _paper_map_response(
-    response: StructuredExperimentalPaperMap | StructuredReviewPaperMap,
+    response: ExperimentalPaperMapModelOutput | ReviewPaperMapModelOutput,
     source_units_by_label: Mapping[str, Mapping[str, Any]],
 ) -> StructuredPaperResearchMap:
-    if isinstance(response, StructuredExperimentalPaperMap):
+    if isinstance(response, ExperimentalPaperMapModelOutput):
         payload = response.model_dump()
         for study in payload["studies"]:
             for relationship in study["relationships"]:
@@ -1821,7 +1766,7 @@ class PaperResearchMapExtractor:
         def validate_output_contract(response: BaseModel) -> BaseModel | None:
             if not isinstance(
                 response,
-                (StructuredExperimentalPaperMap, StructuredReviewPaperMap),
+                (ExperimentalPaperMapModelOutput, ReviewPaperMapModelOutput),
             ):
                 raise TypeError("unexpected paper research map response type")
             paper_map = _paper_map_response(response, source_units_by_label)
@@ -1847,7 +1792,7 @@ class PaperResearchMapExtractor:
                 build_retry_prompt=build_retry_prompt,
                 normalize_response_payload=(
                     _normalize_experimental_paper_map_payload
-                    if kwargs.get("response_model") is StructuredExperimentalPaperMap
+                    if kwargs.get("response_model") is ExperimentalPaperMapModelOutput
                     else None
                 ),
                 postprocess_response=validate_output_contract,
@@ -1899,7 +1844,7 @@ class PaperResearchMapExtractor:
             response = self.response_client.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                response_model=StructuredPaperSourceSignalScreen,
+                response_model=PaperSourceSignalScreenModelOutput,
                 max_completion_tokens=_SOURCE_SIGNAL_MAX_COMPLETION_TOKENS,
                 json_completion=complete_json_with_contract,
                 fail_on_output_saturation=True,
@@ -1909,7 +1854,7 @@ class PaperResearchMapExtractor:
         except StructuredOutputSaturatedError:
             self._log_saturation_trace(payload, contract="paper_source_signal")
             raise
-        if not isinstance(response, StructuredPaperSourceSignalScreen):
+        if not isinstance(response, PaperSourceSignalScreenModelOutput):
             raise TypeError("unexpected paper source signal response type")
         if response.output_saturated:
             self._log_saturation_trace(payload, contract="paper_source_signal")
@@ -2003,9 +1948,11 @@ __all__ = [
     "PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT",
     "PAPER_SOURCE_SIGNAL_PROMPT_VERSION",
     "PaperResearchMapExtractor",
+    "ExperimentalPaperMapModelOutput",
+    "ReviewPaperMapModelOutput",
     "StructuredPaperResearchMap",
     "StructuredPaperSourceSignal",
-    "StructuredPaperSourceSignalScreen",
+    "PaperSourceSignalScreenModelOutput",
     "StructuredPaperResearchScope",
     "StructuredPaperResearchRelationship",
     "StructuredPaperResearchSignal",

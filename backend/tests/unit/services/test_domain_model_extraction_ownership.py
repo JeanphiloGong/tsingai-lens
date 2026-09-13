@@ -11,7 +11,8 @@ from application.core.objectives.analysis.source_extraction import (
     StructuredEvidenceExtractions,
 )
 from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
+    PaperFrameBatchModelOutput,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
@@ -49,7 +50,10 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         StructuredAxisCanonicalizationPlan: (
             "application.core.objectives.discovery.axis_equivalence"
         ),
-        StructuredPaperFrameBatch: (
+        PaperFrameBatchModelOutput: (
+            "application.core.objectives.analysis.source_screening"
+        ),
+        PaperFrameBatchResult: (
             "application.core.objectives.analysis.source_screening"
         ),
         StructuredEvidenceSelections: (

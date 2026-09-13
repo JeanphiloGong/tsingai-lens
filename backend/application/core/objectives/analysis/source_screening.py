@@ -67,11 +67,11 @@ Non-negotiable rules:
 """.strip()
 
 
-class _SourceScreeningResponse(BaseModel):
+class _SourceScreeningContractBase(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class StructuredPaperFrameBatch(_SourceScreeningResponse):
+class PaperFrameBatchResult(_SourceScreeningContractBase):
     _source_accounting_origin: Literal["model", "repair"] = PrivateAttr(default="model")
     _source_accounting_errors: tuple[str, ...] = PrivateAttr(default=())
 
@@ -126,7 +126,7 @@ class StructuredPaperFrameBatch(_SourceScreeningResponse):
         return [] if value is None else value
 
     @model_validator(mode="after")
-    def _validate_source_partition(self) -> "StructuredPaperFrameBatch":
+    def _validate_source_partition(self) -> "PaperFrameBatchResult":
         relevant = self.relevant_source_unit_ids
         excluded = self.excluded_source_unit_ids
         if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
@@ -162,7 +162,7 @@ class StructuredPaperFrameBatch(_SourceScreeningResponse):
         return _normalize_choice(value, allowed=_FRAME_PAPER_ROLES, default="uncertain")
 
 
-class _StructuredPaperFrameModelBatch(_SourceScreeningResponse):
+class PaperFrameBatchModelOutput(_SourceScreeningContractBase):
     relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
         "uncertain"
     )
@@ -216,7 +216,7 @@ class _StructuredPaperFrameModelBatch(_SourceScreeningResponse):
         return [] if value is None else value
 
     @model_validator(mode="after")
-    def _validate_source_partition(self) -> "_StructuredPaperFrameModelBatch":
+    def _validate_source_partition(self) -> "PaperFrameBatchModelOutput":
         relevant = self.relevant_source_labels
         excluded = self.excluded_source_labels
         if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
@@ -403,7 +403,7 @@ class ObjectiveSourceScreener:
     def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
-    def screen_batch(self, payload: dict[str, Any]) -> StructuredPaperFrameBatch:
+    def screen_batch(self, payload: dict[str, Any]) -> PaperFrameBatchResult:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
         _model_payload, source_units_by_label = _objective_paper_frame_model_payload(
             payload
@@ -427,7 +427,7 @@ class ObjectiveSourceScreener:
                 source_accounting_errors.append(detail)
 
         def validate_source_accounting(parsed: BaseModel) -> BaseModel:
-            if not isinstance(parsed, _StructuredPaperFrameModelBatch):
+            if not isinstance(parsed, PaperFrameBatchModelOutput):
                 raise TypeError("unexpected objective paper frame response type")
             returned_labels = (
                 *parsed.relevant_source_labels,
@@ -472,7 +472,7 @@ class ObjectiveSourceScreener:
             response = self.response_client.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                response_model=_StructuredPaperFrameModelBatch,
+                response_model=PaperFrameBatchModelOutput,
                 max_completion_tokens=_FRAME_MAX_COMPLETION_TOKENS,
                 json_completion=complete_json_with_contract,
                 postprocess_response=validate_source_accounting,
@@ -487,7 +487,7 @@ class ObjectiveSourceScreener:
                 "objective paper frame source accounting repair failed; "
                 f"initial_errors={source_accounting_errors}; final_error={exc}"
             ) from exc
-        if not isinstance(response, _StructuredPaperFrameModelBatch):
+        if not isinstance(response, PaperFrameBatchModelOutput):
             raise TypeError("unexpected objective paper frame response type")
         screening_note = _optional_text(response.screening_note)
         if screening_note and len(screening_note) > _FRAME_SCREENING_NOTE_CHARS:
@@ -499,7 +499,7 @@ class ObjectiveSourceScreener:
                 _FRAME_SCREENING_NOTE_CHARS,
             )
             screening_note = screening_note[:_FRAME_SCREENING_NOTE_CHARS].rstrip()
-        rebound = StructuredPaperFrameBatch.model_validate(
+        rebound = PaperFrameBatchResult.model_validate(
             {
                 **response.model_dump(
                     exclude={"relevant_source_labels", "excluded_source_labels"}
@@ -524,7 +524,7 @@ class ObjectiveSourceScreener:
         return self.response_client.estimate_prompt_tokens(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=_StructuredPaperFrameModelBatch,
+            response_model=PaperFrameBatchModelOutput,
         )
 
 

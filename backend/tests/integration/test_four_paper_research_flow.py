@@ -53,7 +53,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         postprocess_response: Any = None,
         **options: Any,
     ) -> Any:
-        if response_model.__name__ != "_StructuredPaperFrameModelBatch":
+        if response_model.__name__ != "PaperFrameBatchModelOutput":
             return super().complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,

@@ -31,7 +31,7 @@ from application.core.objectives.analysis.source_extraction import (
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
     PaperAnalysisFrame,
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
 )
 from application.core.paper_facts.extraction import TableMatrixRepairModelOutput
 from domain.core import (
@@ -75,7 +75,7 @@ class _BoundedFrameExtractor:
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         assert (
             self.estimate_prompt_tokens(payload)
             <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
@@ -123,7 +123,7 @@ class _BoundedFrameExtractor:
                 )
             )
 
-        return StructuredPaperFrameBatch(
+        return PaperFrameBatchResult(
             relevance=relevance,
             paper_role=next(
                 (
@@ -164,7 +164,7 @@ class _BlockingFrameExtractor(_BoundedFrameExtractor):
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         with self._lock:
             self.active_calls += 1
             self.call_count += 1

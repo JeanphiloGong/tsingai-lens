@@ -16,7 +16,7 @@ from application.core.objectives.analysis.source_extraction import (
     StructuredEvidenceExtractions,
 )
 from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
@@ -159,7 +159,7 @@ class FakeObjectiveExtractor:
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
@@ -171,7 +171,7 @@ class FakeObjectiveExtractor:
             if unit.get("source_unit_id")
         ]
         if document_id in objective.get("excluded_document_ids", ()):
-            return StructuredPaperFrameBatch(
+            return PaperFrameBatchResult(
                 relevance="irrelevant",
                 paper_role="review",
                 screening_note="Excluded by objective discovery.",
@@ -195,7 +195,7 @@ class FakeObjectiveExtractor:
             if unit.get("source_kind") == "section"
             and source_unit_id not in relevant_source_unit_ids
         )
-        return StructuredPaperFrameBatch(
+        return PaperFrameBatchResult(
             relevance="high",
             paper_role="primary_experiment",
             screening_note="Paper directly supports the active research objective.",

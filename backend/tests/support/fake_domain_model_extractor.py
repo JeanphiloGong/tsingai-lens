@@ -21,7 +21,8 @@ from application.core.objectives.analysis.source_extraction import (
 	StructuredRequestedContextFact,
 )
 from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
+    PaperFrameBatchModelOutput,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
@@ -157,8 +158,31 @@ class FakeDomainModelExtractor:
             response = self.reconcile(payload)
         elif response_model is StructuredAxisCanonicalizationPlan:
             response = self.classify(payload)
-        elif response_model is StructuredPaperFrameBatch:
-            response = self.screen_batch(payload)
+        elif response_model is PaperFrameBatchModelOutput:
+            frame = self.screen_batch(payload)
+            source_labels = {
+                str(unit.get("source_unit_id") or ""): f"S{index}"
+                for index, unit in enumerate(payload.get("source_units") or (), start=1)
+                if isinstance(unit, dict) and str(unit.get("source_unit_id") or "")
+            }
+            response = PaperFrameBatchModelOutput(
+                **frame.model_dump(
+                    exclude={
+                        "relevant_source_unit_ids",
+                        "excluded_source_unit_ids",
+                    }
+                ),
+                relevant_source_labels=[
+                    source_labels[source_unit_id]
+                    for source_unit_id in frame.relevant_source_unit_ids
+                    if source_unit_id in source_labels
+                ],
+                excluded_source_labels=[
+                    source_labels[source_unit_id]
+                    for source_unit_id in frame.excluded_source_unit_ids
+                    if source_unit_id in source_labels
+                ],
+            )
         elif response_model is StructuredEvidenceSelections:
             response = self.route_source(payload)
         elif response_model is StructuredEvidenceExtractions:
@@ -429,7 +453,7 @@ class FakeDomainModelExtractor:
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
         paper_prior = payload.get("paper_prior") if isinstance(payload.get("paper_prior"), dict) else {}
         document = payload.get("document") if isinstance(payload.get("document"), dict) else {}
@@ -450,7 +474,7 @@ class FakeDomainModelExtractor:
             if str(value).strip()
         }
         if document_id in excluded_document_ids or paper_prior.get("doc_role") == "review":
-            return StructuredPaperFrameBatch(
+            return PaperFrameBatchResult(
                 relevance="irrelevant",
                 paper_role="review",
                 screening_note="Paper does not directly support the objective.",
@@ -488,7 +512,7 @@ class FakeDomainModelExtractor:
             elif source_unit_id:
                 excluded_source_unit_ids.append(source_unit_id)
 
-        return StructuredPaperFrameBatch(
+        return PaperFrameBatchResult(
             relevance="high" if paper_prior else "uncertain",
             paper_role="primary_experiment",
             screening_note="Paper directly supports the objective.",

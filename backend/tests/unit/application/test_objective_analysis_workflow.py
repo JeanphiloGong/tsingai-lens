@@ -26,7 +26,7 @@ from application.core.objectives.analysis.source_extraction import (
 )
 from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.objective_analysis_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
@@ -574,7 +574,7 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         self.frame_payloads.append(payload)
         raise RuntimeError("frame model failed")
 

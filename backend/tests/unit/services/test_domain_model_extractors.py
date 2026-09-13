@@ -36,7 +36,7 @@ from application.core.objectives.analysis.source_extraction import (
 )
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
     build_objective_paper_frame_prompt,
 )
 from application.core.objectives.discovery.axis_equivalence import (
@@ -3265,13 +3265,13 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
         }
     )
 
-    assert isinstance(frame, StructuredPaperFrameBatch)
+    assert isinstance(frame, PaperFrameBatchResult)
     assert frame.relevance == "high"
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-2"]
     assert frame.source_accounting_origin == "model"
     assert frame.source_accounting_errors == ()
-    frame_schema = StructuredPaperFrameBatch.model_json_schema()
+    frame_schema = PaperFrameBatchResult.model_json_schema()
     assert "source_accounting_origin" not in frame_schema["properties"]
     assert "source_accounting_errors" not in frame_schema["properties"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
@@ -3371,7 +3371,7 @@ def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_id
     assert frame.screening_note == "x" * 320
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert len(client.chat.completions.calls) == 1
-    assert "background" not in StructuredPaperFrameBatch.model_json_schema()[
+    assert "background" not in PaperFrameBatchResult.model_json_schema()[
         "properties"
     ]
 

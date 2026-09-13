@@ -79,11 +79,23 @@ def test_finding_review_checks_document_structure_even_after_an_abstract_search(
     assert capability_policy._pending_document_overviews(results) == ()
 
 
+def test_complete_overview_passage_satisfies_evidence_free_paper_read_without_rereading():
+    source = {"document_id": "paper-b", "source_kind": "text_window", "source_ref": "abstract-b",
+              "source_digest": "digest-b", "content_truncated": False, "content": "Only an abstract is prepared."}
+    results = {
+        "discover_research_tools": [{"source_inspection_required": True}],
+        "inspect_published_finding": [{"finding": {"paper_contributions": [{"document_id": "paper-b"}]}}],
+        "inspect_document_sources": [{"document": {"document_id": "paper-b"},
+                                      "sources": [source], "document_outline": []}],
+    }
+    assert capability_policy._pending_finding_sources(results) == ()
+
+
 def test_finding_review_requires_a_source_check_for_evidence_free_contributions():
     source = {
         "document_id": "paper-b", "source_kind": "text_window",
         "source_ref": "abstract-1", "source_digest": "digest-b",
-        "content_truncated": False,
+        "content_truncated": True,
     }
     results = {
         "discover_research_tools": [{"source_inspection_required": True}],

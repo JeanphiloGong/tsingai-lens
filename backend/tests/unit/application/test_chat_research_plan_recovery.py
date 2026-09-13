@@ -46,7 +46,8 @@ async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missi
     assert result.tool_results[1 + int(initial_schema_error)].data["draft_status"] == "abstained"
     if missing_control:
         assert result.tool_results[-2].error_code == "invalid_tool_arguments"
-        assert "controls (missing)" in result.tool_results[-2].error_message
+        assert "controls" in result.tool_results[-2].error_message
+        assert "missing" in result.tool_results[-2].error_message
     assert result.tool_results[-1].data["draft_id"]
     assert result.tool_results[-1].data["structured_plan"]
 

@@ -122,9 +122,13 @@ does not describe the original publication's total page count or prove scientifi
 absence. Resolved questions and genuinely unavailable checks permit a bounded
 partial draft; available but unchecked relevant body sections require further
 investigation. Reading within the authorized Collection needs no write approval.
-Once every Finding-linked Source has been read or has a recorded read failure,
-the correction path closes broad navigation and exposes only the transient draft
-action; remaining gaps are carried by that draft instead of prompting an open-ended crawl.
+The correction checks the prepared outlines for every contributing paper,
+including papers with no Evidence. Reading the linked Sources does not close
+the reading tools or mark the investigation complete. The Agent can inspect
+remaining relevant sections before drafting; fully read passages from an outline
+batch count as reads and do not require a duplicate individual read. Unavailable
+checks remain explicit in a partial draft. The visible reading step stays active
+until a reviewed draft is actually produced.
 Finding draft parameters describe Evidence roles relative to the proposed
 conclusion, including when it corrects a disputed parent. Missing supporting
 Evidence returns `finding_supporting_evidence_required` so argument repair can
@@ -175,7 +179,9 @@ finishing the requested draft. The loop still enforces capability availability,
 Source identity and budgets. Other draft corrections retain their requested
 action. Invalid report format or
 references receive one bounded repair using the same candidate and observations;
-real primitive-list fields and their elements are valid reference targets.
+real list fields, including lists of paper contributions, and their elements
+are valid reference targets. Repeated invalid review reports return
+`research_review_invalid`, distinct from an unavailable provider response.
 Repeated invalid reports, unresolved claims or unavailable review stop unchecked content while
 preserving completed reads. Normal capability and exact approval checks still
 apply after the correction.
@@ -219,6 +225,9 @@ have no default ceiling. Their optional environment settings accept a positive
 limit; unset or zero disables that ceiling. Usage remains observable telemetry.
 Individual model/read requests retain a 180-second timeout, cancellation and
 the repeated-observation guard. An explicit limit cannot bypass claim review.
+Model requests recheck the remaining output allowance after context preparation;
+an exhausted optional cumulative allowance cannot produce a zero or negative
+provider output limit.
 `LENS_AGENT_CONTEXT_TOKENS` defaults to 65,536 for the entire model request,
 including system instructions, tool schemas, observations, output reserve and
 protocol margin. Token counts use the existing cl100k tokenizer with 20% reserve;

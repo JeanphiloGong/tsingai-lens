@@ -2322,6 +2322,25 @@ async def test_finding_revision_keeps_source_discovery_before_required_draft() -
     assert draft.executed_arguments == [{}]
 
 
+@pytest.mark.parametrize("tokens_spent", [80000, 84109])
+async def test_context_preparation_exhausting_allowance_finalizes_without_negative_output(monkeypatch, tokens_spent):
+    from application.chat.context_builder import ChatModelContext
+
+    model = _Model(ModelTurn(content="The investigation remains incomplete; no correction was saved."))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 limits=AgentRunLimits(max_model_tokens=80000))
+
+    async def prepared(messages, tool_specs, progress, *, active_user_message_id):
+        progress.model_tokens = tokens_spent
+        return ChatModelContext(messages)
+
+    monkeypatch.setattr(runner, "_prepare_model_context", prepared)
+    result = await runner.run_turn(context=_context(), previous_messages=(), user_message="Recheck these papers.")
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert model.request_limits == [(runner.limits.max_request_seconds, runner.limits.max_finalization_output_tokens)]
+    assert not result.tool_calls
+
+
 async def test_finding_recheck_reads_its_linked_source_before_other_navigation() -> None:
     from application.chat.capabilities.document_sources import ReadSourceArguments
 
@@ -2346,9 +2365,8 @@ async def test_finding_recheck_reads_its_linked_source_before_other_navigation()
     )
     assert result.status is AgentRunStatus.COMPLETED
     assert model.tool_spec_names[1] == ("read_source",)
-    # Once the linked Source is completely read, the correction is bounded to
-    # the transient Finding draft instead of reopening broad navigation.
-    assert model.tool_spec_names[2] == ("create_finding_draft",)
+    # A linked passage does not resolve all of the researcher's source checks.
+    assert {"read_source", "create_finding_draft"}.issubset(model.tool_spec_names[2])
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == [
         "inspect_published_finding", "read_source", "create_finding_draft",
     ]

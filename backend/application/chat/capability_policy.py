@@ -229,7 +229,6 @@ def select_tool_specs(
     )
     source_grounded_intent = source_grounded_intent and not finding_review_pending
     if (source_grounded_intent and "inspect_document_sources" in registered_names
-            and not finding_draft_requested
             and _pending_document_overviews(successful_results, calls)):
         return tuple(spec for spec in specs if spec.name == "inspect_document_sources")
     if source_grounded_intent and _pending_finding_sources(successful_results, calls) and "read_source" in registered_names:
@@ -427,16 +426,9 @@ def select_tool_specs(
     elif finding_draft_requested and not mandatory_stage:
         # A Finding is the starting point of review, not proof that its Sources
         # have been checked. Keep discovered readers and discovery available.
-        if _finding_review_sources_sufficient(successful_results, calls):
-            # The linked source basis is now bounded. Do not let the model turn
-            # a correction into an unbounded literature crawl; unresolved or
-            # unavailable material remains explicit in the draft.
-            allowed_names = {"create_finding_draft"}
-            mandatory_stage = True
-        else:
-            allowed_names = {"create_finding_draft"} | loaded_names.intersection(
-                intent_policy.SOURCE_READ_CAPABILITIES | {"inspect_published_finding"}
-            )
+        allowed_names = {"create_finding_draft"} | loaded_names.intersection(
+            intent_policy.SOURCE_READ_CAPABILITIES | {"inspect_published_finding"}
+        )
     elif inspected_finding and plan_intent:
         allowed_names = {"propose_research_plan"}
     elif plan_intent:
@@ -641,12 +633,7 @@ def _pending_finding_sources(
             for item in (finding.get("paper_contributions", ()) if isinstance(finding, Mapping) else ())
             if isinstance(item, Mapping) and item.get("document_id")
         }
-        read_documents = {
-            str(item.get("document_id") or "").strip()
-            for name in ("read_source", "inspect_table")
-            for item in successful_results.get(name, ())
-            if item.get("document_id")
-        }
+        read_documents = {identity[0] for identity in complete_source_reads(successful_results)}
         failed_documents = {
             str(call.arguments.get("document_id") or "").strip()
             for call in calls
@@ -669,40 +656,6 @@ def _pending_finding_sources(
                     pending.append(candidate)
                     break
     return tuple(pending)
-
-
-def _finding_review_sources_sufficient(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
-) -> bool:
-    """Return whether the review has a bounded source basis for drafting.
-
-    A correction request must inspect the exact Sources linked to the published
-    Finding before proposing a replacement. Once every linked Source is either
-    completely read or has a recorded failed read, further broad navigation is
-    not a prerequisite for a draft; the draft can carry the unresolved gap.
-    """
-    if not any(item.get("source_inspection_required") is True
-               for item in successful_results.get("discover_research_tools", ())):
-        return False
-    if not successful_results.get("inspect_published_finding"):
-        return False
-    if _pending_finding_sources(successful_results, calls):
-        return False
-    if has_successful_exact_source_read(successful_results):
-        return True
-    linked = {
-        tuple(str(item.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
-        for result in successful_results.get("inspect_published_finding", ())
-        for item in (*result.get("evidence", ()), *result.get("replacement_evidence", ()))
-        if isinstance(item, Mapping)
-    }
-    return any(
-        call.name in {"read_source", "inspect_table"}
-        and call.status is ToolCallStatus.FAILED
-        and tuple(str(call.arguments.get(key) or "") for key in ("document_id", "source_kind", "source_ref")) in linked
-        for call in calls
-    )
 
 
 def _section_reading_progress(
@@ -960,7 +913,7 @@ def stage_instruction(
                 "coverage gap instead of rereading the same content:\n"
                 + json.dumps(coverage, ensure_ascii=False)
             )
-    elif ("create_finding_draft" in tool_names
+    if ("create_finding_draft" in tool_names
           and successful_results.get("inspect_published_finding")
           and not has_successful_exact_source_read(successful_results)):
         content = (
@@ -982,17 +935,10 @@ def stage_instruction(
             "or unavailable checks. Use abstention_reason only when there is no defensible "
             "statement, and then omit statement, assertion_strength, and all Evidence role IDs."
         )
-    elif (
-        "create_finding_draft" in tool_names
-        and _finding_review_sources_sufficient(successful_results, calls)
-    ):
-        content = (
-            "The linked Source review is complete for this bounded correction. "
-            "Call create_finding_draft now with the supported correction and explicit "
-            "unresolved or unavailable checks; do not broaden the literature search."
-        )
     elif "create_finding_draft" in tool_names and has_successful_exact_source_read(successful_results):
         content = (
+            (content + "\n\n" if content else "")
+            +
             "Complete the researcher's investigation before the Finding revision. Use each document_outline "
             "to locate sections that can resolve the disputed material state, treatment, comparator, "
             "measurement and result. Read these relevant sections progressively with heading_path, "

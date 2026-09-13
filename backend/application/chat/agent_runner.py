@@ -184,9 +184,6 @@ class _RunProgress:
             return
         transitions = {
             "inspect_published_finding": ("inspect_finding", "inspect_sources"),
-            "inspect_document_sources": ("inspect_sources", "validate_claim"),
-            "read_source": ("inspect_sources", "validate_claim"),
-            "inspect_table": ("inspect_sources", "validate_claim"),
             "create_finding_draft": ("validate_claim", "approval"),
         }
         transition = transitions.get(tool_name)
@@ -195,7 +192,7 @@ class _RunProgress:
         current, next_step = transition
         if tool_name == "create_finding_draft":
             for item in self.research_plan:
-                if item["id"] in {"validate_claim", "draft_finding"}:
+                if item["id"] in {"inspect_sources", "validate_claim", "draft_finding"}:
                     item["status"] = "completed"
             next_step = "approval"
         current_item = next((item for item in self.research_plan if item["id"] == current), None)
@@ -653,6 +650,11 @@ class ResearchAgentRunner:
                     progress.trace(context, phase="model", capability_names=tool_names,
                                    requested_count=len(turn.tool_calls))
                 except ModelResponseError as exc:
+                    if exc.reason == "model_allowance_exhausted":
+                        return await self._finalize_with_current_evidence(
+                            AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
+                            checkpoint=checkpoint, text_delta_callback=text_delta_callback,
+                        )
                     model_name = str(
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
@@ -899,6 +901,9 @@ class ResearchAgentRunner:
         if finalizing:
             timeout = min(timeout, self.limits.max_finalization_seconds)
             output_limit = self.limits.max_finalization_output_tokens
+        if output_limit <= 0:
+            raise ModelResponseError("The configured model allowance is exhausted.",
+                                     reason="model_allowance_exhausted", retryable=False)
         if model_context.compacting:
             output_limit = min(output_limit, 8192)
         if timeout <= 0:
@@ -1182,9 +1187,15 @@ class ResearchAgentRunner:
                         report = ResearchClaimReview.model_validate_json(extract_json_object(reviewed.content))
                         self._validate_research_review(report, candidate_fields, observations)
                         break
-                    except ValueError:
+                    except ValueError as exc:
+                        logger.warning(
+                            "Research claim review validation failed kind=%s attempt=%d",
+                            "schema" if isinstance(exc, ValidationError) else "format_or_reference",
+                            validation_attempt + 1,
+                        )
                         if validation_attempt:
-                            raise
+                            raise ModelResponseError("Research review references or format are invalid.",
+                                                     reason="research_review_invalid", retryable=False) from None
                         review_input["invalid_report"] = reviewed.content
                         review_input["validation_feedback"] = (
                             "The review format or references are invalid. Return a complete review using only "
@@ -1195,6 +1206,8 @@ class ResearchAgentRunner:
                 issues = [check for check in report.checks if check.verdict in {"revise", "unverified"}]
                 logger.info("Research claim review attempt=%d checks=%d issues=%d", attempt + 1, len(report.checks), len(issues))
             except ModelResponseError as exc:
+                if exc.reason == "research_review_invalid":
+                    raise
                 logger.warning(
                     "Research claim review unavailable exception_type=%s retryable=%s",
                     type(exc).__name__,
@@ -1349,8 +1362,7 @@ class ResearchAgentRunner:
         if isinstance(value, (Mapping, list, tuple)) and not value:
             return {path: json.dumps(value)}
         children = value.items() if isinstance(value, Mapping) else enumerate(value) if isinstance(value, (list, tuple)) else ()
-        container = ({path: json.dumps(value, ensure_ascii=False)} if isinstance(value, (list, tuple))
-                     and all(item is None or isinstance(item, (str, bool, int, float)) for item in value) else {})
+        container = {path: json.dumps(value, ensure_ascii=False)} if isinstance(value, (list, tuple)) else {}
         return container | {
             ref: text for key, child in children
             for ref, text in ResearchAgentRunner._review_candidate_fields(
@@ -1655,7 +1667,7 @@ class ResearchAgentRunner:
             "This turn could not be completed. Obtained results were preserved; the technical "
             "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
         )
-        if review_reason in {"research_claim_unresolved", "research_review_unavailable"}:
+        if review_reason in {"research_claim_unresolved", "research_review_unavailable", "research_review_invalid"}:
             lead = (
                 "本轮内容尚未通过来源范围与测量指标核对，暂不返回未经确认的结论或新草案。已取得的阅读结果已保留；这不代表论文没有相关证据。"
                 if chinese else

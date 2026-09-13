@@ -413,6 +413,43 @@ def test_observation_fields_preserve_empty_null_and_zero_without_inventing_missi
     assert "/not_reported" not in fields
 
 
+def test_review_can_cite_paper_contributions_as_an_observed_object_list():
+    from application.chat.model import ResearchClaimReview
+
+    papers = [{"document_id": "paper-a", "supporting_evidence_ids": ["evidence-a"]},
+              {"document_id": "paper-b", "supporting_evidence_ids": []}]
+    observations = {"finding-read": {"kind": "inspect_published_finding", "data": {
+        "finding": {"paper_contributions": papers},
+    }}}
+    report = ResearchClaimReview.model_validate_json(_report(
+        "paper_scope", "Only one of the two papers has supporting evidence.",
+        reference="finding-read", field_path="/finding/paper_contributions",
+    ).content)
+    rendered = ResearchAgentRunner._review_observations_for_model(observations)
+    assert json.loads(rendered[0]["fields"]["/finding/paper_contributions"]) == papers
+    ResearchAgentRunner._validate_research_review(report, {"/content": "Both papers agree."}, observations)
+    report.checks[0].basis[0].field_path = "/finding/paper_contributions/2"
+    with pytest.raises(ValueError):
+        ResearchAgentRunner._validate_research_review(report, {"/content": "Both papers agree."}, observations)
+
+
+@pytest.mark.anyio
+async def test_invalid_review_references_are_distinguished_from_provider_failure():
+    from application.chat.agent_runner import _RunProgress
+    from application.chat.model import ModelResponseError
+
+    invalid = _report("paper_scope", "Check scope.", reference="missing-observation")
+    model = _ReviewModel(invalid, invalid)
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    with pytest.raises(ModelResponseError) as error:
+        await runner._review_research_turn(
+            ModelTurn(content="All papers agree."), ChatModelContext(_messages("Check the papers.")),
+            (), _RunProgress(runner.limits), None,
+        )
+    assert error.value.reason == "research_review_invalid"
+    assert len(model.contexts) == 2
+
+
 def test_review_can_cite_an_observed_evidence_list_or_its_exact_member():
     from application.chat.model import ResearchClaimReview
 

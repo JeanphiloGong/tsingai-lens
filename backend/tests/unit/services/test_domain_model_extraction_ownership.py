@@ -2,7 +2,8 @@ from pathlib import Path
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelections,
+    EvidenceSelectionModelOutput,
+    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
@@ -56,7 +57,10 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         PaperFrameBatchResult: (
             "application.core.objectives.analysis.source_screening"
         ),
-        StructuredEvidenceSelections: (
+        EvidenceSelectionModelOutput: (
+            "application.core.objectives.analysis.evidence_routing"
+        ),
+        EvidenceSelectionsModelOutput: (
             "application.core.objectives.analysis.evidence_routing"
         ),
         StructuredEvidenceExtractions: (

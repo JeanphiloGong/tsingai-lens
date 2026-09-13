@@ -17,7 +17,7 @@ from application.core.objectives.analysis.finding_synthesis import (
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
-    StructuredEvidenceSelections,
+    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
@@ -565,7 +565,7 @@ class _FailingRouteExtractor(_ObjectiveExtractor):
     def route_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
+    ) -> EvidenceSelectionsModelOutput:
         self.route_payloads.append(payload)
         raise RuntimeError("route model failed")
 

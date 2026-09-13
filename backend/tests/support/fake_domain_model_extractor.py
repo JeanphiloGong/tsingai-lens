@@ -7,8 +7,8 @@ from typing import Any
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
+    EvidenceSelectionModelOutput,
+    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
@@ -183,7 +183,7 @@ class FakeDomainModelExtractor:
                     if source_unit_id in source_labels
                 ],
             )
-        elif response_model is StructuredEvidenceSelections:
+        elif response_model is EvidenceSelectionsModelOutput:
             response = self.route_source(payload)
         elif response_model is StructuredEvidenceExtractions:
             response = self.extract_source(_source_extraction_payload(user_prompt))
@@ -531,7 +531,7 @@ class FakeDomainModelExtractor:
     def route_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
+    ) -> EvidenceSelectionsModelOutput:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
         outcomes = [
             str(value).lower()
@@ -541,7 +541,7 @@ class FakeDomainModelExtractor:
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         candidates = [payload["current_source"]]
-        routes: list[StructuredEvidenceSelection] = []
+        routes: list[EvidenceSelectionModelOutput] = []
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
@@ -551,7 +551,7 @@ class FakeDomainModelExtractor:
                 continue
             if candidate.get("frame_status") == "excluded":
                 routes.append(
-                    StructuredEvidenceSelection(
+                    EvidenceSelectionModelOutput(
                         role="low_value_or_irrelevant",
                         extractable=False,
                         confidence=0.7,
@@ -588,7 +588,7 @@ class FakeDomainModelExtractor:
                     else "process_or_treatment"
                 )
                 routes.append(
-                    StructuredEvidenceSelection(
+                    EvidenceSelectionModelOutput(
                         role=role,
                         extractable=True,
                         confidence=0.82,
@@ -596,13 +596,13 @@ class FakeDomainModelExtractor:
                 )
                 continue
             routes.append(
-                StructuredEvidenceSelection(
+                EvidenceSelectionModelOutput(
                     role="process_or_treatment",
                     extractable=True,
                     confidence=0.72,
                 )
             )
-        return StructuredEvidenceSelections(selections=routes)
+        return EvidenceSelectionsModelOutput(selections=routes)
 
     def extract_source(
         self,

@@ -75,7 +75,7 @@ Non-negotiable rules:
 """.strip()
 
 
-class StructuredEvidenceSelection(BaseModel):
+class EvidenceSelectionModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     role: Literal[
@@ -111,10 +111,10 @@ class StructuredEvidenceSelection(BaseModel):
         )
 
 
-class StructuredEvidenceSelections(BaseModel):
+class EvidenceSelectionsModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    selections: list[StructuredEvidenceSelection] = Field(
+    selections: list[EvidenceSelectionModelOutput] = Field(
         default_factory=list,
         max_length=1,
     )
@@ -228,20 +228,20 @@ class ObjectiveEvidenceRouter:
     def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
-    def route_source(self, payload: dict[str, Any]) -> StructuredEvidenceSelections:
+    def route_source(self, payload: dict[str, Any]) -> EvidenceSelectionsModelOutput:
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
         response = self.response_client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredEvidenceSelections,
+            response_model=EvidenceSelectionsModelOutput,
             max_completion_tokens=_ROUTE_MAX_COMPLETION_TOKENS,
             force_json_text=True,
             task_type="objective_evidence_route",
             prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
         )
-        if not isinstance(response, StructuredEvidenceSelections):
+        if not isinstance(response, EvidenceSelectionsModelOutput):
             raise TypeError("unexpected objective evidence route response type")
         return response
 

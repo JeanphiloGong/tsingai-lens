@@ -17,7 +17,8 @@ from application.core.document_profiles.extraction import (
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
     ObjectiveEvidenceRouter,
-    StructuredEvidenceSelections,
+    EvidenceSelectionModelOutput,
+    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.finding_synthesis import (
     FindingAssertionJudge,
@@ -3909,9 +3910,17 @@ def test_domain_model_extractors_validates_objective_evidence_routes_response():
         }
     )
 
-    assert isinstance(routes, StructuredEvidenceSelections)
-    assert routes.selections[0].role == "current_experimental_evidence"
-    assert "reason" not in routes.selections[0].model_dump()
+    assert isinstance(routes, EvidenceSelectionsModelOutput)
+    assert isinstance(routes.selections[0], EvidenceSelectionModelOutput)
+    assert routes.model_dump() == {
+        "selections": [
+            {
+                "role": "current_experimental_evidence",
+                "extractable": True,
+                "confidence": 0.88,
+            }
+        ]
+    }
 
 
 def test_domain_model_extractors_rejects_legacy_objective_route_batches():
@@ -4739,7 +4748,7 @@ def test_domain_model_extractors_routes_objective_selections_directly_to_bounded
         }
     )
 
-    assert routes == StructuredEvidenceSelections()
+    assert routes == EvidenceSelectionsModelOutput()
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
     assert text_call["max_completion_tokens"] == 512

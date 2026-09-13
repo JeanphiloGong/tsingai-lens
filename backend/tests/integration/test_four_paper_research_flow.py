@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
+    EvidenceSelectionModelOutput,
+    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
@@ -197,14 +197,14 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             warnings=[],
         )
 
-    def route_source(self, payload: dict[str, Any]) -> StructuredEvidenceSelections:
+    def route_source(self, payload: dict[str, Any]) -> EvidenceSelectionsModelOutput:
         source = payload.get("current_source") or {}
         if not isinstance(source, dict) or not source.get("source_ref"):
-            return StructuredEvidenceSelections()
+            return EvidenceSelectionsModelOutput()
         text = str(source.get("text_hint") or "").casefold()
-        return StructuredEvidenceSelections(
+        return EvidenceSelectionsModelOutput(
             selections=[
-                StructuredEvidenceSelection(
+                EvidenceSelectionModelOutput(
                     role=(
                         "current_experimental_evidence"
                         if "decreased porosity from" in text

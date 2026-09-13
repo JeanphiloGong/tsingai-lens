@@ -4,8 +4,8 @@ from typing import Any
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
+    EvidenceSelectionModelOutput,
+    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
@@ -236,17 +236,17 @@ class FakeObjectiveExtractor:
     def route_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
+    ) -> EvidenceSelectionsModelOutput:
         self.route_payloads.append(payload)
         objective = payload["objective"]
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         candidates = [payload["current_source"]]
-        routes: list[StructuredEvidenceSelection] = []
+        routes: list[EvidenceSelectionModelOutput] = []
         for candidate in candidates:
             if candidate["frame_status"] == "excluded":
                 routes.append(
-                    StructuredEvidenceSelection(
+                    EvidenceSelectionModelOutput(
                         role="low_value_or_irrelevant",
                         extractable=False,
                         confidence=0.7,
@@ -255,7 +255,7 @@ class FakeObjectiveExtractor:
                 continue
             if candidate["source_kind"] == "text_window":
                 routes.append(
-                    StructuredEvidenceSelection(
+                    EvidenceSelectionModelOutput(
                         role="process_or_treatment",
                         extractable=True,
                         confidence=0.72,
@@ -289,13 +289,13 @@ class FakeObjectiveExtractor:
                 else "process_or_treatment"
             )
             routes.append(
-                StructuredEvidenceSelection(
+                EvidenceSelectionModelOutput(
                     role=role,
                     extractable=True,
                     confidence=0.82,
                 )
             )
-        return StructuredEvidenceSelections(selections=routes)
+        return EvidenceSelectionsModelOutput(selections=routes)
 
     def extract_source(
         self,

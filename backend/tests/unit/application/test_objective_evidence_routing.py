@@ -587,7 +587,7 @@ def test_direct_result_source_is_recalled_when_router_returns_empty_selection() 
 
     class EmptyRouter:
         def route_source(self, payload):  # noqa: ANN001
-            return evidence_routing.StructuredEvidenceSelections(selections=[])
+            return evidence_routing.EvidenceSelectionsModelOutput(selections=[])
 
     objective = _research_objective(
         {

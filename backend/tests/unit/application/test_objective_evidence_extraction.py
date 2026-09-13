@@ -24,7 +24,7 @@ from application.core.objectives.analysis.diagnostics import (
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
     _extract_source_round,
 )
@@ -402,7 +402,7 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
             self.payloads.append(payload)
             source_ref = payload["source"]["source_ref"]
             if source_ref == "results-strength":
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {
                         "extractions": [
                             {
@@ -458,7 +458,7 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
                         ]
                     }
                 )
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     extractor = CapturingExtractor()
     drafts = _extract_source_round(
@@ -803,7 +803,7 @@ def test_empty_context_inspection_preserves_route_scope_for_later_result_read() 
 def test_bundle_provenance_keeps_only_sources_matching_result_conditions() -> None:
     """Bundle provenance is field-supported rather than whole-bundle provenance."""
 
-    item = source_extraction.StructuredEvidenceExtraction.model_validate(
+    item = source_extraction.EvidenceExtractionModelOutput.model_validate(
         {
             "evidence_role": "direct_result",
             "changed_variables": [
@@ -3672,7 +3672,7 @@ class _StudySourceEvidenceExtractor:
         if source_ref == self.failing_source_ref:
             raise RuntimeError("objective evidence provider unavailable")
         record = self.records_by_source_ref[source_ref]
-        return StructuredEvidenceExtractions.model_validate(
+        return EvidenceExtractionsModelOutput.model_validate(
             {"extractions": [record] if record is not None else []}
         )
 
@@ -3799,7 +3799,7 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
 
     class OmittedConfidenceExtractor:
         def extract_source(self, payload):  # noqa: ANN001
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -4012,7 +4012,7 @@ def test_method_context_is_not_created_for_paper_outside_objective_route_scope()
 
     class EmptyExtractor:
         def extract_source(self, payload: dict[str, Any]):
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     drafts = _extract_source_round(
         collection_id="col-test",
@@ -7114,7 +7114,7 @@ def test_partial_result_keeps_source_fact_and_binds_context_without_revisit() ->
             prior_evidence = payload["document_state"].get("prior_evidence") or []
             self.calls.append((source_ref, bool(prior_evidence)))
             if source_ref == "01-methods":
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {
                         "extractions": [
                             {
@@ -7141,10 +7141,10 @@ def test_partial_result_keeps_source_fact_and_binds_context_without_revisit() ->
                     }
                 )
             if source_ref == "03-results":
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {"extractions": [direct_record]}
                 )
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     extractor = RevisitExtractor()
     drafts = extract_and_validate_source_facts(
@@ -7283,7 +7283,7 @@ def test_context_closure_uses_new_same_paper_label_in_a_later_round() -> None:
                     "confidence": 0.9,
                 },
             }
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {"extractions": [records[source_ref]]}
             )
 
@@ -7441,8 +7441,8 @@ def test_empty_result_is_not_reinterpreted_after_same_paper_context_closure() ->
             source_ref = str(payload["source"]["source_ref"])
             self.calls.append(source_ref)
             if source_ref == "03-results":
-                return StructuredEvidenceExtractions()
-            return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput()
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -7759,7 +7759,7 @@ def test_research_objective_binds_directional_result_series_to_process_table() -
 
 
 def test_objective_extraction_contract_keeps_result_comparison_values() -> None:
-    response = StructuredEvidenceExtractions.model_validate(
+    response = EvidenceExtractionsModelOutput.model_validate(
         {
             "extractions": [
                 {
@@ -7797,7 +7797,7 @@ def test_objective_extraction_contract_keeps_result_comparison_values() -> None:
 
 
 def test_objective_extraction_contract_preserves_multiple_atomic_results() -> None:
-    response = StructuredEvidenceExtractions.model_validate(
+    response = EvidenceExtractionsModelOutput.model_validate(
         {
             "extractions": [
                 {
@@ -7864,7 +7864,7 @@ def test_source_extraction_persists_each_atomic_result_from_one_source() -> None
 
     class MultiResultExtractor:
         def extract_source(self, _payload):
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -10935,7 +10935,7 @@ def test_context_repair_keeps_manufacturing_facts_out_of_test_context() -> None:
 
 
 def test_process_context_output_contract_materializes_only_requested_family() -> None:
-    parsed = source_extraction.StructuredRequestedContextFacts.model_validate(
+    parsed = source_extraction.RequestedContextFactsModelOutput.model_validate(
         {
             "facts": [
                 {
@@ -10962,7 +10962,7 @@ def test_process_context_output_contract_materializes_only_requested_family() ->
     assert extracted.extractions[0].scientific_context.test == []
 
     with pytest.raises(ValueError, match="context_scope"):
-        source_extraction.StructuredRequestedContextFacts.model_validate(
+        source_extraction.RequestedContextFactsModelOutput.model_validate(
             {"facts": [{"name": "machine", "value": "System M"}]}
         )
 
@@ -10995,7 +10995,7 @@ def test_result_role_with_only_groundable_context_is_preserved_as_context() -> N
     }
 
     normalized = source_extraction._normalize_objective_evidence_payload(payload)
-    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+    parsed = source_extraction.EvidenceExtractionsModelOutput.model_validate(normalized)
 
     assert len(parsed.extractions) == 1
     extraction = parsed.extractions[0]
@@ -11028,7 +11028,7 @@ def test_context_role_with_reported_result_is_preserved_as_result() -> None:
     }
 
     normalized = source_extraction._normalize_objective_evidence_payload(payload)
-    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+    parsed = source_extraction.EvidenceExtractionsModelOutput.model_validate(normalized)
 
     assert len(parsed.extractions) == 1
     extraction = parsed.extractions[0]
@@ -11057,7 +11057,7 @@ def test_result_role_without_result_or_context_remains_invalid() -> None:
     normalized = source_extraction._normalize_objective_evidence_payload(payload)
 
     with pytest.raises(ValueError, match="result evidence requires one reported result"):
-        source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+        source_extraction.EvidenceExtractionsModelOutput.model_validate(normalized)
 
 
 def test_research_objective_prompt_separates_result_and_context_authority() -> None:
@@ -11150,7 +11150,7 @@ def test_narrow_test_context_prompt_requires_explicit_outcome_applicability() ->
 
 
 def test_context_scope_survives_model_validation_and_source_grounding() -> None:
-    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(
+    parsed = source_extraction.EvidenceExtractionsModelOutput.model_validate(
         {
             "extractions": [
                 {
@@ -11533,9 +11533,9 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             self.unit_payloads.append(payload)
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     extractor = PayloadCaptureExtractor()
 
@@ -12353,7 +12353,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
 
         def extract_source(self, _payload):
             self.calls += 1
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     repair_extractor = RouteScopedRepairExtractor()
     evidence_extractor = UnexpectedEvidenceExtractor()
@@ -12469,7 +12469,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
 
         def extract_source(self, _payload):
             self.calls += 1
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     evidence_extractor = UnexpectedEvidenceExtractor()
     repair_extractor = UnusableRepairExtractor()
@@ -12544,7 +12544,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
 
         def extract_source(self, _payload):
             self.calls += 1
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     repair_extractor = FailingPaperFactsExtractor()
     evidence_extractor = UnexpectedEvidenceExtractor()

@@ -28,9 +28,9 @@ from application.core.objectives.analysis.finding_synthesis import (
 )
 from application.core.objectives.analysis.source_extraction import (
     ObjectiveSourceExtractor,
-    StructuredEvidenceContext,
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceContextModelOutput,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
     _normalize_objective_evidence_payload,
     _objective_evidence_repair_instruction,
     build_objective_evidence_prompt,
@@ -4064,7 +4064,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
         }
     )
 
-    assert isinstance(extractions, StructuredEvidenceExtractions)
+    assert isinstance(extractions, EvidenceExtractionsModelOutput)
     extraction = extractions.extractions[0]
     assert extraction.evidence_role == "direct_result"
     assert extraction.changed_variables[0].name == "heat treatment"
@@ -4104,7 +4104,7 @@ def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
 
 
 def test_structured_objective_evidence_normalizes_compact_context_attributes():
-    context = StructuredEvidenceContext.model_validate(
+    context = EvidenceContextModelOutput.model_validate(
         {
             "material": ["316L stainless steel"],
             "sample": [
@@ -4150,7 +4150,7 @@ def test_structured_objective_evidence_rejects_single_variable_joint_effect():
         ValidationError,
         match="joint effect requires multiple changed variables",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4187,7 +4187,7 @@ def test_structured_objective_evidence_rejects_repeated_variable_intervals():
         ValidationError,
         match="changed variable names must be unique per extraction",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4230,7 +4230,7 @@ def test_structured_objective_evidence_rejects_unbound_experimental_attribution(
         ValidationError,
         match="experimental attribution requires baseline and target values",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4475,7 +4475,7 @@ def test_structured_objective_evidence_rejects_unchanged_factor_as_changed_varia
         ValidationError,
         match="changed variables require distinct baseline and target values",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4507,7 +4507,7 @@ def test_structured_objective_evidence_rejects_unchanged_factor_as_changed_varia
 
 
 def test_structured_objective_evidence_allows_unbound_variable_draft():
-    extraction = StructuredEvidenceExtraction.model_validate(
+    extraction = EvidenceExtractionModelOutput.model_validate(
         {
             "evidence_role": "direct_result",
             "changed_variables": [
@@ -4766,7 +4766,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient(
         '{"extractions":[]}',
-        parsed=StructuredEvidenceExtractions(),
+        parsed=EvidenceExtractionsModelOutput(),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 
@@ -4779,7 +4779,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
         }
     )
 
-    assert units == StructuredEvidenceExtractions()
+    assert units == EvidenceExtractionsModelOutput()
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
     assert text_call["max_completion_tokens"] == 3072
@@ -4789,7 +4789,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
     )
     assert text_call["response_format"]["json_schema"]["strict"] is True
     assert text_call["response_format"]["json_schema"]["schema"] == (
-        StructuredEvidenceExtractions.model_json_schema()
+        EvidenceExtractionsModelOutput.model_json_schema()
     )
     assert "JSON schema:" not in text_call["messages"][1]["content"]
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"

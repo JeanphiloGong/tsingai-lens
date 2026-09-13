@@ -17,8 +17,8 @@ from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesisItem,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
@@ -216,20 +216,20 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             ]
         )
 
-    def extract_source(self, payload: dict[str, Any]) -> StructuredEvidenceExtractions:
+    def extract_source(self, payload: dict[str, Any]) -> EvidenceExtractionsModelOutput:
         source = payload.get("source") or {}
         text = str(source.get("text") or "").strip()
         lowered = text.casefold()
         if "decreased porosity from" not in lowered:
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
         stress_relaxed = "stress-relieved sample state" in lowered
         values = (1.5, 0.6) if stress_relaxed else (1.9, 0.7)
         if "2.4%" in text:
             values = (2.4, 0.8)
-        return StructuredEvidenceExtractions(
+        return EvidenceExtractionsModelOutput(
             extractions=[
-                StructuredEvidenceExtraction(
+                EvidenceExtractionModelOutput(
                     evidence_role="direct_result",
                     changed_variables=[
                         {

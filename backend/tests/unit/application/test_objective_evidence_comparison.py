@@ -20,8 +20,8 @@ from application.core.objectives.analysis.diagnostics import (
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
@@ -780,13 +780,13 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped():
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             self.payloads.append(payload)
             source_ref = payload["evidence_route"]["source_ref"]
             if source_ref == "paper-1-methods":
-                return StructuredEvidenceExtractions(
+                return EvidenceExtractionsModelOutput(
                     extractions=[
-                        StructuredEvidenceExtraction(
+                        EvidenceExtractionModelOutput(
                             evidence_role="condition_context",
                             attribution_scope="descriptive_only",
                             scientific_context={
@@ -803,9 +803,9 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped():
                         )
                     ]
                 )
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="direct_result",
                         changed_variables=[
                             {
@@ -936,13 +936,13 @@ def test_objective_evidence_continues_after_one_route_format_failure():
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             self.calls += 1
             if self.calls == 1:
                 raise ValueError("invalid structured response")
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="descriptive_only",
                         scientific_context={
@@ -1015,9 +1015,9 @@ def test_objective_evidence_routes_round_robin_across_documents():
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             self.source_refs.append(payload["evidence_route"]["source_ref"])
-            return StructuredEvidenceExtractions(extractions=[])
+            return EvidenceExtractionsModelOutput(extractions=[])
 
     extractor = RecordingExtractor()
     objective = _research_objective(
@@ -1083,7 +1083,7 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             source_ref = payload["evidence_route"]["source_ref"]
             self.source_refs.append(source_ref)
             if source_ref == "paper-1-a-results":
@@ -1091,9 +1091,9 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
                     message="provider failure",
                     request=Request("POST", "http://llm.test/v1/chat/completions"),
                 )
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="descriptive_only",
                         scientific_context={
@@ -1181,7 +1181,7 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             source_ref = payload["evidence_route"]["source_ref"]
             self.source_refs.append(source_ref)
             if source_ref == "paper-1-invalid":
@@ -1191,9 +1191,9 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
                     response=Response(400, request=request),
                     body=None,
                 )
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="descriptive_only",
                         scientific_context={
@@ -1467,10 +1467,10 @@ def test_objective_context_drops_model_changed_variable_without_values():
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
-            return StructuredEvidenceExtractions(
+        ) -> EvidenceExtractionsModelOutput:
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         changed_variables=[
                             {"name": "build platform preheating temperature"}

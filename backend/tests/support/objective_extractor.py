@@ -12,8 +12,8 @@ from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesisItem,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
 )
 from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchResult,
@@ -300,14 +300,14 @@ class FakeObjectiveExtractor:
     def extract_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceExtractions:
+    ) -> EvidenceExtractionsModelOutput:
         self.unit_payloads.append(payload)
         route = payload["evidence_route"]
         source = payload["source"]
         if route["source_kind"] == "table":
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="direct_result",
                         changed_variables=[
                             {
@@ -352,9 +352,9 @@ class FakeObjectiveExtractor:
                 ]
             )
         if source.get("text"):
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="descriptive_only",
                         scientific_context={
@@ -383,7 +383,7 @@ class FakeObjectiveExtractor:
                     )
                 ]
             )
-        return StructuredEvidenceExtractions()
+        return EvidenceExtractionsModelOutput()
 
     def judge_result_set(
         self,

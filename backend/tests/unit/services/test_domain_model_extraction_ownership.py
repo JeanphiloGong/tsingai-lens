@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceSelectionModelOutput,
@@ -9,7 +11,19 @@ from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredEvidenceExtractions,
+    DirectEvidenceExtractionModelOutput,
+    DirectEvidenceExtractionsModelOutput,
+    DirectEvidenceResultModelOutput,
+    EvidenceAttributeModelOutput,
+    EvidenceComparisonModelOutput,
+    EvidenceContextModelOutput,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
+    EvidenceResultModelOutput,
+    EvidenceVariableModelOutput,
+    ObjectiveSourceExtractor,
+    RequestedContextFactModelOutput,
+    RequestedContextFactsModelOutput,
 )
 from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchModelOutput,
@@ -63,9 +77,6 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         EvidenceSelectionsModelOutput: (
             "application.core.objectives.analysis.evidence_routing"
         ),
-        StructuredEvidenceExtractions: (
-            "application.core.objectives.analysis.source_extraction"
-        ),
         StructuredFindingSynthesis: (
             "application.core.objectives.analysis.finding_synthesis"
         ),
@@ -75,6 +86,27 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         response_model.__module__ == owner
         for response_model, owner in expected_owners.items()
     )
+
+
+@pytest.mark.parametrize(
+    "output_model",
+    [
+        EvidenceAttributeModelOutput,
+        EvidenceVariableModelOutput,
+        EvidenceComparisonModelOutput,
+        EvidenceResultModelOutput,
+        EvidenceContextModelOutput,
+        EvidenceExtractionModelOutput,
+        EvidenceExtractionsModelOutput,
+        DirectEvidenceResultModelOutput,
+        DirectEvidenceExtractionModelOutput,
+        DirectEvidenceExtractionsModelOutput,
+        RequestedContextFactModelOutput,
+        RequestedContextFactsModelOutput,
+    ],
+)
+def test_source_extraction_owns_its_model_outputs(output_model: type) -> None:
+    assert output_model.__module__ == ObjectiveSourceExtractor.__module__
 
 
 def test_paper_facts_retains_only_the_active_table_repair_contract() -> None:

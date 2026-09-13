@@ -519,7 +519,7 @@ def _normalize_list_container(value: object) -> object:
     return [] if value is None else value
 
 
-class _SourceExtractionResponse(BaseModel):
+class _SourceExtractionContractBase(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     @field_validator("confidence", mode="before", check_fields=False)
@@ -533,7 +533,7 @@ class _SourceExtractionResponse(BaseModel):
 ScientificScalar = str | int | float | bool
 
 
-class StructuredEvidenceAttribute(_SourceExtractionResponse):
+class EvidenceAttributeModelOutput(_SourceExtractionContractBase):
     name: str
     value: ScientificScalar
     unit: str | None = None
@@ -557,14 +557,14 @@ class StructuredEvidenceAttribute(_SourceExtractionResponse):
         return _normalize_list_container(value)
 
 
-class StructuredEvidenceVariable(_SourceExtractionResponse):
+class EvidenceVariableModelOutput(_SourceExtractionContractBase):
     name: str
     baseline_value: ScientificScalar | None = None
     target_value: ScientificScalar | None = None
     unit: str | None = None
 
 
-class StructuredEvidenceComparison(_SourceExtractionResponse):
+class EvidenceComparisonModelOutput(_SourceExtractionContractBase):
     baseline_label: str
     target_label: str
     axis_names: list[str] = Field(min_length=1)
@@ -572,7 +572,7 @@ class StructuredEvidenceComparison(_SourceExtractionResponse):
     incomparability_reasons: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_comparability(self) -> "StructuredEvidenceComparison":
+    def _validate_comparability(self) -> "EvidenceComparisonModelOutput":
         if not self.comparable and not self.incomparability_reasons:
             raise ValueError("incomparable evidence requires reasons")
         if self.comparable and self.incomparability_reasons:
@@ -580,7 +580,7 @@ class StructuredEvidenceComparison(_SourceExtractionResponse):
         return self
 
 
-class StructuredEvidenceResult(_SourceExtractionResponse):
+class EvidenceResultModelOutput(_SourceExtractionContractBase):
     outcome: str
     value: ScientificScalar | None = None
     baseline_value: ScientificScalar | None = None
@@ -631,11 +631,11 @@ class StructuredEvidenceResult(_SourceExtractionResponse):
         )
 
 
-class StructuredEvidenceContext(_SourceExtractionResponse):
-    material: list[StructuredEvidenceAttribute] = Field(default_factory=list)
-    sample: list[StructuredEvidenceAttribute] = Field(default_factory=list)
-    process: list[StructuredEvidenceAttribute] = Field(default_factory=list)
-    test: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+class EvidenceContextModelOutput(_SourceExtractionContractBase):
+    material: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
+    sample: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
+    process: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
+    test: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
 
     @field_validator("material", "sample", "process", "test", mode="before")
     @classmethod
@@ -645,7 +645,7 @@ class StructuredEvidenceContext(_SourceExtractionResponse):
             return items
         normalized_items: list[object] = []
         for item in items:
-            if isinstance(item, StructuredEvidenceAttribute):
+            if isinstance(item, EvidenceAttributeModelOutput):
                 normalized_items.append(item)
                 continue
             if isinstance(item, (str, int, float, bool)):
@@ -711,13 +711,13 @@ class StructuredEvidenceContext(_SourceExtractionResponse):
         return normalized_items
 
 
-class StructuredRequestedContextFact(StructuredEvidenceAttribute):
+class RequestedContextFactModelOutput(EvidenceAttributeModelOutput):
     context_scope: Literal["experimental", "simulation", "background", "unknown"]
     group_label: str | None = None
 
 
-class StructuredRequestedContextFacts(_SourceExtractionResponse):
-    facts: list[StructuredRequestedContextFact] = Field(
+class RequestedContextFactsModelOutput(_SourceExtractionContractBase):
+    facts: list[RequestedContextFactModelOutput] = Field(
         default_factory=list,
         max_length=16,
     )
@@ -728,7 +728,7 @@ class StructuredRequestedContextFacts(_SourceExtractionResponse):
         return _normalize_list_container(value)
 
 
-class StructuredEvidenceExtraction(_SourceExtractionResponse):
+class EvidenceExtractionModelOutput(_SourceExtractionContractBase):
     evidence_role: Literal[
         "direct_result",
         "condition_context",
@@ -739,12 +739,12 @@ class StructuredEvidenceExtraction(_SourceExtractionResponse):
         "contradictory_result",
         "irrelevant",
     ] = "irrelevant"
-    changed_variables: list[StructuredEvidenceVariable] = Field(
+    changed_variables: list[EvidenceVariableModelOutput] = Field(
         default_factory=list,
         max_length=12,
     )
-    comparison: StructuredEvidenceComparison | None = None
-    reported_result: StructuredEvidenceResult | None = None
+    comparison: EvidenceComparisonModelOutput | None = None
+    reported_result: EvidenceResultModelOutput | None = None
     attribution_scope: Literal[
         "isolated_effect",
         "joint_effect",
@@ -752,8 +752,8 @@ class StructuredEvidenceExtraction(_SourceExtractionResponse):
         "descriptive_only",
         "not_attributable",
     ] = "not_attributable"
-    scientific_context: StructuredEvidenceContext = Field(
-        default_factory=StructuredEvidenceContext
+    scientific_context: EvidenceContextModelOutput = Field(
+        default_factory=EvidenceContextModelOutput
     )
     resolution_status: Literal[
         "resolved",
@@ -797,7 +797,7 @@ class StructuredEvidenceExtraction(_SourceExtractionResponse):
         return _normalize_list_container(value)
 
     @model_validator(mode="after")
-    def _validate_scientific_contract(self) -> "StructuredEvidenceExtraction":
+    def _validate_scientific_contract(self) -> "EvidenceExtractionModelOutput":
         result_role = self.evidence_role in {"direct_result", "contradictory_result"}
         if result_role and self.reported_result is None:
             raise ValueError("result evidence requires one reported result")
@@ -844,8 +844,8 @@ class StructuredEvidenceExtraction(_SourceExtractionResponse):
         return self
 
 
-class StructuredEvidenceExtractions(_SourceExtractionResponse):
-    extractions: list[StructuredEvidenceExtraction] = Field(
+class EvidenceExtractionsModelOutput(_SourceExtractionContractBase):
+    extractions: list[EvidenceExtractionModelOutput] = Field(
         default_factory=list,
         max_length=_SOURCE_EXTRACTION_MAX_ITEMS,
     )
@@ -856,7 +856,7 @@ class StructuredEvidenceExtractions(_SourceExtractionResponse):
         return _normalize_list_container(value)
 
 
-class StructuredDirectEvidenceResult(StructuredEvidenceResult):
+class DirectEvidenceResultModelOutput(EvidenceResultModelOutput):
     """Result-route fields that must be explicit in model output."""
 
     direction: Literal[
@@ -870,14 +870,14 @@ class StructuredDirectEvidenceResult(StructuredEvidenceResult):
     ]
 
 
-class StructuredDirectEvidenceExtraction(StructuredEvidenceExtraction):
+class DirectEvidenceExtractionModelOutput(EvidenceExtractionModelOutput):
     """Result-route contract requiring a source-backed reported result."""
 
-    reported_result: StructuredDirectEvidenceResult
+    reported_result: DirectEvidenceResultModelOutput
 
 
-class StructuredDirectEvidenceExtractions(_SourceExtractionResponse):
-    extractions: list[StructuredDirectEvidenceExtraction] = Field(
+class DirectEvidenceExtractionsModelOutput(_SourceExtractionContractBase):
+    extractions: list[DirectEvidenceExtractionModelOutput] = Field(
         default_factory=list,
         max_length=_SOURCE_EXTRACTION_MAX_ITEMS,
     )
@@ -981,12 +981,12 @@ def _objective_context_repair_instruction(
 
 
 def _objective_context_facts_as_extractions(
-    parsed: StructuredRequestedContextFacts,
+    parsed: RequestedContextFactsModelOutput,
     *,
     context_field: str,
-) -> StructuredEvidenceExtractions:
+) -> EvidenceExtractionsModelOutput:
     if not parsed.facts:
-        return StructuredEvidenceExtractions()
+        return EvidenceExtractionsModelOutput()
     grouped_facts: dict[str | None, list[dict[str, Any]]] = {}
     for fact in parsed.facts:
         group_label = str(fact.group_label or "").strip() or None
@@ -1022,7 +1022,7 @@ def _objective_context_facts_as_extractions(
                 "resolution_status": "resolved",
             }
         )
-    return StructuredEvidenceExtractions.model_validate(
+    return EvidenceExtractionsModelOutput.model_validate(
         {"extractions": extractions}
     )
 
@@ -1454,19 +1454,19 @@ class ObjectiveSourceExtractor:
     def extract_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceExtractions:
+    ) -> EvidenceExtractionsModelOutput:
         system_prompt, user_prompt = build_objective_evidence_prompt(payload)
         narrow_context_field = _objective_route_narrow_context_field(payload)
-        response_model: type[BaseModel] = StructuredEvidenceExtractions
+        response_model: type[BaseModel] = EvidenceExtractionsModelOutput
         json_completion = self._complete_json_response
         if narrow_context_field is not None:
-            response_model = StructuredRequestedContextFacts
+            response_model = RequestedContextFactsModelOutput
             json_completion = partial(
                 self._parse_context_json_response,
                 context_field=narrow_context_field,
             )
         elif _objective_route_requires_reported_result(payload):
-            response_model = StructuredDirectEvidenceExtractions
+            response_model = DirectEvidenceExtractionsModelOutput
         response = self.response_client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1478,16 +1478,16 @@ class ObjectiveSourceExtractor:
             task_type="objective_evidence_extraction",
             prompt_version=OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
         )
-        if isinstance(response, StructuredRequestedContextFacts):
+        if isinstance(response, RequestedContextFactsModelOutput):
             if narrow_context_field is None:
                 raise TypeError("context extraction returned without a context field")
             return _objective_context_facts_as_extractions(
                 response,
                 context_field=narrow_context_field,
             )
-        if isinstance(response, StructuredDirectEvidenceExtractions):
-            return StructuredEvidenceExtractions.model_validate(response.model_dump())
-        if not isinstance(response, StructuredEvidenceExtractions):
+        if isinstance(response, DirectEvidenceExtractionsModelOutput):
+            return EvidenceExtractionsModelOutput.model_validate(response.model_dump())
+        if not isinstance(response, EvidenceExtractionsModelOutput):
             raise TypeError("unexpected objective evidence extraction response type")
         return response
 
@@ -6649,7 +6649,7 @@ def _objective_bundle_grounding_sources(
 
 
 def _objective_bundle_source_refs_for_record(
-    item: StructuredEvidenceExtraction,
+    item: EvidenceExtractionModelOutput,
     bundle_pairs: tuple[tuple[dict[str, Any], dict[str, Any]], ...],
     *,
     existing_grounding_keys: set[tuple[str, str]],

@@ -21,7 +21,7 @@ from application.core.objectives.analysis.evidence_routing import (
 )
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
@@ -316,11 +316,11 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        def extract_source(self, payload: dict[str, Any]) -> StructuredEvidenceExtractions:
+        def extract_source(self, payload: dict[str, Any]) -> EvidenceExtractionsModelOutput:
             source_ref = str(payload["source"]["source_ref"])
             self.calls.append(source_ref)
             if source_ref.endswith("-methods"):
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {
                         "extractions": [
                             {
@@ -382,7 +382,7 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                 )
 
             baseline, target = result_values[source_ref]
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {

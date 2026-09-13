@@ -14,11 +14,11 @@ from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
 from application.core.objectives.analysis.source_extraction import (
-	StructuredDirectEvidenceExtractions,
-	StructuredEvidenceExtraction,
-	StructuredEvidenceExtractions,
-	StructuredRequestedContextFacts,
-	StructuredRequestedContextFact,
+	DirectEvidenceExtractionsModelOutput,
+	EvidenceExtractionModelOutput,
+	EvidenceExtractionsModelOutput,
+	RequestedContextFactsModelOutput,
+	RequestedContextFactModelOutput,
 )
 from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchModelOutput,
@@ -185,9 +185,9 @@ class FakeDomainModelExtractor:
             )
         elif response_model is EvidenceSelectionsModelOutput:
             response = self.route_source(payload)
-        elif response_model is StructuredEvidenceExtractions:
+        elif response_model is EvidenceExtractionsModelOutput:
             response = self.extract_source(_source_extraction_payload(user_prompt))
-        elif response_model is StructuredRequestedContextFacts:
+        elif response_model is RequestedContextFactsModelOutput:
             source_payload = _source_extraction_payload(user_prompt)
             extracted = self.extract_source(source_payload)
             route = source_payload.get("evidence_route")
@@ -198,7 +198,7 @@ class FakeDomainModelExtractor:
                 "composition_or_background": "material",
             }.get(role, "process")
             facts = [
-                StructuredRequestedContextFact(
+                RequestedContextFactModelOutput(
                     name=str(attribute.get("name") or "source_statement"),
                     value=attribute.get("value")
                     if attribute.get("value") is not None
@@ -216,10 +216,10 @@ class FakeDomainModelExtractor:
                 if isinstance(attribute, dict)
                 and str(attribute.get("name") or "").strip()
             ]
-            response = StructuredRequestedContextFacts(facts=facts)
-        elif response_model is StructuredDirectEvidenceExtractions:
+            response = RequestedContextFactsModelOutput(facts=facts)
+        elif response_model is DirectEvidenceExtractionsModelOutput:
             extracted = self.extract_source(_source_extraction_payload(user_prompt))
-            response = StructuredDirectEvidenceExtractions.model_validate(
+            response = DirectEvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         item.model_dump()
@@ -607,11 +607,11 @@ class FakeDomainModelExtractor:
     def extract_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceExtractions:
+    ) -> EvidenceExtractionsModelOutput:
         route = payload.get("evidence_route")
         source = payload.get("source")
         if not isinstance(route, dict) or not isinstance(source, dict):
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
         if route.get("source_kind") == "table":
             headers = [
                 str(value)
@@ -644,9 +644,9 @@ class FakeDomainModelExtractor:
                 if not sample_label or not value_text:
                     continue
                 numeric_match = _FLOAT_PATTERN.search(value_text.replace(",", ""))
-                return StructuredEvidenceExtractions(
+                return EvidenceExtractionsModelOutput(
                     extractions=[
-                        StructuredEvidenceExtraction(
+                        EvidenceExtractionModelOutput(
                             evidence_role="direct_result",
                             reported_result={
                                 "outcome": property_header,
@@ -672,11 +672,11 @@ class FakeDomainModelExtractor:
                         )
                     ]
                 )
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
         if route.get("source_kind") == "text_window" and source.get("text"):
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="not_attributable",
                         scientific_context={
@@ -692,7 +692,7 @@ class FakeDomainModelExtractor:
                     )
                 ]
             )
-        return StructuredEvidenceExtractions()
+        return EvidenceExtractionsModelOutput()
 
     def _infer_material_system(self, title: str, text: str):
         lowered = f"{title}\n{text}".lower()

@@ -7,8 +7,8 @@ details.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+from dataclasses import dataclass, field
 from hashlib import sha1
 from typing import Any, Final, Mapping
 
@@ -24,8 +24,8 @@ from domain.core.research_objective import (
     ObjectiveEvidenceContext,
     ObjectiveEvidenceResult,
     ObjectiveEvidenceVariable,
+    ResearchObjective,
 )
-
 
 SOURCE_OBSERVATION_STATUSES: Final[frozenset[str]] = frozenset(
     {"unvalidated", "validated", "uncertain", "rejected"}
@@ -65,6 +65,7 @@ class SourceObservation:
     status: str = "unvalidated"
     evidence_anchor_ids: tuple[str, ...] = ()
     source_refs: tuple[dict[str, Any], ...] = ()
+    derived_from_observation_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for name in (
@@ -86,6 +87,16 @@ class SourceObservation:
             raise ValueError("source observation confidence must be between 0 and 1")
         object.__setattr__(self, "changed_variables", tuple(self.changed_variables))
         object.__setattr__(self, "evidence_anchor_ids", tuple(self.evidence_anchor_ids))
+        parents = tuple(self.derived_from_observation_ids)
+        if (
+            any(not str(item).strip() for item in parents)
+            or self.observation_id in parents
+            or len(parents) != len(set(parents))
+        ):
+            raise ValueError(
+                "observation derivation requires distinct parent observations"
+            )
+        object.__setattr__(self, "derived_from_observation_ids", parents)
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "SourceObservation":
@@ -117,7 +128,7 @@ class SourceObservation:
         selection_status = str(payload.get("selection_status") or "extracted").strip()
         status = str(payload.get("status") or "").strip()
         if not status:
-            status = "rejected" if selection_status == "failed" else "unvalidated"
+            status = "unvalidated"
         source_excerpt = str(
             payload.get("source_excerpt")
             or first_source_ref.get("source_excerpt")
@@ -129,7 +140,9 @@ class SourceObservation:
             objective_id=str(payload.get("objective_id") or "").strip(),
             document_id=str(payload.get("document_id") or "").strip(),
             source_kind=str(
-                payload.get("source_kind") or first_source_ref.get("source_kind") or "text_window"
+                payload.get("source_kind")
+                or first_source_ref.get("source_kind")
+                or "text_window"
             ).strip(),
             source_ref=str(
                 payload.get("source_ref")
@@ -172,7 +185,9 @@ class SourceObservation:
             attribution_scope=str(
                 payload.get("attribution_scope") or "not_attributable"
             ).strip(),
-            resolution_status=str(payload.get("resolution_status") or "unknown").strip(),
+            resolution_status=str(
+                payload.get("resolution_status") or "unknown"
+            ).strip(),
             failure_reason=(
                 str(payload["failure_reason"]).strip()
                 if payload.get("failure_reason")
@@ -185,6 +200,9 @@ class SourceObservation:
                 if str(item).strip()
             ),
             source_refs=source_refs,
+            derived_from_observation_ids=tuple(
+                payload.get("derived_from_observation_ids") or ()
+            ),
         )
 
     @property
@@ -224,6 +242,7 @@ class SourceObservation:
             "status": self.status,
             "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "source_refs": [dict(item) for item in self.source_refs],
+            "derived_from_observation_ids": list(self.derived_from_observation_ids),
         }
 
     @property
@@ -233,6 +252,41 @@ class SourceObservation:
             or self.comparison
             or self.reported_result
             or self.scientific_context.has_content
+        )
+
+
+@dataclass(frozen=True)
+class ExperimentComparison:
+    """Assessment of two recorded measurements for one research question."""
+
+    objective_id: str
+    baseline_result_id: str
+    target_result_id: str
+    status: str
+    reasons: tuple[str, ...]
+    source_observation_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not all(
+            str(item).strip()
+            for item in (
+                self.objective_id,
+                self.baseline_result_id,
+                self.target_result_id,
+            )
+        ):
+            raise ValueError("comparison requires objective and measurement identities")
+        if self.baseline_result_id == self.target_result_id:
+            raise ValueError("comparison requires different measurements")
+        if self.status not in {"comparable", "non_comparable", "insufficient_context"}:
+            raise ValueError("invalid experiment comparison status")
+        if self.status != "comparable" and not self.reasons:
+            raise ValueError("limited comparison requires reasons")
+        if self.status == "comparable" and self.reasons:
+            raise ValueError("comparable assessment cannot have unresolved reasons")
+        object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(
+            self, "source_observation_ids", tuple(self.source_observation_ids)
         )
 
 
@@ -286,6 +340,21 @@ class PaperExperiment:
             raise ValueError(
                 "paper experiment observations must be listed in source_observation_ids"
             )
+        variant_ids = set(ids)
+        condition_ids = {item.test_condition_id for item in self.test_conditions}
+        baseline_ids = {item.baseline_id for item in self.baselines}
+        for measurement in self.measurements:
+            for reference, available in (
+                (measurement.variant_id, variant_ids),
+                (measurement.test_condition_id, condition_ids),
+                (measurement.baseline_id, baseline_ids),
+            ):
+                if reference is not None and reference not in available:
+                    raise ValueError(
+                        "measurement binding references a fact outside its experiment"
+                    )
+        if self.status == "bound" and not self.has_bound_measurements:
+            raise ValueError("bound experiment requires validated measurement bindings")
         object.__setattr__(
             self, "source_observation_ids", tuple(self.source_observation_ids)
         )
@@ -373,18 +442,128 @@ class PaperExperiment:
         return bool(self.measurements)
 
     @property
-    def is_ready_for_comparison(self) -> bool:
-        return (
-            self.status == "bound"
-            and bool(self.sample_variants)
-            and bool(self.measurements)
-            and bool(self.test_conditions)
+    def has_bound_measurements(self) -> bool:
+        observations = {item.observation_id: item for item in self.source_observations}
+        return bool(self.measurements) and all(
+            item.variant_id is not None
+            and item.test_condition_id is not None
+            and item.result_id in observations
+            and observations[item.result_id].status == "validated"
+            for item in self.measurements
+        )
+
+    def assess_comparison(
+        self,
+        objective: ResearchObjective,
+        baseline_result_id: str,
+        target_result_id: str,
+    ) -> ExperimentComparison:
+        """Missing reporting limits a comparison; it never invalidates the observation."""
+        measurements = {item.result_id: item for item in self.measurements}
+        observations = {item.observation_id: item for item in self.source_observations}
+        ids = (baseline_result_id, target_result_id)
+        if objective.collection_id != self.collection_id or any(
+            observation.objective_id != objective.objective_id
+            for observation in self.source_observations
+        ):
+            raise ValueError("comparison objective must own this experiment")
+        missing: list[str] = []
+        differences: list[str] = []
+        for result_id in ids:
+            result = measurements.get(result_id)
+            observation = observations.get(result_id)
+            if result is None or observation is None:
+                missing.append(
+                    f"Measurement is not bound in this experiment: {result_id}"
+                )
+                continue
+            if observation.status != "validated":
+                missing.append(f"Source support is unresolved: {result_id}")
+            if not result.variant_id or not result.test_condition_id:
+                missing.append(f"Sample or test binding is unresolved: {result_id}")
+            if (
+                not observation.scientific_context.material
+                or not observation.scientific_context.process
+            ):
+                missing.append(
+                    f"Material or process context is unresolved: {result_id}"
+                )
+        if all(
+            result_id in measurements and result_id in observations for result_id in ids
+        ):
+            left, right = (measurements[result_id] for result_id in ids)
+            if (
+                left.property_normalized != right.property_normalized
+                or left.unit != right.unit
+            ):
+                differences.append("Outcome or reported units differ.")
+            left_observation, right_observation = (
+                observations[result_id] for result_id in ids
+            )
+            for section in ("material", "test"):
+                left_context = {
+                    item.name.casefold(): item
+                    for item in getattr(left_observation.scientific_context, section)
+                }
+                right_context = {
+                    item.name.casefold(): item
+                    for item in getattr(right_observation.scientific_context, section)
+                }
+                if not left_context or not right_context:
+                    missing.append(f"Unreported {section} context.")
+                if left_context.keys() != right_context.keys():
+                    missing.append(f"Incomplete {section} context for this pair.")
+                for key in left_context.keys() & right_context.keys():
+                    left_fact, right_fact = left_context[key], right_context[key]
+                    if (
+                        left_fact.value != right_fact.value
+                        or left_fact.unit != right_fact.unit
+                    ):
+                        differences.append(
+                            f"Reported {section} condition differs: {key}."
+                        )
+            # Only a recorded contrast establishes which factors changed. Two
+            # measurements in one paper do not establish a controlled design.
+            contrasts = tuple(
+                item
+                for item in self.source_observations
+                if item.derived_from_observation_ids == ids
+                and item.comparison is not None
+            )
+            if not contrasts:
+                missing.append("No Source-backed contrast links these measurements.")
+            else:
+                contrast = contrasts[0]
+                if contrast.status != "validated":
+                    missing.append("Source support for the contrast is unresolved.")
+                if not contrast.comparison.comparable:
+                    missing.extend(
+                        contrast.comparison.incomparability_reasons
+                        or ("The recorded contrast has not established comparability.",)
+                    )
+                if not contrast.changed_variables:
+                    missing.append("The contrast does not establish changed factors.")
+                # Axis normalization and scientific attribution belong to the
+                # existing Source-grounded reconstruction, not a second matcher.
+        reasons = tuple(dict.fromkeys((*differences, *missing)))
+        return ExperimentComparison(
+            objective_id=objective.objective_id,
+            baseline_result_id=baseline_result_id,
+            target_result_id=target_result_id,
+            status="non_comparable"
+            if differences
+            else "insufficient_context"
+            if missing
+            else "comparable",
+            reasons=reasons,
+            source_observation_ids=tuple(item for item in ids if item in observations),
         )
 
 
 __all__ = [
     "PAPER_EXPERIMENT_STATUSES",
     "PaperExperiment",
+    "ExperimentComparison",
     "SOURCE_OBSERVATION_STATUSES",
     "SourceObservation",
 ]

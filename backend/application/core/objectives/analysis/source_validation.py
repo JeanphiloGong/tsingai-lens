@@ -172,9 +172,9 @@ def _source_validation_failure_record(
 ) -> dict[str, Any]:
     """Keep a rejected source observation visible without treating it as science.
 
-    A grounding rejection is a technical extraction failure, not evidence that
-    the paper has no result.  Persist a stable, source-linked failed observation so
-    the contribution warning and Evidence Map can distinguish the two cases.
+    A grounding rejection is an extraction failure, not evidence that the paper
+    has no result. The caller converts this marker to a SourceReadAudit so
+    contribution warnings and retry accounting retain the unsuccessful read.
     """
 
     identity = "|".join(
@@ -344,6 +344,11 @@ def validate_source_fact(
     record = _objective_retain_source_grounded_context(
         record,
         source=grounding_source,
+    )
+    record["status"] = (
+        "validated"
+        if record.get("selection_status", "extracted") == "extracted"
+        else "uncertain"
     )
     if collection_id:
         record["collection_id"] = collection_id

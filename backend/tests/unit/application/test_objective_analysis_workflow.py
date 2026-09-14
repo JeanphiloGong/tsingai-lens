@@ -449,7 +449,9 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
     }
 
     extractor = SourceExtractor()
+    read_audits = []
     extracted = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id=collection_id,
         source_extractor=extractor,
         objectives=(objective,),

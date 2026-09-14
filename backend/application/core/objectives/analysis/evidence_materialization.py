@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
+import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import replace
 from hashlib import sha256
-import json
-import re
 from typing import Any
 
 from application.core.objectives import property_matching
@@ -20,15 +20,15 @@ from application.core.objectives.analysis.source_extraction import (
     SourceReadAudit,
     _objective_missing_context_fields,
 )
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis.source_validation import (
     _objective_source_explicitly_links_variable_to_result,
 )
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
-    PaperExperiment,
     PaperContribution,
+    PaperExperiment,
     PaperResearchMap,
     PaperSourceUnitCoverageStatus,
     ResearchObjective,
@@ -79,16 +79,15 @@ def materialize_evidence(
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
-    paper_experiment: PaperExperiment | None = None,
+    experiments: tuple[PaperExperiment, ...] = (),
     technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> tuple[tuple[ObjectiveEvidence, ...], tuple[PaperContribution, ...]]:
-    if paper_experiment is not None:
+    if experiments:
         observations = _merge_domain_experiment_inputs(
-            paper_experiment=paper_experiment,
+            experiments=experiments,
             observations=observations,
         )
     inspection_source_refs = _inspection_source_refs_by_document(
-        observations,
         technical_audits=technical_audits,
     )
     selected_observations = _objective_detail_evidence(
@@ -140,18 +139,39 @@ def materialize_evidence(
             emit_parity_snapshot=True,
         )
     target_axes = property_matching.objective_outcomes(objective)
+    comparison_assessments = tuple(
+        experiment.assess_comparison(
+            objective, *observation.derived_from_observation_ids
+        )
+        for experiment in experiments
+        for observation in experiment.source_observations
+        if len(observation.derived_from_observation_ids) == 2
+    )
     record_analysis_diagnostic(
         {
             "trace_type": "objective_evidence_materialization",
             "collection_id": collection_id,
             "objective_id": objective.objective_id,
             "analysis_version": analysis.analysis_version,
+            "experiment_count": len(experiments),
+            "bound_experiment_count": sum(
+                experiment.has_bound_measurements for experiment in experiments
+            ),
+            "measurement_count": sum(
+                len(experiment.measurements) for experiment in experiments
+            ),
+            "comparison_assessment_counts": dict(
+                Counter(item.status for item in comparison_assessments)
+            ),
+            "grounding_rejection_count": sum(
+                audit.disposition == "grounding_rejected" for audit in technical_audits
+            ),
             "draft_count": len(observations),
             "failed_draft_count": sum(
                 draft.selection_status == "failed" for draft in observations
-            ) + sum(
-                audit.disposition == "technical_failure"
-                for audit in technical_audits
+            )
+            + sum(
+                audit.failed for audit in technical_audits
             ),
             "target_outcome_match_count": sum(
                 draft.selection_status != "failed"
@@ -179,99 +199,34 @@ def materialize_evidence(
 
 def _merge_domain_experiment_inputs(
     *,
-    paper_experiment: PaperExperiment,
+    experiments: tuple[PaperExperiment, ...],
     observations: tuple[SourceObservation, ...],
 ) -> tuple[SourceObservation, ...]:
-    """Make SourceObservation the primary materialization input.
+    """Read assembled facts directly without losing validation or derivation metadata."""
 
-    Derived comparison units remain in the application record until they have
-    their own domain representation. Technical read failures are passed to
-    materialization separately as ``SourceReadAudit`` records. Source-backed
-    facts are rebuilt from the PaperExperiment aggregate and therefore no
-    longer depend on an extraction-stage container as their source of truth.
-    """
-
-    observations_by_id = {item.evidence_id: item for item in observations}
-    domain_drafts = tuple(
-        SourceObservation.from_mapping(
-            {
-                "evidence_id": observation.observation_id,
-                "objective_id": observation.objective_id,
-                "document_id": observation.document_id,
-                "source_kind": observation.source_kind,
-                "source_ref": observation.source_ref,
-                "evidence_role": observation.observation_role,
-                "selection_status": observation.selection_status,
-                "selection_reason": observation.selection_reason,
-                "attribution_scope": observation.attribution_scope,
-                "resolution_status": observation.resolution_status,
-                "failure_reason": observation.failure_reason,
-                "changed_variables": [
-                    item.to_record() for item in observation.changed_variables
-                ],
-                "comparison": (
-                    observation.comparison.to_record()
-                    if observation.comparison
-                    else None
-                ),
-                "reported_result": (
-                    observation.reported_result.to_record()
-                    if observation.reported_result
-                    else None
-                ),
-                "scientific_context": observation.scientific_context.to_record(),
-                "source_refs": (
-                    observations_by_id[observation.observation_id].to_record().get(
-                        "source_refs"
-                    )
-                    or [
-                        {
-                            "source_kind": observation.source_kind,
-                            "source_ref": observation.source_ref,
-                            "source_excerpt": observation.source_excerpt,
-                        }
-                    ]
-                ),
-                "evidence_anchor_ids": list(observation.evidence_anchor_ids),
-                "confidence": observation.confidence,
-            }
-        )
-        for observation in paper_experiment.source_observations
-    )
-    domain_ids = {item.evidence_id for item in domain_drafts}
+    domain_drafts = {
+        item.observation_id: item
+        for experiment in experiments
+        for item in experiment.source_observations
+    }
+    original_ids = {item.observation_id for item in observations}
     return (
-        *domain_drafts,
-        *(item for item in observations if item.evidence_id not in domain_ids),
+        *(domain_drafts.get(item.observation_id, item) for item in observations),
+        *(
+            item
+            for identifier, item in domain_drafts.items()
+            if identifier not in original_ids
+        ),
     )
 
 
 def _inspection_source_refs_by_document(
-    observations: tuple[SourceObservation, ...],
     *,
     technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> dict[str, set[tuple[str, str]]]:
-    """Return source locators for reads that yielded no scientific fact.
-
-    These transient rejected markers are deliberately excluded from durable
-    Evidence, but the coverage ledger still needs to distinguish an inspected
-    Source with no fact from a Source that was never read.
-    """
+    """Count attempted reads separately from scientific observations."""
 
     inspected: dict[str, set[tuple[str, str]]] = {}
-    for draft in observations:
-        if (
-            draft.selection_status != "rejected"
-            or draft.evidence_role != "irrelevant"
-            or draft.reported_result is not None
-            or draft.changed_variables
-            or draft.comparison is not None
-            or draft.scientific_context.has_content
-            or not draft.source_ref
-        ):
-            continue
-        inspected.setdefault(draft.document_id, set()).add(
-            _source_identity(draft.source_kind, draft.source_ref)
-        )
     for audit in technical_audits:
         inspected.setdefault(audit.document_id, set()).add(
             _source_identity(audit.source_kind, audit.source_ref)
@@ -506,7 +461,7 @@ def _record_source_coverage_ledger(
         technical_failures = tuple(
             audit
             for audit in technical_audits_by_document.get(frame.document_id, ())
-            if audit.disposition == "technical_failure"
+            if audit.failed
         )
         missing_by_result = {
             evidence.evidence_id: _objective_result_missing_field_families(
@@ -1215,7 +1170,7 @@ def _analysis_contributions(
         failed_sources.update(
             (audit.source_kind, audit.source_ref)
             for audit in technical_audits_by_document.get(frame.document_id, ())
-            if audit.disposition == "technical_failure"
+            if audit.failed
         )
         comparable_evidence_count = sum(
             FindingSynthesisService.is_synthesizable_result_evidence(
@@ -1522,6 +1477,18 @@ def _analysis_evidence_records(
         selection_status = draft.selection_status
         selection_reason = draft.selection_reason
         resolution_status = draft.resolution_status
+        if (
+            draft.status in {"uncertain", "rejected"}
+            and selection_status == "extracted"
+        ):
+            selection_status = (
+                "candidate" if draft.status == "uncertain" else "rejected"
+            )
+            resolution_status = "partial"
+            selection_reason = (
+                f"Source validation remains {draft.status}; not accepted for synthesis. "
+                f"{selection_reason or ''}"
+            ).strip()
         if (
             selection_status == "extracted"
             and draft.reported_result is None

@@ -10,46 +10,36 @@ from functools import partial
 from hashlib import sha1
 from typing import Any, Callable, Iterable, Literal, Mapping, NamedTuple
 
-from openai import APIConnectionError, APIStatusError
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationInfo,
-    field_validator,
-    model_validator,
-)
-
 from application.core.objectives import property_matching
-from application.core.objectives.analysis.evidence_routing import (
-    EvidenceCandidate,
-    OBJECTIVE_STATE_TEXT_LIMIT,
-    ROUTE_PROMPT_TEXT_LIMIT,
-    order_routes_for_extraction,
-)
 from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
 )
+from application.core.objectives.analysis.evidence_routing import (
+    OBJECTIVE_STATE_TEXT_LIMIT,
+    ROUTE_PROMPT_TEXT_LIMIT,
+    EvidenceCandidate,
+    order_routes_for_extraction,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.source_text import (
+    NUMBER_PATTERN,
+    coerce_result_cell_number,
+    numeric_match_tokens,
+)
 from application.core.objectives.analysis.source_validation import (
     _objective_axis_is_source_grounded,
     _objective_column_key,
     _objective_result_is_attributed_to_secondary_study,
     _objective_result_text_is_study_intent_only,
-    _objective_source_is_secondary_only_target_context,
-    _objective_source_grounding_text,
-    _objective_value_is_source_grounded,
     _objective_route_source_refs,
     _objective_row_matches_headers,
+    _objective_source_grounding_text,
+    _objective_source_is_secondary_only_target_context,
     _objective_table_matrix_rows,
     _objective_table_row_values,
+    _objective_value_is_source_grounded,
     _split_property_unit,
     validate_source_fact,
-)
-from application.core.objectives.analysis.source_text import (
-    NUMBER_PATTERN,
-    coerce_result_cell_number,
-    numeric_match_tokens,
 )
 from application.core.objectives.analysis.table_repair import (
     _objective_table_source_needs_llm_structural_repair,
@@ -67,6 +57,15 @@ from domain.core import (
     normalize_objective_terms,
 )
 from domain.source import SourceDocumentTree, render_markdown_table
+from openai import APIConnectionError, APIStatusError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,38 +88,14 @@ class SourceReadAudit:
     source_ref: str
     disposition: str
     reason: str | None = None
+    role: str = ""
+    context_fields: tuple[str, ...] = ()
 
-    @classmethod
-    def from_observation(cls, observation: SourceObservation) -> "SourceReadAudit":
-        disposition = (
-            "technical_failure"
-            if observation.selection_status == "failed"
-            else "inspected_without_fact"
-        )
-        return cls(
-            collection_id=observation.collection_id,
-            objective_id=observation.objective_id,
-            document_id=observation.document_id,
-            source_kind=observation.source_kind,
-            source_ref=observation.source_ref,
-            disposition=disposition,
-            reason=observation.failure_reason or observation.selection_reason,
-        )
+    @property
+    def failed(self) -> bool:
+        """An unsupported generated answer is also an unsuccessful read."""
+        return self.disposition in {"technical_failure", "grounding_rejected"}
 
-
-def split_source_read_audits(
-    observations: tuple[SourceObservation, ...],
-) -> tuple[tuple[SourceObservation, ...], tuple[SourceReadAudit, ...]]:
-    """Separate technical read markers from scientific observations."""
-
-    scientific: list[SourceObservation] = []
-    audits: list[SourceReadAudit] = []
-    for observation in observations:
-        if observation.selection_status in {"failed", "rejected"} and not observation.has_scientific_content:
-            audits.append(SourceReadAudit.from_observation(observation))
-        else:
-            scientific.append(observation)
-    return tuple(scientific), tuple(audits)
 
 _OBJECTIVE_STATE_ITEM_LIMIT = 12
 # A Source block is normally one paragraph, but tables and figure captions can
@@ -1679,6 +1654,7 @@ def _dedupe_extraction_routes(
 def extract_and_validate_source_facts(
     *,
     collection_id: str,
+    read_audits: list[SourceReadAudit],
     source_extractor: ObjectiveSourceExtractor,
     paper_facts_extractor: PaperFactsExtractor | None = None,
     objectives: tuple[ResearchObjective, ...],
@@ -1695,6 +1671,7 @@ def extract_and_validate_source_facts(
     units = list(
         _extract_source_round(
             collection_id=collection_id,
+            read_audits=read_audits,
             source_extractor=source_extractor,
             paper_facts_extractor=paper_facts_extractor,
             objectives=objectives,
@@ -1773,6 +1750,7 @@ def extract_and_validate_source_facts(
             )
             expanded_context_units = _extract_source_round(
                 collection_id=collection_id,
+                read_audits=read_audits,
                 source_extractor=source_extractor,
                 paper_facts_extractor=paper_facts_extractor,
                 objectives=objectives,
@@ -1834,6 +1812,7 @@ def extract_and_validate_source_facts(
 def _extract_source_round(
     *,
     collection_id: str,
+    read_audits: list[SourceReadAudit],
     source_extractor: ObjectiveSourceExtractor,
     paper_facts_extractor: PaperFactsExtractor | None = None,
     objectives: tuple[ResearchObjective, ...],
@@ -1978,6 +1957,7 @@ def _extract_source_round(
                     [
                         *extractable_routes,
                         *_objective_seed_context_routes(
+                            read_audits=read_audits,
                             units=document_state_units.get(document_key, []),
                             route=route,
                         ),
@@ -2000,6 +1980,7 @@ def _extract_source_round(
             dict(item) for item in context_bundle
         ]
         route_unit_start = len(units)
+        route_audit_start = len(read_audits)
         route_result_is_not_current_observation = bool(
             source.get("source_kind") == "text_window"
             and (
@@ -2019,14 +2000,12 @@ def _extract_source_round(
                 source=source,
             )
         ):
-            failed_unit = _failed_source_observation(
+            failed_read = _failed_source_read(
                 collection_id=collection_id,
                 route=route,
                 error=table_repair_error,
             )
-            if failed_unit.evidence_id not in seen:
-                seen.add(failed_unit.evidence_id)
-                units.append(failed_unit)
+            read_audits.append(failed_read)
             continue
         route_records = _objective_table_matrix_evidence_records(
             route=route,
@@ -2165,14 +2144,12 @@ def _extract_source_round(
                         llm_records=llm_route_records,
                     )
             if extraction_error is not None:
-                failed_unit = _failed_source_observation(
+                failed_read = _failed_source_read(
                     collection_id=collection_id,
                     route=route,
                     error=extraction_error,
                 )
-                if failed_unit.evidence_id not in seen:
-                    seen.add(failed_unit.evidence_id)
-                    units.append(failed_unit)
+                read_audits.append(failed_read)
                 if not route_records:
                     continue
             if (
@@ -2223,6 +2200,30 @@ def _extract_source_round(
                     ).to_record(),
                 )
         for record in route_records:
+            if record.get("selection_status") == "failed":
+                read_audits.append(
+                    SourceReadAudit(
+                        collection_id=collection_id,
+                        objective_id=route.objective_id,
+                        document_id=route.document_id,
+                        source_kind=route.source_kind,
+                        source_ref=route.source_ref,
+                        disposition="grounding_rejected",
+                        reason=record.get("failure_reason"),
+                    )
+                )
+                continue
+            record = {**record, "collection_id": collection_id}
+            if "status" not in record:
+                record["status"] = (
+                    "validated"
+                    if record.get("selection_status", "extracted") == "extracted"
+                    and any(
+                        ref.get("source_excerpt")
+                        for ref in record.get("source_refs", ())
+                    )
+                    else "uncertain"
+                )
             unit = SourceObservation.from_mapping(record)
             if not _objective_evidence_has_payload(unit):
                 continue
@@ -2234,7 +2235,7 @@ def _extract_source_round(
                 (unit.objective_id, unit.document_id),
                 [],
             ).append(unit)
-        if len(units) == route_unit_start:
+        if len(units) == route_unit_start and len(read_audits) == route_audit_start:
             # A selected result Source remains a visible unresolved anchor.
             # Later same-paper context can close only fields already reported
             # by this immutable result read. A context or background Source
@@ -2244,16 +2245,14 @@ def _extract_source_round(
                 _needs_context_source_observation(
                     collection_id=collection_id,
                     route=route,
-                    selection_reason=(
-                        _SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON
-                    ),
+                    selection_reason=(_SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON),
                 )
                 if (
                     route.role in _DIRECT_RESULT_ROUTE_ROLES
                     and not _objective_route_is_context_inspection(route)
                     and not route_result_is_not_current_observation
                 )
-                else _inspected_source_observation(
+                else _inspected_source_read(
                     collection_id=collection_id,
                     route=route,
                 )
@@ -2275,7 +2274,9 @@ def _extract_source_round(
                         "disposition": "no_source_grounded_fact",
                     }
                 )
-            if inspection_unit.evidence_id not in seen:
+            if isinstance(inspection_unit, SourceReadAudit):
+                read_audits.append(inspection_unit)
+            elif inspection_unit.evidence_id not in seen:
                 seen.add(inspection_unit.evidence_id)
                 units.append(inspection_unit)
                 if route.role in _DIRECT_RESULT_ROUTE_ROLES:
@@ -2386,46 +2387,21 @@ def _objective_header_matches_any_axis(
     return False
 
 
-def _failed_source_observation(
+def _failed_source_read(
     *,
     collection_id: str | None = None,
     route: EvidenceCandidate,
     error: Exception,
-) -> SourceObservation:
-    identity = "|".join(
-        (
-            route.objective_id,
-            route.document_id,
-            route.source_kind,
-            route.source_ref,
-            "failed",
-        )
-    )
+) -> SourceReadAudit:
     reason = f"{error.__class__.__name__}: {str(error) or 'extraction failed'}"
-    return SourceObservation.from_mapping(
-        {
-            "collection_id": collection_id,
-            "evidence_id": (
-                f"oev_failed_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-            ),
-            "objective_id": route.objective_id,
-            "document_id": route.document_id,
-            "source_kind": route.source_kind,
-            "source_ref": route.source_ref,
-            "evidence_role": "irrelevant",
-            "selection_status": "failed",
-            "selection_reason": route.reason,
-            "attribution_scope": "not_attributable",
-            "source_refs": [
-                {
-                    "source_kind": route.source_kind,
-                    "source_ref": route.source_ref,
-                }
-            ],
-            "resolution_status": "unknown",
-            "failure_reason": reason[:1000],
-            "confidence": 0.0,
-        }
+    return SourceReadAudit(
+        collection_id=collection_id or "",
+        objective_id=route.objective_id,
+        document_id=route.document_id,
+        source_kind=route.source_kind,
+        source_ref=route.source_ref,
+        disposition="technical_failure",
+        reason=reason[:1000],
     )
 
 
@@ -2487,53 +2463,23 @@ _INSPECTION_ONLY_SELECTION_REASON = (
 )
 
 
-def _inspected_source_observation(
+def _inspected_source_read(
     *,
     collection_id: str | None = None,
     route: EvidenceCandidate,
-) -> SourceObservation:
+) -> SourceReadAudit:
     """Keep an attempted read in the audit ledger without creating Evidence."""
 
-    identity = "|".join(
-        (
-            route.objective_id,
-            route.document_id,
-            route.source_kind,
-            route.source_ref,
-            "inspection_only",
-        )
-    )
-    return SourceObservation.from_mapping(
-        {
-            "collection_id": collection_id,
-            "evidence_id": (
-                "oev_inspected_"
-                f"{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-            ),
-            "objective_id": route.objective_id,
-            "document_id": route.document_id,
-            "source_kind": route.source_kind,
-            "source_ref": route.source_ref,
-            "evidence_role": "irrelevant",
-            # ``rejected`` is a valid transient disposition for a selected
-            # Source that yielded no scientific fact. Materialization filters
-            # this marker while using it to count the Source as inspected.
-            "selection_status": "rejected",
-            "selection_reason": (
-                f"{_INSPECTION_ONLY_SELECTION_REASON} {route.reason}".strip()
-            ),
-            "attribution_scope": "not_attributable",
-            "source_refs": [
-                {
-                    "source_kind": route.source_kind,
-                    "source_ref": route.source_ref,
-                    "role": route.role,
-                    "context_fields": list(route.context_fields),
-                }
-            ],
-            "resolution_status": "skipped",
-            "confidence": 0.0,
-        }
+    return SourceReadAudit(
+        collection_id=collection_id or "",
+        objective_id=route.objective_id,
+        document_id=route.document_id,
+        source_kind=route.source_kind,
+        source_ref=route.source_ref,
+        disposition="inspected_without_fact",
+        reason=f"{_INSPECTION_ONLY_SELECTION_REASON} {route.reason}".strip(),
+        role=route.role,
+        context_fields=route.context_fields,
     )
 
 
@@ -6284,6 +6230,7 @@ def _objective_seed_context_routes(
     *,
     units: Iterable[SourceObservation],
     route: EvidenceCandidate,
+    read_audits: Iterable[SourceReadAudit] = (),
 ) -> tuple[EvidenceCandidate, ...]:
     """Expose previously inspected same-paper Sources to the next prompt."""
 
@@ -6354,6 +6301,33 @@ def _objective_seed_context_routes(
                     }
                 )
             )
+    for audit in read_audits:
+        source_key = (audit.source_kind, audit.source_ref)
+        if (
+            audit.disposition != "inspected_without_fact"
+            or audit.objective_id != route.objective_id
+            or audit.document_id != route.document_id
+            or source_key == (route.source_kind, route.source_ref)
+            or source_key in seen
+        ):
+            continue
+        seen.add(source_key)
+        routes.append(
+            EvidenceCandidate.from_mapping(
+                {
+                    "objective_id": route.objective_id,
+                    "document_id": route.document_id,
+                    "source_kind": audit.source_kind,
+                    "source_ref": audit.source_ref,
+                    "role": audit.role,
+                    "extractable": True,
+                    "reason": "Previously inspected same-paper Source.",
+                    "confidence": 1.0,
+                    "context_fields": audit.context_fields
+                    or _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS.get(audit.role, ()),
+                }
+            )
+        )
     return tuple(routes)
 
 

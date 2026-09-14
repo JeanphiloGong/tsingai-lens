@@ -58,11 +58,17 @@ Read the analysis responsibilities in real research order:
    reference. Raw document text and Objective hints never create this context;
    conflicting materials remain unresolved. It never reads preliminary map
    scope as experiment context.
+   `assemble_paper_experiments` then records separate Source/outcome/context
+   series rather than assuming a document is one experiment. Each measurement
+   links only to its own supported sample and outcome-applicable test facts.
+   Unknown study identity remains `None`; these conservative series are not a
+   claim to have reconstructed every experiment in the paper.
 6. `evidence_materialization.py` consumes the `PaperExperiment` Source
    observations as the primary scientific input and turns them into durable
    `ObjectiveEvidence`. Technical read failures are supplied separately as
-   application `SourceReadAudit` records; derived comparison units remain
-   supplemental until they receive their own domain model. It deduplicates replayed scientific claims by stable
+   application `SourceReadAudit` records. Derived comparisons are observations
+   with explicit `derived_from_observation_ids`, not additional raw
+   measurements. It deduplicates replayed scientific claims by stable
    Evidence identity, and derives each paper's `PaperContribution` from that
    final Evidence set. Table row and column locators are part of a result's
    Source-local identity, so equal scalar values in different specimen rows do
@@ -144,7 +150,16 @@ owns that judgment's prompt, response schema, scientific validation, bounded
 repair instructions, completion budget, and direct model call. It passes every
 schema-valid model observation directly to `source_validation.py` before updating the
 accepted state supplied to the next Source prompt. Provider or irrecoverable
-structured-output failures remain technical failed observations. Shared provider
+structured-output failures become `SourceReadAudit(technical_failure)` records,
+not rejected scientific observations. A successfully inspected Source with no
+fact is `inspected_without_fact`; a rejected extraction is `grounding_rejected`.
+Both count as inspected but neither proves that the paper reports no effect.
+Provider/format failures and grounding rejections both remain unsuccessful
+reads for failed-source counts, warnings, and retry eligibility. A rejected
+generated answer must not become a successful scientific absence.
+Previously inspected Methods Sources remain available to subsequent reading
+through their audit locators and roles, without entering the accepted fact list.
+Shared provider
 invocation, JSON parsing, usage accounting, and trace capture stay outside this
 scientific responsibility. A model-authored context role carrying a non-null
 `reported_result` is normalized to `direct_result` without changing any
@@ -497,3 +512,44 @@ conditions, or an incomplete comparison.
 Technical JSON parsing, provider retries, usage accounting, and trace capture
 live in `llm/structured_response.py`; they support this process but do not
 define its scientific order.
+
+## Internal Research State
+
+The acceptance scenario is a researcher asking how platform preheating affects
+316L elongation. P002 reports NP/P150 definitions in Methods, test conditions on
+another page, and 72%/82% in Table 2. These remain separately traceable facts.
+Binding records which sample and test produced each result. A computed contrast
+references those two observations; it is not a third measurement. In P004,
+as-SLM, HT-SLM, and HIP-SLM states remain separate, and the table's 35.0% and
+the prose's 32.8% remain distinct observations rather than being silently
+reconciled. A researcher can inspect the original disagreement before deciding
+what to compare.
+
+`SourceObservation.status` describes Source support, not pipeline execution.
+Assembly preserves `unvalidated`, `validated`, `uncertain`, and `rejected`
+without promoting a fact merely because extraction returned it. Source
+validation sets the acceptance state. An explicitly uncertain or rejected
+observation retains its reported fields at materialization but cannot become
+accepted Evidence just because its extraction status said `extracted`.
+
+`PaperExperiment.status=bound` means that its measurements have validated
+observations and actual links to sample and applicable test records. It does
+not mean all Methods fields are reported, nor that the whole paper is
+comparable. Missing bindings retain the measurements and explicit uncertainty;
+test context is not labeled complete by list presence alone.
+
+`PaperExperiment.assess_comparison` returns an internal `ExperimentComparison`
+for two measurement IDs and their owning Objective. Missing context differs
+from conflicting reported material or test conditions. A positive assessment
+also requires the existing reconstruction's validated contrast and changed
+factors. It does not implement a second axis-normalization or causal-inference
+engine. Materialization records bounded assessment counts in its private trace;
+this internal check does not add a new public synthesis approval gate. The
+existing Evidence and Finding rules still own published scientific eligibility.
+
+These domain bindings and comparison assessments are per-execution state, not
+new persisted Evidence/Finding fields. Reused document checkpoints therefore
+have no newly reconstructed `PaperExperiment` aggregates. This change does not
+rewrite historical results, change HTTP schemas or enum values, or require
+frontend interaction changes. Expanding Finding beyond its current atomic
+claim contract remains separate work.

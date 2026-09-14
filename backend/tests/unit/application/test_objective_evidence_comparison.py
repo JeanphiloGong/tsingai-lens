@@ -890,7 +890,9 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped():
         for document_id in ("paper-1", "paper-2")
     }
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -987,7 +989,9 @@ def test_objective_evidence_continues_after_one_route_format_failure():
         for source_ref in ("block-failed", "block-recovered")
     ]
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -999,12 +1003,13 @@ def test_objective_evidence_continues_after_one_route_format_failure():
     )
 
     assert extractor.calls == 2
-    assert len(units) == 2
-    assert units[0].source_ref == "block-failed"
-    assert units[0].selection_status == "failed"
-    assert units[0].failure_reason == "ValueError: invalid structured response"
-    assert units[1].source_ref == "block-recovered"
-    assert units[1].selection_status == "extracted"
+    assert len(read_audits) == 1
+    assert read_audits[0].source_ref == "block-failed"
+    assert read_audits[0].disposition == "technical_failure"
+    assert read_audits[0].reason == "ValueError: invalid structured response"
+    assert len(units) == 1
+    assert units[0].source_ref == "block-recovered"
+    assert units[0].selection_status == "extracted"
 
 
 def test_objective_evidence_routes_round_robin_across_documents():
@@ -1062,6 +1067,7 @@ def test_objective_evidence_routes_round_robin_across_documents():
     }
 
     extract_and_validate_source_facts(
+        read_audits=[],
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -1149,7 +1155,9 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
         for document_id in ("paper-1", "paper-2")
     }
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -1163,8 +1171,8 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
     assert extractor.source_refs == ["paper-1-a-results", "paper-2-results"]
     assert {
         unit.source_ref
-        for unit in units
-        if unit.document_id == "paper-1" and unit.selection_status == "failed"
+        for unit in read_audits
+        if unit.document_id == "paper-1" and unit.disposition == "technical_failure"
     } == {"paper-1-a-results", "paper-1-b-followup"}
     assert any(
         unit.document_id == "paper-2" and unit.selection_status == "extracted"
@@ -1241,7 +1249,9 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
         for source_ref in source_refs
     ]
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -1253,7 +1263,10 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
     )
 
     assert extractor.source_refs == list(source_refs)
-    assert [unit.selection_status for unit in units] == ["failed", "extracted"]
+    assert [unit.selection_status for unit in units] == ["extracted"]
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "technical_failure"
+    assert read_audits[0].source_ref == "paper-1-invalid"
 
 
 def test_objective_evidence_rejects_selected_route_without_source():
@@ -1282,6 +1295,7 @@ def test_objective_evidence_rejects_selected_route_without_source():
 
     with pytest.raises(RuntimeError, match="selected Evidence Source is missing"):
         extract_and_validate_source_facts(
+            read_audits=[],
             collection_id="col-test",
             source_extractor=UnexpectedExtractor(),
             objectives=(objective,),
@@ -1517,7 +1531,9 @@ def test_objective_context_drops_model_changed_variable_without_values():
         heading_path="Methods",
     )
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=ContextExtractor(),
         objectives=(objective,),

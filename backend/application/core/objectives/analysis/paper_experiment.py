@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from hashlib import sha1
 from typing import Any
 
@@ -139,18 +140,87 @@ def reconstruct_paper_experiments(
     return (*paper_facts, *comparisons)
 
 
+def assemble_paper_experiments(
+    *,
+    collection_id: str,
+    document_id: str,
+    source_facts: tuple[SourceObservation, ...],
+) -> tuple[PaperExperiment, ...]:
+    """Keep independently sourced result series separate; do not invent study ids."""
+    groups: dict[tuple[Any, ...], list[SourceObservation]] = {}
+    observations_by_id = {item.observation_id: item for item in source_facts}
+    if len(observations_by_id) != len(source_facts):
+        raise ValueError("experiment assembly requires unique observations")
+    for observation in source_facts:
+        if observation.document_id != document_id:
+            raise ValueError("experiment assembly cannot include another document")
+        if observation.derived_from_observation_ids:
+            continue
+        groups.setdefault(_experiment_series_key(observation), []).append(observation)
+    for observation in source_facts:
+        if not observation.derived_from_observation_ids:
+            continue
+        parents = tuple(
+            observations_by_id.get(identifier)
+            for identifier in observation.derived_from_observation_ids
+        )
+        if any(
+            parent is None or parent.derived_from_observation_ids for parent in parents
+        ):
+            raise ValueError(
+                "derived comparison requires its original parent observations"
+            )
+        parent_scopes = {_experiment_series_key(parent) for parent in parents}
+        key = (
+            next(iter(parent_scopes))
+            if len(parent_scopes) == 1
+            else ("unbound_contrast", observation.observation_id)
+        )
+        groups.setdefault(key, []).append(observation)
+    return tuple(
+        assemble_paper_experiment(
+            collection_id=collection_id,
+            document_id=document_id,
+            source_facts=tuple(items),
+        )
+        for items in groups.values()
+    )
+
+
+def _experiment_series_key(observation: SourceObservation) -> tuple[Any, ...]:
+    context = observation.scientific_context
+    # Scope by Source and outcome until the paper establishes a shared study.
+    # Non-identity sample attributes (state, orientation, treatment) stay boundaries.
+    fixed = tuple(
+        sorted(
+            (section, item.name, str(item.value), item.unit or "")
+            for section in ("material", "sample", "test")
+            for item in getattr(context, section)
+            if not (
+                section == "sample"
+                and _objective_table_column_is_sample_key(
+                    _objective_column_key(item.name)
+                )
+                and _objective_sample_values_are_opaque_identifiers(item.value)
+            )
+        )
+    )
+    return (
+        observation.objective_id,
+        observation.source_kind,
+        observation.source_ref,
+        observation.reported_result.outcome if observation.reported_result else None,
+        fixed,
+    )
+
+
 def assemble_paper_experiment(
     *,
     collection_id: str,
     document_id: str,
     source_facts: tuple[SourceObservation, ...],
 ) -> PaperExperiment:
-    """Build the domain experiment aggregate from one paper's source facts.
-
-    This adapter deliberately records only facts already present in the
-    validated source observations. Missing Methods or sample context becomes an explicit
-    incomplete experiment rather than an inferred value.
-    """
+    """Bind a selected result series using only context already attached to each fact."""
 
     measurements: list[MeasurementResult] = []
     test_conditions: list[TestCondition] = []
@@ -161,72 +231,47 @@ def assemble_paper_experiment(
     uncertainties: list[str] = []
     for draft in source_facts:
         if draft.document_id != document_id:
-            continue
+            raise ValueError("experiment assembly cannot include another document")
+        if draft.collection_id not in {collection_id, "unknown"}:
+            raise ValueError("experiment assembly cannot include another collection")
         source_kind = draft.source_kind
         source_ref = draft.source_ref
         if source_kind and source_ref:
             source_observation_ids.append(draft.evidence_id)
-            source_ref_record = next(
-                (
-                    item
-                    for item in draft.source_refs
-                    if item.get("source_kind") == source_kind
-                    and item.get("source_ref") == source_ref
-                ),
-                {},
-            )
-            source_excerpt = str(source_ref_record.get("source_excerpt") or "").strip()
-            if source_excerpt:
-                source_observations.append(
-                    SourceObservation.from_mapping(
-                        {
-                            "observation_id": draft.evidence_id,
-                            "collection_id": collection_id,
-                            "objective_id": draft.objective_id,
-                            "document_id": document_id,
-                            "source_kind": source_kind,
-                            "source_ref": source_ref,
-                            "observation_role": draft.evidence_role or "unknown",
-                            "source_excerpt": source_excerpt,
-                            "changed_variables": [
-                                item.to_record() for item in draft.changed_variables
-                            ],
-                            "comparison": (
-                                draft.comparison.to_record()
-                                if draft.comparison
-                                else None
-                            ),
-                            "reported_result": (
-                                draft.reported_result.to_record()
-                                if draft.reported_result
-                                else None
-                            ),
-                            "scientific_context": draft.scientific_context.to_record(),
-                            "confidence": draft.confidence,
-                            "selection_status": draft.selection_status,
-                            "selection_reason": draft.selection_reason,
-                            "attribution_scope": draft.attribution_scope,
-                            "resolution_status": draft.resolution_status,
-                            "failure_reason": draft.failure_reason,
-                            "status": (
-                                "validated"
-                                if draft.selection_status == "extracted"
-                                else "rejected"
-                                if draft.selection_status == "failed"
-                                else "uncertain"
-                            ),
-                            "evidence_anchor_ids": list(draft.evidence_anchor_ids),
-                        }
-                    )
-                )
+            source_observations.append(replace(draft, collection_id=collection_id))
         result = draft.reported_result
-        if result is not None and source_kind and source_ref:
+        context = draft.scientific_context
+        sample_label = _objective_explicit_sample_label(draft)
+        applicable_test = tuple(
+            item
+            for item in context.test
+            if result is not None
+            and (
+                not item.applies_to_outcomes
+                or _objective_test_context_applies_to_outcome(item, result.outcome)
+            )
+        )
+        if (
+            result is not None
+            and source_kind
+            and source_ref
+            and not draft.derived_from_observation_ids
+        ):
             measurements.append(
                 MeasurementResult.from_mapping(
                     {
                         "result_id": draft.evidence_id,
                         "document_id": document_id,
                         "collection_id": collection_id,
+                        "variant_id": f"variant_{draft.evidence_id}"
+                        if sample_label
+                        else None,
+                        "test_condition_id": f"tc_{draft.evidence_id}"
+                        if applicable_test
+                        else None,
+                        "baseline_id": f"baseline_{draft.evidence_id}"
+                        if draft.comparison
+                        else None,
                         "property_normalized": result.outcome,
                         "result_type": result.result_kind,
                         "claim_scope": "current_work",
@@ -237,17 +282,18 @@ def assemble_paper_experiment(
                         },
                         "unit": result.unit,
                         "evidence_anchor_ids": list(draft.evidence_anchor_ids),
-                        "traceability_status": "direct",
+                        "traceability_status": "direct"
+                        if draft.status == "validated"
+                        else "unresolved",
                         "result_source_type": source_kind,
-                        "epistemic_status": "directly_observed",
+                        "epistemic_status": draft.status,
                     }
                 )
             )
-        context = draft.scientific_context
-        if context.test and source_kind and source_ref:
+        if applicable_test and source_kind and source_ref:
             test_payload = {
                 item.name: {"value": item.value, "unit": item.unit}
-                for item in context.test
+                for item in applicable_test
             }
             test_conditions.append(
                 TestCondition.from_mapping(
@@ -259,14 +305,14 @@ def assemble_paper_experiment(
                         "template_type": "objective_test_context",
                         "scope_level": "measurement",
                         "condition_payload": test_payload,
-                        "condition_completeness": "complete",
+                        "condition_completeness": "partial",
                         "evidence_anchor_ids": list(draft.evidence_anchor_ids),
                         "confidence": draft.confidence,
                         "epistemic_status": "normalized_from_evidence",
                     }
                 )
             )
-        if context.sample and source_kind and source_ref:
+        if sample_label and source_kind and source_ref:
             sample_payload = {
                 item.name: {"value": item.value, "unit": item.unit}
                 for item in context.sample
@@ -293,17 +339,38 @@ def assemble_paper_experiment(
         uncertainties.append("Test conditions remain unresolved from the inspected Sources.")
     if not sample_variants:
         uncertainties.append("Sample identity remains unresolved from the inspected Sources.")
+    for measurement in measurements:
+        if measurement.variant_id is None or measurement.test_condition_id is None:
+            uncertainties.append(
+                f"Sample or test binding remains unresolved for {measurement.result_id}."
+            )
+        if measurement.epistemic_status != "validated":
+            uncertainties.append(
+                f"Source validation remains {measurement.epistemic_status} for {measurement.result_id}."
+            )
     unique_measurements = {item.result_id: item for item in measurements}
     unique_conditions = {item.test_condition_id: item for item in test_conditions}
     unique_variants = {item.variant_id: item for item in sample_variants}
     unique_baselines = {item.baseline_id: item for item in baselines}
     status = (
         "bound"
-        if unique_measurements and unique_conditions and unique_variants
+        if unique_measurements
+        and all(
+            item.variant_id in unique_variants
+            and item.test_condition_id in unique_conditions
+            and item.epistemic_status == "validated"
+            for item in unique_measurements.values()
+        )
         else "incomplete"
     )
     return PaperExperiment(
-        experiment_id=f"exp_{document_id}",
+        experiment_id="exp_"
+        + sha1(
+            json.dumps(
+                [collection_id, document_id, sorted(source_observation_ids)],
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:24],
         collection_id=collection_id,
         document_id=document_id,
         study_id=None,
@@ -327,20 +394,13 @@ def _sample_variant_from_context(
     document_id: str,
     sample_payload: dict[str, Any],
 ) -> SampleVariant:
-    variant_label = next(
-        (
-            str(value.get("value"))
-            for name, value in sample_payload.items()
-            if name.casefold() in {"condition", "group", "sample", "specimen"}
-        ),
-        None,
-    )
+    variant_label = _objective_explicit_sample_label(draft)
     return SampleVariant.from_mapping(
         {
             "variant_id": f"variant_{draft.evidence_id}",
             "document_id": document_id,
             "collection_id": collection_id,
-            "variant_label": variant_label or "source-defined sample variant",
+            "variant_label": variant_label,
             "host_material_system": {
                 item.name: item.value for item in draft.scientific_context.material
             },
@@ -4007,6 +4067,14 @@ def _build_objective_pairwise_comparison_units(
                             ),
                             "objective_id": target.objective_id,
                             "document_id": target.document_id,
+                            "collection_id": target.collection_id,
+                            "derived_from_observation_ids": [
+                                baseline.observation_id,
+                                target.observation_id,
+                            ],
+                            "status": "validated"
+                            if baseline.status == target.status == "validated"
+                            else "uncertain",
                             "source_kind": target.source_kind,
                             "source_ref": target.source_ref,
                             "evidence_role": "direct_result",
@@ -4026,9 +4094,7 @@ def _build_objective_pairwise_comparison_units(
                                 "target_label": target_label,
                                 "axis_names": list(axis_names),
                                 "comparable": comparable,
-                                "incomparability_reasons": (
-                                    incomparability_reasons
-                                ),
+                                "incomparability_reasons": (incomparability_reasons),
                             },
                             "reported_result": {
                                 "outcome": target_result.outcome,
@@ -4068,9 +4134,7 @@ def _build_objective_pairwise_comparison_units(
                                 )
                             ),
                             "resolution_status": "resolved",
-                            "confidence": min(
-                                baseline.confidence, target.confidence
-                            ),
+                            "confidence": min(baseline.confidence, target.confidence),
                         }
                     )
                 )

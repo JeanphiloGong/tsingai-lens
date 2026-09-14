@@ -26,6 +26,7 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.source_extraction import SourceReadAudit
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -35,6 +36,103 @@ from domain.core import (
 )
 from domain.source import SourceTable
 from tests.support.research_objective_service import research_objective
+
+
+def test_grounding_rejection_remains_retryable_not_a_scientific_absence() -> None:
+    objective = research_objective({"variables": ["laser power"], "outcomes": ["porosity"]})
+    analysis = ObjectiveAnalysis(
+        collection_id=objective.collection_id, objective_id=objective.objective_id,
+        analysis_version=1, total_document_count=1,
+        document_inputs=(PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="fixture"),),
+        pipeline_version="test", model_name=None, prompt_versions={},
+    )
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": objective.objective_id, "document_id": "paper-1",
+        "source_kind": "text_window", "source_ref": "result-1",
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    records, contributions = materialize_evidence(
+        collection_id=objective.collection_id, objective=objective, analysis=analysis,
+        observations=(), technical_audits=(SourceReadAudit(
+            collection_id=objective.collection_id, objective_id=objective.objective_id,
+            document_id="paper-1", source_kind="text_window", source_ref="result-1",
+            disposition="grounding_rejected", reason="Source grounding failed: unsupported result value",
+        ),), paper_maps=(), frames=(PaperAnalysisFrame.from_mapping({
+            "objective_id": objective.objective_id, "document_id": "paper-1",
+            "relevance": "high", "paper_role": "primary_experiment",
+        }),), routes=(route,), blocks_by_document_id={}, tables_by_document_id={}, figures_by_document_id={},
+    )
+    assert records == ()
+    assert contributions[0].failed_source_count == 1
+    assert contributions[0].analysis_status == "failed"
+    assert contributions[0].uninspected_source_count == 0
+    assert contributions[0].warnings
+
+
+def test_unaccepted_observation_keeps_its_value_without_entering_synthesis() -> None:
+    objective = research_objective(
+        {"variables": ["preheating"], "outcomes": ["elongation"]}
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id=objective.collection_id,
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        total_document_count=1,
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="p002", preparation_fingerprint="fixture"
+            ),
+        ),
+        pipeline_version="test",
+        model_name=None,
+        prompt_versions={},
+    )
+    table = SourceTable(
+        table_id="table-2",
+        document_id="p002",
+        table_order=2,
+        caption_block_id=None,
+        page=8,
+        caption_text="Elongation (%)",
+        heading_path="Results",
+        column_headers=("Condition", "Elongation (%)"),
+        table_matrix=(("P150", "82"),),
+    )
+    for state, expected in (("uncertain", "candidate"), ("rejected", "rejected")):
+        observation = SourceObservation.from_mapping(
+            {
+                "observation_id": "p150",
+                "objective_id": objective.objective_id,
+                "document_id": "p002",
+                "source_kind": "table",
+                "source_ref": "table-2",
+                "observation_role": "direct_result",
+                "status": state,
+                "source_excerpt": "P150 82",
+                "selection_status": "extracted",
+                "reported_result": {
+                    "outcome": "elongation",
+                    "value": 82,
+                    "unit": "%",
+                    "direction": "unknown",
+                    "result_text": "P150 82",
+                },
+            }
+        )
+        evidence = _analysis_evidence_records(
+            collection_id=objective.collection_id,
+            analysis=analysis,
+            objective=objective,
+            drafts=(observation,),
+            blocks_by_document_id={},
+            tables_by_document_id={"p002": [table]},
+            figures_by_document_id={},
+        )[0]
+        assert evidence.reported_result.value == 82
+        assert evidence.selection_status == expected
+        assert not FindingSynthesisService.is_synthesizable_result_evidence(
+            objective, evidence
+        )
 
 
 def test_factor_recovery_does_not_promote_treatment_mediated_porosity() -> None:
@@ -2449,6 +2547,11 @@ def test_empty_evidence_materialization_records_bounded_abstention_trace() -> No
             "objective_id": "objective-1",
             "analysis_version": 1,
             "draft_count": 0,
+            "experiment_count": 0,
+            "bound_experiment_count": 0,
+            "measurement_count": 0,
+            "comparison_assessment_counts": {},
+            "grounding_rejection_count": 0,
             "failed_draft_count": 0,
             "target_outcome_match_count": 0,
             "selected_draft_count": 0,
@@ -2570,6 +2673,11 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
         "objective_id": "objective-1",
         "analysis_version": 1,
         "draft_count": 1,
+        "experiment_count": 0,
+        "bound_experiment_count": 0,
+        "measurement_count": 0,
+        "comparison_assessment_counts": {},
+        "grounding_rejection_count": 0,
         "failed_draft_count": 0,
         "target_outcome_match_count": 0,
         "selected_draft_count": 1,

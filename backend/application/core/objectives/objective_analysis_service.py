@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
 from asyncio import Semaphore, gather, to_thread
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
-import json
-import logging
 from typing import Any, Callable, Mapping, Sequence
 
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
@@ -24,14 +24,14 @@ from application.core.objectives.analysis.finding_synthesis import (
 )
 from application.core.objectives.analysis.paper_experiment import (
     PAPER_EXPERIMENT_RECONSTRUCTION_VERSION,
-    assemble_paper_experiment,
+    assemble_paper_experiments,
     reconstruct_paper_experiments,
 )
 from application.core.objectives.analysis.source_extraction import (
     OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
     ObjectiveSourceExtractor,
+    SourceReadAudit,
     extract_and_validate_source_facts,
-    split_source_read_audits,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
@@ -52,6 +52,8 @@ from application.core.objectives.scope_screening import (
     screen_objective_scope,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.paper_map_repository import PaperMapRepository
 from application.source.collection_service import CollectionService
 from domain.core import (
     Finding,
@@ -64,8 +66,6 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from application.repositories.paper_map_repository import PaperMapRepository
-from application.repositories.objective_repository import ObjectiveRepository
 from domain.source import (
     SourceBlock,
     SourceFigure,
@@ -116,7 +116,7 @@ class ObjectiveDocumentEvidenceArtifacts:
 
     contribution: PaperContribution
     evidence_records: tuple[ObjectiveEvidence, ...]
-    experiment: PaperExperiment | None = None
+    experiments: tuple[PaperExperiment, ...] = ()
 
 
 class ResearchObjectiveNotFoundError(FileNotFoundError):
@@ -363,9 +363,9 @@ class ObjectiveEvidenceAnalysisService:
             findings=findings,
             model_name=model_name,
             experiments=tuple(
-                item.experiment
+                experiment
                 for item in document_artifacts
-                if item.experiment is not None
+                for experiment in item.experiments
             ),
         )
 
@@ -403,8 +403,10 @@ class ObjectiveEvidenceAnalysisService:
             ],
             progress_callback=progress_callback,
         )
+        read_audits: list[SourceReadAudit] = []
         validated_source_facts = extract_and_validate_source_facts(
             collection_id=collection_id,
+            read_audits=read_audits,
             source_extractor=self._objective_source_extractor,
             paper_facts_extractor=self._paper_facts_extractor,
             objectives=(objective,),
@@ -415,9 +417,7 @@ class ObjectiveEvidenceAnalysisService:
             document_trees_by_document_id=objective_inputs[
                 "document_trees_by_document_id"
             ],
-            table_cells_by_document_id=objective_inputs[
-                "table_cells_by_document_id"
-            ],
+            table_cells_by_document_id=objective_inputs["table_cells_by_document_id"],
             progress_callback=progress_callback,
         )
         paper_evidence_drafts = reconstruct_paper_experiments(
@@ -430,20 +430,17 @@ class ObjectiveEvidenceAnalysisService:
                 figures_by_document_id=objective_inputs["figures_by_document_id"],
             ),
         )
-        experiment = assemble_paper_experiment(
+        experiments = assemble_paper_experiments(
             collection_id=collection_id,
             document_id=objective_inputs["documents"][0].document_id,
             source_facts=paper_evidence_drafts,
-        )
-        scientific_observations, technical_audits = split_source_read_audits(
-            paper_evidence_drafts
         )
         evidence_records, contributions = materialize_evidence(
             collection_id=collection_id,
             analysis=analysis,
             objective=objective,
-            observations=scientific_observations,
-            technical_audits=technical_audits,
+            observations=paper_evidence_drafts,
+            technical_audits=tuple(read_audits),
             paper_maps=objective_inputs["paper_maps"],
             frames=screened_sources,
             routes=source_inspection_routes,
@@ -453,7 +450,7 @@ class ObjectiveEvidenceAnalysisService:
             document_trees_by_document_id=objective_inputs[
                 "document_trees_by_document_id"
             ],
-            paper_experiment=experiment,
+            experiments=experiments,
         )
         if len(contributions) != 1:
             raise RuntimeError(
@@ -462,7 +459,7 @@ class ObjectiveEvidenceAnalysisService:
         return ObjectiveDocumentEvidenceArtifacts(
             contribution=contributions[0],
             evidence_records=evidence_records,
-            experiment=experiment,
+            experiments=experiments,
         )
 
     @staticmethod

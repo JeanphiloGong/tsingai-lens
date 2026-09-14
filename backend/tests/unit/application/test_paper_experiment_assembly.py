@@ -7,7 +7,9 @@ from application.core.objectives.analysis.evidence_materialization import (
     _merge_domain_experiment_inputs,
 )
 from application.core.objectives.analysis.source_extraction import (
+    SourceReadAudit,
     SourceObservation,
+    split_source_read_audits,
 )
 
 
@@ -83,9 +85,42 @@ def test_materialization_reads_source_facts_from_experiment_first() -> None:
 
     merged = _merge_domain_experiment_inputs(
         paper_experiment=experiment,
-        drafts=(draft,),
+        observations=(draft,),
     )
 
     assert len(merged) == 1
     assert merged[0].source_refs[0]["page"] == 4
     assert merged[0].scientific_context.test[0].name == "temperature"
+
+
+def test_source_read_audits_are_not_scientific_observations() -> None:
+    failed = SourceObservation.from_mapping(
+        {
+            "evidence_id": "failed-1",
+            "collection_id": "col-1",
+            "objective_id": "obj-1",
+            "document_id": "doc-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "evidence_role": "irrelevant",
+            "selection_status": "failed",
+            "failure_reason": "provider unavailable",
+            "status": "rejected",
+            "confidence": 0,
+        }
+    )
+
+    scientific, audits = split_source_read_audits((failed,))
+
+    assert scientific == ()
+    assert audits == (
+        SourceReadAudit(
+            collection_id="col-1",
+            objective_id="obj-1",
+            document_id="doc-1",
+            source_kind="table",
+            source_ref="table-1",
+            disposition="technical_failure",
+            reason="provider unavailable",
+        ),
+    )

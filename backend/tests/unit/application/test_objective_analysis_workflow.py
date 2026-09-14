@@ -486,7 +486,7 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
-        drafts=reconstructed,
+        observations=reconstructed,
         paper_maps=(),
         frames=frames,
         routes=routes,

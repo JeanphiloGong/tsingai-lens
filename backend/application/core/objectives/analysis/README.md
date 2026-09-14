@@ -38,7 +38,7 @@ measurement. Different sample states must not be pooled into one comparison.
 | Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> source observations | When deterministic extraction is insufficient | None |
 | Ground | `source_validation.validate_source_fact` | One source observation and its exact Source -> validated, uncertain, or rejected observation | No | None |
 | Bind | `paper_experiment.reconstruct_paper_experiments` / `assemble_paper_experiment` | Same-paper validated facts -> `PaperExperiment` plus technical comparison units | No | None |
-| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` Source observations -> Evidence and contribution records; technical failure/derived units remain supplemental | No | None; caller stores records |
+| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` Source observations plus application `SourceReadAudit` records -> Evidence and contribution records | No | None; caller stores records |
 | Compare | `finding_synthesis.FindingSynthesisService.synthesize` | Paper contributions and Evidence -> Findings | Optional assertion judge | None; caller publishes |
 
 Extraction and grounding alternate per Source, not as two collection-wide

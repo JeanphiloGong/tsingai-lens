@@ -31,6 +31,7 @@ from application.core.objectives.analysis.source_extraction import (
     OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
     ObjectiveSourceExtractor,
     extract_and_validate_source_facts,
+    split_source_read_audits,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
@@ -434,11 +435,15 @@ class ObjectiveEvidenceAnalysisService:
             document_id=objective_inputs["documents"][0].document_id,
             source_facts=paper_evidence_drafts,
         )
+        scientific_observations, technical_audits = split_source_read_audits(
+            paper_evidence_drafts
+        )
         evidence_records, contributions = materialize_evidence(
             collection_id=collection_id,
             analysis=analysis,
             objective=objective,
-            drafts=paper_evidence_drafts,
+            observations=scientific_observations,
+            technical_audits=technical_audits,
             paper_maps=objective_inputs["paper_maps"],
             frames=screened_sources,
             routes=source_inspection_routes,

@@ -72,6 +72,56 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
+
+@dataclass(frozen=True)
+class SourceReadAudit:
+    """Technical accounting for a routed Source read.
+
+    This is deliberately application-layer data: a failed or skipped read is
+    not a scientific observation and must not enter PaperExperiment or
+    ObjectiveEvidence.
+    """
+
+    collection_id: str
+    objective_id: str
+    document_id: str
+    source_kind: str
+    source_ref: str
+    disposition: str
+    reason: str | None = None
+
+    @classmethod
+    def from_observation(cls, observation: SourceObservation) -> "SourceReadAudit":
+        disposition = (
+            "technical_failure"
+            if observation.selection_status == "failed"
+            else "inspected_without_fact"
+        )
+        return cls(
+            collection_id=observation.collection_id,
+            objective_id=observation.objective_id,
+            document_id=observation.document_id,
+            source_kind=observation.source_kind,
+            source_ref=observation.source_ref,
+            disposition=disposition,
+            reason=observation.failure_reason or observation.selection_reason,
+        )
+
+
+def split_source_read_audits(
+    observations: tuple[SourceObservation, ...],
+) -> tuple[tuple[SourceObservation, ...], tuple[SourceReadAudit, ...]]:
+    """Separate technical read markers from scientific observations."""
+
+    scientific: list[SourceObservation] = []
+    audits: list[SourceReadAudit] = []
+    for observation in observations:
+        if observation.selection_status in {"failed", "rejected"} and not observation.has_scientific_content:
+            audits.append(SourceReadAudit.from_observation(observation))
+        else:
+            scientific.append(observation)
+    return tuple(scientific), tuple(audits)
+
 _OBJECTIVE_STATE_ITEM_LIMIT = 12
 # A Source block is normally one paragraph, but tables and figure captions can
 # carry longer result clauses.  Keep a generous bounded window so extraction

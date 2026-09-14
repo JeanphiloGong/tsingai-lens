@@ -17,6 +17,7 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis.source_extraction import (
+    SourceReadAudit,
     _objective_missing_context_fields,
 )
 from application.core.objectives.analysis.source_validation import (
@@ -70,7 +71,7 @@ def materialize_evidence(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    drafts: tuple[SourceObservation, ...],
+    observations: tuple[SourceObservation, ...],
     paper_maps: tuple[PaperResearchMap, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
@@ -79,22 +80,26 @@ def materialize_evidence(
     figures_by_document_id: Mapping[str, list[Any]],
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
     paper_experiment: PaperExperiment | None = None,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> tuple[tuple[ObjectiveEvidence, ...], tuple[PaperContribution, ...]]:
     if paper_experiment is not None:
-        drafts = _merge_domain_experiment_inputs(
+        observations = _merge_domain_experiment_inputs(
             paper_experiment=paper_experiment,
-            drafts=drafts,
+            observations=observations,
         )
-    inspection_source_refs = _inspection_source_refs_by_document(drafts)
-    selected_drafts = _objective_detail_evidence(
-        drafts,
+    inspection_source_refs = _inspection_source_refs_by_document(
+        observations,
+        technical_audits=technical_audits,
+    )
+    selected_observations = _objective_detail_evidence(
+        observations,
         objective_context=objective,
     )
     evidence_records = _analysis_evidence_records(
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
-        drafts=selected_drafts,
+        drafts=selected_observations,
         blocks_by_document_id=blocks_by_document_id,
         tables_by_document_id=tables_by_document_id,
         figures_by_document_id=figures_by_document_id,
@@ -114,6 +119,7 @@ def materialize_evidence(
         routes=routes,
         evidence_records=evidence_records,
         inspection_source_refs=inspection_source_refs,
+        technical_audits=technical_audits,
         document_trees_by_document_id=document_trees_by_document_id or {},
     )
     # Framing owns the complete candidate Source partition.  Emit the final
@@ -129,6 +135,7 @@ def materialize_evidence(
             routes=routes,
             evidence_records=evidence_records,
             inspection_source_refs=inspection_source_refs,
+            technical_audits=technical_audits,
             document_trees_by_document_id=document_trees_by_document_id or {},
             emit_parity_snapshot=True,
         )
@@ -139,9 +146,12 @@ def materialize_evidence(
             "collection_id": collection_id,
             "objective_id": objective.objective_id,
             "analysis_version": analysis.analysis_version,
-            "draft_count": len(drafts),
+            "draft_count": len(observations),
             "failed_draft_count": sum(
-                draft.selection_status == "failed" for draft in drafts
+                draft.selection_status == "failed" for draft in observations
+            ) + sum(
+                audit.disposition == "technical_failure"
+                for audit in technical_audits
             ),
             "target_outcome_match_count": sum(
                 draft.selection_status != "failed"
@@ -150,9 +160,9 @@ def materialize_evidence(
                     draft,
                     target_axes=target_axes,
                 )
-                for draft in drafts
+                for draft in observations
             ),
-            "selected_draft_count": len(selected_drafts),
+            "selected_draft_count": len(selected_observations),
             "evidence_record_count": len(evidence_records),
             "paper_disposition_counts": dict(
                 sorted(
@@ -170,17 +180,18 @@ def materialize_evidence(
 def _merge_domain_experiment_inputs(
     *,
     paper_experiment: PaperExperiment,
-    drafts: tuple[SourceObservation, ...],
+    observations: tuple[SourceObservation, ...],
 ) -> tuple[SourceObservation, ...]:
     """Make SourceObservation the primary materialization input.
 
-    Derived comparison units and technical failure markers remain in ``drafts``
-    until they have their own domain representation.  Source-backed facts are
-    rebuilt from the PaperExperiment aggregate and therefore no longer depend
-    on the extraction-stage object as their source of truth.
+    Derived comparison units remain in the application record until they have
+    their own domain representation. Technical read failures are passed to
+    materialization separately as ``SourceReadAudit`` records. Source-backed
+    facts are rebuilt from the PaperExperiment aggregate and therefore no
+    longer depend on an extraction-stage container as their source of truth.
     """
 
-    drafts_by_id = {draft.evidence_id: draft for draft in drafts}
+    observations_by_id = {item.evidence_id: item for item in observations}
     domain_drafts = tuple(
         SourceObservation.from_mapping(
             {
@@ -210,7 +221,7 @@ def _merge_domain_experiment_inputs(
                 ),
                 "scientific_context": observation.scientific_context.to_record(),
                 "source_refs": (
-                    drafts_by_id[observation.observation_id].to_record().get(
+                    observations_by_id[observation.observation_id].to_record().get(
                         "source_refs"
                     )
                     or [
@@ -227,12 +238,17 @@ def _merge_domain_experiment_inputs(
         )
         for observation in paper_experiment.source_observations
     )
-    domain_ids = {draft.evidence_id for draft in domain_drafts}
-    return (*domain_drafts, *(draft for draft in drafts if draft.evidence_id not in domain_ids))
+    domain_ids = {item.evidence_id for item in domain_drafts}
+    return (
+        *domain_drafts,
+        *(item for item in observations if item.evidence_id not in domain_ids),
+    )
 
 
 def _inspection_source_refs_by_document(
-    drafts: tuple[SourceObservation, ...],
+    observations: tuple[SourceObservation, ...],
+    *,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> dict[str, set[tuple[str, str]]]:
     """Return source locators for reads that yielded no scientific fact.
 
@@ -242,7 +258,7 @@ def _inspection_source_refs_by_document(
     """
 
     inspected: dict[str, set[tuple[str, str]]] = {}
-    for draft in drafts:
+    for draft in observations:
         if (
             draft.selection_status != "rejected"
             or draft.evidence_role != "irrelevant"
@@ -255,6 +271,10 @@ def _inspection_source_refs_by_document(
             continue
         inspected.setdefault(draft.document_id, set()).add(
             _source_identity(draft.source_kind, draft.source_ref)
+        )
+    for audit in technical_audits:
+        inspected.setdefault(audit.document_id, set()).add(
+            _source_identity(audit.source_kind, audit.source_ref)
         )
     return inspected
 
@@ -410,6 +430,7 @@ def _record_source_coverage_ledger(
     routes: tuple[EvidenceCandidate, ...],
     evidence_records: tuple[ObjectiveEvidence, ...],
     inspection_source_refs: Mapping[str, set[tuple[str, str]]] | None = None,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
     emit_parity_snapshot: bool = False,
 ) -> None:
@@ -428,6 +449,10 @@ def _record_source_coverage_ledger(
 
     document_trees_by_document_id = document_trees_by_document_id or {}
     inspection_source_refs = inspection_source_refs or {}
+    technical_audits_by_document: dict[str, tuple[SourceReadAudit, ...]] = {}
+    for audit in technical_audits:
+        technical_audits_by_document.setdefault(audit.document_id, ())
+        technical_audits_by_document[audit.document_id] += (audit,)
     ledger_records: list[dict[str, Any]] = []
     for frame in frames:
         document_evidence = tuple(evidence_by_document.get(frame.document_id, ()))
@@ -478,6 +503,11 @@ def _record_source_coverage_ledger(
             for evidence in document_evidence
             if evidence.selection_status == "failed"
         )
+        technical_failures = tuple(
+            audit
+            for audit in technical_audits_by_document.get(frame.document_id, ())
+            if audit.disposition == "technical_failure"
+        )
         missing_by_result = {
             evidence.evidence_id: _objective_result_missing_field_families(
                 objective=objective,
@@ -504,12 +534,19 @@ def _record_source_coverage_ledger(
             if evidence.evidence_role in {"direct_result", "contradictory_result"}
         )
         closure_complete = bool(result_evidence) and not (
-            missing_fields or uninspected_sources or critical_failed_evidence
+            missing_fields
+            or uninspected_sources
+            or critical_failed_evidence
+            or technical_failures
         )
         failed_source_refs = {
             _source_identity(item.source_kind, item.source_ref)
             for item in failed_evidence
         }
+        failed_source_refs.update(
+            _source_identity(item.source_kind, item.source_ref)
+            for item in technical_failures
+        )
         ledger = {
             "trace_type": "objective_source_coverage_ledger",
             "collection_id": collection_id,
@@ -533,7 +570,7 @@ def _record_source_coverage_ledger(
                     for item in context_evidence
                 }
             ),
-            "technical_failure_count": len(failed_evidence),
+            "technical_failure_count": len(failed_evidence) + len(technical_failures),
             "uninspected_source_count": len(uninspected_sources),
             "result_count": len(result_evidence),
             "source_grounded_result_count": source_grounded_result_count,
@@ -569,6 +606,14 @@ def _record_source_coverage_ledger(
                     "reason": item.failure_reason,
                 }
                 for item in failed_evidence
+            ]
+            + [
+                {
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "reason": item.reason,
+                }
+                for item in technical_failures
             ],
             **_researcher_decision_packet_audit(document_evidence),
         }
@@ -1105,6 +1150,7 @@ def _analysis_contributions(
     routes: tuple[EvidenceCandidate, ...],
     evidence_records: tuple[ObjectiveEvidence, ...],
     inspection_source_refs: Mapping[str, set[tuple[str, str]]] | None = None,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
 ) -> tuple[PaperContribution, ...]:
     paper_maps_by_document_id = {
@@ -1126,6 +1172,10 @@ def _analysis_contributions(
 
     document_trees_by_document_id = document_trees_by_document_id or {}
     inspection_source_refs = inspection_source_refs or {}
+    technical_audits_by_document: dict[str, tuple[SourceReadAudit, ...]] = {}
+    for audit in technical_audits:
+        technical_audits_by_document.setdefault(audit.document_id, ())
+        technical_audits_by_document[audit.document_id] += (audit,)
     contributions: list[PaperContribution] = []
     for frame in frames:
         document_evidence = tuple(evidence_by_document.get(frame.document_id, ()))
@@ -1162,6 +1212,11 @@ def _analysis_contributions(
             for evidence in document_evidence
             if evidence.selection_status == "failed"
         }
+        failed_sources.update(
+            (audit.source_kind, audit.source_ref)
+            for audit in technical_audits_by_document.get(frame.document_id, ())
+            if audit.disposition == "technical_failure"
+        )
         comparable_evidence_count = sum(
             FindingSynthesisService.is_synthesizable_result_evidence(
                 objective,

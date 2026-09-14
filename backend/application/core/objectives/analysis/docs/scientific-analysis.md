@@ -60,8 +60,9 @@ Read the analysis responsibilities in real research order:
    scope as experiment context.
 6. `evidence_materialization.py` consumes the `PaperExperiment` Source
    observations as the primary scientific input and turns them into durable
-   `ObjectiveEvidence`. Technical failure markers and derived comparison units
-   remain supplemental until they receive their own domain model. It deduplicates replayed scientific claims by stable
+   `ObjectiveEvidence`. Technical read failures are supplied separately as
+   application `SourceReadAudit` records; derived comparison units remain
+   supplemental until they receive their own domain model. It deduplicates replayed scientific claims by stable
    Evidence identity, and derives each paper's `PaperContribution` from that
    final Evidence set. Table row and column locators are part of a result's
    Source-local identity, so equal scalar values in different specimen rows do

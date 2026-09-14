@@ -25,9 +25,9 @@ from application.chat.capabilities import (
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat import capability_policy, intent_policy
-from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage, ResearchClaimReview
+from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
 from application.chat.model import (
-    RESEARCH_AGENT_SYSTEM_PROMPT, RESEARCH_REVIEW_SYSTEM_PROMPT,
+    RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT, ResearchWorkingCheck, ResearchWorkingNotes,
 )
 from application.core.structured_extraction.json_support import extract_json_object
@@ -57,15 +57,6 @@ _TrajectoryCheckpoint = Callable[
 _MODEL_RESPONSE_RETRY_LIMIT = 5
 _REQUIRED_ACTION_RETRY_LIMIT = 1
 _MAX_TOOL_CALLS_PER_RESPONSE = 32
-_RESEARCH_DRAFT_TOOLS = frozenset({
-    "propose_objective_drafts", "preview_research_scope", "propose_research_plan",
-    "create_finding_draft",
-})
-_RESEARCH_OBSERVATION_TOOLS = frozenset({
-    "read_source", "inspect_table", "inspect_document_sources",
-    "inspect_published_finding", "inspect_objective_evidence", "inspect_research_plans",
-    *_RESEARCH_DRAFT_TOOLS,
-})
 
 
 def _is_retryable_provider_exception(exc: BaseException) -> bool:
@@ -689,7 +680,7 @@ class ResearchAgentRunner:
                     messages.append(
                         self._assistant(
                             context,
-                            self._failure_answer(messages, calls, results, review_reason=exc.reason),
+                            self._failure_answer(messages, calls, results),
                             progress,
                         )
                     )
@@ -892,7 +883,6 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None,
         *,
         finalizing: bool = False,
-        check_research: bool = True,
     ) -> ModelTurn:
         timeout = progress.remaining_seconds()
         output_limit = self.limits.max_model_output_tokens
@@ -909,8 +899,7 @@ class ResearchAgentRunner:
         if timeout <= 0:
             raise TimeoutError("research turn deadline reached")
         model_context = replace(model_context, max_context_tokens=self.limits.max_context_tokens)
-        prompt = (RESEARCH_COMPACTION_SYSTEM_PROMPT if model_context.compacting else
-                  RESEARCH_REVIEW_SYSTEM_PROMPT if model_context.research_review is not None else RESEARCH_AGENT_SYSTEM_PROMPT)
+        prompt = RESEARCH_COMPACTION_SYSTEM_PROMPT if model_context.compacting else RESEARCH_AGENT_SYSTEM_PROMPT
         request_tokens = self.context_builder.estimate_tokens({
             "messages": model_context.provider_messages(prompt),
             "tools": [spec.model_schema() for spec in tool_specs],
@@ -918,7 +907,7 @@ class ResearchAgentRunner:
         if request_tokens + output_limit + 1024 > self.limits.max_context_tokens:
             raise ModelResponseError("Model request exceeds its context window.",
                                      reason="context_window_exceeded", retryable=False)
-        if check_research:
+        if not model_context.compacting:
             progress.read_batch_tokens = max(1024, min(16_000,
                 self.limits.max_context_tokens - request_tokens - output_limit - 4096))
         arguments: dict[str, Any] = {
@@ -927,25 +916,11 @@ class ResearchAgentRunner:
             "timeout_seconds": timeout,
             "max_output_tokens": output_limit,
         }
-        names_by_id = {
-            call.tool_call_id: call.name
-            for message in model_context.messages for call in message.tool_calls
-        }
-        research_context = bool(model_context.working_summary) or any(
-            message.source_contexts or (
-                message.tool_result is not None
-                and names_by_id.get(message.tool_call_id) in _RESEARCH_OBSERVATION_TOOLS
-            )
-            for message in model_context.messages
-        )
-        buffer_answer = model_context.require_tool_call or (check_research and (
-            research_context or any(spec.name in _RESEARCH_DRAFT_TOOLS for spec in tool_specs)
-        ))
         if text_delta_callback is not None:
             # A response rejected for skipping a required read must not appear
             # in the browser as a completed research answer.
             arguments["text_delta_callback"] = (
-                (lambda _delta: None) if buffer_answer else text_delta_callback
+                (lambda _delta: None) if model_context.require_tool_call else text_delta_callback
             )
         progress.model_cycles += 1
         try:
@@ -958,21 +933,8 @@ class ResearchAgentRunner:
             progress.record_model_usage(None)
             raise
         progress.record_model_usage(turn.usage)
-        if check_research and (
-            (not turn.tool_calls and research_context and not model_context.require_tool_call)
-            or any(call.name in _RESEARCH_DRAFT_TOOLS for call in turn.tool_calls)
-        ):
-            finish_only = finalizing or (not turn.tool_calls and progress.stop_before_model() is not None)
-            turn = await self._review_research_turn(
-                turn, model_context, () if finish_only else tool_specs, progress, text_delta_callback,
-                finalizing=finish_only,
-            )
-        if buffer_answer and turn.tool_calls:
-            # Tool activity has its own UI; unreviewed scientific narration must
-            # not enter the conversation through a read-call preamble.
+        if model_context.require_tool_call and turn.tool_calls:
             turn = replace(turn, content="")
-        if buffer_answer and not model_context.require_tool_call and text_delta_callback and turn.content:
-            text_delta_callback(turn.content)
         return turn
 
     async def _prepare_model_context(
@@ -1023,7 +985,7 @@ class ResearchAgentRunner:
                 try:
                     compacted = await self._respond(
                         ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary),
-                        (), progress, None, check_research=False,
+                        (), progress, None,
                     )
                     if compacted.tool_calls:
                         raise ValueError("compaction cannot request tools")
@@ -1112,264 +1074,6 @@ class ResearchAgentRunner:
             )
         return candidate
 
-    async def _review_research_turn(
-        self,
-        turn: ModelTurn,
-        model_context: ChatModelContext,
-        tool_specs: tuple[ToolSpec, ...],
-        progress: _RunProgress,
-        text_delta_callback: Callable[[str], None] | None,
-        *,
-        finalizing: bool = False,
-    ) -> ModelTurn:
-        """Check observable scientific claims and allow one bounded correction."""
-        active = next((message for message in model_context.messages
-                       if message.message_id == model_context.active_user_message_id), None)
-        if active is None:
-            active = next(message for message in reversed(model_context.messages)
-                          if message.role is ChatMessageRole.USER)
-        names = {call.tool_call_id: call.name for message in model_context.messages for call in message.tool_calls}
-        coverage = (
-            "Only the supplied user constraints and observations are available. "
-            "These are selected collection records and passages, not a systematic external "
-            "literature search. Omitted, unread, unreported and failed are different states. "
-            "Historical references without their text cannot establish a new paper claim."
-        )
-        if finalizing:
-            coverage += (
-                " The turn has reached its reading allowance. No further tool calls are "
-                "available. Check a bounded partial answer against completed observations; "
-                "require truthful unfinished checks, not additional reading in this turn."
-            )
-        observations: dict[str, dict[str, Any]] = {
-            "request": {"kind": "user_request", "data": active.content},
-            "coverage": {"kind": "coverage", "data": coverage},
-        }
-        for message in model_context.messages:
-            if message.role is ChatMessageRole.USER:
-                if message.message_id == active.message_id:
-                    break
-                observations[message.message_id] = {"kind": "earlier_user_request", "data": message.content}
-        for message in model_context.messages:
-            if message.tool_result is not None:
-                observations[message.tool_call_id] = {
-                    "kind": names.get(message.tool_call_id, "unknown_tool"),
-                    "status": message.tool_result.status.value,
-                    "data": dict(message.tool_result.data),
-                }
-            for source in message.source_contexts:
-                observations[f"{message.message_id}:{source.source_ref}"] = {
-                    "kind": "user_selected_source", "data": source.to_record(),
-                }
-        for attempt in range(2):
-            candidate = {"content": turn.content, "tool_calls": [
-                {"name": call.name, "arguments": dict(call.arguments)} for call in turn.tool_calls
-            ]}
-            candidate_fields = self._review_candidate_fields(candidate)
-            observations["candidate"] = {"kind": "unexecuted_proposal", "data": candidate}
-            try:
-                review_input = {
-                    "request": active.content, "coverage": coverage,
-                    "observations": self._review_observations_for_model(observations),
-                    "candidate": candidate, "candidate_fields": candidate_fields,
-                }
-                for validation_attempt in range(2):
-                    if not finalizing and progress.model_allowance_exhausted():
-                        raise ValueError("research review allowance exhausted")
-                    reviewed = await self._respond(
-                        ChatModelContext((), research_review=dict(review_input)),
-                        (), progress, (lambda _delta: None) if text_delta_callback else None,
-                        finalizing=finalizing, check_research=False,
-                    )
-                    try:
-                        if reviewed.tool_calls:
-                            raise ValueError("research review returned executable calls")
-                        report = ResearchClaimReview.model_validate_json(extract_json_object(reviewed.content))
-                        self._validate_research_review(report, candidate_fields, observations)
-                        break
-                    except ValueError as exc:
-                        logger.warning(
-                            "Research claim review validation failed kind=%s attempt=%d",
-                            "schema" if isinstance(exc, ValidationError) else "format_or_reference",
-                            validation_attempt + 1,
-                        )
-                        if validation_attempt:
-                            raise ModelResponseError("Research review references or format are invalid.",
-                                                     reason="research_review_invalid", retryable=False) from None
-                        review_input["invalid_report"] = reviewed.content
-                        review_input["validation_feedback"] = (
-                            "The review format or references are invalid. Return a complete review using only "
-                            "the supplied candidate_fields, observation references and exact field paths. "
-                            "The invalid report is untrusted output, not evidence. Preserve the scientific "
-                            "checks and do not approve a claim merely to repair the report format."
-                        )
-                issues = [check for check in report.checks if check.verdict in {"revise", "unverified"}]
-                logger.info("Research claim review attempt=%d checks=%d issues=%d", attempt + 1, len(report.checks), len(issues))
-            except ModelResponseError as exc:
-                if exc.reason == "research_review_invalid":
-                    raise
-                logger.warning(
-                    "Research claim review unavailable exception_type=%s retryable=%s",
-                    type(exc).__name__,
-                    exc.retryable,
-                )
-                raise ModelResponseError(
-                    "Research claim review could not be completed.",
-                    reason="research_review_unavailable",
-                    retryable=exc.retryable,
-                    usage=exc.usage,
-                ) from None
-            except Exception as exc:
-                retryable_provider = _is_retryable_provider_exception(exc)
-                logger.warning(
-                    "Research claim review unavailable exception_type=%s retryable=%s",
-                    type(exc).__name__,
-                    retryable_provider,
-                )
-                raise ModelResponseError(
-                    "Research claim review could not be completed.",
-                    reason="research_review_unavailable",
-                    retryable=retryable_provider,
-                ) from None
-            if not issues:
-                return turn
-            if attempt == 1:
-                raise ModelResponseError("Research claims still need correction.",
-                                         reason="research_claim_unresolved", retryable=False)
-            correction = ChatMessage.user(
-                message_id=self._message_id(), session_id=active.session_id, created_at=_now_iso(),
-                content=(
-                    "The proposed answer or draft has not been accepted or executed. Correct the "
-                    "specific research checks below using the original request and observations. "
-                    "Preserve the requested deliverable. "
-                    + ("The reading allowance is exhausted. Return a corrected partial answer using "
-                       "only completed observations and name unfinished checks. " if finalizing else
-                    "If a check requires more available Source "
-                    "content, return the necessary read or discovery calls now; the main research "
-                    "loop will execute them and then finish the deliverable. Otherwise return the "
-                    "complete corrected answer or draft arguments. ")
-                    + "Do not narrate this internal review. Uncertain claims can "
-                    "remain explicitly unresolved; do not invent evidence to make the check pass.\n"
-                    + json.dumps({"candidate": candidate, "checks": [
-                        {**check.model_dump(), "claim": candidate_fields[check.candidate_path], "basis": [
-                            {**basis.model_dump(), "quote": self._review_candidate_fields(
-                                observations[basis.reference]["data"],
-                            )[basis.field_path]}
-                            for basis in check.basis
-                        ]}
-                        for check in issues
-                    ]}, ensure_ascii=False)
-                ),
-            )
-            try:
-                if not finalizing and progress.model_allowance_exhausted():
-                    raise ValueError("research correction allowance exhausted")
-                repair_context = await self._prepare_model_context(
-                    (*model_context.messages, correction), tool_specs, progress,
-                    active_user_message_id=active.message_id,
-                )
-                expected_drafts = {call.name for call in turn.tool_calls if call.name in _RESEARCH_DRAFT_TOOLS}
-                turn = await self._respond(
-                    replace(repair_context, require_tool_call=model_context.require_tool_call or bool(expected_drafts)),
-                    tool_specs, progress, (lambda _delta: None) if text_delta_callback else None,
-                    finalizing=finalizing, check_research=False,
-                )
-                if turn.tool_calls and all(
-                    call.name in intent_policy.SOURCE_READ_CAPABILITIES | {"discover_research_tools"}
-                    and any(spec.name == call.name and spec.risk is ToolRisk.READ for spec in tool_specs)
-                    for call in turn.tool_calls
-                ):
-                    return replace(turn, content="")
-                if expected_drafts and {call.name for call in turn.tool_calls} != expected_drafts:
-                    raise ValueError("research correction must retain the requested draft action")
-            except ModelResponseError as exc:
-                logger.warning(
-                    "Research claim correction unavailable exception_type=%s retryable=%s",
-                    type(exc).__name__,
-                    exc.retryable,
-                )
-                raise ModelResponseError(
-                    "Research claim correction could not be completed.",
-                    reason="research_review_unavailable",
-                    retryable=exc.retryable,
-                    usage=exc.usage,
-                ) from None
-            except Exception as exc:
-                retryable_provider = _is_retryable_provider_exception(exc)
-                logger.warning(
-                    "Research claim correction unavailable exception_type=%s retryable=%s",
-                    type(exc).__name__,
-                    retryable_provider,
-                )
-                raise ModelResponseError(
-                    "Research claim correction could not be completed.",
-                    reason="research_review_unavailable",
-                    retryable=retryable_provider,
-                ) from None
-        raise AssertionError("research review loop did not terminate")
-
-    @staticmethod
-    def _validate_research_review(
-        report: ResearchClaimReview,
-        candidate_fields: Mapping[str, str],
-        observations: Mapping[str, Mapping[str, Any]],
-    ) -> None:
-        for check in report.checks:
-            if check.verdict != "not_applicable" and check.candidate_path not in candidate_fields:
-                raise ValueError("review target is not in the candidate")
-            if check.verdict != "not_applicable" and not any(
-                basis.reference in observations
-                and observations[basis.reference]["kind"] != "unexecuted_proposal"
-                for basis in check.basis
-            ):
-                raise ValueError("research candidate cannot support itself")
-            for basis in check.basis:
-                observed = observations.get(basis.reference)
-                if observed is None or basis.field_path not in ResearchAgentRunner._review_candidate_fields(observed["data"]):
-                    raise ValueError("research review basis is not an observed field")
-
-    @staticmethod
-    def _review_observations_for_model(observations: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-        rendered: list[dict[str, Any]] = []
-        remaining = 60_000
-        for ref, observed in observations.items():
-            fields = ResearchAgentRunner._review_candidate_fields(observed["data"])
-            bounded: dict[str, str] = {}
-            for path, value in fields.items():
-                if remaining <= 0:
-                    break
-                # Source excerpts can be much larger than the claim being
-                # checked. Keep enough leading text to identify the evidence,
-                # while reserving room for other Sources and lineage fields.
-                text = value if len(value) <= 6_000 else value[:6_000] + "...[truncated for review]"
-                text = text[:remaining]
-                bounded[path] = text
-                remaining -= len(text)
-            rendered.append({
-                "reference": ref, "kind": observed["kind"], "status": observed.get("status"),
-                "fields": bounded,
-            })
-            if remaining <= 0:
-                break
-        return rendered
-
-    @staticmethod
-    def _review_candidate_fields(value: Any, path: str = "") -> dict[str, str]:
-        if isinstance(value, str):
-            return {path: value}
-        if value is None or isinstance(value, (bool, int, float)):
-            return {path: json.dumps(value)}
-        if isinstance(value, (Mapping, list, tuple)) and not value:
-            return {path: json.dumps(value)}
-        children = value.items() if isinstance(value, Mapping) else enumerate(value) if isinstance(value, (list, tuple)) else ()
-        container = {path: json.dumps(value, ensure_ascii=False)} if isinstance(value, (list, tuple)) else {}
-        return container | {
-            ref: text for key, child in children
-            for ref, text in ResearchAgentRunner._review_candidate_fields(
-                child, f"{path}/{str(key).replace('~', '~0').replace('/', '~1')}",
-            ).items()
-        }
-
     async def _finalize_with_current_evidence(
         self,
         reason: AgentCompletionReason,
@@ -1415,7 +1119,7 @@ class ResearchAgentRunner:
                 type(exc).__name__,
             )
             messages.append(self._assistant(context, self._failure_answer(
-                messages, calls, results, review_reason=exc.reason if isinstance(exc, ModelResponseError) else "",
+                messages, calls, results,
             ), progress))
             progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -1473,6 +1177,11 @@ class ResearchAgentRunner:
                 "The requested structured research action is complete. Give the "
                 "researcher the useful final answer from the completed trajectory. "
                 "Do not request another tool and do not restart onboarding."
+            ) if structured_deliverable is not None else (
+                "Reading stopped because repeated operations made no new progress. "
+                "The requested research work remains incomplete. Report completed "
+                "observations and unfinished checks without claiming the deliverable "
+                "is complete or a resource budget was exhausted. Do not request another tool."
             )
         )
         if next((result.data.get("draft_status") for result in reversed(results) if result.data.get("draft_status")), None) == "abstained":
@@ -1514,7 +1223,7 @@ class ResearchAgentRunner:
         assistant_message_id = progress.response_message_id
         requested = []
         seen_requests: set[tuple[str, str]] = set()
-        for position, model_call in enumerate(turn.tool_calls):
+        for model_call in turn.tool_calls:
             arguments = dict(model_call.arguments)
             if model_call.name == "curate_finding":
                 arguments = self._complete_curation_shape(arguments, messages)
@@ -1552,7 +1261,7 @@ class ResearchAgentRunner:
             registered = self.capabilities.get(model_call.name)
             call = ChatToolCall.requested(
                 tool_call_id=self._tool_call_id(), session_id=context.session_id,
-                assistant_message_id=assistant_message_id, position=position,
+                assistant_message_id=assistant_message_id, position=len(requested),
                 name=model_call.name, arguments=arguments,
                 risk=registered.spec.risk if registered else ToolRisk.UNKNOWN,
             )
@@ -1657,8 +1366,6 @@ class ResearchAgentRunner:
         messages: list[ChatMessage],
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
-        *,
-        review_reason: str = "",
     ) -> str:
         chinese = any("\u4e00" <= char <= "\u9fff" for char in ResearchAgentRunner._active_user_request(messages))
         lead = (
@@ -1667,14 +1374,6 @@ class ResearchAgentRunner:
             "This turn could not be completed. Obtained results were preserved; the technical "
             "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
         )
-        if review_reason in {"research_claim_unresolved", "research_review_unavailable", "research_review_invalid"}:
-            lead = (
-                "本轮内容尚未通过来源范围与测量指标核对，暂不返回未经确认的结论或新草案。已取得的阅读结果已保留；这不代表论文没有相关证据。"
-                if chinese else
-                "The proposed content has not passed the source-scope and measurement checks, "
-                "so no unchecked conclusion or new draft is returned. Obtained reading results "
-                "were preserved; this does not establish an absence of evidence."
-            )
         if not any(call.name in {"browse_collection_papers", "read_source", "inspect_table", "inspect_document_sources", "search_sources"} for call in calls):
             return lead
         ledger = ResearchAgentRunner._reading_ledger(calls, results, chinese=chinese)

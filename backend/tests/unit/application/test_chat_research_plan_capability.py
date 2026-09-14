@@ -220,8 +220,6 @@ class _Model(_DiscoveryModel):
         }
 
     async def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None, timeout_seconds=180.0, max_output_tokens=16_384):
-        if context.research_review is not None:
-            return await super().respond(context=context, tool_specs=tool_specs)
         messages = context.messages
         assert messages
         if any(spec.name == "discover_research_tools" for spec in tool_specs):

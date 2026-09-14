@@ -106,14 +106,6 @@ class _Model:
         timeout_seconds=180.0,
         max_output_tokens=16_384,
     ) -> ModelTurn:
-        if context.research_review is not None:
-            # Other suites isolate the execution policy; claim-review behavior
-            # has its own adversarial and provider-backed tests.
-            return ModelTurn(content=json.dumps({"checks": [
-                {"category": category, "verdict": "not_applicable", "candidate_path": "",
-                 "reason": "Scripted execution-policy fixture.", "basis": []}
-                for category in ("paper_scope", "measurement_identity", "gap_scope")
-            ]}))
         messages = context.messages
         assert messages
         names = tuple(item.name for item in tool_specs)
@@ -152,6 +144,7 @@ class _Capability:
         fail_with: Exception | None = None,
         result_status: ToolResultStatus = ToolResultStatus.SUCCEEDED,
         result_data: dict[str, Any] | None = None,
+        resource_refs: tuple[ChatResourceRef, ...] = (),
     ) -> None:
         self.spec = ToolSpec(
             name=name,
@@ -162,6 +155,7 @@ class _Capability:
         self.fail_with = fail_with
         self.result_status = result_status
         self.result_data = result_data
+        self.resource_refs = resource_refs
         self.executed_arguments: list[dict[str, Any]] = []
         self.executed_call_ids: list[str] = []
 
@@ -184,14 +178,10 @@ class _Capability:
                 if self.result_data is not None
                 else {"arguments": values, "collection_id": context.collection_id}
             ),
-            resource_refs=(
-                ChatResourceRef(
-                    resource_type="objective_analysis",
-                    resource_id="objective-1:1",
-                ),
-            )
-            if self.result_status is ToolResultStatus.QUEUED
-            else (),
+            resource_refs=self.resource_refs or (
+                (ChatResourceRef(resource_type="objective_analysis", resource_id="objective-1:1"),)
+                if self.result_status is ToolResultStatus.QUEUED else ()
+            ),
         )
 
 
@@ -223,6 +213,42 @@ async def test_greeting_completes_without_calling_a_tool() -> None:
     assert result.tool_calls == ()
     assert capability.executed_arguments == []
     assert model.tool_spec_names == [()]
+
+
+async def test_research_read_returns_to_the_same_agent_loop_without_nested_review() -> None:
+    capability = _Capability(
+        "read_source",
+        ToolRisk.READ,
+        result_data={
+            "document_id": "paper-1",
+            "source_ref": "results",
+            "source_kind": "text_window",
+            "source_digest": "digest-1",
+            "content_truncated": False,
+            "content": "The inspected results report improved elongation.",
+        },
+        resource_refs=(ChatResourceRef(resource_type="source", resource_id="paper-1:results"),),
+    )
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(content="The inspected results report improved elongation."),
+    )
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((capability,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Read the source and summarize the result.",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert len(model.contexts) == 2
+    assert capability.executed_arguments == [{}]
+    assert all(item.status is ToolResultStatus.SUCCEEDED for item in result.tool_results)
+    assert any(message.tool_result and message.tool_result.data.get("content") == capability.result_data["content"]
+               for message in model.contexts[-1])
+    assert result.messages[-1].content == "The inspected results report improved elongation."
 
 
 async def test_validated_tool_arguments_are_reused_for_execution() -> None:
@@ -344,15 +370,18 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
 async def test_identical_observations_finalize_without_losing_results(failed: bool) -> None:
     read = _Capability("get_collection_context", ToolRisk.READ,
                        fail_with=RuntimeError("unavailable") if failed else None)
+    model = _Model(*(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)) for _ in range(3)),
+                   ModelTurn(content="Only the inspected scope can be discussed."))
     result = await ResearchAgentRunner(
-        model=_Model(*(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)) for _ in range(3)),
-                     ModelTurn(content="Only the inspected scope can be discussed.")),
+        model=model,
         capabilities=CapabilityRegistry((read,)),
     ).run_turn(context=_context(), previous_messages=(), user_message="Read collection papers.")
     assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
     assert len(result.tool_results) == 4
     assert len(read.executed_arguments) == 3
     assert result.warnings
+    assert "work remains incomplete" in model.contexts[-1][-1].content
+    assert "action is complete" not in model.contexts[-1][-1].content
 
 
 async def test_usage_exhaustion_records_unexecuted_intent_then_finalizes() -> None:
@@ -634,7 +663,8 @@ async def test_tool_response_deduplicates_and_bounds_one_model_batch() -> None:
     requested = tuple(
         ModelToolCall(name=read.spec.name, arguments={"question": f"paper-{index}"})
         for index in range(40)
-    ) + (ModelToolCall(name=read.spec.name, arguments={"question": "paper-0"}),)
+        for _ in range(2)
+    )
     result = await ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=requested), ModelTurn(content="The bounded batch was inspected.")),
         capabilities=CapabilityRegistry((read,)),
@@ -644,6 +674,10 @@ async def test_tool_response_deduplicates_and_bounds_one_model_batch() -> None:
     assert len(read.executed_arguments) == 32
     assert len(result.tool_results) == 32
     assert len({item["question"] for item in read.executed_arguments}) == 32
+    assert [call.position for call in result.tool_calls] == list(range(32))
+    assert [call.tool_call_id for call in result.tool_calls] == [
+        item.tool_call_id for item in result.tool_results
+    ]
 
 
 @pytest.mark.parametrize("risk", [ToolRisk.DRAFT, ToolRisk.WRITE])

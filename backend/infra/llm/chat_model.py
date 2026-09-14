@@ -18,8 +18,6 @@ from application.chat.model import (
     ModelUsage,
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
-    RESEARCH_REVIEW_PROMPT_VERSION,
-    RESEARCH_REVIEW_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
 )
 from domain.chat import ToolRisk
@@ -69,15 +67,11 @@ class OpenAIChatModel:
             "max_completion_tokens": max_output_tokens,
             "messages": context.provider_messages(
                 RESEARCH_COMPACTION_SYSTEM_PROMPT if context.compacting else
-                RESEARCH_REVIEW_SYSTEM_PROMPT if context.research_review is not None else RESEARCH_AGENT_SYSTEM_PROMPT
+                RESEARCH_AGENT_SYSTEM_PROMPT
             ),
         }
         if self.reasoning_effort is not None:
             request["reasoning_effort"] = self.reasoning_effort
-        if context.research_review is not None:
-            if tool_specs or context.require_tool_call:
-                raise ValueError("research review cannot expose executable tools")
-            request["response_format"] = {"type": "json_object"}
         if context.compacting:
             if tool_specs or context.require_tool_call:
                 raise ValueError("context compaction cannot expose executable tools")
@@ -101,14 +95,13 @@ class OpenAIChatModel:
                 stream_options={"include_usage": True},
             )
             try:
-                return await self._stream_turn(chunks, text_delta_callback, review=context.research_review is not None)
+                return await self._stream_turn(chunks, text_delta_callback)
             finally:
                 await chunks.close()
 
         completion = await self.client.chat.completions.create(**request)
         record_llm_prompt_version(
-            "research_claim_review" if context.research_review is not None else "research_agent",
-            RESEARCH_REVIEW_PROMPT_VERSION if context.research_review is not None else RESEARCH_AGENT_PROMPT_VERSION,
+            "research_agent", RESEARCH_AGENT_PROMPT_VERSION,
         )
         record_llm_completion(completion, requested_model=self.model)
         usage = _model_usage(getattr(completion, "usage", None))
@@ -172,8 +165,6 @@ class OpenAIChatModel:
         self,
         chunks: Any,
         text_delta_callback: Callable[[str], None],
-        *,
-        review: bool = False,
     ) -> ModelTurn:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -232,8 +223,7 @@ class OpenAIChatModel:
             ) from exc
 
         record_llm_prompt_version(
-            "research_claim_review" if review else "research_agent",
-            RESEARCH_REVIEW_PROMPT_VERSION if review else RESEARCH_AGENT_PROMPT_VERSION,
+            "research_agent", RESEARCH_AGENT_PROMPT_VERSION,
         )
         record_llm_completion(last_chunk, requested_model=self.model)
         content = "".join(content_parts).strip()

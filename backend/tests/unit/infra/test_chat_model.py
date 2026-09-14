@@ -127,30 +127,27 @@ async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream
 
 
 @pytest.mark.parametrize("stream", [False, True])
-async def test_research_review_uses_dedicated_json_task_without_tools_or_chat_instructions(stream):
-    from application.chat.model import RESEARCH_REVIEW_SYSTEM_PROMPT
+async def test_context_compaction_uses_json_without_executable_tools(stream):
+    from application.chat.model import RESEARCH_COMPACTION_SYSTEM_PROMPT
 
     client, completions = _client([_stream_chunk(content='{"checks": []}')] if stream
                                   else _completion(content='{"checks": []}'))
-    context = ChatModelContext((_message(),), research_review={
-        "request": "Compare inspected papers.", "candidate": {"content": "All agree."},
-        "observations": [], "coverage": "Selected passages only.",
-    })
+    context = ChatModelContext((_message(),), compacting=True)
     await OpenAIChatModel(client=client, model="test-model").respond(
         context=context, tool_specs=(), text_delta_callback=(lambda _: None) if stream else None,
     )
     request = completions.calls[0]
-    assert request["messages"][0]["content"] == RESEARCH_REVIEW_SYSTEM_PROMPT
+    assert request["messages"][0]["content"] == RESEARCH_COMPACTION_SYSTEM_PROMPT
     assert request["response_format"] == {"type": "json_object"}
     assert "tools" not in request
-    assert "你好" not in str(request["messages"])
+    assert "你好" in str(request["messages"])
 
 
-async def test_research_review_rejects_executable_tools():
+async def test_context_compaction_rejects_executable_tools():
     client, completions = _client(_completion(content="Unused"))
     with pytest.raises(ValueError, match="cannot expose"):
         await OpenAIChatModel(client=client).respond(
-            context=ChatModelContext((), research_review={}),
+            context=ChatModelContext((), compacting=True),
             tool_specs=(ToolSpec(name="write", description="Write", risk=ToolRisk.WRITE, input_model=_NoArguments),),
         )
     assert completions.calls == []
@@ -159,11 +156,11 @@ async def test_research_review_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.14"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.15"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "supporting source" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "supporting source" in prompt
     assert "Never expose registered tool names" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "never restart the greeting or capability introduction" in prompt
     assert "Use onboarding only for an actual greeting" in prompt
@@ -361,12 +358,14 @@ async def test_rollover_is_a_separate_system_message_without_mutating_history() 
     assert messages[0].content == "你好"
 
 
-@pytest.mark.parametrize("review", [False, True])
-async def test_total_context_guard_includes_prompts_tools_and_review_input(review):
+@pytest.mark.parametrize("compacting", [False, True])
+async def test_total_context_guard_includes_prompts_and_compaction_input(compacting):
     from dataclasses import replace
     client, completions = _client(_completion(content="unreachable"))
-    context = replace(ChatModelContext((_message(),)), max_context_tokens=2000,
-                      research_review={"observations": ["Ti-6Al-4V elongation " * 2000]} if review else None)
+    context = ChatModelContext(
+        (replace(_message(), content="Ti-6Al-4V elongation " * 2000),),
+        max_context_tokens=2000, compacting=compacting,
+    )
     with pytest.raises(ModelResponseError) as caught:
         await OpenAIChatModel(client=client, model="test-model").respond(
             context=context, tool_specs=(), max_output_tokens=512,

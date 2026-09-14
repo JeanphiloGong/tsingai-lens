@@ -38,7 +38,17 @@ class ObjectiveDraftInput(BaseModel):
     question: str = Field(min_length=5, max_length=500)
     material_scope: list[ShortText] = Field(default_factory=list, max_length=6)
     variables: list[ShortText] = Field(min_length=1, max_length=6)
-    outcomes: list[ShortText] = Field(min_length=1, max_length=1)
+    outcomes: list[ShortText] = Field(
+        min_length=1, max_length=1,
+        description=(
+            "One specific outcome, preserving the researcher's measurement. "
+            "Do not bundle different endpoints inside a single string or parentheses. "
+            "For tensile strength use 'ultimate tensile strength (UTS)': yield "
+            "strength measures yielding and is a separate outcome, even though "
+            "both use MPa. Related measurements require separate questions."
+        ),
+        examples=[["ultimate tensile strength (UTS)"]],
+    )
     mechanisms: list[ShortText] = Field(default_factory=list, max_length=6)
     constraints: list[ShortText] = Field(default_factory=list, max_length=8)
     requested_comparator: str | None = Field(default=None, max_length=240)

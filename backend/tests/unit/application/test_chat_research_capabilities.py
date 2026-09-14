@@ -2448,6 +2448,107 @@ async def test_fresh_finding_inspection_recalls_saved_feedback_and_curation() ->
     assert len(feedback_service.feedback_calls) == len(feedback_service.curation_calls) == 1
 
 
+@pytest.mark.parametrize("invalid_read_first,invalid_curation_first", [(False, False), (True, False), (False, True)])
+async def test_finding_correction_rereads_records_drafts_and_saves_only_after_approval(
+    invalid_read_first, invalid_curation_first,
+):
+    published = _canonical_finding_record()
+    source_repository = _SourceArtifactRepository()
+    original_source = source_repository.document
+    feedback = _FindingFeedbackService()
+    collection = _CollectionService()
+    inspect = InspectPublishedFindingCapability(
+        collection_service=collection, objective_analysis_service=_AnalysisService(),
+        finding_feedback_service=feedback,
+    )
+    read = ReadSourceCapability(collection_service=collection, source_artifact_repository=source_repository)
+    curate = CurateFindingCapability(collection_service=collection, finding_feedback_service=feedback)
+    key = {name: published[name] for name in ("objective_id", "analysis_version", "finding_id")}
+    table = {"document_id": "paper-1", "source_kind": "table", "source_ref": "table-2"}
+    corrected = "In the inspected paper, elongation fell from 10.1% to 7.8% across the reported energy-input conditions."
+    draft_arguments = {
+        "draft_id": "correction-1", "objective_id": key["objective_id"],
+        "source_analysis_version": key["analysis_version"], "parent_finding_id": key["finding_id"],
+        "statement": corrected, "assertion_strength": "associative",
+        "supporting_evidence_ids": ["evidence-1"],
+        "limitations": ["Only this paper and its reported conditions were checked."],
+    }
+    decisions = [
+        ModelTurn(tool_calls=(ModelToolCall(inspect.spec.name, key),)),
+        ModelTurn(tool_calls=(ModelToolCall(read.spec.name, table),)),
+    ]
+    if invalid_read_first:
+        decisions.append(ModelTurn(tool_calls=(ModelToolCall(read.spec.name, {"document_id": "paper-1"}),)))
+    # The same inspection tools remain usable when the investigator needs to
+    # check the original Finding again and relate it to another exact passage.
+    decisions.extend((
+        ModelTurn(tool_calls=(
+            ModelToolCall(inspect.spec.name, key),
+            ModelToolCall(read.spec.name, {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "block-result"}),
+        )),
+        ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", draft_arguments),)),
+    ))
+    model = _Model(*decisions, source_inspection_required=True)
+    context = AgentContext("chat-1", "user-1", "col-1")
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
+        inspect, read, CreateFindingDraftCapability(), curate,
+    )))
+    result = await runner.run_turn(
+        context=context, previous_messages=(),
+        user_message="Check this Finding against its exact sources and draft a narrower correction. Do not save or publish.",
+    )
+    assert result.status.value == "completed", result.error_code
+    assert result.pending_approval is None
+    assert feedback.curation_calls == feedback.feedback_calls == []
+    assert len([call for call in result.tool_calls if call.name == inspect.spec.name and call.status.value == "succeeded"]) == 2
+    drafts = [item.data["draft"] for item in result.tool_results if "draft" in item.data]
+    assert drafts == [CreateFindingDraftArguments.model_validate(draft_arguments).model_dump()]
+    assert sum(item.status.value == "failed" for item in result.tool_results) == int(invalid_read_first)
+    assert not model.turns
+
+    curated = {**published, "statement": drafts[0]["statement"], "limitations": drafts[0]["limitations"]}
+    curation_arguments = {
+        **key, "curated_status": "limited", "curated_finding": curated,
+        "note": "The comparison is limited to the inspected paper and treatment conditions.",
+    }
+    save_decisions = []
+    if invalid_curation_first:
+        save_decisions.extend((
+            ModelTurn(tool_calls=(ModelToolCall(curate.spec.name, {
+                **curation_arguments, "curated_finding": {**curated, "direction": "non-monotonic"},
+            }),)),
+            ModelTurn(tool_calls=(ModelToolCall(inspect.spec.name, key),)),
+        ))
+    save_decisions.append(ModelTurn(tool_calls=(ModelToolCall(curate.spec.name, curation_arguments),)))
+    save_runner = ResearchAgentRunner(model=_Model(*save_decisions),
+                                     capabilities=CapabilityRegistry((curate, inspect)))
+    pending = await save_runner.run_turn(
+        context=context, previous_messages=result.messages,
+        user_message="Save the human revision of this Finding; do not publish a new Finding.",
+    )
+    assert pending.status.value == "approval_required", pending.error_code
+    assert feedback.curation_calls == []
+    if invalid_curation_first:
+        failed = [item for item in pending.tool_results if item.status.value == "failed"]
+        assert len(failed) == 1
+        assert "curated_finding.direction" in failed[0].error_message
+        assert "mixed" in failed[0].error_message
+        assert "non-monotonic" not in failed[0].error_message
+    call = pending.pending_approval
+    with pytest.raises(ValueError):
+        call.approve(user_id=context.user_id, arguments_digest="0" * 64, decided_at="2026-09-14T08:00:00Z")
+    approved = call.approve(user_id=context.user_id, arguments_digest=call.arguments_digest, decided_at="2026-09-14T08:00:00Z")
+    saved = await save_runner.resume_claimed_call(
+        context=context, previous_messages=pending.messages, claimed_call=approved.start("2026-09-14T08:00:01Z"),
+    )
+    assert saved.status.value == "completed"
+    assert len(feedback.curation_calls) == 1
+    recalled = await inspect.execute(_context("fresh-read"), inspect.spec.input_model(**key))
+    assert recalled.data["finding"] == published
+    assert recalled.data["curation_records"][0]["curated_finding"] == curated
+    assert source_repository.document == original_source
+
+
 async def test_missing_published_results_is_a_successful_scientific_absence() -> None:
     candidate = _objective("objective-candidate")
     analysis_service = _AnalysisService()

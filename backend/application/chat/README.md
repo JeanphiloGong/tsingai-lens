@@ -61,6 +61,9 @@ Source context attached from the document reader is resolved against the
 canonical Source before the model runs. A quote is inspection material, not
 Evidence or permission to mutate a scientific record.
 
+Repeated identical calls within one model response execute once. Retained calls
+are assigned contiguous positions so checkpointed requests and results stay paired.
+
 Read and draft capabilities can execute during the turn. Write capabilities
 persist their exact arguments and digest, stop for the authenticated user's
 approval, and execute only that approved call once. Rejection, provider
@@ -139,9 +142,9 @@ Objective, analysis version, and Finding. A fresh conversation can therefore
 recall persisted corrections while distinguishing them from the original
 published result and from unsaved drafts.
 Readback attributes scientific statements to those saved records; it does not
-claim the current turn independently reverified their papers. Claim review checks
-the faithfulness of this attribution while retaining evidence requirements for
-new scientific judgments. A completed Finding publication does not require an
+claim the current turn independently reverified their papers. The Agent checks
+this attribution against the inspected record; new scientific judgments still
+require their Source basis. A completed Finding publication does not require an
 additional, unrequested feedback or curation approval.
 
 At mandatory action stages the model context requests a provider tool call
@@ -158,33 +161,31 @@ context; historical references alone cannot recover omitted text or authorize a
 new Evidence write. Filtered filename counts are not reported as collection
 totals, including when a literal filename search has no matches.
 
-Scientific answers following Source or published-result inspection, and question,
-scope, Finding, and research-plan proposals, receive a separate claim review before their
-text is emitted or their draft calls execute. The review checks per-paper claim
-scope, the requested measurement identity, and the scope of evidence-gap claims.
-Its input contains the original user request, available observations and exact
-candidate and observation field paths. The reviewer selects those paths; the
-runner checks that every selected field and reference exists and retrieves the
-original value for correction feedback. The reviewer does not copy or rewrite
-source excerpts. A proposal cannot serve as its own independent support.
+Research turns use one Codex-style decision loop: the model chooses a currently
+available capability, receives its result, and decides whether to read more,
+revise its answer or finish. Source observations, user feedback and failed calls
+are ordinary conversation records in that loop. The runner does not insert a
+second claim-review model or a correction-only capability whitelist into an
+ordinary turn; this keeps a correction free to re-read the published Finding,
+its Evidence, and any relevant Source under the same read policy.
 
-For example, a third paper with no reported deterioration cannot establish a
-shared upper-temperature limit, yield strength cannot replace requested ultimate
-tensile strength, and an unresolved equipment transfer in the inspected papers
-cannot establish field-wide novelty. These checks cover draft fields as well
-as the final explanation. One correction receives the specific rejected fields
-and their basis, and is reviewed again. A correction that needs more available
-Source content may return registered read/discovery calls to the main loop before
-finishing the requested draft. The loop still enforces capability availability,
-Source identity and budgets. Other draft corrections retain their requested
-action. Invalid report format or
-references receive one bounded repair using the same candidate and observations;
-real list fields, including lists of paper contributions, and their elements
-are valid reference targets. Repeated invalid review reports return
-`research_review_invalid`, distinct from an unavailable provider response.
-Repeated invalid reports, unresolved claims or unavailable review stop unchecked content while
-preserving completed reads. Normal capability and exact approval checks still
-apply after the correction.
+The agent instructions require explicit paper scope, preserved measurement
+identity, evidence gaps bounded to inspected material, and a reason for each
+Finding. Cross-paper synthesis starts from each paper's observed conditions,
+comparator and outcome; each clause of a shared claim must hold for all papers
+it names. Objective draft parameters keep distinct measurement endpoints
+separate even when their units match. These scientific judgments are fallible
+model decisions, not facts certified by the runner's deterministic validation.
+Collection ownership, Source identity, version checks and write approval remain
+backend responsibilities. An explicit review task may still be added later, but
+it must return its findings to this same loop rather than silently replacing it.
+The curation tool describes the canonical direction values and reports an invalid
+direction at `curated_finding.direction` with the allowed values. This gives the
+Agent a concrete argument repair without changing or approving its proposal.
+
+When repeated operations stop making progress, finalization reports unfinished
+work. It does not claim a structured deliverable exists or that a resource budget
+was exhausted merely because the current response cannot perform more reads.
 
 Proposed experimental measurements remain distinct from reported paper results.
 An experiment may specify new measurements and clearly separate auxiliary
@@ -193,38 +194,29 @@ Missing extracted numeric values do not establish that the paper reports no
 numbers. An equipment ceiling also does not establish a researcher-selected
 operating setpoint; proposed values retain their proposed status.
 
-When a checked plan succeeds and no further capability is available for the
+When a plan draft succeeds and no further capability is available for the
 request, the runner returns the capability's complete existing Markdown draft
 with an explicit unsaved status. It does not ask the model to rewrite that
-already reviewed deliverable. This preserves its actual wording, source basis
-and pending researcher-review status while avoiding another generation/review
+existing deliverable. This preserves its actual wording, source basis
+and pending researcher-review status while avoiding another generation
 cycle. Unresolved references and requested saving still follow their normal
 correction and approval paths.
 
-A checked Finding draft similarly finishes with a deterministic unsaved-status
-message. The existing structured result presents the exact reviewed statement
-and limitations; an additional model rewrite cannot add unsupported claims after
-the draft has already been accepted. This remains a transient conversation draft,
+A Finding draft similarly finishes with a deterministic unsaved-status
+message. The structured result presents the proposed statement and limitations
+for researcher review. This remains a transient conversation draft,
 not published Evidence or a saved scientific correction.
 
-The reviewer uses the existing provider with no executable tools. Its requests,
-correction and usage count toward the same run. The existing answer-only
-finalization allowance also covers its bounded review and one correction after
-the reading allowance is exhausted; finalization cannot restart tool work and
-still shares the original elapsed-time deadline. Scientific text is buffered
-until accepted, so its first visible text may arrive later. The reviewer receives
-the exhausted-reading state during finalization and judges the bounded partial
-answer without requiring unavailable new tool calls. Accurately stated unresolved
-checks are limitations, not unsupported assertions. Tool activity remains
-visible separately. A model review is fallible and does not certify scientific
-truth; explicit evidence, adversarial evaluation and researcher review remain
-necessary.
+Answer-only finalization cannot restart tool work. Its response must distinguish
+completed observations from unresolved checks. Tool activity remains visible
+separately. Explicit evidence, evaluation against real research scenarios and
+researcher review remain necessary to assess scientific correctness.
 
 Whole-turn time, tool-call count, cumulative model tokens and total model cycles
 have no default ceiling. Their optional environment settings accept a positive
 limit; unset or zero disables that ceiling. Usage remains observable telemetry.
 Individual model/read requests retain a 180-second timeout, cancellation and
-the repeated-observation guard. An explicit limit cannot bypass claim review.
+the repeated-observation guard.
 Model requests recheck the remaining output allowance after context preparation;
 an exhausted optional cumulative allowance cannot produce a zero or negative
 provider output limit.
@@ -232,7 +224,7 @@ provider output limit.
 including system instructions, tool schemas, observations, output reserve and
 protocol margin. Token counts use the existing cl100k tokenizer with 20% reserve;
 operators must choose a window supported by their configured model. Both normal
-decisions and scientific review are checked at the provider boundary.
+decisions and context compaction are checked at the provider boundary.
 
 Section inspection packs complete Sources into the available result allowance
 and exposes canonical lengths and estimated tokens in the outline. It defaults
@@ -245,8 +237,7 @@ When older operations leave context, the runner creates provisional working
 notes containing scope, comparison conditions, conclusions, basis message IDs,
 uncertainties and next actions. It validates references before retiring those
 operations from model input. The full trajectory remains in storage. Working
-notes are not primary evidence, approval or published results, and are excluded
-from the scientific review's independent observations. Source claims require
+notes are not primary evidence, approval or published results. Source claims require
 their actual passages. A failed compaction preserves history and fails visibly.
 
 For example, a researcher asking to inspect the P002 group definitions can load
@@ -338,8 +329,8 @@ the final checkpoint keeps that identity. A bounded PostgreSQL snapshot permits
 another worker to serve reconnecting readers. Ordinary turns and approved
 continuations share this lifecycle, and reconnecting never repeats either action.
 If execution stops unexpectedly, partial text remains explicitly incomplete.
-Snapshots support observation of the research work; they do not bypass claim
-review, certify a scientific stage, or automatically restart interrupted work.
+Snapshots support observation of the research work; they do not replace source
+checks, certify a scientific stage, or automatically restart interrupted work.
 
 ## Key Areas
 

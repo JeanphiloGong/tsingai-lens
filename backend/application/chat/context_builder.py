@@ -19,7 +19,6 @@ class ChatModelContext:
     messages: tuple[ChatMessage, ...]
     rollover_summary: str = ""
     require_tool_call: bool = False
-    research_review: Mapping[str, Any] | None = None
     active_user_message_id: str | None = None
     working_summary: str = ""
     compacting: bool = False
@@ -27,8 +26,6 @@ class ChatModelContext:
 
     def provider_messages(self, system_prompt: str) -> list[dict[str, Any]]:
         messages = [{"role": "system", "content": system_prompt}]
-        if self.research_review is not None:
-            return [*messages, {"role": "user", "content": json.dumps(self.research_review, ensure_ascii=False)}]
         if self.rollover_summary:
             messages.append({"role": "system", "content": (
                 "[DURABLE TRAJECTORY ROLLOVER]\n"

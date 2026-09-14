@@ -15,6 +15,19 @@ def anyio_backend():
     return "asyncio"
 
 
+class _CompactionModel:
+    def __init__(self, *turns):
+        self.turns = iter(turns)
+        self.contexts = []
+
+    async def respond(self, *, context, **kwargs):
+        self.contexts.append(context)
+        turn = next(self.turns)
+        if isinstance(turn, Exception):
+            raise turn
+        return turn
+
+
 def test_context_token_budget_preserves_complete_call_result_batches():
     active = _user("active", "Compare elongation under the same annealing conditions.")
     pairs = [_tool_pair(call_id=f"source-{i}", payload={
@@ -34,7 +47,6 @@ def test_context_token_budget_preserves_complete_call_result_batches():
 async def test_compaction_preserves_research_notes_and_full_archived_history():
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
-    from tests.unit.application.test_chat_research_claim_review import _ReviewModel
 
     active = _user("active", "Correct the elongation comparison; do not save.")
     old = _tool_pair(call_id="methods", payload={
@@ -48,7 +60,7 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
         "conditions": "Temperature comparison, not time; same baseline required.",
         "basis_message_ids": [old[1].message_id], "unresolved": "Read the exact result before correcting the Finding.",
     }], "next_actions": ["Re-read methods-A together with results-A before the final judgment."]}
-    model = _ReviewModel(ModelTurn(content=json.dumps(notes)))
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
                                  context_builder=ChatContextBuilder(max_messages=3))
     progress = _RunProgress(runner.limits)
@@ -69,14 +81,13 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
 async def test_failed_compaction_does_not_discard_archived_observations():
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
     from application.chat.agent_runner import _RunProgress
-    from tests.unit.application.test_chat_research_claim_review import _ReviewModel
 
     active = _user("active", "Check the same measurement.")
     messages = (active, *_tool_pair(call_id="old"), *_tool_pair(call_id="new"))
     invalid = ModelTurn(content=json.dumps({"scope": "same measurement", "checks": [{
         "statement": "Claim", "conditions": "", "basis_message_ids": ["invented"], "unresolved": "",
     }], "next_actions": []}))
-    model = _ReviewModel(invalid, invalid)
+    model = _CompactionModel(invalid, invalid)
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
                                  context_builder=ChatContextBuilder(max_messages=3))
     progress = _RunProgress(runner.limits)
@@ -90,13 +101,12 @@ async def test_failed_compaction_does_not_discard_archived_observations():
 async def test_repeated_compaction_has_a_visible_failure_exit():
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
     from application.chat.agent_runner import _RunProgress
-    from tests.unit.application.test_chat_research_claim_review import _ReviewModel
 
     active = _user("active", "Keep checking the selected paper.")
     messages = (active, *_tool_pair(call_id="old", payload={"text": "x" * 5000}),
                 *_tool_pair(call_id="new", payload={"text": "y" * 5000}))
     notes = {"scope": "selected paper", "checks": [], "next_actions": []}
-    model = _ReviewModel(*(ModelTurn(content=json.dumps(notes)) for _ in range(3)))
+    model = _CompactionModel(*(ModelTurn(content=json.dumps(notes)) for _ in range(3)))
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
                                  context_builder=ChatContextBuilder(max_messages=3))
     progress = _RunProgress(runner.limits, compaction_attempts=3)

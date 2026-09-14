@@ -102,11 +102,12 @@ aggregation preserves that role; a local Source judgment cannot promote one
 cited experiment into a primary experiment paper.
 
 `evidence_routing.py` owns transient route records, Source-tree candidate
-ordering, selection hints, the bounded routing prompt and response schema, the
-one-Source model call, deterministic fallback, and the document round-robin
-extraction queue. The model decides only whether and how to inspect the current
-Source; the backend preserves its identity, so a route cannot redirect work to
-another paper or Source or become durable Evidence. A review frame remains a
+ordering, selection hints, deterministic role classification, and the document
+round-robin extraction queue. Semantic relevance belongs to
+`source_screening.py`; routing no longer makes a second per-Source model call.
+The route is an instruction to inspect a Source, not a scientific finding. The
+backend preserves its identity, so a route cannot redirect work to another
+paper or Source or become durable Evidence. A review frame remains a
 secondary synthesis or citation-lead source and does not enter the primary
 Evidence extraction queue. Review synthesis produced during discovery remains
 available upstream; a cited experiment must be inspected in its primary paper
@@ -120,11 +121,12 @@ irrelevant but the concrete Source tree contains a direct Objective signal,
 routing records a recall override and inspects that Source. Only papers with no
 source-local Objective signal remain skipped. This keeps model false negatives
 from removing facts that a researcher would have found by reading the paper.
-Before any Source-routing model call, the selected Sources must collectively
-establish at least one confirmed Objective variable and one confirmed Objective
-outcome. They may occur in different Sources, as they commonly do across Methods
-and Results. A paper that reports the broad outcome but studies a different
-variable is recorded in the internal trace and does not enter deep extraction.
+Before extraction, the selected Sources are expected to establish at least one
+confirmed Objective variable and one confirmed Objective outcome. They may occur
+in different Sources, as they commonly do across Methods and Results. A paper
+that reports the broad outcome but studies a different variable is retained for
+Source-local inspection and recorded as a scope gap; grounding, not a duplicate
+paper-level gate, decides whether its facts can support the Objective.
 An exact Paper Map relationship lineage preserves an abbreviated Source for
 inspection, but the lineage is still only a recall reason: Source-local
 extraction and grounding must establish every fact before it can become
@@ -349,9 +351,9 @@ or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
 from that complete claim set, and its contribution summary is assembled only
 from grounded result text in the final Evidence records. Contribution warnings
-count only final framing fallback, deterministic evidence-routing fallback,
-`PaperResearchMap` coverage gaps, and failed Evidence Sources; successful repair
-is not a warning. It does not persist artifacts or synthesize a cross-paper
+count only final framing fallback, `PaperResearchMap` coverage gaps, and failed
+Evidence Sources; normal deterministic task organization and successful repair
+are not warnings. It does not persist artifacts or synthesize a cross-paper
 claim. Its private materialization trace records only bounded counts and paper
 dispositions, so an empty result can be distinguished from filtering and
 technical extraction failure without storing Source content in diagnostics.

@@ -115,7 +115,7 @@ _SOURCE_EXTRACTION_MAX_ITEMS = 8
 # Candidate selection and immutable result anchors are part of the scientific
 # extraction contract. Rebuild checkpoints so context closure no longer
 # reinterprets a result Source after its source-local read.
-OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v27"
+OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v28"
 _ADAPTIVE_CONTEXT_HEADING_MARKERS = (
     "design",
     "method",
@@ -948,6 +948,13 @@ def _objective_route_narrow_context_field(
         return None
     role = str(route.get("role") or "").strip().casefold()
     if role not in _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS:
+        return None
+    # A role is a navigation hint, not permission to omit result facts.  Only
+    # an explicit context_fields request created by a targeted follow-up may
+    # select the compact context-only contract. Initial Source reads stay on
+    # the full evidence contract even when their deterministic role is a
+    # process/test/characterization role.
+    if not route.get("context_fields"):
         return None
     explicit_fields = tuple(
         str(field).strip().casefold()
@@ -6388,7 +6395,7 @@ def _objective_seed_context_routes(
             if unit.scientific_context.sample:
                 context_fields.append("sample")
             if unit.scientific_context.process:
-                context_fields.append("variable")
+                context_fields.append("process")
             if unit.scientific_context.test:
                 context_fields.append("test")
             if unit.comparison is not None:
@@ -6519,9 +6526,9 @@ def _build_objective_same_paper_context_bundle(
         # result.  Passing independent Results prose in this bundle lets the
         # model combine separate experiments and attribute the wrong
         # conditions or outcome to the current anchor.  A route explicitly
-        # carrying context fields is retained because some routing fallbacks
-        # use the result role for a Methods/condition Source; complete tables
-        # remain eligible as structured context for the anchored result.
+        # carrying context fields is retained because an explicit follow-up
+        # may use the result role for a Methods/condition Source; complete
+        # tables remain eligible as structured context for the anchored result.
         if (
             candidate.role in _DIRECT_RESULT_ROUTE_ROLES
             and not candidate.context_fields

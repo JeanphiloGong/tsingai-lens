@@ -34,7 +34,7 @@ measurement. Different sample states must not be pooled into one comparison.
 | Step | Direct entry | Input and output | Model calls | Writes |
 |---|---|---|---|---|
 | Screen | `source_screening.screen_sources` | Objective and paper Sources -> frames | Yes, bounded batches | None |
-| Route | `evidence_routing.route_sources` | Frames and Source tree -> inspection routes | When semantic routing is needed | None |
+| Route | `evidence_routing.route_sources` | Screened frames and Source tree -> deterministic inspection tasks | No (screening owns semantic relevance) | None |
 | Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> grounded drafts | When deterministic extraction is insufficient | None |
 | Ground | `source_validation.validate_source_fact` | One draft and its exact Source -> accepted or demoted draft | No | None |
 | Bind | `paper_experiment.reconstruct_paper_experiments` | Same-paper validated facts -> experiment drafts | No | None |

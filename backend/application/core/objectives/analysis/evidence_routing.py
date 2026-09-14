@@ -56,7 +56,9 @@ _OBJECTIVE_ROUTE_ROLES = {
 }
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _ROUTE_MAX_COMPLETION_TOKENS = 512
-OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v3"
+# Routing is deterministic task organization after semantic screening. Keep a
+# versioned fingerprint so old model-routed analyses are not silently reused.
+OBJECTIVE_EVIDENCE_ROUTING_VERSION = "objective_evidence_routing.v4"
 _ROUTE_SYSTEM_PROMPT = """
 You are routing source units for one research objective in an evidence-backed literature comparison backend.
 
@@ -239,7 +241,7 @@ class ObjectiveEvidenceRouter:
             max_completion_tokens=_ROUTE_MAX_COMPLETION_TOKENS,
             force_json_text=True,
             task_type="objective_evidence_route",
-            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
+            prompt_version=OBJECTIVE_EVIDENCE_ROUTING_VERSION,
         )
         if not isinstance(response, EvidenceSelectionsModelOutput):
             raise TypeError("unexpected objective evidence route response type")
@@ -378,7 +380,7 @@ def _progress_document_metadata(
 def route_sources(
     *,
     collection_id: str,
-    evidence_router: ObjectiveEvidenceRouter,
+    evidence_router: ObjectiveEvidenceRouter | None = None,
     objectives: tuple[ResearchObjective, ...],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...],
     blocks_by_document_id: dict[str, list[Any]],
@@ -386,6 +388,12 @@ def route_sources(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[EvidenceCandidate, ...]:
+    """Organize screened Sources without invoking an LLM router.
+
+    ``evidence_router`` is accepted for older direct callers and model-contract
+    tests, but is intentionally unused. Relevance belongs to screening and
+    source-local facts belong to extraction.
+    """
     objective_by_id = {objective.objective_id: objective for objective in objectives}
     all_tables = tuple(
         table
@@ -553,36 +561,24 @@ def route_sources(
                 source_candidates=source_candidates,
             )
             if not source_scope["eligible"]:
+                # Variable and outcome facts commonly live in different
+                # Methods/Results Sources. Keep the frame and let Source-local
+                # extraction establish or reject each fact instead of
+                # converting a navigation gap into a paper-level exclusion.
                 record_analysis_diagnostic(
                     {
-                        "trace_type": "objective_paper_scope_skipped",
+                        "trace_type": "objective_paper_scope_review",
                         "collection_id": collection_id,
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
                         "paper_role": frame.paper_role,
                         "matched_variables": source_scope["matched_variables"],
                         "matched_outcomes": source_scope["matched_outcomes"],
-                        "missing_axis_families": source_scope[
-                            "missing_axis_families"
-                        ],
+                        "missing_axis_families": source_scope["missing_axis_families"],
                         "lineage_preserved": source_scope["lineage_preserved"],
-                        "reason": (
-                            "primary_experiment_lacks_source_backed_objective_scope"
-                        ),
+                        "disposition": "continue_source_inspection",
                     }
                 )
-                logger.info(
-                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=missing_source_backed_objective_scope missing_axis_families=%s completed_frames=%s remaining_frames=%s",
-                    collection_id,
-                    frame.objective_id,
-                    frame.document_id,
-                    frame_position,
-                    frame_count,
-                    ",".join(source_scope["missing_axis_families"]),
-                    frame_position,
-                    max(frame_count - frame_position, 0),
-                )
-                continue
         frame_route_count_before = len(routes)
         candidate_by_key = {
             (candidate["source_kind"], candidate["source_ref"]): candidate
@@ -619,72 +615,18 @@ def route_sources(
                         )
                     )
                 continue
-            payload = {
-                "collection_id": collection_id,
-                "objective": _route_prompt_objective_record(objective),
-                "paper_frame": _route_prompt_paper_frame_record(frame),
-                "tree_position": _route_tree_position(candidate),
-                "document_state": _empty_objective_document_state(),
-                "current_source": _route_prompt_current_source(candidate),
-            }
-            try:
-                parsed = evidence_router.route_source(payload)
-                # Preserve whether the model actually supplied a confidence.
-                # A Pydantic default of 0.0 is an implementation default, not a
-                # scientific judgment.  Finalization assigns the conservative
-                # deterministic route confidence only when the field was absent.
-                route_records = [
-                    item.model_dump(exclude_unset=True)
-                    for item in parsed.selections[:1]
-                ]
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Research objective evidence routing model failed; using deterministic route collection_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s",
-                    collection_id,
-                    frame.objective_id,
-                    frame.document_id,
-                    candidate.get("source_kind"),
-                    candidate.get("source_ref"),
-                    exc_info=True,
+            # Screening has already made the semantic relevance decision.  The
+            # remaining routing work is deterministic task organization: bind
+            # the Source identity, classify its role from source-local signals,
+            # and preserve explicit direct-result recall.  A second model call
+            # used to repeat this decision and its output was subsequently
+            # overwritten by _finalize_objective_route_record.
+            route_records = [
+                _build_deterministic_objective_route_record(
+                    objective_context=objective_context,
+                    candidate=candidate,
                 )
-                route_records = [
-                    _build_deterministic_objective_route_record(
-                        objective_context=objective_context,
-                        candidate=candidate,
-                    )
-                ]
-            if not route_records and _route_candidate_is_direct_result_candidate(
-                candidate=candidate,
-                objective_context=objective_context,
-            ):
-                # A router is allowed to rank or annotate a direct result, but
-                # it cannot veto reading a Source that the deterministic
-                # candidate pass identified as current-work target evidence.
-                # Researchers do not skip an explicit result paragraph merely
-                # because a preliminary routing judgment returned no route.
-                route_records = [
-                    {
-                        "role": "current_experimental_evidence",
-                        "extractable": True,
-                        "reason": (
-                            "Deterministic recall override: the Source contains "
-                            "a direct Objective result."
-                        ),
-                        "confidence": 0.72,
-                        "used_fallback": True,
-                    }
-                ]
-                record_analysis_diagnostic(
-                    {
-                        "trace_type": "objective_source_recall_override",
-                        "collection_id": collection_id,
-                        "objective_id": frame.objective_id,
-                        "document_id": frame.document_id,
-                        "source_kind": candidate.get("source_kind"),
-                        "source_ref": candidate.get("source_ref"),
-                        "reason": "router_returned_empty_for_direct_result",
-                    }
-                )
+            ]
             for record in route_records:
                 source_kind = str(candidate.get("source_kind") or "")
                 source_ref = str(candidate.get("source_ref") or "")
@@ -838,9 +780,9 @@ def _build_deterministic_objective_route_record(
     return {
         "role": role,
         "extractable": extractable,
-        "reason": "Deterministic route built after model routing failed.",
-        "confidence": 0.62 if extractable else 0.55,
-        "used_fallback": True,
+        "reason": "Deterministic Source task organized from screened source signals.",
+        "confidence": 0.72 if evidence_role == "direct_support" else (0.62 if extractable else 0.55),
+        "used_fallback": False,
     }
 
 
@@ -1554,8 +1496,7 @@ def _build_route_source_candidates(
             "table_schema": table_schema,
             "sample_rows": table_schema["sample_rows"],
             # Candidate recall uses the complete logical table a researcher
-            # can inspect. The routing prompt still receives only its bounded
-            # caption/header preview; extraction receives the complete table.
+            # can inspect; extraction receives the complete table.
             "decision_text": _objective_table_search_text(table),
         }
         candidate["lineage_match"] = _route_candidate_matches_lineage(
@@ -1673,9 +1614,9 @@ def _build_route_source_candidates(
     # Direct result Sources are the recall boundary.  Context Sources are a
     # starting bundle only; missing fields trigger same-paper expansion after
     # extraction.  Keeping this bound here prevents every Methods/background
-    # paragraph from becoming a model call before we know what is missing.
-    # Keep recall-first selection separate from execution order.  The model
-    # may classify direct results before context, but extraction should still
+    # paragraph from becoming an unbounded first read before we know what is
+    # missing. Keep recall-first selection separate from execution order;
+    # extraction should still
     # follow the paper's source order so the resulting trajectory mirrors how
     # a researcher reads and binds Methods, Results, tables, and captions.
     selected_keys = direct_keys | {

@@ -17,7 +17,6 @@ from application.core.objectives.analysis.finding_synthesis import (
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
-    EvidenceSelectionsModelOutput,
 )
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
@@ -86,7 +85,7 @@ def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version(
 def test_document_evidence_checkpoint_uses_current_source_extraction_version():
     assert (
         "source_extraction",
-        "objective_evidence_extraction.v27",
+        "objective_evidence_extraction.v28",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -559,15 +558,6 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
             and "changed_variables" in ref.get("supports", ())
             for ref in result_evidence.related_source_refs
         )
-
-
-class _FailingRouteExtractor(_ObjectiveExtractor):
-    def route_source(
-        self,
-        payload: dict[str, Any],
-    ) -> EvidenceSelectionsModelOutput:
-        self.route_payloads.append(payload)
-        raise RuntimeError("route model failed")
 
 
 class _FailingFrameExtractor(_ObjectiveExtractor):
@@ -1409,7 +1399,7 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
     )
 
 
-async def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
+async def test_objective_analysis_does_not_invoke_a_route_model(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -1494,17 +1484,17 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         objective.objective_id,
     )
 
-    failing_extractor = _FailingRouteExtractor()
-    service._objective_evidence_router = failing_extractor
+    failing_extractor = _ObjectiveExtractor()
     service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
 
-    assert failing_extractor.route_payloads
+    assert not failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
-    assert artifacts.contributions[0].warnings == (
-        "2 Source unit(s) used deterministic evidence routing fallback.",
+    assert all(
+        "deterministic evidence routing fallback" not in warning
+        for warning in artifacts.contributions[0].warnings
     )
     assert all(
         evidence.analysis_version == analysis.analysis_version
@@ -1604,7 +1594,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
 
     facts = await service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
-    assert extractor.route_payloads
+    assert not extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
 

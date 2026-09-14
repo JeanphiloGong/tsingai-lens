@@ -16,8 +16,7 @@ from application.core.objectives.analysis.evidence_materialization import (
     rebind_persisted_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import (
-    OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
-    ObjectiveEvidenceRouter,
+    OBJECTIVE_EVIDENCE_ROUTING_VERSION,
     route_sources,
 )
 from application.core.objectives.analysis.finding_synthesis import (
@@ -86,7 +85,7 @@ class ObjectiveAnalysisInputs(ObjectiveSourceInputs):
 _OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v1"
 OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
     ("paper_framing", OBJECTIVE_PAPER_FRAME_PROMPT_VERSION),
-    ("evidence_routing", OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION),
+    ("evidence_routing", OBJECTIVE_EVIDENCE_ROUTING_VERSION),
     ("source_extraction", OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION),
     ("source_grounding", OBJECTIVE_SOURCE_GROUNDING_VERSION),
     ("paper_experiment", PAPER_EXPERIMENT_RECONSTRUCTION_VERSION),
@@ -143,13 +142,11 @@ class ObjectiveEvidenceAnalysisService:
         finding_synthesis_service: FindingSynthesisService,
         objective_input_service: ObjectiveInputService,
         objective_source_screener: ObjectiveSourceScreener | None = None,
-        objective_evidence_router: ObjectiveEvidenceRouter | None = None,
         objective_source_extractor: ObjectiveSourceExtractor | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._objective_source_screener = objective_source_screener
-        self._objective_evidence_router = objective_evidence_router
         self._objective_source_extractor = objective_source_extractor
         self._paper_facts_extractor = paper_facts_extractor
         self.paper_map_repository = paper_map_repository
@@ -198,8 +195,6 @@ class ObjectiveEvidenceAnalysisService:
         response_client = self.objective_input_service.response_client
         if self._objective_source_screener is None:
             self._objective_source_screener = ObjectiveSourceScreener(response_client)
-        if self._objective_evidence_router is None:
-            self._objective_evidence_router = ObjectiveEvidenceRouter(response_client)
         if self._objective_source_extractor is None:
             self._objective_source_extractor = ObjectiveSourceExtractor(response_client)
         model_name = str(
@@ -389,7 +384,6 @@ class ObjectiveEvidenceAnalysisService:
         )
         source_inspection_routes = route_sources(
             collection_id=collection_id,
-            evidence_router=self._objective_evidence_router,
             objectives=(objective,),
             objective_paper_frames=screened_sources,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],

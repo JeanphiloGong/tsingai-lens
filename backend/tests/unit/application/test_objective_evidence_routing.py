@@ -343,7 +343,7 @@ def test_irrelevant_primary_experiment_without_objective_signal_stays_skipped() 
     assert routes == ()
 
 
-def test_primary_experiment_with_outcome_but_no_objective_variable_is_skipped() -> None:
+def test_primary_experiment_with_outcome_but_no_objective_variable_stays_visible() -> None:
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -375,7 +375,7 @@ def test_primary_experiment_with_outcome_but_no_objective_variable_is_skipped() 
 
     class UnexpectedRouter:
         def route_source(self, payload):  # noqa: ANN001, ARG002
-            raise AssertionError("an out-of-scope paper must not reach routing")
+            raise AssertionError("routing model must not be called")
 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
@@ -388,15 +388,18 @@ def test_primary_experiment_with_outcome_but_no_objective_variable_is_skipped() 
             document_trees_by_document_id={},
         )
 
-    assert routes == ()
+    assert [route.source_ref for route in routes if route.extractable] == [
+        "unrelated-microstructure-result"
+    ]
     scope_trace = next(
         record
         for record in diagnostics.records
-        if record["trace_type"] == "objective_paper_scope_skipped"
+        if record["trace_type"] == "objective_paper_scope_review"
     )
     assert scope_trace["matched_variables"] == []
     assert scope_trace["matched_outcomes"] == ["microstructure"]
     assert scope_trace["missing_axis_families"] == ["variable"]
+    assert scope_trace["disposition"] == "continue_source_inspection"
 
 
 def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() -> None:
@@ -451,7 +454,7 @@ def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() ->
     )
 
     assert "microstructure-result" in {route.source_ref for route in routes}
-    assert extractor.route_payloads
+    assert not extractor.route_payloads
 
 
 def test_explicit_relationship_lineage_preserves_abbreviated_result_scope() -> None:
@@ -642,16 +645,11 @@ def test_direct_result_source_is_recalled_when_router_returns_empty_selection() 
         route.role == "current_experimental_evidence"
         for route in direct_routes.values()
     )
-    recalls = [
+    assert not [
         record
         for record in diagnostics.records
         if record["trace_type"] == "objective_source_recall_override"
     ]
-    assert {record["source_ref"] for record in recalls} == set(direct_routes)
-    assert all(
-        record["reason"] == "router_returned_empty_for_direct_result"
-        for record in recalls
-    )
 
 
 def test_mixed_current_and_cited_paragraph_is_kept_for_source_extraction() -> None:
@@ -1756,7 +1754,7 @@ def test_research_objective_routing_uses_document_tree_order():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -1766,12 +1764,7 @@ def test_research_objective_routing_uses_document_tree_order():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
-        "methods",
-        "results",
-    ]
-    assert extractor.route_payloads[0]["tree_position"]["section_path"] == ["Methods"]
-    assert extractor.route_payloads[1]["tree_position"]["section_path"] == ["Results"]
+    assert not extractor.route_payloads
 
 
 def test_research_objective_routing_binds_current_source_to_model_decision():
@@ -1816,8 +1809,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision():
         document_trees_by_document_id={},
     )
 
-    assert len(extractor.route_payloads) == 1
-    assert extractor.route_payloads[0]["current_source"]["source_ref"] == "table-1"
+    assert not extractor.route_payloads
     assert {
         (route.source_kind, route.source_ref, route.role)
         for route in routes
@@ -1870,7 +1862,7 @@ def test_research_objective_routing_uses_compact_prompt_payload():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -1880,20 +1872,7 @@ def test_research_objective_routing_uses_compact_prompt_payload():
         document_trees_by_document_id={},
     )
 
-    route_payload = extractor.route_payloads[0]
-    assert "routing_hints" not in route_payload["objective"]
-    assert "extraction_guidance" not in route_payload["objective"]
-    assert "objective_context" not in route_payload
-    assert "screening_note" not in route_payload["paper_frame"]
-    assert "relevant_tables" not in route_payload["paper_frame"]
-    assert "excluded_tables" not in route_payload["paper_frame"]
-    assert "table_schema" not in route_payload["current_source"]
-    assert "sample_rows" not in route_payload["current_source"]
-    assert route_payload["current_source"]["column_headers"] == [
-        "condition",
-        "yield strength",
-    ]
-    assert route_payload["current_source"]["row_count"] == 200
+    assert not extractor.route_payloads
 
 
 def test_research_objective_routing_uses_text_hint_not_source_text():
@@ -1948,7 +1927,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -1958,10 +1937,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    current_source = extractor.route_payloads[0]["current_source"]
-    assert "text" not in current_source
-    assert current_source["text_hint"] == long_text[:320]
-    assert len(current_source["text_hint"]) == 320
+    assert not extractor.route_payloads
 
 
 def test_research_objective_routing_builds_text_candidates_from_document_tree():
@@ -2069,7 +2045,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -2079,14 +2055,11 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
+    assert [route.source_ref for route in routes if route.extractable] == [
         "methods",
         "results",
     ]
-    assert "reference" not in {
-        payload["current_source"]["source_ref"]
-        for payload in extractor.route_payloads
-    }
+    assert "reference" not in {route.source_ref for route in routes}
 
 
 def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
@@ -2173,7 +2146,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -2183,7 +2156,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
+    assert [route.source_ref for route in routes if route.extractable] == [
         "results",
     ]
 
@@ -2245,7 +2218,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text()
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -2255,10 +2228,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text()
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    routed_refs = [
-        payload["current_source"]["source_ref"]
-        for payload in extractor.route_payloads
-    ]
+    routed_refs = [route.source_ref for route in routes if route.extractable]
     assert len(routed_refs) == 8
     assert routed_refs == [f"block-{index}" for index in range(8)]
 
@@ -2320,7 +2290,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -2330,10 +2300,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    routed_refs = [
-        payload["current_source"]["source_ref"]
-        for payload in extractor.route_payloads
-    ]
+    routed_refs = [route.source_ref for route in routes if route.extractable]
     assert len(routed_refs) == 8
     assert routed_refs[-1] == "block-44"
     assert routed_refs == sorted(
@@ -2408,7 +2375,7 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes():
     )
     extractor = _ObjectiveExtractor()
 
-    evidence_routing.route_sources(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         evidence_router=extractor,
         objectives=(objective,),
@@ -2418,10 +2385,7 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert "preheating-crack-result" in {
-        payload["current_source"]["source_ref"]
-        for payload in extractor.route_payloads
-    }
+    assert "preheating-crack-result" in {route.source_ref for route in routes}
 
 
 def test_research_objective_tree_routing_keeps_direct_result_among_scope_text():

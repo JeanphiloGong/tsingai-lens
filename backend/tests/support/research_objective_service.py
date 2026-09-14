@@ -49,7 +49,6 @@ def build_research_objective_service(
 ) -> ObjectiveEvidenceAnalysisService:
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
-        kwargs.setdefault("objective_evidence_router", objective_judgments)
         kwargs.setdefault("objective_source_extractor", objective_judgments)
         kwargs.setdefault("objective_source_screener", objective_judgments)
     source_repository = kwargs.pop("source_artifact_repository", None)

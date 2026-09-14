@@ -10859,7 +10859,7 @@ def test_research_objective_prompt_exposes_context_fields_without_values() -> No
     assert "not_a_field" not in prompt
 
 
-def test_research_objective_prompt_derives_context_field_from_route_role() -> None:
+def test_research_objective_prompt_does_not_narrow_from_route_role_alone() -> None:
     _, prompt = source_extraction.build_objective_evidence_prompt(
         {
             "objective": {
@@ -10882,8 +10882,9 @@ def test_research_objective_prompt_derives_context_field_from_route_role() -> No
         }
     )
 
-    assert "CONTEXT FAMILY: process" in prompt
-    assert "manufacturing or process family" in prompt
+    assert "CONTEXT FAMILY: process" not in prompt
+    assert "OBJECTIVE QUESTION:" in prompt
+    assert "SOURCE:" in prompt
 
 
 def test_research_objective_prompt_treats_fixed_manufacturing_facts_as_context() -> None:

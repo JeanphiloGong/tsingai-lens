@@ -47,7 +47,7 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
-    StructuredPaperSourceSignal,
+    PaperSourceSignalModelOutput,
     PaperSourceSignalScreenModelOutput,
     ReviewPaperMapModelOutput,
 )
@@ -79,11 +79,11 @@ def test_paper_research_map_contract_bounds_model_output():
     assert schema["studies"]["maxItems"] == 2
     assert schema["unresolved_signals"]["maxItems"] == 12
     assert schema["output_saturated"]["type"] == "boolean"
-    study_schema = experimental_schema["$defs"]["StructuredPaperMapStudy"][
+    study_schema = experimental_schema["$defs"]["PaperMapStudyModelOutput"][
         "properties"
     ]
     relationship_schema = experimental_schema["$defs"][
-        "StructuredPaperMapRelationship"
+        "PaperMapRelationshipModelOutput"
     ]["properties"]
     assert study_schema["material_scope"]["maxItems"] == 4
     assert study_schema["process_context"]["maxItems"] == 4
@@ -96,7 +96,7 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "varied_factors" not in relationship_schema
     assert relationship_schema["factor_assertions"]["maxItems"] == 6
     factor_schema = experimental_schema["$defs"][
-        "StructuredPaperMapFactorAssertion"
+        "PaperMapFactorAssertionModelOutput"
     ]["properties"]
     assert factor_schema["role"]["enum"] == ["varied", "compared", "modeled"]
     assert factor_schema["source_labels"]["minItems"] == 1
@@ -104,7 +104,7 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "source_unit_ids" not in relationship_schema
     assert relationship_schema["source_labels"]["minItems"] == 1
     assert relationship_schema["source_labels"]["maxItems"] == 4
-    signal_schema = experimental_schema["$defs"]["StructuredPaperMapSignal"][
+    signal_schema = experimental_schema["$defs"]["PaperMapSignalModelOutput"][
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
@@ -129,11 +129,11 @@ def test_paper_research_map_contract_bounds_model_output():
     assert schema["warnings"]["items"]["maxLength"] == 240
 
     review_model_schema = ReviewPaperMapModelOutput.model_json_schema()
-    review_schema = review_model_schema["$defs"]["StructuredReviewMapSynthesis"][
+    review_schema = review_model_schema["$defs"]["ReviewMapSynthesisModelOutput"][
         "properties"
     ]
     review_item_schema = review_model_schema["$defs"][
-        "StructuredReviewMapKnowledgeItem"
+        "ReviewMapKnowledgeItemModelOutput"
     ]["properties"]
     assert "studies" not in review_model_schema["properties"]
     assert "unresolved_signals" not in review_model_schema["properties"]
@@ -194,7 +194,7 @@ def test_paper_map_rejects_unknown_enum_values_instead_of_downgrading_them(
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
     model_schema = PaperSourceSignalScreenModelOutput.model_json_schema()
     schema = model_schema["properties"]
-    signal_schema = model_schema["$defs"]["StructuredPaperSourceSignal"][
+    signal_schema = model_schema["$defs"]["PaperSourceSignalModelOutput"][
         "properties"
     ]
 
@@ -331,7 +331,7 @@ def test_paper_source_signal_contract_rejects_role_type_mismatch(
     variable_role: str,
 ):
     with pytest.raises(ValidationError, match="variable role"):
-        StructuredPaperSourceSignal.model_validate(
+        PaperSourceSignalModelOutput.model_validate(
             {
                 "signal_type": signal_type,
                 "label": "research axis",

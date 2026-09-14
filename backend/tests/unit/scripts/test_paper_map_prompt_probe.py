@@ -10,8 +10,8 @@ import pytest
 from pydantic import ValidationError
 
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
-    StructuredPaperMapRelationship,
-    StructuredPaperMapStudy,
+    PaperMapRelationshipModelOutput,
+    PaperMapStudyModelOutput,
 )
 
 
@@ -157,7 +157,7 @@ def test_scientific_evaluator_rejects_broad_outcome_as_complete_relationship() -
         for item in probe.default_scenarios()
         if item.scenario_id == "broad_outcome"
     )
-    relationship = StructuredPaperMapRelationship.model_construct(
+    relationship = PaperMapRelationshipModelOutput.model_construct(
         factor_assertions=[
             SimpleNamespace(
                 label="heat treatment",
@@ -169,7 +169,7 @@ def test_scientific_evaluator_rejects_broad_outcome_as_complete_relationship() -
         source_labels=["S1"],
         confidence=0.8,
     )
-    study = StructuredPaperMapStudy.model_construct(
+    study = PaperMapStudyModelOutput.model_construct(
         design_type="experimental",
         claim_scope="current_work",
         relationships=[relationship],
@@ -477,13 +477,13 @@ def test_paper_map_study_accepts_six_relationships_but_rejects_seven() -> None:
         {**relationship, "outcome": f"outcome {position}"} for position in range(1, 7)
     ]
 
-    parsed = StructuredPaperMapStudy.model_validate(
+    parsed = PaperMapStudyModelOutput.model_validate(
         {"relationships": six_relationships}
     )
 
     assert len(parsed.relationships) == 6
     with pytest.raises(ValidationError, match="at most 6 items"):
-        StructuredPaperMapStudy.model_validate(
+        PaperMapStudyModelOutput.model_validate(
             {
                 "relationships": [
                     *six_relationships,

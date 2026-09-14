@@ -25,7 +25,7 @@ from .common import (
 from .normalization import _downgrade_unresolved_relationships
 
 
-class StructuredPaperMapFactorAssertion(_PaperResearchMapResponse):
+class PaperMapFactorAssertionModelOutput(_PaperResearchMapResponse):
     """One Source-linked factor role inside a candidate paper relationship."""
 
     label: Annotated[str, Field(min_length=1, max_length=80)]
@@ -40,7 +40,7 @@ class StructuredPaperMapFactorAssertion(_PaperResearchMapResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_labels(self) -> "StructuredPaperMapFactorAssertion":
+    def _validate_source_labels(self) -> "PaperMapFactorAssertionModelOutput":
         normalized = [value.strip() for value in self.source_labels]
         if any(not value for value in normalized):
             raise ValueError("paper-map factor Source labels cannot be empty")
@@ -49,11 +49,11 @@ class StructuredPaperMapFactorAssertion(_PaperResearchMapResponse):
         return self
 
 
-class StructuredPaperMapRelationship(_PaperResearchMapResponse):
+class PaperMapRelationshipModelOutput(_PaperResearchMapResponse):
     """One compact factor-to-outcome axis used only during paper mapping."""
 
     factor_assertions: list[
-        StructuredPaperMapFactorAssertion
+        PaperMapFactorAssertionModelOutput
     ] = Field(min_length=1, max_length=_PAPER_MAP_VARIED_FACTOR_LIMIT)
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
     source_labels: list[
@@ -67,7 +67,7 @@ class StructuredPaperMapRelationship(_PaperResearchMapResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_labels(self) -> "StructuredPaperMapRelationship":
+    def _validate_source_labels(self) -> "PaperMapRelationshipModelOutput":
         normalized = [value.strip() for value in self.source_labels]
         if any(not value for value in normalized):
             raise ValueError("paper-map relationship Source labels cannot be empty")
@@ -82,7 +82,7 @@ class StructuredPaperMapRelationship(_PaperResearchMapResponse):
         return self
 
 
-class StructuredPaperMapStudy(_PaperResearchMapResponse):
+class PaperMapStudyModelOutput(_PaperResearchMapResponse):
     """Paper-owned scope without experiment reconstruction fields."""
 
     experiment_label: str | None = Field(default=None, max_length=120)
@@ -104,7 +104,7 @@ class StructuredPaperMapStudy(_PaperResearchMapResponse):
     process_context: list[
         Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
     ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
-    relationships: list[StructuredPaperMapRelationship] = Field(
+    relationships: list[PaperMapRelationshipModelOutput] = Field(
         min_length=1,
         max_length=PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     )
@@ -121,7 +121,7 @@ class StructuredPaperMapStudy(_PaperResearchMapResponse):
         return _normalize_list(value)
 
 
-class StructuredPaperMapSignal(_PaperResearchMapResponse):
+class PaperMapSignalModelOutput(_PaperResearchMapResponse):
     """One incomplete paper-owned variable or outcome axis."""
 
     signal_type: Literal["variable", "outcome"]
@@ -170,7 +170,7 @@ class StructuredPaperMapSignal(_PaperResearchMapResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_labels(self) -> "StructuredPaperMapSignal":
+    def _validate_source_labels(self) -> "PaperMapSignalModelOutput":
         normalized = [value.strip() for value in self.source_labels]
         if any(not value for value in normalized):
             raise ValueError("paper-map signal Source labels cannot be empty")
@@ -187,11 +187,11 @@ class ExperimentalPaperMapModelOutput(_PaperResearchMapResponse):
     """Compact high-level scope contract for non-review papers."""
 
     doc_role: Literal["experimental", "modeling", "mixed", "uncertain"] = "uncertain"
-    studies: list[StructuredPaperMapStudy] = Field(
+    studies: list[PaperMapStudyModelOutput] = Field(
         default_factory=list,
         max_length=_PAPER_MAP_STUDY_LIMIT,
     )
-    unresolved_signals: list[StructuredPaperMapSignal] = Field(
+    unresolved_signals: list[PaperMapSignalModelOutput] = Field(
         default_factory=list,
         max_length=PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
     )
@@ -218,7 +218,7 @@ class ExperimentalPaperMapModelOutput(_PaperResearchMapResponse):
         return _normalize_warnings(value)
 
 
-class StructuredPaperSourceSignal(_PaperResearchMapResponse):
+class PaperSourceSignalModelOutput(_PaperResearchMapResponse):
     """One explicit scientific axis from one Source, before relationship assembly."""
 
     signal_type: Literal["variable", "outcome"]
@@ -289,7 +289,7 @@ class StructuredPaperSourceSignal(_PaperResearchMapResponse):
         )
 
     @model_validator(mode="after")
-    def _validate_variable_role(self) -> "StructuredPaperSourceSignal":
+    def _validate_variable_role(self) -> "PaperSourceSignalModelOutput":
         if self.signal_type == "variable" and self.variable_role == "not_applicable":
             raise ValueError("variable signal requires a scientific variable role")
         if self.signal_type == "outcome" and self.variable_role != "not_applicable":
@@ -303,7 +303,7 @@ class PaperSourceSignalScreenModelOutput(_PaperResearchMapResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
-    signals: list[StructuredPaperSourceSignal] = Field(
+    signals: list[PaperSourceSignalModelOutput] = Field(
         default_factory=list,
         max_length=_SOURCE_SIGNAL_LIMIT,
     )
@@ -323,11 +323,11 @@ class PaperSourceSignalScreenModelOutput(_PaperResearchMapResponse):
         if not isinstance(raw_signals, list):
             return value
 
-        signals: list[StructuredPaperSourceSignal] = []
+        signals: list[PaperSourceSignalModelOutput] = []
         malformed_count = 0
         for raw_signal in raw_signals:
             try:
-                signals.append(StructuredPaperSourceSignal.model_validate(raw_signal))
+                signals.append(PaperSourceSignalModelOutput.model_validate(raw_signal))
             except ValidationError:
                 malformed_count += 1
         if not malformed_count:
@@ -368,7 +368,7 @@ class PaperSourceSignalScreenModelOutput(_PaperResearchMapResponse):
         return self
 
 
-class StructuredReviewMapKnowledgeItem(_PaperResearchMapResponse):
+class ReviewMapKnowledgeItemModelOutput(_PaperResearchMapResponse):
     """One model-returned review statement linked by a short Source label."""
 
     content: Annotated[str, Field(min_length=1, max_length=240)]
@@ -406,27 +406,27 @@ class StructuredReviewMapKnowledgeItem(_PaperResearchMapResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_source_labels(self) -> "StructuredReviewMapKnowledgeItem":
+    def _validate_source_labels(self) -> "ReviewMapKnowledgeItemModelOutput":
         normalized = [value.strip() for value in self.source_labels]
         if len(normalized) != len(set(normalized)):
             raise ValueError("review knowledge Source labels must be unique")
         return self
 
 
-class StructuredReviewMapSynthesis(_PaperResearchMapResponse):
-    synthesis_claims: list[StructuredReviewMapKnowledgeItem] = Field(
+class ReviewMapSynthesisModelOutput(_PaperResearchMapResponse):
+    synthesis_claims: list[ReviewMapKnowledgeItemModelOutput] = Field(
         default_factory=list,
         max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
     )
-    disputes: list[StructuredReviewMapKnowledgeItem] = Field(
+    disputes: list[ReviewMapKnowledgeItemModelOutput] = Field(
         default_factory=list,
         max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
     )
-    evidence_gaps: list[StructuredReviewMapKnowledgeItem] = Field(
+    evidence_gaps: list[ReviewMapKnowledgeItemModelOutput] = Field(
         default_factory=list,
         max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
     )
-    citation_leads: list[StructuredReviewMapKnowledgeItem] = Field(
+    citation_leads: list[ReviewMapKnowledgeItemModelOutput] = Field(
         default_factory=list,
         max_length=_REVIEW_CITATION_LEAD_LIMIT,
     )
@@ -447,8 +447,8 @@ class ReviewPaperMapModelOutput(_PaperResearchMapResponse):
     """Review-author knowledge without duplicate study or signal output."""
 
     doc_role: Literal["review"] = "review"
-    review_synthesis: StructuredReviewMapSynthesis = Field(
-        default_factory=StructuredReviewMapSynthesis
+    review_synthesis: ReviewMapSynthesisModelOutput = Field(
+        default_factory=ReviewMapSynthesisModelOutput
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"

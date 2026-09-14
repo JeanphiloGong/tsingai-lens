@@ -96,7 +96,7 @@ class StructuredPaperSignalReconciliation(_SignalReconciliationResponse):
         return _normalize_list(value)
 
 
-class _StructuredModelSignalRelationship(_SignalReconciliationResponse):
+class PaperSignalRelationshipModelOutput(_SignalReconciliationResponse):
     signal_labels: list[Annotated[str, Field(max_length=12)]] = Field(
         min_length=2,
         max_length=12,
@@ -109,13 +109,13 @@ class _StructuredModelSignalRelationship(_SignalReconciliationResponse):
         return _normalize_list(value)
 
     @model_validator(mode="after")
-    def _validate_unique_signal_labels(self) -> "_StructuredModelSignalRelationship":
+    def _validate_unique_signal_labels(self) -> "PaperSignalRelationshipModelOutput":
         if len(self.signal_labels) != len(set(self.signal_labels)):
             raise ValueError("paper signal relationship labels must be unique")
         return self
 
 
-class _StructuredModelUnresolvedSignal(_SignalReconciliationResponse):
+class UnresolvedPaperSignalModelOutput(_SignalReconciliationResponse):
     signal_label: Annotated[str, Field(min_length=1, max_length=12)]
     reason: Annotated[str, Field(min_length=1, max_length=240)]
 
@@ -126,8 +126,8 @@ class _StructuredModelUnresolvedSignal(_SignalReconciliationResponse):
         return (reason or "No supported paper-scope link was established.")[:240]
 
 
-class _StructuredModelSignalStudy(_SignalReconciliationResponse):
-    relationships: list[_StructuredModelSignalRelationship] = Field(
+class PaperSignalStudyModelOutput(_SignalReconciliationResponse):
+    relationships: list[PaperSignalRelationshipModelOutput] = Field(
         min_length=1,
         max_length=11,
     )
@@ -138,12 +138,12 @@ class _StructuredModelSignalStudy(_SignalReconciliationResponse):
         return _normalize_list(value)
 
 
-class _StructuredModelSignalReconciliation(_SignalReconciliationResponse):
-    studies: list[_StructuredModelSignalStudy] = Field(
+class PaperSignalReconciliationModelOutput(_SignalReconciliationResponse):
+    studies: list[PaperSignalStudyModelOutput] = Field(
         default_factory=list,
         max_length=1,
     )
-    unresolved_signals: list[_StructuredModelUnresolvedSignal] = Field(
+    unresolved_signals: list[UnresolvedPaperSignalModelOutput] = Field(
         default_factory=list,
         max_length=12,
     )
@@ -209,7 +209,7 @@ def _paper_signal_model_payload(
 
 
 def _rebind_signal_reconciliation(
-    response: _StructuredModelSignalReconciliation,
+    response: PaperSignalReconciliationModelOutput,
     *,
     signals_by_label: Mapping[str, Mapping[str, Any]],
 ) -> StructuredPaperSignalReconciliation:
@@ -352,7 +352,7 @@ class PaperSignalReconciler:
 
         def validate_or_recover_contexts(response: BaseModel) -> BaseModel | None:
             nonlocal conflicting_response_count
-            if not isinstance(response, _StructuredModelSignalReconciliation):
+            if not isinstance(response, PaperSignalReconciliationModelOutput):
                 raise TypeError("unexpected paper signal reconciliation response type")
             rebound = _rebind_signal_reconciliation(
                 response,
@@ -397,7 +397,7 @@ class PaperSignalReconciler:
         response = self.response_client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=_StructuredModelSignalReconciliation,
+            response_model=PaperSignalReconciliationModelOutput,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
             json_completion=complete_json_with_contract,
             postprocess_response=validate_or_recover_contexts,
@@ -415,7 +415,7 @@ class PaperSignalReconciler:
         return self.response_client.estimate_prompt_tokens(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=_StructuredModelSignalReconciliation,
+            response_model=PaperSignalReconciliationModelOutput,
         )
 
 

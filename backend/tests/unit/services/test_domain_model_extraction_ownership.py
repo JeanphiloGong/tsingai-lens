@@ -28,6 +28,8 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
+from application.core.objectives.discovery import signal_reconciliation
+from application.core.objectives.discovery.paper_understanding import paper_map_outputs
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
@@ -76,6 +78,24 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         response_model.__module__ == owner
         for response_model, owner in expected_owners.items()
     )
+
+
+@pytest.mark.parametrize(
+    ("module", "model_name"),
+    [
+        (paper_map_outputs, "ExperimentalPaperMapModelOutput"),
+        (paper_map_outputs, "PaperSourceSignalScreenModelOutput"),
+        (paper_map_outputs, "ReviewPaperMapModelOutput"),
+        (signal_reconciliation, "PaperSignalReconciliationModelOutput"),
+    ],
+)
+def test_discovery_model_outputs_keep_nested_output_names(module, model_name):
+    output_model = getattr(module, model_name)
+    schema = output_model.model_json_schema()
+
+    assert output_model.__module__ == module.__name__
+    assert schema["title"] == model_name
+    assert all(name.endswith("ModelOutput") for name in schema.get("$defs", {}))
 
 
 @pytest.mark.parametrize(

@@ -8,10 +8,6 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.evidence_routing import (
-    EvidenceSelectionModelOutput,
-    EvidenceSelectionsModelOutput,
-)
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
@@ -195,25 +191,6 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             evidence_density="high" if studies else "medium",
             confidence=0.94 if studies else 0.75,
             warnings=[],
-        )
-
-    def route_source(self, payload: dict[str, Any]) -> EvidenceSelectionsModelOutput:
-        source = payload.get("current_source") or {}
-        if not isinstance(source, dict) or not source.get("source_ref"):
-            return EvidenceSelectionsModelOutput()
-        text = str(source.get("text_hint") or "").casefold()
-        return EvidenceSelectionsModelOutput(
-            selections=[
-                EvidenceSelectionModelOutput(
-                    role=(
-                        "current_experimental_evidence"
-                        if "decreased porosity from" in text
-                        else "process_or_treatment"
-                    ),
-                    extractable=True,
-                    confidence=0.92,
-                )
-            ]
         )
 
     def extract_source(self, payload: dict[str, Any]) -> EvidenceExtractionsModelOutput:

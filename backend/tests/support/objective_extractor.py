@@ -3,10 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.evidence_routing import (
-    EvidenceSelectionModelOutput,
-    EvidenceSelectionsModelOutput,
-)
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
@@ -71,7 +67,6 @@ class FakeObjectiveExtractor:
         self.skim_payloads: list[dict[str, Any]] = []
         self.canonicalization_payloads: list[dict[str, Any]] = []
         self.frame_payloads: list[dict[str, Any]] = []
-        self.route_payloads: list[dict[str, Any]] = []
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
 
@@ -232,70 +227,6 @@ class FakeObjectiveExtractor:
             if any(str(axis or "").lower() in text for axis in axes):
                 source_unit_ids.append(str(unit["source_unit_id"]))
         return source_unit_ids
-
-    def route_source(
-        self,
-        payload: dict[str, Any],
-    ) -> EvidenceSelectionsModelOutput:
-        self.route_payloads.append(payload)
-        objective = payload["objective"]
-        if not isinstance(payload.get("current_source"), dict):
-            raise ValueError("objective evidence routing requires current_source")
-        candidates = [payload["current_source"]]
-        routes: list[EvidenceSelectionModelOutput] = []
-        for candidate in candidates:
-            if candidate["frame_status"] == "excluded":
-                routes.append(
-                    EvidenceSelectionModelOutput(
-                        role="low_value_or_irrelevant",
-                        extractable=False,
-                        confidence=0.7,
-                    )
-                )
-                continue
-            if candidate["source_kind"] == "text_window":
-                routes.append(
-                    EvidenceSelectionModelOutput(
-                        role="process_or_treatment",
-                        extractable=True,
-                        confidence=0.72,
-                    )
-                )
-                continue
-            table_schema = candidate.get("table_schema") or {}
-            column_headers = (
-                table_schema.get("column_headers")
-                if isinstance(table_schema.get("column_headers"), list)
-                else candidate.get("column_headers")
-                if isinstance(candidate.get("column_headers"), list)
-                else []
-            )
-            text = " ".join(
-                str(value or "")
-                for value in (
-                    candidate.get("caption_text"),
-                    candidate.get("heading_path"),
-                    " ".join(column_headers),
-                )
-            ).lower()
-            outcomes = [
-                str(axis or "").lower()
-                for axis in objective.get("outcomes", ())
-                if str(axis or "").strip()
-            ]
-            role = (
-                "current_experimental_evidence"
-                if any(axis in text for axis in outcomes)
-                else "process_or_treatment"
-            )
-            routes.append(
-                EvidenceSelectionModelOutput(
-                    role=role,
-                    extractable=True,
-                    confidence=0.82,
-                )
-            )
-        return EvidenceSelectionsModelOutput(selections=routes)
 
     def extract_source(
         self,

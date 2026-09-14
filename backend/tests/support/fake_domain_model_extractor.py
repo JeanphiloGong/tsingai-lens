@@ -6,10 +6,6 @@ from collections.abc import Callable
 from typing import Any
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.evidence_routing import (
-    EvidenceSelectionModelOutput,
-    EvidenceSelectionsModelOutput,
-)
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
@@ -183,8 +179,6 @@ class FakeDomainModelExtractor:
                     if source_unit_id in source_labels
                 ],
             )
-        elif response_model is EvidenceSelectionsModelOutput:
-            response = self.route_source(payload)
         elif response_model is EvidenceExtractionsModelOutput:
             response = self.extract_source(_source_extraction_payload(user_prompt))
         elif response_model is RequestedContextFactsModelOutput:
@@ -527,82 +521,6 @@ class FakeDomainModelExtractor:
             relevant_source_unit_ids=relevant_source_unit_ids,
             excluded_source_unit_ids=excluded_source_unit_ids,
         )
-
-    def route_source(
-        self,
-        payload: dict[str, Any],
-    ) -> EvidenceSelectionsModelOutput:
-        objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
-        outcomes = [
-            str(value).lower()
-            for value in objective.get("outcomes", [])
-            if str(value).strip()
-        ]
-        if not isinstance(payload.get("current_source"), dict):
-            raise ValueError("objective evidence routing requires current_source")
-        candidates = [payload["current_source"]]
-        routes: list[EvidenceSelectionModelOutput] = []
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            source_kind = str(candidate.get("source_kind") or "text_window")
-            source_ref = str(candidate.get("source_ref") or "")
-            if not source_ref:
-                continue
-            if candidate.get("frame_status") == "excluded":
-                routes.append(
-                    EvidenceSelectionModelOutput(
-                        role="low_value_or_irrelevant",
-                        extractable=False,
-                        confidence=0.7,
-                    )
-                )
-                continue
-            if source_kind == "table":
-                table_schema = (
-                    candidate.get("table_schema")
-                    if isinstance(candidate.get("table_schema"), dict)
-                    else {}
-                )
-                column_headers = (
-                    table_schema.get("column_headers")
-                    if isinstance(table_schema.get("column_headers"), list)
-                    else candidate.get("column_headers")
-                    if isinstance(candidate.get("column_headers"), list)
-                    else []
-                )
-                table_text = " ".join(
-                    str(value or "")
-                    for value in (
-                        candidate.get("caption_text"),
-                        candidate.get("heading_path"),
-                        " ".join(
-                            str(item)
-                            for item in column_headers
-                        ),
-                    )
-                ).lower()
-                role = (
-                    "current_experimental_evidence"
-                    if any(axis in table_text for axis in outcomes)
-                    else "process_or_treatment"
-                )
-                routes.append(
-                    EvidenceSelectionModelOutput(
-                        role=role,
-                        extractable=True,
-                        confidence=0.82,
-                    )
-                )
-                continue
-            routes.append(
-                EvidenceSelectionModelOutput(
-                    role="process_or_treatment",
-                    extractable=True,
-                    confidence=0.72,
-                )
-            )
-        return EvidenceSelectionsModelOutput(selections=routes)
 
     def extract_source(
         self,

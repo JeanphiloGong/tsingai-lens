@@ -60,7 +60,7 @@ Non-negotiable rules:
 - Return exactly one JSON object and nothing else.
 - Copy every supplied short Source `label` exactly once into either `relevant_source_labels` or `excluded_source_labels`.
 - Never invent, rewrite, omit, or duplicate a Source label. The backend owns real Source identity.
-- Treat uncertain candidates as relevant so the downstream evidence router can inspect them.
+- Treat uncertain candidates as relevant so deterministic evidence routing can inspect them.
 - Do not emit measurement results, sample variants, evidence anchors, source text, or persistence ids.
 - Do not infer material systems from filenames.
 - Judge only the supplied neighborhood; omitted paper sources are outside this batch.

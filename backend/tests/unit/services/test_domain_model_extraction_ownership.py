@@ -3,10 +3,6 @@ from pathlib import Path
 import pytest
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
-from application.core.objectives.analysis.evidence_routing import (
-    EvidenceSelectionModelOutput,
-    EvidenceSelectionsModelOutput,
-)
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
@@ -70,12 +66,6 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         ),
         PaperFrameBatchResult: (
             "application.core.objectives.analysis.source_screening"
-        ),
-        EvidenceSelectionModelOutput: (
-            "application.core.objectives.analysis.evidence_routing"
-        ),
-        EvidenceSelectionsModelOutput: (
-            "application.core.objectives.analysis.evidence_routing"
         ),
         StructuredFindingSynthesis: (
             "application.core.objectives.analysis.finding_synthesis"

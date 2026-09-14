@@ -28,106 +28,7 @@ from tests.support.research_objective_service import (
 )
 
 
-def test_objective_evidence_route_prompt_uses_response_schema_field_name():
-    system_prompt, user_prompt = (
-        evidence_routing.build_objective_evidence_route_prompt(
-            {
-                "objective": {
-                    "question": "How does scan strategy affect residual stress?",
-                },
-                "current_source": {
-                    "source_kind": "text_window",
-                    "text": "Residual stress depends on the selected scan strategy.",
-                },
-            }
-        )
-    )
-
-    for prompt in (system_prompt, user_prompt):
-        assert "`selections`" in prompt
-        assert '{"selections": []}' in prompt
-        assert "`routes`" not in prompt
-        assert '{"routes": []}' not in prompt
-
-
-def test_objective_evidence_route_prompt_hides_backend_lineage():
-    _system_prompt, user_prompt = (
-        evidence_routing.build_objective_evidence_route_prompt(
-            {
-                "collection_id": "collection-internal",
-                "objective": {
-                    "objective_id": "objective-internal",
-                    "question": "How does scan strategy affect residual stress?",
-                    "variables": ["scan strategy"],
-                    "outcomes": ["residual stress"],
-                },
-                "paper_frame": {
-                    "objective_id": "objective-internal",
-                    "document_id": "document-internal",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "changed_variables": ["scan strategy"],
-                },
-                "tree_position": {
-                    "node_id": "node-internal",
-                    "node_type": "paragraph",
-                    "section_path": ["Results"],
-                    "source_ref_id": "block-internal",
-                },
-                "current_source": {
-                    "source_kind": "text_window",
-                    "source_ref": "block-internal",
-                    "section_label": "Results",
-                    "text_hint": "Residual stress depends on scan strategy.",
-                },
-            }
-        )
-    )
-
-    assert "Residual stress depends on scan strategy." in user_prompt
-    assert '"section_path": [' in user_prompt
-    for internal_value in (
-        "collection-internal",
-        "objective-internal",
-        "document-internal",
-        "node-internal",
-        "block-internal",
-    ):
-        assert internal_value not in user_prompt
-
-
-def test_research_objective_service_forces_extractable_objective_route_roles():
-
-    assert evidence_routing._normalize_route_extractable(
-        {"role": "current_experimental_evidence", "extractable": False}
-    )
-    assert evidence_routing._normalize_route_extractable(
-        {"role": "process_or_treatment", "extractable": False}
-    )
-    assert not evidence_routing._normalize_route_extractable(
-        {"role": "low_value_or_irrelevant", "extractable": True}
-    )
-    assert not evidence_routing._normalize_route_extractable(
-        {"role": "literature_comparison", "extractable": False}
-    )
-
-
-def test_research_objective_service_forces_direct_support_route_role():
-
-    record = evidence_routing._apply_route_evidence_role(
-        record={
-            "role": "low_value_or_irrelevant",
-            "extractable": False,
-        },
-        evidence_role="direct_support",
-    )
-
-    assert record["role"] == "current_experimental_evidence"
-    assert record["extractable"] is True
-    assert record["join_plan"] == {"evidence_role": "direct_support"}
-
-
-def test_route_without_model_confidence_gets_conservative_fallback() -> None:
+def test_route_without_confidence_gets_conservative_fallback() -> None:
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -163,10 +64,6 @@ def test_route_without_model_confidence_gets_conservative_fallback() -> None:
 
 
 def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
-    class UnexpectedRouter:
-        def route_source(self, payload):  # noqa: ANN001, ARG002
-            raise AssertionError("review citations must not reach primary routing")
-
     objective = _research_objective(
         {
             "objective_id": "obj-ti64-porosity",
@@ -232,7 +129,6 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
 
     routes = evidence_routing.route_sources(
         collection_id="collection-review",
-        evidence_router=UnexpectedRouter(),
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={frame.document_id: [review_block]},
@@ -277,7 +173,6 @@ def test_irrelevant_primary_experiment_is_recalled_when_source_has_direct_result
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
             collection_id="col-test",
-            evidence_router=_ObjectiveExtractor(),
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={"paper-1": blocks},
@@ -332,7 +227,6 @@ def test_irrelevant_primary_experiment_without_objective_signal_stays_skipped() 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
             collection_id="col-test",
-            evidence_router=_ObjectiveExtractor(),
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={"paper-1": blocks},
@@ -373,14 +267,9 @@ def test_primary_experiment_with_outcome_but_no_objective_variable_stays_visible
         )
     ]
 
-    class UnexpectedRouter:
-        def route_source(self, payload):  # noqa: ANN001, ARG002
-            raise AssertionError("routing model must not be called")
-
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
             collection_id="col-test",
-            evidence_router=UnexpectedRouter(),
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={frame.document_id: blocks},
@@ -441,11 +330,8 @@ def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() ->
             ),
         ),
     ]
-    extractor = _ObjectiveExtractor()
-
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={frame.document_id: blocks},
@@ -454,7 +340,6 @@ def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() ->
     )
 
     assert "microstructure-result" in {route.source_ref for route in routes}
-    assert not extractor.route_payloads
 
 
 def test_explicit_relationship_lineage_preserves_abbreviated_result_scope() -> None:
@@ -489,7 +374,6 @@ def test_explicit_relationship_lineage_preserves_abbreviated_result_scope() -> N
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=_ObjectiveExtractor(),
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={frame.document_id: blocks},
@@ -588,10 +472,6 @@ def test_authors_prior_investigation_is_not_current_work_evidence() -> None:
 def test_direct_result_source_is_recalled_when_router_returns_empty_selection() -> None:
     """A routing false negative must not hide a source a researcher would read."""
 
-    class EmptyRouter:
-        def route_source(self, payload):  # noqa: ANN001
-            return evidence_routing.EvidenceSelectionsModelOutput(selections=[])
-
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -626,7 +506,6 @@ def test_direct_result_source_is_recalled_when_router_returns_empty_selection() 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
             collection_id="col-test",
-            evidence_router=EmptyRouter(),
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={"paper-1": result_blocks},
@@ -1163,7 +1042,6 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=_ObjectiveExtractor(),
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-independent": []},
@@ -1756,7 +1634,6 @@ def test_research_objective_routing_uses_document_tree_order():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": blocks},
@@ -1764,7 +1641,6 @@ def test_research_objective_routing_uses_document_tree_order():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert not extractor.route_payloads
 
 
 def test_research_objective_routing_binds_current_source_to_model_decision():
@@ -1801,7 +1677,6 @@ def test_research_objective_routing_binds_current_source_to_model_decision():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1809,7 +1684,6 @@ def test_research_objective_routing_binds_current_source_to_model_decision():
         document_trees_by_document_id={},
     )
 
-    assert not extractor.route_payloads
     assert {
         (route.source_kind, route.source_ref, route.role)
         for route in routes
@@ -1864,7 +1738,6 @@ def test_research_objective_routing_uses_compact_prompt_payload():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1872,7 +1745,6 @@ def test_research_objective_routing_uses_compact_prompt_payload():
         document_trees_by_document_id={},
     )
 
-    assert not extractor.route_payloads
 
 
 def test_research_objective_routing_uses_text_hint_not_source_text():
@@ -1929,7 +1801,6 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1937,7 +1808,6 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert not extractor.route_payloads
 
 
 def test_research_objective_routing_builds_text_candidates_from_document_tree():
@@ -2047,7 +1917,6 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2148,7 +2017,6 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2220,7 +2088,6 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text()
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2292,7 +2159,6 @@ def test_research_objective_tree_routing_keeps_late_document_nodes():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2377,7 +2243,6 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2714,10 +2579,6 @@ def test_research_objective_tree_routing_does_not_cap_direct_result_recall():
 def test_research_objective_routing_reads_late_result_in_complete_source_block():
     """Candidate ranking must not truncate what a researcher can read."""
 
-    class EmptyRouter:
-        def route_source(self, payload):  # noqa: ANN001, ARG002
-            return SimpleNamespace(selections=[])
-
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -2769,7 +2630,6 @@ def test_research_objective_routing_reads_late_result_in_complete_source_block()
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=EmptyRouter(),
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2784,10 +2644,6 @@ def test_research_objective_routing_reads_late_result_in_complete_source_block()
 
 def test_research_objective_routing_reads_target_result_in_late_table_row():
     """The full logical table, not a three-row preview, owns recall."""
-
-    class EmptyRouter:
-        def route_source(self, payload):  # noqa: ANN001, ARG002
-            return SimpleNamespace(selections=[])
 
     objective = _research_objective(
         {
@@ -2821,7 +2677,6 @@ def test_research_objective_routing_reads_target_result_in_late_table_row():
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        evidence_router=EmptyRouter(),
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},

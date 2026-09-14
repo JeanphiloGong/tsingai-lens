@@ -1490,7 +1490,6 @@ async def test_objective_analysis_does_not_invoke_a_route_model(
         collection_id, analysis
     )
 
-    assert not failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
     assert all(
         "deterministic evidence routing fallback" not in warning
@@ -1594,7 +1593,6 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
 
     facts = await service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
-    assert not extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
 

@@ -15,11 +15,6 @@ from application.core.document_profiles.extraction import (
     DocumentProfileExtractor,
 )
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.evidence_routing import (
-    ObjectiveEvidenceRouter,
-    EvidenceSelectionModelOutput,
-    EvidenceSelectionsModelOutput,
-)
 from application.core.objectives.analysis.finding_synthesis import (
     FindingAssertionJudge,
     StructuredFindingMechanism,
@@ -3885,122 +3880,6 @@ def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
     assert client.chat.completions.calls == []
 
 
-def test_domain_model_extractors_validates_objective_evidence_routes_response():
-    client = _FakeOpenAIClient(
-        """
-            {
-              "selections": [
-                {
-                  "role": "current_experimental_evidence",
-                  "extractable": true,
-                  "confidence": 0.88
-                }
-              ]
-            }
-        """
-    )
-    extractor = _response_client(client)
-
-    routes = ObjectiveEvidenceRouter(extractor).route_source(
-        {
-            "collection_id": "col-1",
-            "objective": {"question": "How does heat treatment affect corrosion?"},
-            "paper_frame": {"frame_id": "opf-1"},
-            "current_source": {"source_kind": "table", "source_ref": "table-1"},
-        }
-    )
-
-    assert isinstance(routes, EvidenceSelectionsModelOutput)
-    assert isinstance(routes.selections[0], EvidenceSelectionModelOutput)
-    assert routes.model_dump() == {
-        "selections": [
-            {
-                "role": "current_experimental_evidence",
-                "extractable": True,
-                "confidence": 0.88,
-            }
-        ]
-    }
-
-
-def test_domain_model_extractors_rejects_legacy_objective_route_batches():
-    client = _FakeOpenAIClient('{"selections": []}')
-    extractor = _response_client(client)
-
-    with pytest.raises(ValueError):
-        ObjectiveEvidenceRouter(extractor).route_source(
-            {
-                "collection_id": "col-1",
-                "objective": {"question": "How does heat treatment affect corrosion?"},
-                "paper_frame": {"frame_id": "opf-1"},
-                "source_candidates": [
-                    {"source_kind": "table", "source_ref": "table-1"}
-                ],
-            }
-        )
-
-
-def test_domain_model_extractors_rejects_verbose_objective_route_objects():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "selections": [
-            {
-              "role": "current_experimental_evidence",
-              "extractable": true,
-              "reason": "Target result table.",
-              "table_schema": {
-                "column_headers": ["sample", "corrosion current"]
-              },
-              "confidence": 0.88
-            }
-          ]
-        }
-        """
-    )
-    extractor = _response_client(client)
-
-    with pytest.raises(ValidationError):
-        ObjectiveEvidenceRouter(extractor).route_source(
-            {
-                "collection_id": "col-1",
-                "objective": {"question": "How does heat treatment affect corrosion?"},
-                "paper_frame": {"frame_id": "opf-1"},
-                "current_source": {"source_kind": "table", "source_ref": "table-1"},
-            }
-        )
-
-
-def test_domain_model_extractors_rejects_source_ids_in_objective_routes():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "selections": [
-            {
-              "source_kind": "table",
-              "source_ref": "table-1",
-              "role": "current_experimental_evidence",
-              "extractable": true,
-              "reason": "Target result table.",
-              "confidence": 0.88
-            }
-          ]
-        }
-        """
-    )
-    extractor = _response_client(client)
-
-    with pytest.raises(ValidationError):
-        ObjectiveEvidenceRouter(extractor).route_source(
-            {
-                "collection_id": "col-1",
-                "objective": {"question": "How does heat treatment affect corrosion?"},
-                "paper_frame": {"frame_id": "opf-1"},
-                "current_source": {"source_kind": "table", "source_ref": "table-1"},
-            }
-        )
-
-
 def test_domain_model_extractors_validates_objective_evidence_response():
     client = _FakeOpenAIClient(
         """
@@ -4730,34 +4609,6 @@ def test_domain_model_extractors_forward_configured_reasoning_effort(
     )
 
     assert extractor._provider_request_options()["reasoning_effort"] == "none"
-
-
-def test_domain_model_extractors_routes_objective_selections_directly_to_bounded_json_text(
-    monkeypatch,
-):
-    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient('{"selections":[]}')
-    extractor = StructuredResponseClient(client=client, model="fake-model")
-
-    routes = ObjectiveEvidenceRouter(extractor).route_source(
-        {
-            "collection_id": "col-1",
-            "objective": {"question": "How does heat treatment affect corrosion?"},
-            "paper_frame": {"frame_id": "opf-1"},
-            "current_source": {"source_kind": "text_window", "source_ref": "b1"},
-        }
-    )
-
-    assert routes == EvidenceSelectionsModelOutput()
-    assert client.beta.chat.completions.calls == []
-    text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 512
-    assert text_call["response_format"] == {"type": "json_object"}
-    assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert text_call["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
-    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
 def test_domain_model_extractors_routes_objective_units_through_bounded_json_text(

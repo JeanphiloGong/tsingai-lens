@@ -35,10 +35,10 @@ measurement. Different sample states must not be pooled into one comparison.
 |---|---|---|---|---|
 | Screen | `source_screening.screen_sources` | Objective and paper Sources -> frames | Yes, bounded batches | None |
 | Route | `evidence_routing.route_sources` | Screened frames and Source tree -> deterministic inspection tasks | No (screening owns semantic relevance) | None |
-| Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> grounded drafts | When deterministic extraction is insufficient | None |
-| Ground | `source_validation.validate_source_fact` | One draft and its exact Source -> accepted or demoted draft | No | None |
-| Bind | `paper_experiment.reconstruct_paper_experiments` | Same-paper validated facts -> experiment drafts | No | None |
-| Materialize | `evidence_materialization.materialize_evidence` | Experiment drafts -> Evidence and contribution records | No | None; caller stores records |
+| Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> source observations | When deterministic extraction is insufficient | None |
+| Ground | `source_validation.validate_source_fact` | One source observation and its exact Source -> validated, uncertain, or rejected observation | No | None |
+| Bind | `paper_experiment.reconstruct_paper_experiments` / `assemble_paper_experiment` | Same-paper validated facts -> `PaperExperiment` plus technical comparison units | No | None |
+| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` Source observations -> Evidence and contribution records; technical failure/derived units remain supplemental | No | None; caller stores records |
 | Compare | `finding_synthesis.FindingSynthesisService.synthesize` | Paper contributions and Evidence -> Findings | Optional assertion judge | None; caller publishes |
 
 Extraction and grounding alternate per Source, not as two collection-wide

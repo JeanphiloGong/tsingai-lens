@@ -19,7 +19,6 @@ from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
 )
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
     EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
 )
@@ -39,6 +38,7 @@ from application.core.objectives.objective_input_service import (
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    SourceObservation,
     ObjectiveFactSet,
     PaperContribution,
     PaperResearchMap,
@@ -173,7 +173,7 @@ def test_table_context_can_complete_material_for_result_reconstruction() -> None
             "outcomes": ["tensile strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-table-5",
             "objective_id": objective.objective_id,
@@ -1002,7 +1002,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
         {"source_kind": "text_window", "source_ref": "block-1"}
     ]
     drafts = (
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "normal-context",
                 "objective_id": objective.objective_id,
@@ -1020,7 +1020,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.95,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "repair-result",
                 "objective_id": objective.objective_id,
@@ -1056,7 +1056,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.8,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "repair-result",
                 "objective_id": objective.objective_id,
@@ -1092,7 +1092,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.8,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "failed-short",
                 "objective_id": objective.objective_id,
@@ -1110,7 +1110,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.0,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "failed-short",
                 "objective_id": objective.objective_id,

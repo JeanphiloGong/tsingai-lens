@@ -11,8 +11,8 @@ Read the analysis responsibilities in real research order:
    inspection queue consumed by Source-local fact extraction. A route is an
    instruction to inspect a Source, not a scientific finding.
 3. `source_extraction.py` exposes `extract_and_validate_source_facts`, which
-   inspects routed Sources one at a time and produces transient, source-local
-   `ExtractedEvidenceDraft` records. It owns text and complete Markdown table
+   inspects routed Sources one at a time and produces domain `SourceObservation`
+   objects. The extraction layer owns text and complete Markdown table
    payload construction, deterministic table interpretation, model extraction,
    and route-scoped technical failures. It calls `table_repair.repair_table_source`
    for bounded continuous-row structural recovery before interpreting the table.
@@ -38,14 +38,14 @@ Read the analysis responsibilities in real research order:
    and excerpt hash. The expert audit recomputes those values from the
    persisted Source artifact; unattested or stale repaired rows cannot satisfy
    Source-grounding checks.
-4. `source_validation.py` immediately checks each model-authored draft against
+4. `source_validation.py` immediately checks each model-authored observation against
    the exact Source being inspected. Extraction and validation therefore
    alternate per Source; they are not two collection-wide passes. Validation
    may retain a material only when extraction explicitly bound its source label
    to the current specimen or experiment; an Objective value or an unrelated
    material mention cannot fill it. Unsupported results abstain, while supported results with incomplete variable or
-   comparison support become `association_only` or descriptive drafts before
-   they can enter the next Source prompt's document state. Association drafts
+   comparison support become `association_only` or descriptive observations before
+   they can enter the next Source prompt's document state. Association observations
    may name the confirmed Objective variable while leaving baseline and target
    endpoints empty; they support an observed relationship, not an isolated
    causal effect.
@@ -58,8 +58,10 @@ Read the analysis responsibilities in real research order:
    reference. Raw document text and Objective hints never create this context;
    conflicting materials remain unresolved. It never reads preliminary map
    scope as experiment context.
-6. `evidence_materialization.py` turns reconstructed drafts into durable
-   `ObjectiveEvidence`, deduplicates replayed scientific claims by stable
+6. `evidence_materialization.py` consumes the `PaperExperiment` Source
+   observations as the primary scientific input and turns them into durable
+   `ObjectiveEvidence`. Technical failure markers and derived comparison units
+   remain supplemental until they receive their own domain model. It deduplicates replayed scientific claims by stable
    Evidence identity, and derives each paper's `PaperContribution` from that
    final Evidence set. Table row and column locators are part of a result's
    Source-local identity, so equal scalar values in different specimen rows do
@@ -139,9 +141,9 @@ background context and is inspected source-locally.
 `source_extraction.py` owns the inspection of one exact Source at a time. It
 owns that judgment's prompt, response schema, scientific validation, bounded
 repair instructions, completion budget, and direct model call. It passes every
-schema-valid model draft directly to `source_validation.py` before updating the
+schema-valid model observation directly to `source_validation.py` before updating the
 accepted state supplied to the next Source prompt. Provider or irrecoverable
-structured-output failures remain technical failed drafts. Shared provider
+structured-output failures remain technical failed observations. Shared provider
 invocation, JSON parsing, usage accounting, and trace capture stay outside this
 scientific responsibility. A model-authored context role carrying a non-null
 `reported_result` is normalized to `direct_result` without changing any
@@ -333,7 +335,7 @@ becoming an unsupported causal or joint-effect claim.
 `PaperResearchMap` is not an input to this reconstruction. Analysis may use the
 map earlier to prioritize Source inspection and later to report preliminary
 coverage gaps, but a map material, process, variable, or outcome label cannot
-fill, overwrite, or validate an `ExtractedEvidenceDraft`.
+fill, overwrite, or validate a `SourceObservation`.
 
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,
@@ -343,7 +345,7 @@ figure caption, or cited rows from the primary table; a table with no row-level
 excerpt falls back to its complete Source. Methods, other condition tables,
 figures, and row bindings used to reconstruct the experiment remain separate
 `related_source_refs` and are never concatenated into text that no single
-Source actually contains. Replayed model drafts that canonicalize to the same complete
+Source actually contains. Replayed model observations that canonicalize to the same complete
 source-grounded scientific record are deduplicated even when a provider attempt
 assigned a different `evidence_id`. Distinct claims from one Source remain
 separate because a table, figure, or paragraph can support several measurements

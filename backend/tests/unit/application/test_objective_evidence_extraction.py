@@ -23,7 +23,6 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
     EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
     _extract_source_round,
@@ -37,6 +36,7 @@ from application.core.paper_facts.extraction import TableMatrixRepairModelOutput
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    SourceObservation,
     ObjectiveEvidenceResult,
     PaperResearchMap,
     PreparedDocumentInput,
@@ -687,7 +687,7 @@ def test_validated_context_role_overrides_original_result_route_label() -> None:
             "extractable": True,
         }
     )
-    validated_methods = ExtractedEvidenceDraft.from_mapping(
+    validated_methods = SourceObservation.from_mapping(
         {
             "evidence_id": "validated-methods",
             "objective_id": current.objective_id,
@@ -779,7 +779,7 @@ def test_empty_context_inspection_preserves_route_scope_for_later_result_read() 
         }
     )
 
-    inspected = source_extraction._inspected_objective_source_draft(
+    inspected = source_extraction._inspected_source_observation(
         route=methods_route
     )
     seed_routes = source_extraction._objective_seed_context_routes(
@@ -1040,7 +1040,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -1080,7 +1080,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
         label: str,
         preheating: str,
         include_duplicate_process_name: bool,
-    ) -> ExtractedEvidenceDraft:
+    ) -> SourceObservation:
         process = [
             {
                 "name": "build platform preheating",
@@ -1096,7 +1096,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
                     "context_scope": "experimental",
                 }
             )
-        return ExtractedEvidenceDraft.from_mapping(
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": f"condition-{label}",
                 "objective_id": objective.objective_id,
@@ -1120,7 +1120,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
             }
         )
 
-    shared_process = ExtractedEvidenceDraft.from_mapping(
+    shared_process = SourceObservation.from_mapping(
         {
             "evidence_id": "shared-process",
             "objective_id": objective.objective_id,
@@ -1331,11 +1331,11 @@ def test_cited_context_remains_background_and_cannot_bind_current_result() -> No
     )
 
     assert len(records) == 1
-    cited_context = ExtractedEvidenceDraft.from_mapping(records[0])
+    cited_context = SourceObservation.from_mapping(records[0])
     assert cited_context.evidence_role == "background_context"
     assert cited_context.scientific_context.test[0].context_scope == "background"
 
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "current-result",
             "objective_id": objective.objective_id,
@@ -3294,7 +3294,7 @@ def test_objective_result_table_maps_symbol_conditions_to_broad_objective_axes()
         if attribute["name"] != "manufacturing process"
     } == {"°"}
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in records
     )
     comparisons = paper_experiment._build_objective_pairwise_comparison_units(
@@ -3436,7 +3436,7 @@ def test_objective_angle_table_comparison_retains_all_changed_axes():
         }
     )
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
@@ -3552,7 +3552,7 @@ def test_objective_table_keeps_condition_values_units_and_comparison_labels():
     ] == [1, 2]
 
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record) for record in elongation
+        SourceObservation.from_mapping(record) for record in elongation
     )
     comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
@@ -4671,7 +4671,7 @@ def test_adaptive_context_uses_nearby_source_when_no_lexical_marker_matches() ->
         }
     )
     result_route = _study_source_route(objective.objective_id, "result-3")
-    result_candidate = source_extraction._needs_context_objective_evidence_draft(
+    result_candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     nearby_context = _study_source_block(
@@ -4717,7 +4717,7 @@ def test_needs_context_candidate_selects_same_paper_context_routes() -> None:
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     methods = _study_source_block(
@@ -4750,7 +4750,7 @@ def test_adaptive_context_reads_frame_relevant_source_omitted_by_initial_router(
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-block")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     methods_block = SimpleNamespace(
@@ -4847,7 +4847,7 @@ def test_adaptive_context_does_not_deep_read_every_frame_positive_source() -> No
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-block")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     generic_blocks = [
@@ -4911,7 +4911,7 @@ def test_adaptive_context_selects_context_for_each_incomplete_result_anchor() ->
     )
 
     def result(source_ref: str, baseline_label: str, target_label: str):
-        return source_extraction.ExtractedEvidenceDraft.from_mapping(
+        return source_extraction.SourceObservation.from_mapping(
             {
                 "evidence_id": f"evidence-{source_ref}",
                 "objective_id": objective.objective_id,
@@ -4988,7 +4988,7 @@ def test_adaptive_context_uses_tree_parent_when_source_block_has_no_heading() ->
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     methods_block = SimpleNamespace(
@@ -5058,7 +5058,7 @@ def test_adaptive_context_reads_generic_experimental_design_without_domain_terms
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-roughness")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     experimental_design = _study_source_block(
@@ -5091,7 +5091,7 @@ def test_adaptive_context_selects_one_bundle_for_rows_in_the_same_result_series(
     result_route = _study_source_route(objective.objective_id, "table-results")
 
     def result_row(evidence_id: str, sample_label: str, value: float):
-        return ExtractedEvidenceDraft.from_mapping(
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -5184,7 +5184,7 @@ def test_adaptive_context_trace_does_not_claim_scientific_closure_for_candidates
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     context_block = _study_source_block(
@@ -5228,7 +5228,7 @@ def test_adaptive_context_keeps_late_source_that_contains_missing_objective_cont
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     filler_blocks = [
@@ -5269,7 +5269,7 @@ def test_adaptive_context_prefers_reordered_variable_with_explicit_endpoints() -
         }
     )
     result_route = _study_source_route(objective.objective_id, "table-results")
-    candidate = ExtractedEvidenceDraft.from_mapping(
+    candidate = SourceObservation.from_mapping(
         {
             "evidence_id": "elongation-row",
             "objective_id": objective.objective_id,
@@ -5338,7 +5338,7 @@ def test_complete_result_still_selects_same_paper_fixed_process_controls() -> No
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-microstructure")
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -5426,7 +5426,7 @@ def test_adaptive_context_prefers_method_for_the_result_outcome() -> None:
         objective.objective_id,
         "results-microstructure",
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -5540,7 +5540,7 @@ def test_adaptive_context_keeps_method_intent_narrow_when_other_context_is_missi
         objective.objective_id,
         "results-microstructure",
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -5777,7 +5777,7 @@ def test_context_binding_changed_axis_alone_does_not_close_fixed_process() -> No
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -5819,7 +5819,7 @@ def test_context_binding_changed_axis_alone_does_not_close_fixed_process() -> No
             "confidence": 0.9,
         }
     )
-    changed_axis_context = ExtractedEvidenceDraft.from_mapping(
+    changed_axis_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-1",
             "objective_id": objective.objective_id,
@@ -5859,7 +5859,7 @@ def test_context_binding_requires_group_shared_fixed_process_controls(
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -5903,7 +5903,7 @@ def test_context_binding_requires_group_shared_fixed_process_controls(
     )
 
     def group_context(label: str, temperature: int, spacing: float):
-        return ExtractedEvidenceDraft.from_mapping(
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": f"context-{label}",
                 "objective_id": objective.objective_id,
@@ -5944,7 +5944,7 @@ def test_context_binding_does_not_borrow_fixed_process_from_another_paper() -> N
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -5980,7 +5980,7 @@ def test_context_binding_does_not_borrow_fixed_process_from_another_paper() -> N
             "confidence": 0.9,
         }
     )
-    other_paper_controls = ExtractedEvidenceDraft.from_mapping(
+    other_paper_controls = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-2",
             "objective_id": objective.objective_id,
@@ -6132,7 +6132,7 @@ def test_adaptive_context_bounds_broad_same_paper_expansion_without_losing_exact
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     generic_blocks = [
@@ -6173,7 +6173,7 @@ def test_adaptive_context_does_not_drop_explicit_late_source_after_fixed_quota()
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     distractor_blocks = [
@@ -6221,7 +6221,7 @@ def test_adaptive_context_prefers_minimum_source_set_over_generic_methods_filler
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     generic_blocks = [
@@ -6513,7 +6513,7 @@ def test_context_binding_ignores_matching_context_from_another_document() -> Non
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6549,7 +6549,7 @@ def test_context_binding_ignores_matching_context_from_another_document() -> Non
             "confidence": 0.8,
         }
     )
-    other_document_context = ExtractedEvidenceDraft.from_mapping(
+    other_document_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-2",
             "objective_id": objective.objective_id,
@@ -6585,7 +6585,7 @@ def test_context_binding_accepts_explicit_comparison_labels_in_process_context()
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6614,7 +6614,7 @@ def test_context_binding_accepts_explicit_comparison_labels_in_process_context()
             "confidence": 0.8,
         }
     )
-    methods_context = ExtractedEvidenceDraft.from_mapping(
+    methods_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-1",
             "objective_id": objective.objective_id,
@@ -6688,7 +6688,7 @@ def test_grouped_context_records_bind_result_to_their_explicit_conditions(
         ),
     }
 
-    def context(group: str, condition: str) -> ExtractedEvidenceDraft:
+    def context(group: str, condition: str) -> SourceObservation:
         validated = source_validation.validate_source_fact(
             route=methods_route,
             source=methods_source,
@@ -6709,9 +6709,9 @@ def test_grouped_context_records_bind_result_to_their_explicit_conditions(
             },
         )
         assert len(validated) == 1
-        return ExtractedEvidenceDraft.from_mapping(validated[0])
+        return SourceObservation.from_mapping(validated[0])
 
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6783,7 +6783,7 @@ def test_explicit_respectively_aliases_bind_results_to_method_conditions() -> No
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6869,7 +6869,7 @@ def test_source_extracted_material_context_retains_its_authoritative_source() ->
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6889,7 +6889,7 @@ def test_source_extracted_material_context_retains_its_authoritative_source() ->
         }
     )
 
-    material_context = ExtractedEvidenceDraft.from_mapping(
+    material_context = SourceObservation.from_mapping(
         {
             "evidence_id": "material-paper-1",
             "objective_id": objective.objective_id,
@@ -6982,7 +6982,7 @@ def test_ambiguous_group_aliases_do_not_bind_result_conditions(
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -7502,7 +7502,7 @@ def test_complete_result_endpoints_still_expand_missing_study_context() -> None:
             "outcomes": ["porosity"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -7570,7 +7570,7 @@ def test_context_bundle_is_not_complete_without_required_study_context():
             "outcomes": ["porosity"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -7622,8 +7622,8 @@ def test_research_objective_binds_directional_result_series_to_process_table() -
         sample: str,
         laser_power: str,
         input_current: str = "200 A",
-    ) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    ) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": f"condition-{sample}",
                 "objective_id": "obj-energy-ductility",
@@ -7671,7 +7671,7 @@ def test_research_objective_binds_directional_result_series_to_process_table() -
         "(20 0-70 0), "
         f"{result_text} and then to 15.4% ± 1.3% (20 0-70 0)."
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-ductility",
             "objective_id": "obj-energy-ductility",
@@ -8224,7 +8224,7 @@ def test_source_validation_keeps_incomplete_endpoint_comparison_non_attributable
     assert records[0]["attribution_scope"] == "not_attributable"
     # The incomplete record remains valid Evidence and cannot erase other
     # source-grounded results from the paper during materialization.
-    ExtractedEvidenceDraft.from_mapping(records[0])
+    SourceObservation.from_mapping(records[0])
 
 
 def test_source_validation_recovers_objective_factor_from_named_qualitative_groups():
@@ -8606,7 +8606,7 @@ def test_same_paper_conditions_can_upgrade_opaque_labels_to_real_variable_levels
             "confidence": 0.9,
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         source_validation.validate_source_fact(
             route=route,
             source={
@@ -8652,7 +8652,7 @@ def test_same_paper_conditions_can_upgrade_opaque_labels_to_real_variable_levels
     assert result.comparison is not None and not result.comparison.comparable
 
     context_units = tuple(
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": f"context-{sample}",
                 "objective_id": objective.objective_id,
@@ -8712,8 +8712,8 @@ def test_same_paper_encoded_sample_labels_bind_explicit_method_condition_schema(
         "by tensile testing."
     )
 
-    def result(evidence_id: str, label: str, value: float) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    def result(evidence_id: str, label: str, value: float) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -8814,8 +8814,8 @@ def test_encoded_sample_label_stays_descriptive_when_method_order_is_ambiguous()
         "100/100 and 100/200."
     )
 
-    def result(evidence_id: str, label: str, value: float) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    def result(evidence_id: str, label: str, value: float) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -11249,7 +11249,7 @@ def test_source_grounding_keeps_single_test_with_empty_outcome_scope() -> None:
 def test_document_context_binds_only_test_method_applicable_to_result_outcome() -> None:
     """A paper-wide method is usable only for the outcome it explicitly measures."""
 
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": "obj-preheating-microstructure",
@@ -11281,8 +11281,8 @@ def test_document_context_binds_only_test_method_applicable_to_result_outcome() 
         name: str,
         value: str,
         applies_to_outcomes: list[str],
-    ) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    ) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": result.objective_id,
@@ -11348,7 +11348,7 @@ def test_simulation_context_does_not_close_experimental_process_gap() -> None:
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -11382,7 +11382,7 @@ def test_simulation_context_does_not_close_experimental_process_gap() -> None:
             "confidence": 0.9,
         }
     )
-    simulation_context = ExtractedEvidenceDraft.from_mapping(
+    simulation_context = SourceObservation.from_mapping(
         {
             "evidence_id": "simulation-controls",
             "objective_id": objective.objective_id,
@@ -11430,7 +11430,7 @@ def test_adaptive_context_route_carries_missing_fields_to_extraction_prompt() ->
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-roughness")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     design = _study_source_block(
@@ -13042,7 +13042,7 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
 
 
 def test_paper_reconstruction_does_not_fill_context_from_preliminary_scope() -> None:
-    evidence = ExtractedEvidenceDraft.from_mapping(
+    evidence = SourceObservation.from_mapping(
         {
             "evidence_id": "density-result",
             "objective_id": "obj-density",
@@ -13159,7 +13159,7 @@ def test_reconstruction_records_validated_context_closure():
             "outcomes": ["relative density"],
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "result-closure",
             "objective_id": objective.objective_id,
@@ -13261,8 +13261,8 @@ def test_reconstruction_closure_counts_raw_result_anchors_once_when_rows_form_co
         }
     )
 
-    def row(evidence_id: str, value: float, power: int) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    def row(evidence_id: str, value: float, power: int) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -13443,7 +13443,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison():
         },
     )
     units = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for route in routes
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
@@ -13576,7 +13576,7 @@ def test_cycle_qualified_fatigue_table_binds_to_same_paper_ved_conditions():
         },
     )
     units = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for route in routes
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
@@ -13715,7 +13715,7 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple():
         },
     )
     units = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for route in routes
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
@@ -13782,7 +13782,7 @@ def test_real_ti64_hip_condition_table_builds_comparable_uts_contrast():
         }
     )
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
@@ -13873,7 +13873,7 @@ def test_real_ti64_compound_sample_labels_preserve_orientation_for_hip_contrasts
         }
     )
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
@@ -14061,7 +14061,7 @@ def test_objective_table_records_preserve_measured_and_predicted_result_kinds():
     }
     assert all(item["attribution_scope"] == "descriptive_only" for item in records)
 
-    drafts = tuple(ExtractedEvidenceDraft.from_mapping(item) for item in records)
+    drafts = tuple(SourceObservation.from_mapping(item) for item in records)
     comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         drafts,
         objectives=(objective,),

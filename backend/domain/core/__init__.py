@@ -78,6 +78,12 @@ from domain.core.finding import (
     FindingPaperContribution,
     directions_contradict,
 )
+from domain.core.research_process import (
+    PAPER_EXPERIMENT_STATUSES,
+    SOURCE_OBSERVATION_STATUSES,
+    PaperExperiment,
+    SourceObservation,
+)
 
 __all__ = [
     "BaselineReference",
@@ -104,6 +110,10 @@ __all__ = [
     "FindingMechanismRelation",
     "FindingPaperContribution",
     "directions_contradict",
+    "PAPER_EXPERIMENT_STATUSES",
+    "SOURCE_OBSERVATION_STATUSES",
+    "PaperExperiment",
+    "SourceObservation",
     "OBJECTIVE_ANALYSIS_STATUSES",
     "OBJECTIVE_ANALYSIS_ABSTENTION_REASONS",
     "OBJECTIVE_ANALYSIS_ORIGINS",

@@ -1,8 +1,8 @@
+import pytest
+
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
-from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
-)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from domain.core import SourceObservation
 
 
 def test_paper_analysis_frame_does_not_accept_legacy_paper_id() -> None:
@@ -40,13 +40,11 @@ def test_evidence_candidate_does_not_accept_legacy_paper_id() -> None:
     assert candidate.document_id == ""
 
 
-def test_extracted_evidence_draft_does_not_accept_legacy_paper_id() -> None:
-    draft = ExtractedEvidenceDraft.from_mapping({"paper_id": "doc_legacy"})
+def test_source_observation_requires_current_identity_fields() -> None:
+    with pytest.raises(ValueError, match="objective_id"):
+        SourceObservation.from_mapping({"paper_id": "doc_legacy"})
 
-    assert draft.document_id == ""
 
-
-def test_extracted_evidence_draft_does_not_accept_legacy_anchor_ids() -> None:
-    draft = ExtractedEvidenceDraft.from_mapping({"anchor_ids": ["anchor_legacy"]})
-
-    assert draft.evidence_anchor_ids == ()
+def test_source_observation_does_not_accept_legacy_anchor_only_payload() -> None:
+    with pytest.raises(ValueError, match="objective_id"):
+        SourceObservation.from_mapping({"anchor_ids": ["anchor_legacy"]})

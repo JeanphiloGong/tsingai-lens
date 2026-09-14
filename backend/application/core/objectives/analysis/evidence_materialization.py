@@ -17,7 +17,6 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
     _objective_missing_context_fields,
 )
 from application.core.objectives.analysis.source_validation import (
@@ -27,10 +26,12 @@ from application.core.objectives.analysis.source_screening import PaperAnalysisF
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    PaperExperiment,
     PaperContribution,
     PaperResearchMap,
     PaperSourceUnitCoverageStatus,
     ResearchObjective,
+    SourceObservation,
 )
 from domain.source import SourceDocumentTree
 
@@ -69,7 +70,7 @@ def materialize_evidence(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    drafts: tuple[ExtractedEvidenceDraft, ...],
+    drafts: tuple[SourceObservation, ...],
     paper_maps: tuple[PaperResearchMap, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
@@ -77,7 +78,13 @@ def materialize_evidence(
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
+    paper_experiment: PaperExperiment | None = None,
 ) -> tuple[tuple[ObjectiveEvidence, ...], tuple[PaperContribution, ...]]:
+    if paper_experiment is not None:
+        drafts = _merge_domain_experiment_inputs(
+            paper_experiment=paper_experiment,
+            drafts=drafts,
+        )
     inspection_source_refs = _inspection_source_refs_by_document(drafts)
     selected_drafts = _objective_detail_evidence(
         drafts,
@@ -160,8 +167,72 @@ def materialize_evidence(
     return evidence_records, contributions
 
 
+def _merge_domain_experiment_inputs(
+    *,
+    paper_experiment: PaperExperiment,
+    drafts: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
+    """Make SourceObservation the primary materialization input.
+
+    Derived comparison units and technical failure markers remain in ``drafts``
+    until they have their own domain representation.  Source-backed facts are
+    rebuilt from the PaperExperiment aggregate and therefore no longer depend
+    on the extraction-stage object as their source of truth.
+    """
+
+    drafts_by_id = {draft.evidence_id: draft for draft in drafts}
+    domain_drafts = tuple(
+        SourceObservation.from_mapping(
+            {
+                "evidence_id": observation.observation_id,
+                "objective_id": observation.objective_id,
+                "document_id": observation.document_id,
+                "source_kind": observation.source_kind,
+                "source_ref": observation.source_ref,
+                "evidence_role": observation.observation_role,
+                "selection_status": observation.selection_status,
+                "selection_reason": observation.selection_reason,
+                "attribution_scope": observation.attribution_scope,
+                "resolution_status": observation.resolution_status,
+                "failure_reason": observation.failure_reason,
+                "changed_variables": [
+                    item.to_record() for item in observation.changed_variables
+                ],
+                "comparison": (
+                    observation.comparison.to_record()
+                    if observation.comparison
+                    else None
+                ),
+                "reported_result": (
+                    observation.reported_result.to_record()
+                    if observation.reported_result
+                    else None
+                ),
+                "scientific_context": observation.scientific_context.to_record(),
+                "source_refs": (
+                    drafts_by_id[observation.observation_id].to_record().get(
+                        "source_refs"
+                    )
+                    or [
+                        {
+                            "source_kind": observation.source_kind,
+                            "source_ref": observation.source_ref,
+                            "source_excerpt": observation.source_excerpt,
+                        }
+                    ]
+                ),
+                "evidence_anchor_ids": list(observation.evidence_anchor_ids),
+                "confidence": observation.confidence,
+            }
+        )
+        for observation in paper_experiment.source_observations
+    )
+    domain_ids = {draft.evidence_id for draft in domain_drafts}
+    return (*domain_drafts, *(draft for draft in drafts if draft.evidence_id not in domain_ids))
+
+
 def _inspection_source_refs_by_document(
-    drafts: tuple[ExtractedEvidenceDraft, ...],
+    drafts: tuple[SourceObservation, ...],
 ) -> dict[str, set[tuple[str, str]]]:
     """Return source locators for reads that yielded no scientific fact.
 
@@ -700,10 +771,10 @@ def _record_material_scope_exclusions(
 
 
 def _objective_detail_evidence(
-    evidence_items: tuple[ExtractedEvidenceDraft, ...],
+    evidence_items: tuple[SourceObservation, ...],
     *,
     objective_context: ResearchObjective | None,
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     if (
         objective_context is None
         or not objective_context.outcomes
@@ -725,7 +796,7 @@ def _objective_detail_evidence(
         "comparison_context",
         "background_context",
     }
-    retained: list[ExtractedEvidenceDraft] = []
+    retained: list[SourceObservation] = []
     seen_ids: set[str] = set()
     for unit in evidence_items:
         if unit.evidence_id in seen_ids:
@@ -748,7 +819,7 @@ def _objective_detail_evidence(
                     "outside the confirmed Objective outcome scope; excluded from "
                     "Finding comparison."
                 )
-                unit = ExtractedEvidenceDraft.from_mapping(payload)
+                unit = SourceObservation.from_mapping(payload)
         if not keep and unit.reported_result is None:
             # Context is useful even when it has not yet completed a result.
             # It must carry a Source and a context role (or an explicit
@@ -765,7 +836,7 @@ def _objective_detail_evidence(
 
 
 def _objective_evidence_matches_target_property(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
     target_axes: tuple[str, ...],
 ) -> bool:
@@ -830,7 +901,7 @@ def rebind_persisted_evidence(
             )
         payload["source_refs"] = source_refs
         payload["evidence_anchor_ids"] = list(evidence.anchor_ids)
-        draft = ExtractedEvidenceDraft.from_mapping(payload)
+        draft = SourceObservation.from_mapping(payload)
         source_excerpts_by_locator = _source_excerpts_by_locator(
             draft,
             blocks_by_document_id=blocks_by_document_id,
@@ -1315,7 +1386,7 @@ def _analysis_evidence_records(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    drafts: tuple[ExtractedEvidenceDraft, ...],
+    drafts: tuple[SourceObservation, ...],
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
@@ -1351,7 +1422,7 @@ def _analysis_evidence_records(
                     "confidence": 0.0,
                 }
             )
-            draft = ExtractedEvidenceDraft.from_mapping(payload)
+            draft = SourceObservation.from_mapping(payload)
         source = _canonical_evidence_source(
             draft,
             blocks_by_document_id=blocks_by_document_id,
@@ -1641,13 +1712,13 @@ def _merge_duplicate_evidence(
 
 
 def _recover_source_explicit_objective_factors(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     objective: ResearchObjective,
     source_excerpt: str,
     source_kind: str,
     source_ref: str,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     """Recover omitted factor names from the exact Source being materialized.
 
     Some result responses contain a valid reported outcome and direction but
@@ -1743,15 +1814,15 @@ def _recover_source_explicit_objective_factors(
             )
         )
     payload["source_refs"] = source_refs
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _canonical_objective_evidence_axes(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     objective: ResearchObjective,
     source_excerpts_by_locator: Mapping[tuple[str, str], str] | None = None,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     if draft.selection_status == "failed":
         return draft
 
@@ -1860,11 +1931,11 @@ def _canonical_objective_evidence_axes(
         and len(canonical_variables) == 1
     ):
         payload["attribution_scope"] = "isolated_effect"
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _resolve_source_defined_objective_axis(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     source_label: Any,
     objective_axes: tuple[str, ...],
@@ -1975,7 +2046,7 @@ def _resolve_source_defined_objective_axis(
 
 
 def _source_excerpts_by_locator(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
@@ -2046,7 +2117,7 @@ def _source_text_mentions_value(text: str, value: Any) -> bool:
 
 
 def _canonical_evidence_source(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
@@ -2257,7 +2328,7 @@ def _source_excerpt_for_locator(
     return None
 
 
-def _canonical_evidence_role(draft: ExtractedEvidenceDraft) -> str:
+def _canonical_evidence_role(draft: SourceObservation) -> str:
     role = _text(draft.evidence_role)
     if role in {
         "direct_result",

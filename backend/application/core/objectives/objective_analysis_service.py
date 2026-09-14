@@ -24,6 +24,7 @@ from application.core.objectives.analysis.finding_synthesis import (
 )
 from application.core.objectives.analysis.paper_experiment import (
     PAPER_EXPERIMENT_RECONSTRUCTION_VERSION,
+    assemble_paper_experiment,
     reconstruct_paper_experiments,
 )
 from application.core.objectives.analysis.source_extraction import (
@@ -57,6 +58,7 @@ from domain.core import (
     ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     PaperContribution,
+    PaperExperiment,
     PaperResearchMap,
     PreparedDocumentInput,
     ResearchObjective,
@@ -104,6 +106,7 @@ class ObjectiveAnalysisArtifacts:
     evidence_records: tuple[ObjectiveEvidence, ...]
     findings: tuple[Finding, ...]
     model_name: str | None = None
+    experiments: tuple[PaperExperiment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,7 @@ class ObjectiveDocumentEvidenceArtifacts:
 
     contribution: PaperContribution
     evidence_records: tuple[ObjectiveEvidence, ...]
+    experiment: PaperExperiment | None = None
 
 
 class ResearchObjectiveNotFoundError(FileNotFoundError):
@@ -357,6 +361,11 @@ class ObjectiveEvidenceAnalysisService:
             evidence_records=evidence_records,
             findings=findings,
             model_name=model_name,
+            experiments=tuple(
+                item.experiment
+                for item in document_artifacts
+                if item.experiment is not None
+            ),
         )
 
     def _generate_document_evidence(
@@ -420,6 +429,11 @@ class ObjectiveEvidenceAnalysisService:
                 figures_by_document_id=objective_inputs["figures_by_document_id"],
             ),
         )
+        experiment = assemble_paper_experiment(
+            collection_id=collection_id,
+            document_id=objective_inputs["documents"][0].document_id,
+            source_facts=paper_evidence_drafts,
+        )
         evidence_records, contributions = materialize_evidence(
             collection_id=collection_id,
             analysis=analysis,
@@ -434,6 +448,7 @@ class ObjectiveEvidenceAnalysisService:
             document_trees_by_document_id=objective_inputs[
                 "document_trees_by_document_id"
             ],
+            paper_experiment=experiment,
         )
         if len(contributions) != 1:
             raise RuntimeError(
@@ -442,6 +457,7 @@ class ObjectiveEvidenceAnalysisService:
         return ObjectiveDocumentEvidenceArtifacts(
             contribution=contributions[0],
             evidence_records=evidence_records,
+            experiment=experiment,
         )
 
     @staticmethod

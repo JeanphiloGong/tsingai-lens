@@ -62,12 +62,8 @@ from application.core.paper_facts.extraction import (
     build_default_paper_facts_extractor,
 )
 from domain.core import (
-    ObjectiveEvidenceComparison,
-    ObjectiveEvidenceContext,
-    ObjectiveEvidenceResult,
-    ObjectiveEvidenceVariable,
     ResearchObjective,
-    normalize_objective_confidence,
+    SourceObservation,
     normalize_objective_terms,
 )
 from domain.source import SourceDocumentTree, render_markdown_table
@@ -1581,154 +1577,8 @@ class ObjectiveSourceExtractor:
         )
 
 
-@dataclass(frozen=True)
-class ExtractedEvidenceDraft:
-    """Transient structured extraction before Source text is attached."""
-
-    evidence_id: str
-    objective_id: str
-    document_id: str
-    source_kind: str | None
-    source_ref: str | None
-    evidence_role: str | None
-    selection_reason: str | None
-    selection_status: str
-    changed_variables: tuple[ObjectiveEvidenceVariable, ...]
-    comparison: ObjectiveEvidenceComparison | None
-    reported_result: ObjectiveEvidenceResult | None
-    attribution_scope: str
-    scientific_context: ObjectiveEvidenceContext
-    source_refs: tuple[dict[str, Any], ...]
-    evidence_anchor_ids: tuple[str, ...]
-    resolution_status: str
-    failure_reason: str | None
-    confidence: float
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExtractedEvidenceDraft":
-        source_refs = _mapping_tuple(payload.get("source_refs"))
-        first_source_ref = source_refs[0] if source_refs else {}
-        objective_id = _text(payload.get("objective_id"))
-        document_id = _text(payload.get("document_id"))
-        source_kind = _optional_text(
-            payload.get("source_kind") or first_source_ref.get("source_kind")
-        )
-        source_ref = _optional_text(
-            payload.get("source_ref") or first_source_ref.get("source_ref")
-        )
-        evidence_role = _optional_text(
-            payload.get("evidence_role") or first_source_ref.get("evidence_role")
-        )
-        reported_result_payload = payload.get("reported_result")
-        reported_result = (
-            ObjectiveEvidenceResult.from_mapping(reported_result_payload)
-            if isinstance(reported_result_payload, Mapping)
-            else None
-        )
-        evidence_id = _optional_text(payload.get("evidence_id"))
-        if evidence_id is None:
-            # A context Source can legitimately yield multiple facts (for
-            # example one condition record for S1 and another for S2). Keep
-            # those facts distinct without changing the stable identity of a
-            # result while it gains same-paper context during reconstruction.
-            context_identity = (
-                payload.get("scientific_context")
-                if reported_result is None
-                and _text(payload.get("evidence_role")) in _OBJECTIVE_CONTEXT_ROLES
-                else None
-            )
-            identity = json.dumps(
-                [
-                    objective_id,
-                    document_id,
-                    evidence_role,
-                    source_refs,
-                    context_identity,
-                    payload.get("changed_variables"),
-                    payload.get("comparison"),
-                    payload.get("reported_result"),
-                ],
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            )
-            evidence_id = f"evd_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        return cls(
-            evidence_id=evidence_id,
-            objective_id=objective_id,
-            document_id=document_id,
-            source_kind=source_kind,
-            source_ref=source_ref,
-            evidence_role=evidence_role,
-            selection_reason=_optional_text(
-                payload.get("selection_reason")
-                or first_source_ref.get("selection_reason")
-            ),
-            selection_status=_text(payload.get("selection_status")) or "extracted",
-            changed_variables=tuple(
-                ObjectiveEvidenceVariable.from_mapping(item)
-                for item in payload.get("changed_variables", ())
-                if isinstance(item, Mapping)
-            ),
-            comparison=(
-                ObjectiveEvidenceComparison.from_mapping(payload["comparison"])
-                if isinstance(payload.get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=reported_result,
-            attribution_scope=_text(payload.get("attribution_scope"))
-            or "not_attributable",
-            scientific_context=(
-                ObjectiveEvidenceContext.from_mapping(payload["scientific_context"])
-                if isinstance(payload.get("scientific_context"), Mapping)
-                else ObjectiveEvidenceContext()
-            ),
-            source_refs=source_refs,
-            evidence_anchor_ids=normalize_objective_terms(
-                payload.get("evidence_anchor_ids")
-            ),
-            resolution_status=_text(payload.get("resolution_status")) or "unknown",
-            failure_reason=_optional_text(payload.get("failure_reason")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "evidence_id": self.evidence_id,
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "evidence_role": self.evidence_role,
-            "selection_reason": self.selection_reason,
-            "selection_status": self.selection_status,
-            "changed_variables": [item.to_record() for item in self.changed_variables],
-            "comparison": self.comparison.to_record() if self.comparison else None,
-            "reported_result": (
-                self.reported_result.to_record() if self.reported_result else None
-            ),
-            "attribution_scope": self.attribution_scope,
-            "scientific_context": self.scientific_context.to_record(),
-            "source_refs": [dict(item) for item in self.source_refs],
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
-            "resolution_status": self.resolution_status,
-            "failure_reason": self.failure_reason,
-            "confidence": self.confidence,
-        }
-
-
 def _text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _optional_text(value: Any) -> str | None:
-    return _text(value) or None
-
-
-def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(dict(item) for item in value if isinstance(item, Mapping))
 
 
 _EXTRACTION_ROUTE_ROLE_PRIORITY = {
@@ -1790,7 +1640,7 @@ def extract_and_validate_source_facts(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     table_cells_by_document_id: dict[str, list[Any]] | None = None,
     progress_callback: ProgressCallback | None = None,
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     """Inspect Sources, then read missing same-paper context while facts advance."""
     units = list(
         _extract_source_round(
@@ -1945,8 +1795,8 @@ def _extract_source_round(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     table_cells_by_document_id: dict[str, list[Any]] | None = None,
     progress_callback: ProgressCallback | None = None,
-    document_state: tuple[ExtractedEvidenceDraft, ...] = (),
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    document_state: tuple[SourceObservation, ...] = (),
+) -> tuple[SourceObservation, ...]:
     """Read one ordered batch; validate each Source before updating paper state."""
     objective_by_id = {objective.objective_id: objective for objective in objectives}
     frame_by_key = {
@@ -1969,9 +1819,9 @@ def _extract_source_round(
         len(objective_evidence_routes),
         len(extractable_routes),
     )
-    units: list[ExtractedEvidenceDraft] = []
+    units: list[SourceObservation] = []
     seen: set[str] = set()
-    document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
+    document_state_units: dict[tuple[str, str], list[SourceObservation]] = {}
     for seed in document_state:
         document_state_units.setdefault(
             (seed.objective_id, seed.document_id),
@@ -2119,7 +1969,8 @@ def _extract_source_round(
                 source=source,
             )
         ):
-            failed_unit = _failed_objective_evidence_draft(
+            failed_unit = _failed_source_observation(
+                collection_id=collection_id,
                 route=route,
                 error=table_repair_error,
             )
@@ -2214,6 +2065,7 @@ def _extract_source_round(
                         )
                         llm_route_records_list.extend(
                             validate_source_fact(
+                                collection_id=collection_id,
                                 route=route,
                                 source=source,
                                 objective_context=objective_context,
@@ -2263,7 +2115,8 @@ def _extract_source_round(
                         llm_records=llm_route_records,
                     )
             if extraction_error is not None:
-                failed_unit = _failed_objective_evidence_draft(
+                failed_unit = _failed_source_observation(
+                    collection_id=collection_id,
                     route=route,
                     error=extraction_error,
                 )
@@ -2290,7 +2143,8 @@ def _extract_source_round(
                 # context expansion can inspect it and the Evidence Map can
                 # show the unresolved read.
                 route_records = (
-                    _needs_context_objective_evidence_draft(
+                    _needs_context_source_observation(
+                        collection_id=collection_id,
                         route=route,
                         selection_reason=(
                             _SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON
@@ -2313,12 +2167,13 @@ def _extract_source_round(
                 # routes are handled above so their selection reason remains
                 # distinct from this lexical fallback.
                 route_records = (
-                    _needs_context_objective_evidence_draft(
+                    _needs_context_source_observation(
+                        collection_id=collection_id,
                         route=route,
                     ).to_record(),
                 )
         for record in route_records:
-            unit = ExtractedEvidenceDraft.from_mapping(record)
+            unit = SourceObservation.from_mapping(record)
             if not _objective_evidence_has_payload(unit):
                 continue
             if unit.evidence_id in seen:
@@ -2336,7 +2191,8 @@ def _extract_source_round(
             # with no extracted fact is inspection metadata, not scientific
             # Evidence; retain it only in the internal ledger.
             inspection_unit = (
-                _needs_context_objective_evidence_draft(
+                _needs_context_source_observation(
+                    collection_id=collection_id,
                     route=route,
                     selection_reason=(
                         _SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON
@@ -2347,7 +2203,10 @@ def _extract_source_round(
                     and not _objective_route_is_context_inspection(route)
                     and not route_result_is_not_current_observation
                 )
-                else _inspected_objective_source_draft(route=route)
+                else _inspected_source_observation(
+                    collection_id=collection_id,
+                    route=route,
+                )
             )
             if (
                 route.role not in _DIRECT_RESULT_ROUTE_ROLES
@@ -2477,11 +2336,12 @@ def _objective_header_matches_any_axis(
     return False
 
 
-def _failed_objective_evidence_draft(
+def _failed_source_observation(
     *,
+    collection_id: str | None = None,
     route: EvidenceCandidate,
     error: Exception,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     identity = "|".join(
         (
             route.objective_id,
@@ -2492,8 +2352,9 @@ def _failed_objective_evidence_draft(
         )
     )
     reason = f"{error.__class__.__name__}: {str(error) or 'extraction failed'}"
-    return ExtractedEvidenceDraft.from_mapping(
+    return SourceObservation.from_mapping(
         {
+            "collection_id": collection_id,
             "evidence_id": (
                 f"oev_failed_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
             ),
@@ -2530,11 +2391,12 @@ _NEEDS_CONTEXT_SELECTION_REASONS = frozenset(
         _SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON,
     }
 )
-def _needs_context_objective_evidence_draft(
+def _needs_context_source_observation(
     *,
+    collection_id: str | None = None,
     route: EvidenceCandidate,
     selection_reason: str = _NEEDS_CONTEXT_SELECTION_REASON,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     identity = "|".join(
         (
             route.objective_id,
@@ -2544,8 +2406,9 @@ def _needs_context_objective_evidence_draft(
             "needs_context",
         )
     )
-    return ExtractedEvidenceDraft.from_mapping(
+    return SourceObservation.from_mapping(
         {
+            "collection_id": collection_id,
             "evidence_id": (
                 f"oev_context_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
             ),
@@ -2574,10 +2437,11 @@ _INSPECTION_ONLY_SELECTION_REASON = (
 )
 
 
-def _inspected_objective_source_draft(
+def _inspected_source_observation(
     *,
+    collection_id: str | None = None,
     route: EvidenceCandidate,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     """Keep an attempted read in the audit ledger without creating Evidence."""
 
     identity = "|".join(
@@ -2589,8 +2453,9 @@ def _inspected_objective_source_draft(
             "inspection_only",
         )
     )
-    return ExtractedEvidenceDraft.from_mapping(
+    return SourceObservation.from_mapping(
         {
+            "collection_id": collection_id,
             "evidence_id": (
                 "oev_inspected_"
                 f"{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
@@ -2694,7 +2559,7 @@ class _ContextSourceCandidate(NamedTuple):
 def _build_adaptive_context_routes(
     *,
     objectives: tuple[ResearchObjective, ...],
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    source_facts: tuple[SourceObservation, ...],
     objective_evidence_routes: tuple[EvidenceCandidate, ...],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...] = (),
     blocks_by_document_id: dict[str, list[Any]],
@@ -2782,7 +2647,7 @@ def _build_adaptive_context_routes(
         uncovered_fields: set[str] = set()
         anchor_groups_by_key: dict[
             tuple[str, str, str],
-            list[ExtractedEvidenceDraft],
+            list[SourceObservation],
         ] = {}
         for anchor in anchors:
             result = anchor.reported_result
@@ -2946,13 +2811,13 @@ def _build_adaptive_context_routes(
 
 
 def _incomplete_result_anchors(
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    source_facts: tuple[SourceObservation, ...],
     objective_by_id: Mapping[str, ResearchObjective],
-) -> dict[tuple[str, str], list[ExtractedEvidenceDraft]]:
+) -> dict[tuple[str, str], list[SourceObservation]]:
     """Find results whose missing context cannot already bind from read Sources."""
     anchors_by_key: dict[
         tuple[str, str],
-        list[ExtractedEvidenceDraft],
+        list[SourceObservation],
     ] = {}
     context_seed = tuple(
         unit
@@ -3316,7 +3181,7 @@ def _collect_context_source_candidates(
 
 def _match_context_candidates_to_result(
     *,
-    anchor: ExtractedEvidenceDraft,
+    anchor: SourceObservation,
     anchor_missing_fields: set[str],
     anchor_terms: tuple[str, ...],
     anchor_term_fields: Mapping[str, frozenset[str]],
@@ -3428,7 +3293,7 @@ def _match_context_candidates_to_result(
 def _choose_context_reads(
     *,
     objective: ResearchObjective,
-    anchor: ExtractedEvidenceDraft,
+    anchor: SourceObservation,
     anchor_missing_fields: set[str],
     anchor_candidates: list[_ContextSourceCandidate],
     candidate_search_text: Mapping[tuple[str, str], tuple[str, str]],
@@ -3692,7 +3557,7 @@ _ADAPTIVE_CONTEXT_HEADING_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def _objective_missing_context_fields(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     objective: ResearchObjective,
 ) -> frozenset[str]:
     """Return evidence fields still needed before this paper can be compared."""
@@ -3784,7 +3649,7 @@ def _objective_attribute_is_experimental_context(attribute: Any) -> bool:
 
 
 def _objective_context_pending_source_keys(
-    units: Iterable[ExtractedEvidenceDraft],
+    units: Iterable[SourceObservation],
     objectives: tuple[ResearchObjective, ...],
 ) -> tuple[tuple[str, str, str, str], ...]:
     objective_by_id = {objective.objective_id: objective for objective in objectives}
@@ -3829,7 +3694,7 @@ def _objective_route_identity(
 
 
 def _objective_context_semantic_signature(
-    context_seed: Iterable[ExtractedEvidenceDraft],
+    context_seed: Iterable[SourceObservation],
 ) -> tuple[tuple[str, ...], ...]:
     """Represent read context by grounded values, ignoring Source identity."""
 
@@ -3851,7 +3716,7 @@ def _objective_context_semantic_signature(
 
 
 def _objective_result_semantic_signature(
-    units: Iterable[ExtractedEvidenceDraft],
+    units: Iterable[SourceObservation],
 ) -> tuple[tuple[str, ...], ...]:
     signature: set[tuple[str, ...]] = set()
     for unit in units:
@@ -3894,7 +3759,7 @@ def _objective_result_semantic_signature(
 
 
 def _objective_context_progress_state(
-    units: Iterable[ExtractedEvidenceDraft],
+    units: Iterable[SourceObservation],
     objectives: tuple[ResearchObjective, ...],
 ) -> tuple[
     tuple[tuple[str, str, str, str], ...],
@@ -3917,7 +3782,7 @@ def _record_objective_context_scope_gap(
     *,
     collection_id: str,
     context_round: int,
-    units: list[ExtractedEvidenceDraft],
+    units: list[SourceObservation],
     objectives: tuple[ResearchObjective, ...],
     reason: str,
 ) -> None:
@@ -3934,7 +3799,7 @@ def _record_objective_context_scope_gap(
         objective = objective_by_id.get(unit.objective_id)
         if objective is None or not _objective_fact_needs_context(unit, objective):
             continue
-        # The extraction draft may still be partial because its result and
+        # The source observation may still be partial because its result and
         # Methods facts live in separate Sources.  If the inspected same-paper
         # context already binds the comparison labels, the later reconstruction
         # step can close that gap deterministically; do not report it as an
@@ -3967,7 +3832,7 @@ def _record_objective_context_scope_gap(
             payload["selection_reason"] = (
                 f"{existing_reason} {gap_reason}".strip()
             )
-            units[index] = ExtractedEvidenceDraft.from_mapping(payload)
+            units[index] = SourceObservation.from_mapping(payload)
     if pending:
         record_analysis_diagnostic(
             {
@@ -3981,9 +3846,9 @@ def _record_objective_context_scope_gap(
 
 
 def _objective_context_bundle_can_bind_result(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
-    context_seed: tuple[ExtractedEvidenceDraft, ...],
+    context_seed: tuple[SourceObservation, ...],
     objective: ResearchObjective | None = None,
 ) -> bool:
     """Return whether read same-paper conditions can bind this result.
@@ -4066,8 +3931,8 @@ def _objective_context_bundle_can_bind_result(
         "specimen",
         "specimen_id",
     }
-    document_context: list[ExtractedEvidenceDraft] = []
-    group_context: dict[str, list[ExtractedEvidenceDraft]] = {
+    document_context: list[SourceObservation] = []
+    group_context: dict[str, list[SourceObservation]] = {
         label: [] for label in wanted
     }
     all_material_values: list[object] = []
@@ -4196,7 +4061,7 @@ def _objective_context_bundle_can_bind_result(
 def _objective_context_search_terms(
     *,
     objective: ResearchObjective,
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    source_facts: tuple[SourceObservation, ...],
     document_id: str,
     objective_id: str,
 ) -> tuple[str, ...]:
@@ -4240,7 +4105,7 @@ def _objective_context_search_terms(
 def _objective_context_search_term_fields(
     *,
     objective: ResearchObjective,
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    source_facts: tuple[SourceObservation, ...],
     document_id: str,
     objective_id: str,
 ) -> dict[str, frozenset[str]]:
@@ -4417,7 +4282,7 @@ def _adaptive_context_matched_fields(
 
 
 def _objective_fact_needs_context(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     objective: ResearchObjective,
 ) -> bool:
     if unit.selection_status == "failed":
@@ -6118,7 +5983,7 @@ def _objective_value_column_is_non_result(value: str) -> bool:
 
 
 def _objective_evidence_has_payload(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
 ) -> bool:
     return bool(
         unit.changed_variables
@@ -6367,7 +6232,7 @@ def _objective_evidence_prompt_source(
 
 def _objective_seed_context_routes(
     *,
-    units: Iterable[ExtractedEvidenceDraft],
+    units: Iterable[SourceObservation],
     route: EvidenceCandidate,
 ) -> tuple[EvidenceCandidate, ...]:
     """Expose previously inspected same-paper Sources to the next prompt."""
@@ -6769,7 +6634,7 @@ def _empty_objective_document_state() -> dict[str, Any]:
 
 
 def _objective_document_state_payload(
-    units: list[ExtractedEvidenceDraft],
+    units: list[SourceObservation],
 ) -> dict[str, Any]:
     if not units:
         return _empty_objective_document_state()
@@ -6815,7 +6680,7 @@ def _objective_document_state_payload(
 
 
 def _objective_document_grounding_sources(
-    units: list[ExtractedEvidenceDraft],
+    units: list[SourceObservation],
     *,
     route: EvidenceCandidate,
     blocks: list[Any],

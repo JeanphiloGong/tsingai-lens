@@ -25,15 +25,13 @@ from application.core.objectives.analysis.evidence_routing import EvidenceCandid
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
-from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
-)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
     PreparedDocumentInput,
+    SourceObservation,
 )
 from domain.source import SourceTable
 from tests.support.research_objective_service import research_objective
@@ -48,7 +46,7 @@ def test_factor_recovery_does_not_promote_treatment_mediated_porosity() -> None:
             "outcomes": ["elongation"],
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "heat-treatment-elongation",
             "objective_id": objective.objective_id,
@@ -95,7 +93,7 @@ def test_factor_recovery_keeps_explicit_porosity_elongation_association() -> Non
         }
     )
     result_text = "Higher porosity was associated with lower elongation."
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "porosity-elongation-association",
             "objective_id": objective.objective_id,
@@ -138,7 +136,7 @@ def test_objective_detail_evidence_keeps_context_when_result_is_not_yet_resolved
             "outcomes": ["porosity"],
         }
     )
-    material_context = ExtractedEvidenceDraft.from_mapping(
+    material_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-material",
             "objective_id": objective.objective_id,
@@ -250,7 +248,7 @@ def test_materialization_does_not_mark_context_open_result_comparable() -> None:
         model_name="test-model",
         prompt_versions={},
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "result-open-process",
             "objective_id": objective.objective_id,
@@ -389,7 +387,7 @@ def test_materialization_deduplicates_identical_source_grounded_fact() -> None:
         "confidence": 0.9,
     }
     drafts = tuple(
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {**common, "evidence_id": evidence_id}
         )
         for evidence_id in ("model-pass-1", "model-pass-2")
@@ -478,7 +476,7 @@ def test_materialization_keeps_same_value_from_distinct_table_rows() -> None:
         "confidence": 0.8,
     }
     drafts = tuple(
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 **common,
                 "evidence_id": f"row-{row_index}",
@@ -584,7 +582,7 @@ def test_materialization_coalesces_replayed_fact_with_different_context_lineage(
         "resolution_status": "resolved",
         "confidence": 0.9,
     }
-    first = ExtractedEvidenceDraft.from_mapping(
+    first = SourceObservation.from_mapping(
         {
             **common,
             "evidence_id": "model-pass-1",
@@ -597,7 +595,7 @@ def test_materialization_coalesces_replayed_fact_with_different_context_lineage(
             ],
         }
     )
-    replay = ExtractedEvidenceDraft.from_mapping(
+    replay = SourceObservation.from_mapping(
         {
             **common,
             "evidence_id": "model-pass-2",
@@ -659,7 +657,7 @@ def test_text_evidence_excerpt_stays_bound_to_its_primary_source() -> None:
         "NP and P150 denote non-preheated and 150 C preheated specimens, "
         "respectively."
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": "objective-1",
@@ -754,7 +752,7 @@ def test_materialization_uses_same_paper_definition_to_resolve_source_axis() -> 
         "Specimens fabricated without preheating the build platform and with "
         "preheating the build platform to 150 C were designated NP and P150."
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "source-specific-axis",
             "objective_id": objective.objective_id,
@@ -881,7 +879,7 @@ def test_materialization_resolves_source_axis_from_locator_only_refs() -> None:
         "Specimens fabricated without preheating the build platform and with "
         "preheating the build platform to 150 C were designated NP and P150."
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "source-specific-axis-locator-only",
             "objective_id": objective.objective_id,
@@ -993,7 +991,7 @@ def test_locator_only_source_axis_binding_is_domain_agnostic() -> None:
         "Runs C1 and C2 used catalyst loading values of 1 wt% and 2 wt%, "
         "respectively."
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "catalyst-loading-result",
             "objective_id": objective.objective_id,
@@ -1095,7 +1093,7 @@ def test_locator_only_source_axis_binding_rejects_unrelated_condition() -> None:
         "Runs C1 and C2 used reaction temperatures of 300 K and 350 K, "
         "respectively."
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "reaction-temperature-result",
             "objective_id": objective.objective_id,
@@ -1183,7 +1181,7 @@ def test_materialization_does_not_resolve_axis_from_vocabulary_alone() -> None:
             "outcomes": ["microstructure"],
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "unproven-axis",
             "objective_id": objective.objective_id,
@@ -1238,7 +1236,7 @@ def test_pageless_filename_context_yields_primary_source_to_paged_scientific_tex
 
     filename = "P005-Influence of porosity on 316L stainless steel.pdf"
     abstract = "This study investigates porosity in SLM 316L stainless steel."
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "material-context",
             "objective_id": "objective-1",
@@ -1323,7 +1321,7 @@ def test_table_evidence_excerpt_stays_bound_to_its_primary_table() -> None:
             ("B", "800"),
         ),
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "yield-strength-result",
             "objective_id": "objective-1",
@@ -1413,7 +1411,7 @@ def test_table_result_excerpt_excludes_same_table_context_rows() -> None:
     )
     result_excerpt = "Specimen: A | Yield strength (MPa): 300"
     context_excerpt = "Specimen: B | Yield strength (MPa): 340"
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "yield-strength-result",
             "objective_id": "objective-1",
@@ -2081,7 +2079,7 @@ def test_materialization_persists_context_as_needs_context_evidence() -> None:
             "confidence": 0.9,
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "context-material",
             "objective_id": objective.objective_id,
@@ -2161,7 +2159,7 @@ def test_materialization_recovers_explicit_factor_from_result_source() -> None:
         model_name="test-model",
         prompt_versions={},
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "result-missed-factor",
             "objective_id": objective.objective_id,
@@ -2259,7 +2257,7 @@ def test_materialization_does_not_invent_factor_when_source_omits_it() -> None:
         model_name="test-model",
         prompt_versions={},
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "result-without-factor",
             "objective_id": objective.objective_id,
@@ -2331,7 +2329,7 @@ def test_materialization_preserves_incomparable_observation_without_attribution(
         model_name="test-model",
         prompt_versions={},
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "incomparable-microstructure",
             "objective_id": objective.objective_id,
@@ -2499,7 +2497,7 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
             "confidence": 0.9,
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "draft-1",
             "objective_id": "objective-1",
@@ -2590,7 +2588,7 @@ def test_materialization_canonicalizes_elongation_to_ductility_objective() -> No
             "outcomes": ["ductility"],
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "draft-energy-ductility",
             "objective_id": objective.objective_id,

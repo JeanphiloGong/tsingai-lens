@@ -68,3 +68,40 @@ build; it does not delete saved data.
 
 For model/result responsibilities, see
 [`paper_understanding/README.md`](paper_understanding/README.md).
+
+## Candidate Question Evaluation
+
+`ObjectiveCandidateService.propose_candidate_questions()` is an explicitly
+invoked, nonpersistent evaluation path. Default discovery still calls
+`discover_candidate_facts()` and its existing axis-equivalence grouping.
+Neither the HTTP workflow nor Agent tools call the evaluation method.
+
+Consider three papers on one alloy's porosity: A varies laser power, B varies
+scan speed, and C varies both. They can motivate one reading question without
+sharing an identical experimental design. The evaluation reads supplied maps
+and original excerpts, proposes up to three questions, and retains each selected
+paper's relevance reason, limitations, original map, and cited Source text.
+Power and speed remain different factors; C remains a joint-factor study.
+Missing map relationships do not veto relevance supported by original passages.
+
+`question_formation.py` owns the prompt and direct `*ModelOutput` contracts.
+The candidate service binds returned document/Source pairs to supplied text;
+the model does not reproduce quotations. Its application result reuses
+`ResearchObjective` and `PaperResearchMap` rather than changing domain records.
+Inspection papers populate question `seed_document_ids`; background selections
+are retained separately. These are reading leads, not Evidence, validated
+comparability, or a frozen analysis scope. No relationship equivalence is inferred
+from selection, and no new `source_relationship_ids` are invented.
+
+Input is limited to 12 prepared papers and a 32,000-token prompt budget. Oversized
+input is rejected rather than silently dropping papers or text. One structured
+request uses an 8,192-token output budget by default, with no schema repair,
+subdivision, or hidden SDK retries. Technical and reference failures propagate
+with model-call traces; a valid empty proposal needs an abstention explanation.
+Callers must supply authorized paper snapshots and original excerpts.
+
+The evaluation can omit research interest for automatic exploration. Replacing
+default discovery and deciding how reviewed reading selections enter scope
+screening remain separate decisions. Current scope screening still has its
+existing complete-variable matching behavior; this evaluation does not bypass
+it or claim end-to-end analysis readiness.

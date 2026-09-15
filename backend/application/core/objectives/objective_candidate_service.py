@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
+from functools import partial
 from itertools import combinations
-from typing import Any
+from typing import Any, Literal
 
 from application.core.objectives import property_matching
 from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
@@ -15,6 +17,12 @@ from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
     AxisCanonicalizationPlanModelOutput,
 )
+from application.core.objectives.discovery.question_formation import (
+    CandidateQuestionsModelOutput,
+    QUESTION_FORMATION_PROMPT_VERSION,
+    QUESTION_FORMATION_SYSTEM_PROMPT,
+)
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     ObjectiveFactSet,
     PaperResearchMap,
@@ -108,8 +116,182 @@ class _Compatibility(StrEnum):
     INCOMPATIBLE = "incompatible"
 
 
+@dataclass(frozen=True)
+class CandidatePaperSelection:
+    """Reading provenance, not validated Evidence or experimental comparability."""
+
+    paper_map: PaperResearchMap
+    source_texts: tuple[tuple[str, str], ...]
+    role: Literal["inspect", "background"]
+    reason: str
+    limitation: str
+
+
+@dataclass(frozen=True)
+class CandidateQuestion:
+    objective: ResearchObjective
+    papers: tuple[CandidatePaperSelection, ...]
+
+
+@dataclass(frozen=True)
+class CandidateQuestionBatch:
+    candidates: tuple[CandidateQuestion, ...]
+    abstention_reason: str | None
+
+
 class ObjectiveCandidateService:
     """Promote paper-study relationships into collection research objectives."""
+
+    def propose_candidate_questions(
+        self,
+        collection_id: str,
+        *,
+        paper_maps: tuple[PaperResearchMap, ...],
+        source_texts: Mapping[tuple[str, str], str],
+        response_client: StructuredResponseClient,
+        research_interest: str | None = None,
+        max_prompt_tokens: int = 32000,
+        max_completion_tokens: int = 8192,
+        request_timeout_s: float = 180,
+    ) -> CandidateQuestionBatch:
+        """Opt-in evaluation only; no default discovery caller or persistence.
+
+        The caller supplies authorized, prepared papers and original excerpts.
+        Retained reading selections are not a frozen analysis scope.
+        """
+        if not collection_id.strip():
+            raise ValueError("candidate question formation requires collection_id")
+        if min(max_prompt_tokens, max_completion_tokens, request_timeout_s) <= 0:
+            raise ValueError("candidate question request budget must be positive")
+        maps = {paper.document_id: paper for paper in paper_maps}
+        if len(maps) != len(paper_maps):
+            raise ValueError("candidate question papers must have unique document ids")
+        if len(maps) > 12:
+            raise ValueError("candidate question evaluation supports at most 12 papers")
+        for (document_id, source_ref), text in source_texts.items():
+            if document_id not in maps or not source_ref.strip() or not text.strip():
+                raise ValueError(
+                    "candidate question excerpt has invalid ownership or text"
+                )
+        if not maps:
+            return CandidateQuestionBatch((), "No prepared papers were supplied.")
+        papers = []
+        for document_id, paper_map in maps.items():
+            excerpts = [
+                {"source_ref": ref, "text": text}
+                for (owner, ref), text in source_texts.items()
+                if owner == document_id
+            ]
+            if not excerpts:
+                raise ValueError("candidate question paper requires original excerpts")
+            papers.append(
+                {
+                    "document_id": document_id,
+                    "paper_map": paper_map.to_record(),
+                    "excerpts": excerpts,
+                }
+            )
+        user_prompt = json.dumps(
+            {"research_interest": research_interest, "papers": papers},
+            ensure_ascii=False,
+        )
+        prompt_tokens = response_client.estimate_prompt_tokens(
+            system_prompt=QUESTION_FORMATION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            response_model=CandidateQuestionsModelOutput,
+        )
+        if prompt_tokens > max_prompt_tokens:
+            raise ValueError(
+                "candidate question input exceeds prompt budget; select a smaller reading set"
+            )
+
+        parsed = response_client.complete(
+            system_prompt=QUESTION_FORMATION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            response_model=CandidateQuestionsModelOutput,
+            max_completion_tokens=max_completion_tokens,
+            force_json_text=True,
+            json_completion=partial(
+                response_client.complete_json,
+                max_attempts=1,
+                fail_on_output_saturation=True,
+                postprocess_response=lambda result: self._validate_question_selections(
+                    result,
+                    source_texts=source_texts,
+                ),
+            ),
+            before_request=lambda: request_timeout_s,
+            task_type="objective_question_formation",
+            prompt_version=QUESTION_FORMATION_PROMPT_VERSION,
+        )
+        candidates = []
+        for rank, proposal in enumerate(parsed.proposals, start=1):
+            selections = tuple(
+                CandidatePaperSelection(
+                    paper_map=maps[paper.document_id],
+                    source_texts=tuple(
+                        (ref, source_texts[paper.document_id, ref])
+                        for ref in paper.source_refs
+                    ),
+                    role=paper.role,
+                    reason=paper.reason,
+                    limitation=paper.limitation,
+                )
+                for paper in proposal.papers
+            )
+            objective = ResearchObjective.from_mapping(
+                {
+                    "collection_id": collection_id,
+                    "question": proposal.question,
+                    "material_scope": proposal.material_scope,
+                    "variables": proposal.variables,
+                    "outcomes": [proposal.outcome],
+                    "constraints": proposal.constraints,
+                    "reason": proposal.reason,
+                    "rank": rank,
+                    "seed_document_ids": [
+                        p.paper_map.document_id
+                        for p in selections
+                        if p.role == "inspect"
+                    ],
+                }
+            )
+            candidates.append(CandidateQuestion(objective, selections))
+        return CandidateQuestionBatch(tuple(candidates), parsed.abstention_reason)
+
+    @staticmethod
+    def _validate_question_selections(
+        result: CandidateQuestionsModelOutput,
+        *,
+        source_texts: Mapping[tuple[str, str], str],
+    ) -> CandidateQuestionsModelOutput:
+        if not result.proposals:
+            if not (result.abstention_reason or "").strip():
+                raise ValueError(
+                    "empty question proposal requires an abstention reason"
+                )
+        elif result.abstention_reason is not None:
+            raise ValueError("question proposals cannot also claim abstention")
+        for proposal in result.proposals:
+            seen = set()
+            if not any(p.role == "inspect" for p in proposal.papers):
+                raise ValueError(
+                    "a candidate question needs at least one inspection paper"
+                )
+            for paper in proposal.papers:
+                if paper.document_id in seen:
+                    raise ValueError("duplicate paper selection in candidate question")
+                seen.add(paper.document_id)
+                if len(set(paper.source_refs)) != len(paper.source_refs):
+                    raise ValueError("duplicate Source reference in paper selection")
+                if any(
+                    (paper.document_id, ref) not in source_texts
+                    for ref in paper.source_refs
+                ):
+                    raise ValueError(
+                        "candidate question references an unavailable paper Source"
+                    )
+        return result
 
     def discover_candidate_facts(
         self,

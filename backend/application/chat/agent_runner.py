@@ -248,11 +248,9 @@ class _RunProgress:
         if has_source_observation and call.name in {"search_sources", "inspect_document_sources", "inspect_table"}:
             data.pop("query", None)
         if has_source_observation and call.name == "inspect_document_sources":
-            # Offset/page/limit describe how the batch was requested, not what
-            # was read. Excluding them keeps a replayed batch from looking new
-            # when the model varies pagination arguments without changing the
-            # returned Source records.
-            for key in ("offset", "page", "limit", "next_offset"):
+            # Pagination and the context-dependent token budget describe the
+            # request, not new Source content in the returned batch.
+            for key in ("offset", "page", "limit", "next_offset", "batch_token_budget"):
                 data.pop(key, None)
         normalized_paper_list = call.name == "browse_collection_papers" and (
             data.get("papers") or data.get("paper_total")

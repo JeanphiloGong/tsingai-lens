@@ -329,7 +329,7 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
     )
     result = ChatToolResult(
         tool_call_id="call-1", status="succeeded",
-        data={"document": {"document_id": "doc-1"}, "sources": [{
+        data={"document": {"document_id": "doc-1"}, "batch_token_budget": 16000, "sources": [{
             "source_kind": "text_window", "source_ref": "block-1", "source_digest": "digest-1",
             "content_truncated": False, "content": "Methods and results",
         }]},
@@ -352,6 +352,19 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
         data={**result.data, "offset": 8, "page": 2, "limit": 8, "next_offset": 16},
     )
     assert progress.observe(call, paginated_duplicate) is False
+    budget_duplicate = replace(result, data={
+        **result.data, "batch_token_budget": 10850,
+        "source_coverage": progress.source_coverage(call, result),
+    })
+    assert progress.observe(call, budget_duplicate) is False
+    revised_source = replace(budget_duplicate, data={
+        **budget_duplicate.data, "sources": [{
+            **result.data["sources"][0], "source_digest": "digest-2",
+            "content": "Corrected Methods and results",
+        }],
+    })
+    assert progress.observe(call, revised_source) is True
+    assert progress.observe(call, revised_source) is False
 
     browse_call = replace(call, name="browse_collection_papers")
     browse_result = replace(
@@ -364,6 +377,41 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
         browse_call,
         replace(browse_result, data={**browse_result.data, "query": "same paper", "offset": 1}),
     ) is False
+
+
+async def test_changing_read_budgets_cannot_keep_duplicate_investigation_running() -> None:
+    class SourceRead(_Capability):
+        async def execute(self, context, arguments):
+            result = await super().execute(context, arguments)
+            budget = (9861, 14135, 14992)[len(self.executed_arguments) - 1]
+            return replace(result, data={**result.data, "batch_token_budget": budget})
+
+    read = SourceRead(
+        "inspect_document_sources", ToolRisk.READ,
+        result_data={"document": {"document_id": "doc-1"}, "sources": [{
+            "source_kind": "text_window", "source_ref": "tensile-results",
+            "source_digest": "digest-1", "content_truncated": False,
+            "content": "Elongation varies with the annealing condition and comparator.",
+        }]},
+        resource_refs=(ChatResourceRef("source", "doc-1:tensile-results"),),
+    )
+    model = _Model(
+        *(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)) for _ in range(3)),
+        ModelTurn(content="The same results were inspected; the correction remains incomplete."),
+    )
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((read,)),
+    ).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Recheck the annealing results before correcting the comparison. Do not save.",
+    )
+
+    assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
+    assert len(read.executed_arguments) == 3
+    reads = [item for item in result.tool_results if "source_coverage" in item.data]
+    assert [item.data["source_coverage"]["new_complete_source_count"] for item in reads] == [1, 0, 0]
+    assert "work remains incomplete" in model.contexts[-1][-1].content
+    assert not any(call.risk is ToolRisk.WRITE for call in result.tool_calls)
 
 
 @pytest.mark.parametrize("failed", [False, True])

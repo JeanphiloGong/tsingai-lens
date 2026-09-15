@@ -212,6 +212,9 @@ Agent a concrete argument repair without changing or approving its proposal.
 When repeated operations stop making progress, finalization reports unfinished
 work. It does not claim a structured deliverable exists or that a resource budget
 was exhausted merely because the current response cannot perform more reads.
+Repeated Source batches do not become new progress when pagination, reading
+coverage counters, or the context-dependent batch token budget changes. New
+passages, partial-page content and changed Source versions still count as progress.
 
 Proposed experimental measurements remain distinct from reported paper results.
 An experiment may specify new measurements and clearly separate auxiliary

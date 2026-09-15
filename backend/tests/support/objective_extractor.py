@@ -17,9 +17,6 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
-)
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
@@ -88,7 +85,9 @@ class FakeObjectiveExtractor:
             confidence=0.9,
         )
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         self.skim_payloads.append(payload)
         title = str(payload.get("title") or "")
         if "Review" in title:
@@ -129,11 +128,6 @@ class FakeObjectiveExtractor:
             warnings=[],
         )
 
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        return StructuredPaperSignalReconciliation()
 
     def classify(
         self,

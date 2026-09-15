@@ -28,11 +28,7 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
-from application.core.objectives.discovery import signal_reconciliation
 from application.core.objectives.discovery.paper_understanding import paper_map_outputs
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
-)
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
@@ -57,9 +53,6 @@ def test_model_clients_are_owned_by_their_domains() -> None:
 def test_objective_judgments_own_their_response_contracts() -> None:
     expected_owners = {
         StructuredPaperResearchMap: "application.core.objectives.discovery.paper_understanding.paper_map_results",
-        StructuredPaperSignalReconciliation: (
-            "application.core.objectives.discovery.signal_reconciliation"
-        ),
         StructuredAxisCanonicalizationPlan: (
             "application.core.objectives.discovery.axis_equivalence"
         ),
@@ -84,9 +77,7 @@ def test_objective_judgments_own_their_response_contracts() -> None:
     ("module", "model_name"),
     [
         (paper_map_outputs, "ExperimentalPaperMapModelOutput"),
-        (paper_map_outputs, "PaperSourceSignalScreenModelOutput"),
         (paper_map_outputs, "ReviewPaperMapModelOutput"),
-        (signal_reconciliation, "PaperSignalReconciliationModelOutput"),
     ],
 )
 def test_discovery_model_outputs_keep_nested_output_names(module, model_name):

@@ -113,6 +113,7 @@ class StructuredResponseClient:
         task_type: str | None = None,
         prompt_version: str | None = None,
         fail_on_output_saturation: bool = False,
+        before_request: Callable[[], float] | None = None,
     ) -> BaseModel:
         """Choose the provider parser or JSON-text fallback for one response."""
         if task_type is not None and prompt_version is not None:
@@ -128,6 +129,7 @@ class StructuredResponseClient:
         self._last_attempts.set(())
         started_at = perf_counter()
         trace_extraction_mode = self.extraction_mode
+        request_budget = {"before_request": before_request} if before_request else {}
         try:
             use_provider_parse = (
                 self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
@@ -139,6 +141,7 @@ class StructuredResponseClient:
                         messages=messages,
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
+                        **request_budget,
                     )
                     if postprocess_response is not None:
                         validated = postprocess_response(parsed)
@@ -187,6 +190,7 @@ class StructuredResponseClient:
                         messages=messages,
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
+                        **request_budget,
                     )
                     trace_extraction_mode = (
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
@@ -221,6 +225,7 @@ class StructuredResponseClient:
                         messages=messages,
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
+                        **request_budget,
                     )
                     trace_extraction_mode = (
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
@@ -239,6 +244,7 @@ class StructuredResponseClient:
                     messages=messages,
                     response_model=response_model,
                     max_completion_tokens=max_completion_tokens,
+                    **request_budget,
                 )
         except Exception as exc:
             elapsed_s = perf_counter() - started_at
@@ -335,6 +341,7 @@ class StructuredResponseClient:
         fail_on_output_saturation: bool = False,
         max_attempts: int = 2,
         json_schema_name: str | None = None,
+        before_request: Callable[[], float] | None = None,
     ) -> tuple[BaseModel, str | None]:
         """Decode and validate JSON, retrying only when the response is invalid."""
         response_format: dict[str, Any] = {"type": "json_object"}
@@ -379,8 +386,15 @@ class StructuredResponseClient:
             try:
                 raw_content = ""
                 finish_reason: str | None = None
+                request_client = self.client
+                if before_request is not None:
+                    timeout = before_request()
+                    if callable(getattr(request_client, "with_options", None)):
+                        request_client = request_client.with_options(
+                            timeout=timeout, max_retries=0,
+                        )
                 try:
-                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                    completion = request_client.chat.completions.create(**attempt_kwargs)
                 except Exception as exc:
                     record_llm_completion(
                         getattr(exc, "completion", None),
@@ -545,6 +559,7 @@ class StructuredResponseClient:
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
         max_completion_tokens: int | None,
+        before_request: Callable[[], float] | None = None,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs: dict[str, Any] = {
             "model": self.model,
@@ -555,8 +570,15 @@ class StructuredResponseClient:
         }
         if max_completion_tokens is not None:
             request_kwargs["max_completion_tokens"] = max_completion_tokens
+        request_client = self.client
+        if before_request is not None:
+            timeout = before_request()
+            if callable(getattr(request_client, "with_options", None)):
+                request_client = request_client.with_options(
+                    timeout=timeout, max_retries=0,
+                )
         try:
-            completion = self.client.beta.chat.completions.parse(**request_kwargs)
+            completion = request_client.beta.chat.completions.parse(**request_kwargs)
         except Exception as exc:
             record_llm_completion(
                 getattr(exc, "completion", None),

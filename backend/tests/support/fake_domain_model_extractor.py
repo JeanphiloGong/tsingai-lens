@@ -23,9 +23,6 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
-)
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
     ReviewPaperMapModelOutput,
@@ -137,6 +134,8 @@ class FakeDomainModelExtractor:
         **_options: Any,
     ) -> Any:
         del system_prompt
+        if _options.get("before_request") is not None:
+            _options["before_request"]()
         payload = _input_payload(user_prompt)
         if response_model is ExperimentalPaperMapModelOutput:
             skim = self.extract(payload)
@@ -150,8 +149,6 @@ class FakeDomainModelExtractor:
             )
         elif response_model is StructuredPaperResearchMap:
             response = self.extract(payload)
-        elif response_model is StructuredPaperSignalReconciliation:
-            response = self.reconcile(payload)
         elif response_model is StructuredAxisCanonicalizationPlan:
             response = self.classify(payload)
         elif response_model is PaperFrameBatchModelOutput:
@@ -321,7 +318,9 @@ class FakeDomainModelExtractor:
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         title = str(payload.get("title") or "").strip()
         profile_hint = (
             payload.get("profile_hint")
@@ -422,11 +421,6 @@ class FakeDomainModelExtractor:
             warnings=[] if studies else ["objective_uncertain"],
         )
 
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        return StructuredPaperSignalReconciliation()
 
     def classify(
         self,

@@ -8,7 +8,6 @@ from pydantic import Field, field_validator, model_validator
 from .common import (
     PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     PAPER_RESEARCH_MAP_SCOPE_LIMIT,
-    PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT,
     PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
     PAPER_RESEARCH_MAP_WARNING_LIMIT,
     _PAPER_MAP_CONTEXT_LIMIT,
@@ -30,7 +29,7 @@ class StructuredPaperResearchRelationship(_PaperResearchMapResponse):
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
     source_unit_ids: list[
         Annotated[str, Field(min_length=1, max_length=160)]
-    ] = Field(min_length=1, max_length=PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1)
     confidence: float = 0.0
 
     @field_validator("varied_factors", "source_unit_ids", mode="before")
@@ -169,7 +168,7 @@ class StructuredPaperResearchSignal(_PaperResearchMapResponse):
     ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
     source_unit_ids: list[
         Annotated[str, Field(min_length=1, max_length=160)]
-    ] = Field(min_length=1, max_length=PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1)
     confidence: float = 0.0
 
     @model_validator(mode="before")

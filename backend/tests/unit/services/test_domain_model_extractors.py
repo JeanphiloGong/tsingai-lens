@@ -40,15 +40,8 @@ from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
     build_research_axis_canonicalization_prompt,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    PaperSignalReconciler,
-    StructuredPaperSignalReconciliation,
-    build_paper_signal_reconciliation_prompt,
-)
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
-    PaperSourceSignalModelOutput,
-    PaperSourceSignalScreenModelOutput,
     ReviewPaperMapModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
@@ -57,7 +50,6 @@ from application.core.objectives.discovery.paper_understanding.paper_map_results
 from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
     build_paper_research_map_prompt,
-    build_paper_source_signal_prompt,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
@@ -100,10 +92,10 @@ def test_paper_research_map_contract_bounds_model_output():
     ]["properties"]
     assert factor_schema["role"]["enum"] == ["varied", "compared", "modeled"]
     assert factor_schema["source_labels"]["minItems"] == 1
-    assert factor_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in factor_schema["source_labels"]
     assert "source_unit_ids" not in relationship_schema
     assert relationship_schema["source_labels"]["minItems"] == 1
-    assert relationship_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in relationship_schema["source_labels"]
     signal_schema = experimental_schema["$defs"]["PaperMapSignalModelOutput"][
         "properties"
     ]
@@ -123,7 +115,7 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "test_context" not in signal_schema
     assert "source_unit_ids" not in signal_schema
     assert signal_schema["source_labels"]["minItems"] == 1
-    assert signal_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in signal_schema["source_labels"]
     assert "source_unit_coverage" not in schema
     assert "review_synthesis" not in schema
     assert schema["warnings"]["items"]["maxLength"] == 240
@@ -141,11 +133,11 @@ def test_paper_research_map_contract_bounds_model_output():
     assert review_schema["disputes"]["maxItems"] == 2
     assert review_schema["evidence_gaps"]["maxItems"] == 2
     assert review_schema["citation_leads"]["maxItems"] == 3
-    assert review_item_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in review_item_schema["source_labels"]
     assert review_item_schema["content"]["maxLength"] == 240
     assert "source_unit_ids" not in review_item_schema
     assert review_item_schema["source_labels"]["minItems"] == 1
-    assert review_item_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in review_item_schema["source_labels"]
 
 
 def test_experimental_paper_map_accepts_five_unresolved_signals_without_failure():
@@ -178,7 +170,6 @@ def test_experimental_paper_map_accepts_five_unresolved_signals_without_failure(
     ("response_model", "field_name", "value"),
     [
         (ExperimentalPaperMapModelOutput, "doc_role", "experimental-paper"),
-        (PaperSourceSignalScreenModelOutput, "evidence_density", "dense"),
         (StructuredPaperResearchMap, "doc_role", "experimental-paper"),
     ],
 )
@@ -189,36 +180,6 @@ def test_paper_map_rejects_unknown_enum_values_instead_of_downgrading_them(
 ):
     with pytest.raises(ValidationError):
         response_model.model_validate({field_name: value})
-
-
-def test_paper_source_signal_screen_contract_is_source_local_and_compact():
-    model_schema = PaperSourceSignalScreenModelOutput.model_json_schema()
-    schema = model_schema["properties"]
-    signal_schema = model_schema["$defs"]["PaperSourceSignalModelOutput"][
-        "properties"
-    ]
-
-    assert schema["signals"]["maxItems"] == 8
-    assert schema["output_saturated"]["type"] == "boolean"
-    assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
-    assert signal_schema["variable_role"]["enum"] == [
-        "varied",
-        "compared",
-        "modeled",
-        "fixed",
-        "context",
-        "uncertain",
-        "not_applicable",
-    ]
-    assert signal_schema["material_scope"]["maxItems"] == 4
-    assert signal_schema["process_context"]["maxItems"] == 4
-    assert "sample_context" not in signal_schema
-    assert "test_context" not in signal_schema
-    assert "comparator" not in signal_schema
-    assert "fixed_conditions" not in signal_schema
-    assert "source_unit_ids" not in signal_schema
-    assert "relationships" not in schema
-    assert "studies" not in schema
 
 
 def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_lineage():
@@ -291,263 +252,6 @@ def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_linea
     assert relationship.source_unit_ids == ["source-unit-2", "source-unit-1"]
 
 
-@pytest.mark.parametrize(
-    ("signal_type", "variable_role"),
-    [
-        ("variable", "varied"),
-        ("variable", "fixed"),
-        ("variable", "context"),
-        ("outcome", "not_applicable"),
-    ],
-)
-def test_paper_source_signal_contract_requires_scientific_variable_role(
-    signal_type: str,
-    variable_role: str,
-):
-    parsed = PaperSourceSignalScreenModelOutput.model_validate(
-        {
-            "signals": [
-                {
-                    "signal_type": signal_type,
-                    "label": "processing speed" if signal_type == "variable" else "density",
-                    "variable_role": variable_role,
-                }
-            ]
-        }
-    )
-
-    assert parsed.signals[0].variable_role == variable_role
-
-
-@pytest.mark.parametrize(
-    ("signal_type", "variable_role"),
-    [
-        ("variable", "not_applicable"),
-        ("outcome", "varied"),
-    ],
-)
-def test_paper_source_signal_contract_rejects_role_type_mismatch(
-    signal_type: str,
-    variable_role: str,
-):
-    with pytest.raises(ValidationError, match="variable role"):
-        PaperSourceSignalModelOutput.model_validate(
-            {
-                "signal_type": signal_type,
-                "label": "research axis",
-                "variable_role": variable_role,
-            }
-        )
-
-
-@pytest.mark.parametrize(
-    ("left_context", "right_context"),
-    [
-        ({"design_type": "experimental"}, {"design_type": "observational"}),
-        (
-            {"process_context": ["laser powder bed fusion"]},
-            {"process_context": ["heat treatment"]},
-        ),
-        ({"experiment_label": "tensile"}, {"experiment_label": "hardness"}),
-    ],
-)
-def test_paper_source_signal_identity_preserves_distinct_experiment_context(
-    left_context: dict[str, object],
-    right_context: dict[str, object],
-):
-    common = {
-        "signal_type": "outcome",
-        "label": "yield strength",
-        "variable_role": "not_applicable",
-        "experiment_label": "tensile test",
-        "claim_scope": "current_work",
-        "material_scope": ["Ti-6Al-4V"],
-    }
-
-    parsed = PaperSourceSignalScreenModelOutput.model_validate(
-        {
-            "signals": [
-                {**common, **left_context},
-                {**common, **right_context},
-            ]
-        }
-    )
-
-    assert len(parsed.signals) == 2
-
-
-def test_paper_source_signal_screen_isolates_one_malformed_signal():
-    parsed = PaperSourceSignalScreenModelOutput.model_validate(
-        {
-            "signals": [
-                {
-                    "signal_type": "variable",
-                    "label": "reheating cycle",
-                    "variable_role": "varied",
-                },
-                {
-                    "signal_type": "outcome",
-                    "label": "grain morphology",
-                    "variable_role": "not_applicable",
-                },
-                {
-                    "signal_type": "outcome",
-                    "label": "a complete observation sentence " * 4,
-                    "variable_role": "not_applicable",
-                },
-            ]
-        }
-    )
-
-    assert [signal.label for signal in parsed.signals] == [
-        "reheating cycle",
-        "grain morphology",
-    ]
-    assert parsed.output_saturated is False
-    assert parsed.warnings == [
-        (
-            "Omitted 1 malformed source signal; retained the valid source-local "
-            "signals."
-        )
-    ]
-
-
-def test_paper_source_signal_screen_marks_all_malformed_signals_incomplete():
-    parsed = PaperSourceSignalScreenModelOutput.model_validate(
-        {
-            "signals": [
-                {
-                    "signal_type": "outcome",
-                    "label": "a complete observation sentence " * 4,
-                }
-            ]
-        }
-    )
-
-    assert parsed.signals == []
-    assert parsed.output_saturated is True
-
-
-def test_paper_source_signal_prompt_preserves_review_and_primary_source_roles():
-    _, user_prompt = build_paper_source_signal_prompt(
-        {
-            "document_id": "review-paper",
-            "title": "Heat treatment review",
-            "window_id": "results-1.retry-left",
-            "window_role": "results",
-            "source_units": [
-                {
-                    "source_unit_id": "source-unit-000071",
-                    "source_kind": "block",
-                    "source_ref": "block-71",
-                    "section_path": "Review > Preheating",
-                    "content": (
-                        "Miranda et al. increased build plate temperature and "
-                        "reported lower residual stress."
-                    ),
-                }
-            ],
-        }
-    )
-
-    assert "source-local scientific signal screening" in user_prompt
-    assert "not relationship construction" in user_prompt
-    assert "paper-level reconciliation" in user_prompt
-    assert "claim_scope=background" in user_prompt
-    assert "claim_scope=current_work" in user_prompt
-    assert "Do not return or copy Source-unit IDs" in user_prompt
-    assert "Do not infer a causal relationship" in user_prompt
-    assert "Miranda et al." in user_prompt
-    assert "phase, grain shape, or other observation on that axis" in user_prompt
-    assert "outcome='microstructure'" in user_prompt
-    assert "do not also return 'mechanical properties'" in user_prompt
-    assert "'etc.' or 'including' do not name hidden axes" in user_prompt
-    assert "only when more than 8 distinct explicit research axes" in user_prompt
-
-
-def test_paper_source_signal_screen_binds_source_identity_in_backend():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "doc_role": "review",
-                "signals": [
-                    {
-                        "signal_type": "variable",
-                        "label": "build plate temperature",
-                        "variable_role": "compared",
-                        "experiment_label": "Miranda et al.",
-                        "claim_scope": "background",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["laser powder bed fusion"],
-                        "confidence": 0.88,
-                    },
-                    {
-                        "signal_type": "outcome",
-                        "label": "residual stress",
-                        "variable_role": "not_applicable",
-                        "experiment_label": "Miranda et al.",
-                        "claim_scope": "background",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["laser powder bed fusion"],
-                        "confidence": 0.86,
-                    },
-                ],
-                "evidence_density": "medium",
-                "confidence": 0.87,
-            }
-        )
-    )
-    extractor = PaperResearchMapExtractor(_response_client(client))
-
-    skim = extractor.extract_source_signals(
-        {
-            "collection_id": "collection-internal",
-            "document_id": "review-paper",
-            "window_id": "results-1.retry-left",
-            "window_role": "results",
-            "document_profile": {
-                "doc_type": "review",
-                "profile_warnings": ["parser internal warning"],
-            },
-            "source_units": [
-                {
-                    "source_unit_id": "source-unit-000071",
-                    "source_kind": "block",
-                    "source_ref": "block-71",
-                    "section_path": "Review > Preheating",
-                    "content": (
-                        "Miranda et al. increased build plate temperature and "
-                        "reported lower residual stress."
-                    ),
-                }
-            ],
-        }
-    )
-
-    assert skim.studies == []
-    assert skim.doc_role == "review"
-    assert [signal.claim_scope for signal in skim.unresolved_signals] == [
-        "background",
-        "background",
-    ]
-    assert [signal.source_unit_ids for signal in skim.unresolved_signals] == [
-        ["source-unit-000071"],
-        ["source-unit-000071"],
-    ]
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
-    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
-    assert '"label": "S1"' in request_text
-    for internal_value in (
-        "collection-internal",
-        "review-paper",
-        "results-1.retry-left",
-        "source-unit-000071",
-        "block-71",
-        "parser internal warning",
-    ):
-        assert internal_value not in request_text
-
-
 def test_paper_research_map_contract_represents_bounded_preliminary_scope():
     varied_factors = [
         "HIP temperature",
@@ -587,72 +291,6 @@ def test_paper_research_map_contract_represents_bounded_preliminary_scope():
         "mechanical polishing",
     ]
     assert parsed.studies[0].relationships[0].varied_factors == varied_factors
-
-
-def test_paper_signal_reconciliation_contract_requires_source_signal_ids():
-    parsed = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": ["signal-variable", "signal-outcome"],
-                            "confidence": 0.88,
-                        }
-                    ]
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-unlinked",
-                    "reason": "The result belongs to a different experiment.",
-                }
-            ],
-        }
-    )
-
-    assert parsed.studies[0].relationships[0].signal_ids == [
-        "signal-variable",
-        "signal-outcome",
-    ]
-    with pytest.raises(ValidationError):
-        StructuredPaperSignalReconciliation.model_validate(
-            {
-                "studies": [
-                    {
-                        "relationships": [
-                            {"signal_ids": ["signal-variable"]}
-                        ]
-                    }
-                ]
-            }
-        )
-
-
-def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
-    model_schema = StructuredPaperSignalReconciliation.model_json_schema()
-    response_schema = model_schema["properties"]
-    study_schema = model_schema["$defs"]["StructuredPaperSignalStudy"]["properties"]
-
-    assert response_schema["studies"]["maxItems"] == 1
-    assert response_schema["unresolved_signals"]["maxItems"] == 12
-    assert study_schema["relationships"]["maxItems"] == 11
-
-
-def test_paper_signal_reconciliation_bounds_diagnostic_reason_text():
-    parsed = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-outcome",
-                    "reason": "reason " * 100,
-                }
-            ],
-        }
-    )
-
-    assert len(parsed.unresolved_signals[0].reason) == 240
 
 
 def test_paper_research_map_contract_bounds_diagnostic_warnings():
@@ -735,7 +373,7 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "Copy every directly supporting Source label" in user_prompt
-    assert "at most 4 unique `source_labels`" in user_prompt
+    assert "Copy `source_labels` only from the allowed list" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 2 studies" in user_prompt
     assert "up to 6 relationships per study" in user_prompt
@@ -1109,57 +747,6 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "collection-test" not in user_prompt
 
 
-def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
-    _, user_prompt = build_paper_signal_reconciliation_prompt(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    "label": "laser power",
-                    "sources": [
-                        {
-                            "source_kind": "block",
-                            "source_ref": "methods-1",
-                            "section_path": "Methods",
-                            "excerpt": "Laser power was varied from 150 to 250 W.",
-                        }
-                    ],
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    "label": "relative density",
-                    "sources": [
-                        {
-                            "source_kind": "block",
-                            "source_ref": "results-1",
-                            "section_path": "Results",
-                            "excerpt": "Relative density was recorded for each condition.",
-                        }
-                    ],
-                },
-            ],
-        }
-    )
-
-    assert "membership adjudication" in user_prompt
-    assert "same stated paper-owned research scope" in user_prompt
-    assert "one bounded candidate neighborhood" in user_prompt
-    assert "exactly one outcome anchor" in user_prompt
-    assert "omitted paper signals are outside this batch" in user_prompt
-    assert "backend derives final whole-paper accounting" in user_prompt
-    assert "Do not link signals merely because they occur in the same paper" in user_prompt
-    assert "backend treats every omitted input signal as unresolved" in user_prompt
-    assert "never invent a reason merely to repeat a label" in user_prompt
-    assert "copy only input `signal_label` values" in user_prompt
-    assert "same signal membership more than once" in user_prompt
-    assert "Split high-level statement" in user_prompt
-    assert "Different scopes" in user_prompt
-    assert "Do not infer sample groups, controls, test settings" in user_prompt
-
-
 class _FakeCompletions:
     def __init__(self, content: str | list[str]) -> None:
         self._contents = [content] if isinstance(content, str) else list(content)
@@ -1481,52 +1068,6 @@ def test_paper_research_map_prompt_token_estimate_counts_complete_schema_prompt(
     estimated_tokens = PaperResearchMapExtractor(extractor).estimate_prompt_tokens(payload)
 
     assert estimated_tokens > 1_000
-    assert client.beta.chat.completions.calls == []
-    assert client.chat.completions.calls == []
-
-
-def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prompt():
-    client = _FakeOpenAIClient("unused")
-    extractor = StructuredResponseClient(
-        client=client,
-        model="fake-model",
-        extraction_mode="provider_parse",
-    )
-    payload = {
-        "document_id": "paper-1",
-        "signals": [
-            {
-                "signal_id": "signal-variable",
-                "signal_type": "variable",
-                "label": "laser power",
-                "sources": [
-                    {
-                        "source_unit_id": "source-unit-000001",
-                        "section_path": "Methods",
-                        "excerpt": "Laser power was varied from 150 to 250 W.",
-                    }
-                ],
-            },
-            {
-                "signal_id": "signal-outcome",
-                "signal_type": "outcome",
-                "label": "relative density",
-                "sources": [
-                    {
-                        "source_unit_id": "source-unit-000010",
-                        "section_path": "Results",
-                        "excerpt": "Relative density was measured for each condition.",
-                    }
-                ],
-            },
-        ],
-    }
-
-    estimated_tokens = PaperSignalReconciler(extractor).estimate_prompt_tokens(
-        payload
-    )
-
-    assert estimated_tokens > 500
     assert client.beta.chat.completions.calls == []
     assert client.chat.completions.calls == []
 
@@ -2440,7 +1981,7 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
     assert "duplicate study identities" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "at most 4 labels" in client.chat.completions.calls[1]["messages"][-1][
+    assert "unique Source labels from the input" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
 
@@ -2819,293 +2360,6 @@ def test_paper_research_map_bounds_overflow_and_marks_output_saturated():
     assert "relationships" in skim.warnings[0]
     assert "unresolved_signals" in skim.warnings[0]
     assert len(client.chat.completions.calls) == 1
-
-
-def test_domain_model_extractors_validates_paper_signal_reconciliation():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "studies": [
-                    {
-                        "relationships": [
-                            {
-                                "signal_labels": ["V1", "O1"],
-                                "confidence": 0.89,
-                            }
-                        ]
-                    }
-                ],
-                "unresolved_signals": [],
-            }
-        )
-    )
-    extractor = _response_client(client)
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {"signal_id": "signal-variable", "signal_type": "variable"},
-                {"signal_id": "signal-outcome", "signal_type": "outcome"},
-            ],
-        }
-    )
-
-    assert isinstance(reconciliation, StructuredPaperSignalReconciliation)
-    assert reconciliation.studies[0].relationships[0].signal_ids == [
-        "signal-variable",
-        "signal-outcome",
-    ]
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
-
-
-def test_paper_signal_reconciliation_prompt_hides_backend_lineage():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "studies": [
-                    {
-                        "relationships": [
-                            {
-                                "signal_labels": ["V1", "O1"],
-                                "confidence": 0.89,
-                            }
-                        ]
-                    }
-                ],
-                "unresolved_signals": [],
-            }
-        )
-    )
-
-    reconciliation = PaperSignalReconciler(_response_client(client)).reconcile(
-        {
-            "document_id": "document-internal",
-            "signals": [
-                {
-                    "signal_id": "signal-variable-internal",
-                    "signal_type": "variable",
-                    "label": "laser power",
-                    "sources": [
-                        {
-                            "source_unit_id": "source-variable-internal",
-                            "section_path": "Methods",
-                            "excerpt": "Laser power was varied.",
-                        }
-                    ],
-                },
-                {
-                    "signal_id": "signal-outcome-internal",
-                    "signal_type": "outcome",
-                    "label": "porosity",
-                    "sources": [
-                        {
-                            "source_unit_id": "source-outcome-internal",
-                            "section_path": "Results",
-                            "excerpt": "Porosity decreased with laser power.",
-                        }
-                    ],
-                },
-            ],
-        }
-    )
-
-    assert reconciliation.studies[0].relationships[0].signal_ids == [
-        "signal-variable-internal",
-        "signal-outcome-internal",
-    ]
-    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
-    assert '"signal_label":"V1"' in request_text
-    assert '"signal_label":"O1"' in request_text
-    assert "Laser power was varied." in request_text
-    for internal_value in (
-        "document-internal",
-        "signal-variable-internal",
-        "signal-outcome-internal",
-        "source-variable-internal",
-        "source-outcome-internal",
-    ):
-        assert internal_value not in request_text
-
-
-@pytest.mark.parametrize(
-    ("context_field", "variable_context", "outcome_context"),
-    [
-        ("material_scope", ["316L stainless steel"], ["Ti-6Al-4V"]),
-        ("process_context", ["laser powder bed fusion"], ["heat treatment"]),
-    ],
-)
-def test_paper_signal_reconciliation_repairs_conflicting_contexts(
-    context_field,
-    variable_context,
-    outcome_context,
-):
-    invalid = {
-        "studies": [
-            {
-                "relationships": [
-                    {
-                        "signal_labels": ["V1", "O1"],
-                        "confidence": 0.89,
-                    }
-                ]
-            }
-        ],
-        "unresolved_signals": [],
-    }
-    repaired = {
-        "studies": [],
-        "unresolved_signals": [
-            {
-                "signal_label": "V1",
-                "reason": "The signals describe different experimental contexts.",
-            },
-            {
-                "signal_label": "O1",
-                "reason": "The signals describe different experimental contexts.",
-            },
-        ],
-    }
-    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(repaired)])
-    extractor = _response_client(client)
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    context_field: variable_context,
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    context_field: outcome_context,
-                },
-            ],
-        }
-    )
-
-    assert reconciliation.studies == []
-    assert len(reconciliation.unresolved_signals) == 2
-    assert len(client.chat.completions.calls) == 2
-    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "context-compatible" in repair_prompt
-    assert context_field in repair_prompt
-
-
-def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
-    monkeypatch,
-):
-    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    invalid = {
-        "studies": [
-            {
-                "relationships": [
-                    {
-                        "signal_labels": ["V1", "O1"],
-                        "confidence": 0.89,
-                    }
-                ]
-            }
-        ]
-    }
-    repaired = {
-        "studies": [],
-        "unresolved_signals": [
-            {
-                "signal_label": signal_label,
-                "reason": "The signals describe different material contexts.",
-            }
-            for signal_label in ("V1", "O1")
-        ],
-    }
-    client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
-    extractor = StructuredResponseClient(client=client, model="fake-model")
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    "material_scope": ["316L stainless steel"],
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    "material_scope": ["Ti-6Al-4V"],
-                },
-            ],
-        }
-    )
-
-    assert reconciliation.studies == []
-    assert len(reconciliation.unresolved_signals) == 2
-    assert len(client.beta.chat.completions.calls) == 1
-    assert len(client.chat.completions.calls) == 1
-    repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "context-compatible" in repair_prompt
-    assert "material_scope" in repair_prompt
-
-
-def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
-    invalid = {
-        "studies": [
-            {
-                "relationships": [
-                    {
-                        "signal_labels": ["V1", "O1"],
-                        "confidence": 0.9,
-                    },
-                    {
-                        "signal_labels": ["V2", "O1"],
-                        "confidence": 0.8,
-                    },
-                ]
-            }
-        ],
-        "unresolved_signals": [],
-    }
-    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(invalid)])
-    extractor = _response_client(client)
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    "process_context": ["laser powder bed fusion"],
-                },
-                {
-                    "signal_id": "signal-conflicting-variable",
-                    "signal_type": "variable",
-                    "process_context": ["heat treatment"],
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    "process_context": ["laser powder bed fusion"],
-                },
-            ],
-        }
-    )
-
-    assert len(reconciliation.studies) == 1
-    assert len(reconciliation.studies[0].relationships) == 1
-    assert reconciliation.studies[0].relationships[0].signal_ids == [
-        "signal-variable",
-        "signal-outcome",
-    ]
-    assert [
-        signal.signal_id for signal in reconciliation.unresolved_signals
-    ] == ["signal-conflicting-variable"]
-    assert "process_context" in reconciliation.unresolved_signals[0].reason
-    assert len(client.chat.completions.calls) == 2
 
 
 def test_domain_model_extractors_validates_axis_canonicalization_response():

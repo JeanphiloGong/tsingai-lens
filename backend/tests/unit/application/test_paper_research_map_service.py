@@ -8,26 +8,20 @@ from typing import Any
 
 import pytest
 
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
-)
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
-from application.core.objectives.llm.structured_response import (
-    StructuredOutputSaturatedError,
-)
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
-from application.core.objectives.paper_map_aggregation import PaperMapAggregator, PaperMapSignalInput
+from application.core.objectives.paper_map_aggregation import PaperMapAggregator
 from application.core.objectives.paper_map_extraction import (
     PaperMapExtractionService,
 )
-from domain.core import PaperResearchMap, PaperResearchScope, PaperResearchSignal
+from domain.core import PaperResearchMap, PaperResearchScope
 from domain.source import (
     SourceDocument,
     build_source_document_tree,
@@ -58,18 +52,17 @@ class _WindowExtractor:
     def __init__(
         self,
         *,
-        reconciliation: str = "link",
         window_failure_marker: str | None = None,
     ) -> None:
         self.payloads: list[dict[str, Any]] = []
-        self.reconciliation_payloads: list[dict[str, Any]] = []
-        self.reconciliation = reconciliation
         self.window_failure_marker = window_failure_marker
 
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         self.payloads.append(payload)
         source_units = payload.get("source_units") or []
         text = " ".join(
@@ -183,277 +176,6 @@ class _WindowExtractor:
                 if studies or unresolved_signals
                 else ["no linked study in this window"]
             ),
-        )
-
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        self.reconciliation_payloads.append(payload)
-        if self.reconciliation == "raise":
-            raise RuntimeError("reconciliation unavailable")
-        signals = payload["signals"]
-        if self.reconciliation == "invalid_id":
-            return StructuredPaperSignalReconciliation(
-                studies=[
-                    {
-                        "relationships": [
-                            {
-                                "signal_ids": [
-                                    signals[0]["signal_id"],
-                                    "invented-signal",
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ]
-                    }
-                ],
-                unresolved_signals=[],
-            )
-        if self.reconciliation == "unresolved":
-            return StructuredPaperSignalReconciliation(
-                studies=[],
-                unresolved_signals=[
-                    {
-                        "signal_id": signal["signal_id"],
-                        "reason": "The excerpts describe different experiments.",
-                    }
-                    for signal in signals
-                ],
-            )
-        if self.reconciliation == "mixed_conflict":
-            signals_by_label = {signal["label"]: signal for signal in signals}
-            relationships = []
-            for variable_label, outcome_label, confidence in (
-                ("laser power", "relative density", 0.9),
-                ("heat-treatment temperature", "relative density", 0.8),
-            ):
-                if (
-                    variable_label in signals_by_label
-                    and outcome_label in signals_by_label
-                ):
-                    relationships.append(
-                        {
-                            "signal_ids": [
-                                signals_by_label[variable_label]["signal_id"],
-                                signals_by_label[outcome_label]["signal_id"],
-                            ],
-                            "confidence": confidence,
-                        }
-                    )
-            return StructuredPaperSignalReconciliation(
-                studies=[{"relationships": relationships}] if relationships else [],
-                unresolved_signals=[],
-            )
-        if self.reconciliation == "grouped_contexts":
-            signals_by_label = {signal["label"]: signal for signal in signals}
-            relationships = []
-            for variable_label, outcome_label, confidence in (
-                ("laser power", "relative density", 0.9),
-                ("heat-treatment temperature", "microhardness", 0.88),
-            ):
-                if (
-                    variable_label in signals_by_label
-                    and outcome_label in signals_by_label
-                ):
-                    relationships.append(
-                        {
-                            "signal_ids": [
-                                signals_by_label[variable_label]["signal_id"],
-                                signals_by_label[outcome_label]["signal_id"],
-                            ],
-                            "confidence": confidence,
-                        }
-                    )
-            return StructuredPaperSignalReconciliation(
-                studies=[{"relationships": relationships}] if relationships else [],
-                unresolved_signals=[],
-            )
-        return StructuredPaperSignalReconciliation(
-            studies=[
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": [signal["signal_id"] for signal in signals],
-                            "confidence": 0.86,
-                        }
-                    ]
-                }
-            ],
-            unresolved_signals=[],
-        )
-
-
-class _BoundedSignalReconciliationExtractor(_WindowExtractor):
-    def __init__(
-        self,
-        signal_specs: dict[str, dict[str, Any]],
-        *,
-        prompt_signal_limit: int = 3,
-        reject_later_batches: bool = False,
-        response_mode: str = "link_all",
-    ) -> None:
-        super().__init__()
-        self.signal_specs = signal_specs
-        self.prompt_signal_limit = prompt_signal_limit
-        self.reject_later_batches = reject_later_batches
-        self.response_mode = response_mode
-
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-        self.payloads.append(payload)
-        signals = []
-        for source_unit in payload.get("source_units") or ():
-            source_ref = str(source_unit.get("source_ref") or "")
-            spec = self.signal_specs.get(source_ref)
-            if spec is None:
-                continue
-            signals.append(
-                {
-                    **spec,
-                    "variable_role": spec.get(
-                        "variable_role",
-                        "varied"
-                        if spec.get("signal_type") == "variable"
-                        else "not_applicable",
-                    ),
-                    "source_unit_ids": [source_unit["source_unit_id"]],
-                    "confidence": 0.9,
-                }
-            )
-        return StructuredPaperResearchMap(
-            doc_role="experimental",
-            unresolved_signals=signals,
-            evidence_density="high" if signals else "low",
-            confidence=0.9,
-        )
-
-    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
-        if "signals" not in payload:
-            return super().estimate_prompt_tokens(payload)
-        return 20_000 if len(payload["signals"]) > self.prompt_signal_limit else 1_000
-
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        self.reconciliation_payloads.append(payload)
-        signals = payload["signals"]
-        if self.response_mode == "omit_all":
-            return StructuredPaperSignalReconciliation()
-        if self.response_mode == "duplicate_linked_unresolved":
-            return StructuredPaperSignalReconciliation(
-                studies=[
-                    {
-                        "relationships": [
-                            {
-                                "signal_ids": [
-                                    signal["signal_id"] for signal in signals
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ]
-                    }
-                ],
-                unresolved_signals=[
-                    {
-                        "signal_id": next(
-                            signal["signal_id"]
-                            for signal in signals
-                            if signal["signal_type"] == "outcome"
-                        ),
-                        "reason": "The outcome was repeated by the model.",
-                    }
-                ],
-            )
-        if self.response_mode == "separate_relationships":
-            outcome = next(
-                signal for signal in signals if signal["signal_type"] == "outcome"
-            )
-            variables = [
-                signal for signal in signals if signal["signal_type"] == "variable"
-            ]
-            return StructuredPaperSignalReconciliation(
-                studies=[
-                    {
-                        "relationships": [
-                            {
-                                "signal_ids": [
-                                    variable["signal_id"],
-                                    outcome["signal_id"],
-                                ],
-                                "confidence": 0.9,
-                            }
-                            for variable in variables
-                        ]
-                    }
-                ]
-            )
-        if self.response_mode in {
-            "duplicate_relationships",
-            "duplicate_signal_id",
-        }:
-            outcome = next(
-                signal for signal in signals if signal["signal_type"] == "outcome"
-            )
-            variables = [
-                signal for signal in signals if signal["signal_type"] == "variable"
-            ]
-            first_signal_ids = [
-                variables[0]["signal_id"],
-                outcome["signal_id"],
-            ]
-            duplicate_signal_ids = (
-                [variables[0]["signal_id"], *first_signal_ids]
-                if self.response_mode == "duplicate_signal_id"
-                else list(reversed(first_signal_ids))
-            )
-            return StructuredPaperSignalReconciliation(
-                studies=[
-                    {
-                        "relationships": [
-                            {
-                                "signal_ids": first_signal_ids,
-                                "confidence": 0.9,
-                            },
-                            {
-                                "signal_ids": duplicate_signal_ids,
-                                "confidence": 0.7,
-                            },
-                            *[
-                                {
-                                    "signal_ids": [
-                                        variable["signal_id"],
-                                        outcome["signal_id"],
-                                    ],
-                                    "confidence": 0.85,
-                                }
-                                for variable in variables[1:]
-                            ],
-                        ]
-                    }
-                ]
-            )
-        if self.reject_later_batches and len(self.reconciliation_payloads) > 1:
-            return StructuredPaperSignalReconciliation(
-                unresolved_signals=[
-                    {
-                        "signal_id": signal["signal_id"],
-                        "reason": "No shared experiment was established in this batch.",
-                    }
-                    for signal in signals
-                ]
-            )
-        return StructuredPaperSignalReconciliation(
-            studies=[
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": [signal["signal_id"] for signal in signals],
-                            "confidence": 0.9,
-                        }
-                    ]
-                }
-            ]
         )
 
 
@@ -573,7 +295,6 @@ def _build_skims(
         profiles_by_document_id={},
         document_trees_by_document_id={artifacts[0].document_id: tree},
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
         progress_callback=progress.append if progress is not None else None,
     )
 
@@ -634,7 +355,7 @@ def test_every_source_unit_receives_one_explicit_coverage_outcome():
     assert skim.coverage_complete is True
 
 
-def test_four_source_windows_preserve_all_repeated_signal_lineage():
+def test_one_context_window_preserves_all_repeated_signal_lineage():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("methods", "Methods", 1),
@@ -653,9 +374,9 @@ def test_four_source_windows_preserve_all_repeated_signal_lineage():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 2
-    assert all(len(payload["source_units"]) <= 4 for payload in extractor.payloads)
-    assert len(skim.unresolved_signals) == 2
+    assert len(extractor.payloads) == 1
+    assert len(extractor.payloads[0]["source_units"]) == 6
+    assert len(skim.unresolved_signals) == 1
     assert {
         source_ref.source_ref
         for signal in skim.unresolved_signals
@@ -663,86 +384,6 @@ def test_four_source_windows_preserve_all_repeated_signal_lineage():
     } == {f"variable-{position}" for position in range(1, 7)}
     assert len(skim.source_unit_coverage) == 6
     assert skim.coverage_complete is True
-
-
-def test_failed_batch_splits_until_only_permanent_source_unit_failure_remains(
-    caplog: pytest.LogCaptureFixture,
-):
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("relationship", "RESULT_CANDIDATE", 2, "Results"),
-            _paragraph("background", "BACKGROUND_ONLY", 3, "Results"),
-            _paragraph("failed", "FAIL_WINDOW", 4, "Results"),
-            _paragraph("signal", "VARIABLE_SIGNAL", 5, "Results"),
-        ]
-    )
-    extractor = _WindowExtractor(window_failure_marker="FAIL_WINDOW")
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(skim.studies) == 1
-    assert {
-        item.source_ref: item.status.value for item in skim.source_unit_coverage
-    } == {
-        "relationship": "relationship_emitted",
-        "background": "no_study_signal",
-        "failed": "extraction_failed",
-        "signal": "unresolved_signal_emitted",
-    }
-    assert skim.coverage_complete is False
-    parent_ids = {
-        unit["source_unit_id"] for unit in extractor.payloads[0]["source_units"]
-    }
-    assert len(parent_ids) == 4
-    assert all(
-        {unit["source_unit_id"] for unit in payload["source_units"]} <= parent_ids
-        for payload in extractor.payloads[1:]
-    )
-    assert all(
-        source_unit_id.startswith("source-unit-")
-        for source_unit_id in parent_ids
-    )
-    assert len(extractor.payloads) == 5
-    assert any(
-        "attempt=1 source_unit_count=4 error=window extraction unavailable"
-        in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "attempt=3 source_unit_count=1 error=window extraction unavailable"
-        in record.message
-        for record in caplog.records
-    )
-
-
-def test_retry_consolidates_duplicate_successful_relationships_once():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("candidate-1", "RESULT_CANDIDATE", 2, "Results"),
-            _paragraph("failed", "FAIL_WINDOW", 3, "Results"),
-            _paragraph("candidate-2", "RESULT_CANDIDATE", 4, "Results"),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(window_failure_marker="FAIL_WINDOW"),
-    )[0]
-
-    assert len(skim.studies) == 1
-    assert len(skim.studies[0].relationships) == 1
-    assert {
-        source_ref.source_ref
-        for source_ref in skim.studies[0].relationships[0].source_refs
-    } == {"candidate-1", "candidate-2"}
-    assert [
-        item.source_ref
-        for item in skim.source_unit_coverage
-        if item.status.value == "extraction_failed"
-    ] == ["failed"]
 
 
 def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
@@ -754,7 +395,9 @@ def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
     )
 
     class DuplicateStudyExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+        def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+            if before_request is not None:
+                before_request()
             parsed = super().extract(payload)
             return StructuredPaperResearchMap.model_construct(
                 doc_role=parsed.doc_role,
@@ -776,6 +419,10 @@ def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
 
 
 def test_failed_window_preserves_valid_results_from_other_windows():
+    class PromptBoundExtractor(_WindowExtractor):
+        def estimate_prompt_tokens(self, payload):
+            return 20_000 if len(payload["source_units"]) > 1 else 1_000
+
     artifacts, tree = _artifacts(
         blocks=[
             _heading("methods", "Methods", 1),
@@ -788,7 +435,7 @@ def test_failed_window_preserves_valid_results_from_other_windows():
     skim = _build_skims(
         artifacts,
         tree,
-        _WindowExtractor(window_failure_marker="FAIL_WINDOW"),
+        PromptBoundExtractor(window_failure_marker="FAIL_WINDOW"),
     )[0]
 
     assert len(skim.studies) == 1
@@ -821,13 +468,13 @@ def test_unstructured_paper_map_samples_edges_then_expands_once_without_duplicat
     skim = _build_skims(artifacts, tree, extractor)[0]
 
     assert len(extractor.payloads) == 4
-    assert all(len(payload["source_units"]) <= 4 for payload in extractor.payloads)
+    assert all(len(payload["source_units"]) <= 8 for payload in extractor.payloads)
     covered_refs = [item.source_ref for item in skim.source_unit_coverage]
     assert covered_refs[:8] == [
         "result-0", "result-1", "result-2", "result-3",
         "result-21", "result-22", "result-23", "result-24",
     ]
-    assert len(covered_refs) == len(set(covered_refs)) == 16
+    assert len(covered_refs) == len(set(covered_refs)) == 25
     assert skim.map_status == "insufficient_map"
 
 
@@ -864,7 +511,12 @@ def test_independent_windows_run_concurrently_and_merge_in_source_order(monkeypa
             self._active_calls = 0
             self.max_active_calls = 0
 
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+        def estimate_prompt_tokens(self, payload):
+            return 20_000 if len(payload["source_units"]) > 4 else 1_000
+
+        def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+            if before_request is not None:
+                before_request()
             with self._lock:
                 self._active_calls += 1
                 self.max_active_calls = max(
@@ -1005,726 +657,6 @@ def test_complete_prompt_token_preflight_splits_before_model_execution():
     assert len(skim.source_unit_coverage) == 2
 
 
-def test_model_declared_output_saturation_splits_without_losing_source_units():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("result-a", "BACKGROUND_ONLY_A", 2, "Results"),
-            _paragraph("result-b", "BACKGROUND_ONLY_B", 3, "Results"),
-        ]
-    )
-
-    class SaturatingExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            if len(payload["source_units"]) > 1:
-                self.payloads.append(payload)
-                return StructuredPaperResearchMap(output_saturated=True)
-            return super().extract(payload)
-
-    extractor = SaturatingExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert [len(payload["source_units"]) for payload in extractor.payloads] == [2, 1, 1]
-    assert {item.source_ref for item in skim.source_unit_coverage} == {
-        "result-a",
-        "result-b",
-    }
-    assert all(
-        item.status.value == "no_study_signal"
-        for item in skim.source_unit_coverage
-    )
-
-
-def test_short_singleton_saturation_recovers_through_source_local_signals():
-    source_text = (
-        "Miranda et al. increased build plate temperature and reported lower "
-        "residual stress in laser powder bed fusion Ti-6Al-4V."
-    )
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("review", "Review", 1),
-            _paragraph("short-review-result", source_text, 2, "Review"),
-        ]
-    )
-
-    class CompactFallbackExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__()
-            self.compact_payloads: list[dict[str, Any]] = []
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise StructuredOutputSaturatedError("singleton output saturated")
-
-        def extract_source_signals(
-            self,
-            payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_payloads.append(payload)
-            source_unit_id = payload["source_units"][0]["source_unit_id"]
-            return StructuredPaperResearchMap.model_validate(
-                {
-                    "doc_role": "review",
-                    "unresolved_signals": [
-                        {
-                            "signal_type": "variable",
-                            "label": "build plate temperature",
-                            "variable_role": "varied",
-                            "experiment_label": "Miranda et al.",
-                            "claim_scope": "background",
-                            "material_scope": ["Ti-6Al-4V"],
-                            "process_context": ["laser powder bed fusion"],
-                            "source_unit_ids": [source_unit_id],
-                            "confidence": 0.88,
-                        },
-                        {
-                            "signal_type": "outcome",
-                            "label": "residual stress",
-                            "variable_role": "not_applicable",
-                            "experiment_label": "Miranda et al.",
-                            "claim_scope": "background",
-                            "material_scope": ["Ti-6Al-4V"],
-                            "process_context": ["laser powder bed fusion"],
-                            "source_unit_ids": [source_unit_id],
-                            "confidence": 0.86,
-                        },
-                    ],
-                    "evidence_density": "medium",
-                    "confidence": 0.87,
-                    "warnings": ["model warning one", "model warning two"],
-                }
-            )
-
-    extractor = CompactFallbackExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert len(extractor.compact_payloads) == 1
-    assert len(skim.studies) == 1
-    assert skim.studies[0].claim_scope == "background"
-    assert skim.studies[0].relationships[0].varied_factors == (
-        "build plate temperature",
-    )
-    assert skim.studies[0].relationships[0].outcome == "residual stress"
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "unresolved_signal_emitted"
-    ]
-    assert skim.coverage_complete is True
-    assert "source-local signals" in skim.warnings[0]
-    assert skim.warnings[1] == "model warning one"
-
-
-@pytest.mark.parametrize(
-    "full_failure",
-    [
-        RuntimeError("structured extraction returned no JSON object"),
-        json.JSONDecodeError("Expecting ':' delimiter", "{bad", 4),
-        RuntimeError("structured extraction returned empty response content"),
-    ],
-    ids=["no-json-object", "malformed-json", "empty-response"],
-)
-def test_short_singleton_structured_failure_recovers_source_local_signals(
-    full_failure: Exception,
-):
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph(
-                "short-result",
-                "Reheating changed the observed grain morphology.",
-                2,
-                "Results",
-            ),
-        ]
-    )
-
-    class CompactFallbackExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__()
-            self.compact_payloads: list[dict[str, Any]] = []
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise full_failure
-
-        def extract_source_signals(
-            self,
-            payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_payloads.append(payload)
-            source_unit_id = payload["source_units"][0]["source_unit_id"]
-            return StructuredPaperResearchMap.model_validate(
-                {
-                    "doc_role": "experimental",
-                    "unresolved_signals": [
-                        {
-                            "signal_type": "outcome",
-                            "label": "grain morphology",
-                            "claim_scope": "current_work",
-                            "source_unit_ids": [source_unit_id],
-                            "confidence": 0.86,
-                        }
-                    ],
-                }
-            )
-
-    extractor = CompactFallbackExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert len(extractor.compact_payloads) == 1
-    assert [signal.label for signal in skim.unresolved_signals] == ["grain morphology"]
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "unresolved_signal_emitted"
-    ]
-    assert skim.coverage_complete is True
-    assert "source-local signals" in skim.warnings[0]
-
-
-def test_compact_singleton_retries_one_transient_empty_response():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("review", "Review", 1),
-            _paragraph(
-                "review-result",
-                "Three reheating cycles changed the observed microstructure.",
-                2,
-                "Review",
-            ),
-        ]
-    )
-
-    class TransientCompactExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__()
-            self.compact_attempts = 0
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise StructuredOutputSaturatedError("singleton output saturated")
-
-        def extract_source_signals(
-            self,
-            payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_attempts += 1
-            if self.compact_attempts == 1:
-                raise RuntimeError(
-                    "structured extraction returned empty response content"
-                )
-            source_unit_id = payload["source_units"][0]["source_unit_id"]
-            return StructuredPaperResearchMap.model_validate(
-                {
-                    "doc_role": "review",
-                    "unresolved_signals": [
-                        {
-                            "signal_type": "outcome",
-                            "label": "microstructure",
-                            "claim_scope": "background",
-                            "source_unit_ids": [source_unit_id],
-                        }
-                    ],
-                }
-            )
-
-    extractor = TransientCompactExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert extractor.compact_attempts == 2
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "unresolved_signal_emitted"
-    ]
-
-
-def test_compact_singleton_records_the_final_technical_failure_kind():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("review", "Review", 1),
-            _paragraph(
-                "review-result",
-                "Three reheating cycles changed the observed microstructure.",
-                2,
-                "Review",
-            ),
-        ]
-    )
-
-    class EmptyCompactExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__()
-            self.compact_attempts = 0
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise StructuredOutputSaturatedError("singleton output saturated")
-
-        def extract_source_signals(
-            self,
-            _payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_attempts += 1
-            raise RuntimeError(
-                "structured extraction returned empty response content"
-            )
-
-    extractor = EmptyCompactExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert extractor.compact_attempts == 2
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "extraction_failed"
-    ]
-    assert "compact_empty_response" in skim.source_unit_coverage[0].reason
-
-
-def test_dense_single_source_recovers_through_lossless_content_fragments():
-    source_text = (
-        "VARIABLE_SIGNAL "
-        + "A" * 1000
-        + ". "
-        + "OUTCOME_SIGNAL "
-        + "B" * 1000
-    )
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("dense-result", source_text, 2, "Results"),
-        ]
-    )
-
-    class DenseSourceExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            content = str(payload["source_units"][0]["content"])
-            if len(content) > 1200:
-                self.payloads.append(payload)
-                raise StructuredOutputSaturatedError("dense singleton output")
-            return super().extract(payload)
-
-    extractor = DenseSourceExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 3
-    parent_id = extractor.payloads[0]["source_units"][0]["source_unit_id"]
-    child_units = [
-        payload["source_units"][0] for payload in extractor.payloads[1:]
-    ]
-    assert "".join(str(unit["content"]) for unit in child_units) == source_text
-    assert {unit["source_unit_id"] for unit in child_units} == {parent_id}
-    assert {unit["source_kind"] for unit in child_units} == {"block"}
-    assert {unit["source_ref"] for unit in child_units} == {"dense-result"}
-    assert [payload["window_id"] for payload in extractor.payloads[1:]] == [
-        "results-1.content-left",
-        "results-1.content-right",
-    ]
-    assert len(skim.source_unit_coverage) == 1
-    assert skim.source_unit_coverage[0].source_unit_id == parent_id
-    assert skim.source_unit_coverage[0].status.value == (
-        "unresolved_signal_emitted"
-    )
-    assert skim.coverage_complete is True
-    assert len(skim.studies) == 1
-    assert skim.studies[0].relationships[0].varied_factors == ("laser power",)
-    assert skim.studies[0].relationships[0].outcome == "relative density"
-
-
-def test_successful_fragment_survives_while_failed_parent_coverage_stays_incomplete():
-    source_text = (
-        "RESULT_CANDIDATE "
-        + "A" * 1000
-        + ". "
-        + "PERMANENT_EMPTY "
-        + "B" * 1000
-    )
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("partial-result", source_text, 2, "Results"),
-        ]
-    )
-
-    class PartiallyRecoveringExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            content = str(payload["source_units"][0]["content"])
-            if len(content) > 1200:
-                self.payloads.append(payload)
-                raise StructuredOutputSaturatedError("dense singleton output")
-            if "PERMANENT_EMPTY" in content:
-                self.payloads.append(payload)
-                raise RuntimeError(
-                    "structured extraction returned empty response content"
-                )
-            return super().extract(payload)
-
-        def extract_source_signals(
-            self,
-            _payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            raise RuntimeError("structured extraction returned empty response content")
-
-    extractor = PartiallyRecoveringExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 3
-    assert len(skim.studies) == 1
-    assert skim.studies[0].relationships[0].outcome == "porosity"
-    assert len(skim.source_unit_coverage) == 1
-    assert skim.source_unit_coverage[0].status.value == "extraction_failed"
-    assert "empty_response" in str(skim.source_unit_coverage[0].reason)
-    assert skim.coverage_complete is False
-
-
-def test_single_source_content_recovery_preserves_structured_table_context():
-    row_text = "sample A | 950 MPa | " + "B" * 1900
-    source_unit = {
-        "source_unit_id": "source-unit-000123",
-        "source_kind": "table_row",
-        "source_ref": "row-7",
-        "section_path": "Results > Tensile properties",
-        "content": {
-            "table_context": {
-                "caption_text": "Table 3. Tensile properties",
-                "column_headers": ["Sample", "Yield strength (MPa)"],
-            },
-            "row_id": "row-7",
-            "row_text": row_text,
-        },
-    }
-
-    fragments = PaperMapExtractionService._split_single_source_unit_for_retry(source_unit)
-
-    assert len(fragments) == 2
-    assert "".join(
-        str(fragment["content"]["row_text"]) for fragment in fragments
-    ) == row_text
-    assert all(
-        fragment["content"]["table_context"]
-        == source_unit["content"]["table_context"]
-        for fragment in fragments
-    )
-    assert {
-        (
-            fragment["source_unit_id"],
-            fragment["source_kind"],
-            fragment["source_ref"],
-        )
-        for fragment in fragments
-    } == {("source-unit-000123", "table_row", "row-7")}
-
-
-def test_semantic_single_source_failure_does_not_trigger_content_splitting():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("invalid-result", "A" * 2500, 2, "Results"),
-        ]
-    )
-
-    class SemanticFailureExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise ValueError("paper research map references unknown Source-unit ids")
-
-    extractor = SemanticFailureExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "extraction_failed"
-    ]
-
-
-def test_nonrecoverable_batch_failure_does_not_split_source_units():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("invalid-result-a", "A" * 200, 2, "Results"),
-            _paragraph("invalid-result-b", "B" * 200, 3, "Results"),
-        ]
-    )
-
-    class NonrecoverableBatchExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise ValueError("paper research map references unknown Source-unit ids")
-
-    extractor = NonrecoverableBatchExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert len(skim.source_unit_coverage) == 2
-    assert all(
-        item.status.value == "extraction_failed"
-        for item in skim.source_unit_coverage
-    )
-
-
-@pytest.mark.parametrize(
-    ("error", "expected_kind"),
-    [
-        (
-            StructuredOutputSaturatedError("completion limit reached"),
-            "output_saturated",
-        ),
-        (
-            RuntimeError("structured extraction returned empty response content"),
-            "empty_response",
-        ),
-        (
-            RuntimeError("structured extraction returned no JSON object"),
-            "no_json_object",
-        ),
-        (
-            json.JSONDecodeError("invalid JSON", "{", 1),
-            "malformed_json",
-        ),
-        (RuntimeError("model unavailable"), None),
-        (ValueError("unknown Source-unit id"), None),
-    ],
-)
-def test_single_source_recovery_classifies_only_density_shaped_failures(
-    error: Exception,
-    expected_kind: str | None,
-) -> None:
-    assert PaperMapExtractionService._single_source_recovery_kind(error) == expected_kind
-
-
-def test_single_source_content_recovery_has_a_fixed_request_bound():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("always-dense", "A" * 4000, 2, "Results"),
-        ]
-    )
-
-    class AlwaysSaturatedExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise StructuredOutputSaturatedError("dense singleton output")
-
-    extractor = AlwaysSaturatedExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 6
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "extraction_failed"
-    ]
-    assert skim.coverage_complete is False
-
-
-def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("supported-method", "METHOD_CANDIDATE", 2, "Methods"),
-            _heading("results", "Results", 3),
-            *[
-                _paragraph(
-                    f"result-{position:02d}",
-                    f"SATURATED_SOURCE_{position:02d}",
-                    position + 4,
-                    "Results",
-                )
-                for position in range(12)
-            ],
-        ]
-    )
-
-    class AlwaysSaturatedExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__()
-            self.compact_payloads: list[dict[str, Any]] = []
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            source_units = payload.get("source_units") or []
-            if any(
-                "METHOD_CANDIDATE" in str(unit.get("content") or "")
-                for unit in source_units
-            ):
-                return StructuredPaperResearchMap(
-                    doc_role="experimental",
-                    studies=[
-                        _study(
-                            varied_factors=["laser power"],
-                            outcome="relative density",
-                            source_unit_ids=[source_units[0]["source_unit_id"]],
-                            confidence=0.9,
-                        )
-                    ],
-                )
-            raise StructuredOutputSaturatedError("dense review output")
-
-        def extract_source_signals(
-            self,
-            payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_payloads.append(payload)
-            raise StructuredOutputSaturatedError("dense compact output")
-
-    extractor = AlwaysSaturatedExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) + len(extractor.compact_payloads) <= 11
-    assert len(skim.source_unit_coverage) == 8
-    assert [study.relationships[0].outcome for study in skim.studies] == [
-        "relative density"
-    ]
-    assert {item.status.value for item in skim.source_unit_coverage} == {
-        "relationship_emitted",
-        "extraction_failed",
-    }
-    assert all(
-        "compact_output_saturated" in str(item.reason)
-        for item in skim.source_unit_coverage
-        if item.status.value == "extraction_failed"
-    )
-
-
-def test_saturated_paper_map_recovers_each_source_directly_with_compact_screening():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("scope", "Scope", 1),
-            *[
-                _paragraph(
-                    f"scope-{position}",
-                    f"Explicit research outcome {position}.",
-                    position + 2,
-                    "Scope",
-                )
-                for position in range(4)
-            ],
-        ]
-    )
-
-    class SaturatedMapExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__(reconciliation="unresolved")
-            self.compact_payloads: list[dict[str, Any]] = []
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            raise StructuredOutputSaturatedError("paper map output saturated")
-
-        def extract_source_signals(
-            self,
-            payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_payloads.append(payload)
-            source_unit = payload["source_units"][0]
-            return StructuredPaperResearchMap.model_validate(
-                {
-                    "doc_role": "experimental",
-                    "unresolved_signals": [
-                        {
-                            "signal_type": "outcome",
-                            "label": str(source_unit["content"]),
-                            "claim_scope": "current_work",
-                            "source_unit_ids": [source_unit["source_unit_id"]],
-                            "confidence": 0.8,
-                        }
-                    ],
-                }
-            )
-
-    extractor = SaturatedMapExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert len(extractor.compact_payloads) == 4
-    assert len(skim.source_unit_coverage) == 4
-    assert {item.status.value for item in skim.source_unit_coverage} == {
-        "unresolved_signal_emitted"
-    }
-    assert skim.coverage_complete is True
-
-
-def test_dense_source_in_saturated_map_uses_bounded_content_fragments():
-    dense_text = "Dense explicit outcome " + "A" * 2200
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("scope", "Scope", 1),
-            _paragraph("dense-scope", dense_text, 2, "Scope"),
-            _paragraph("scope-2", "Explicit outcome 2.", 3, "Scope"),
-            _paragraph("scope-3", "Explicit outcome 3.", 4, "Scope"),
-            _paragraph("scope-4", "Explicit outcome 4.", 5, "Scope"),
-        ]
-    )
-
-    class DenseSourceExtractor(_WindowExtractor):
-        def __init__(self) -> None:
-            super().__init__(reconciliation="unresolved")
-            self.compact_payloads: list[dict[str, Any]] = []
-
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
-            self.payloads.append(payload)
-            source_units = payload["source_units"]
-            if len(source_units) > 1:
-                raise StructuredOutputSaturatedError("paper map output saturated")
-            source_unit = source_units[0]
-            return StructuredPaperResearchMap.model_validate(
-                {
-                    "doc_role": "experimental",
-                    "unresolved_signals": [
-                        {
-                            "signal_type": "outcome",
-                            "label": "dense explicit outcome",
-                            "claim_scope": "current_work",
-                            "source_unit_ids": [source_unit["source_unit_id"]],
-                            "confidence": 0.8,
-                        }
-                    ],
-                }
-            )
-
-        def extract_source_signals(
-            self,
-            payload: dict[str, Any],
-        ) -> StructuredPaperResearchMap:
-            self.compact_payloads.append(payload)
-            source_unit = payload["source_units"][0]
-            if len(str(source_unit["content"])) > 1600:
-                raise StructuredOutputSaturatedError("dense compact output")
-            return StructuredPaperResearchMap.model_validate(
-                {
-                    "doc_role": "experimental",
-                    "unresolved_signals": [
-                        {
-                            "signal_type": "outcome",
-                            "label": str(source_unit["content"]),
-                            "claim_scope": "current_work",
-                            "source_unit_ids": [source_unit["source_unit_id"]],
-                            "confidence": 0.8,
-                        }
-                    ],
-                }
-            )
-
-    extractor = DenseSourceExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.compact_payloads) == 4
-    assert len(extractor.payloads) == 3
-    assert len(skim.source_unit_coverage) == 4
-    assert all(
-        item.status.value != "extraction_failed"
-        for item in skim.source_unit_coverage
-    )
-    assert skim.coverage_complete is True
-
-
 def test_paper_map_reads_high_level_scope_before_detailed_experiment_sources():
     artifacts, tree = _artifacts(
         blocks=[
@@ -1854,7 +786,7 @@ def test_paper_map_expands_once_to_results_when_high_level_scope_lacks_outcome()
     assert [
         [unit["source_ref"] for unit in payload["source_units"]]
         for payload in extractor.payloads
-    ] == [["abstract-variable"], ["result-scope"]]
+    ] == [["abstract-variable"], ["abstract-variable", "result-scope"]]
     assert skim.map_status == "sufficient"
     assert skim.map_limitations == ()
 
@@ -1885,12 +817,12 @@ def test_paper_map_stops_when_targeted_expansion_adds_no_new_scope():
             ),
         ]
     )
-    extractor = _WindowExtractor(reconciliation="unresolved")
+    extractor = _WindowExtractor()
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
     assert len(extractor.payloads) == 2
-    assert extractor.payloads[1]["source_units"][0]["source_ref"] == (
+    assert extractor.payloads[1]["source_units"][-1]["source_ref"] == (
         "result-background"
     )
     assert skim.map_status == "insufficient_map"
@@ -1966,7 +898,7 @@ def test_paper_map_fallback_samples_both_ends_under_a_global_source_limit():
     assert "unstructured-40" in mapped_refs
 
 
-def test_one_long_source_paragraph_is_split_into_bounded_units_without_text_loss():
+def test_one_long_source_paragraph_remains_whole_when_prompt_fits():
     source_text = "B" * 8500
     artifacts, tree = _artifacts(
         blocks=[
@@ -1985,12 +917,11 @@ def test_one_long_source_paragraph_is_split_into_bounded_units_without_text_loss
         if unit["source_kind"] == "block"
     ]
     assert len(extractor.payloads) == 1
-    assert len(text_units) == 3
-    assert all(len(text) <= 4000 for text in text_units)
+    assert len(text_units) == 1
     assert "".join(text_units) == source_text
 
 
-def test_long_source_paragraph_prefers_a_natural_split_without_text_loss():
+def test_long_source_paragraph_preserves_sentence_boundary_when_prompt_fits():
     source_text = f"{'A' * 3500}. {'B' * 1000}"
     artifacts, tree = _artifacts(
         blocks=[
@@ -2008,8 +939,8 @@ def test_long_source_paragraph_prefers_a_natural_split_without_text_loss():
         for unit in payload["source_units"]
         if unit["source_kind"] == "block"
     ]
-    assert text_units[0].endswith(". ")
-    assert all(len(text) <= 4000 for text in text_units)
+    assert len(text_units) == 1
+    assert ". " in text_units[0]
     assert "".join(text_units) == source_text
 
 
@@ -2044,10 +975,8 @@ def test_methods_and_results_windows_retain_distinct_linked_candidates():
         ("laser power",),
         ("scan speed",),
     ]
-    assert {payload["window_role"] for payload in extractor.payloads} == {
-        "methods",
-        "results",
-    }
+    assert {payload["window_role"] for payload in extractor.payloads} == {"overview"}
+    assert extractor.payloads[0]["section_paths"] == ["Materials and Methods", "Results and Discussion"]
 
 
 def test_later_table_captions_are_assigned_to_a_screening_window():
@@ -2449,9 +1378,9 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
 
     assert skim.studies == ()
     assert len(signals) == 1
-    assert signals[0].signal.signal_type == "outcome"
-    assert signals[0].signal.label == "microstructure"
-    assert signals[0].signal.source_refs[0].source_ref == "results-microstructure"
+    assert signals[0].signal_type == "outcome"
+    assert signals[0].label == "microstructure"
+    assert signals[0].source_refs[0].source_ref == "results-microstructure"
     assert [item.status.value for item in skim.source_unit_coverage] == [
         "unresolved_signal_emitted"
     ]
@@ -2609,7 +1538,9 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
     )
 
     class ReviewExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+        def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+            if before_request is not None:
+                before_request()
             self.payloads.append(payload)
             source_ids = {
                 str(unit["source_ref"]): str(unit["source_unit_id"])
@@ -2708,7 +1639,6 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
         },
         document_trees_by_document_id={"paper-1": tree},
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )[0]
 
     assert [study.claim_scope for study in skim.studies] == ["synthesis"]
@@ -2751,739 +1681,6 @@ def test_unknown_source_unit_id_marks_the_window_failed():
     assert [item.status.value for item in skim.source_unit_coverage] == [
         "extraction_failed"
     ]
-
-
-def test_methods_variable_and_results_outcome_reconcile_into_one_candidate():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("variable", "VARIABLE_SIGNAL", 2, "Methods"),
-            _heading("results", "Results", 3),
-            _paragraph("outcome", "OUTCOME_SIGNAL", 4, "Results"),
-        ]
-    )
-    progress: list[dict[str, Any]] = []
-    extractor = _WindowExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor, progress=progress)[0]
-
-    assert len(skim.studies) == 1
-    relationship = skim.studies[0].relationships[0]
-    assert relationship.varied_factors == ("laser power",)
-    assert relationship.outcome == "relative density"
-    assert {ref.source_ref for ref in relationship.source_refs} == {
-        "variable",
-        "outcome",
-    }
-    assert skim.unresolved_signals == ()
-    assert len(extractor.reconciliation_payloads) == 1
-    assert any(
-        item.get("active_operation") == "paper_reconciliation" for item in progress
-    )
-
-
-def test_fixed_and_context_parameters_cannot_form_a_paper_relationship():
-    signal_specs = {
-        "generic-parameter": {
-            "signal_type": "variable",
-            "label": "ambient pressure",
-            "variable_role": "context",
-            "process_context": ["thermal processing"],
-        },
-        "fixed-setting": {
-            "signal_type": "variable",
-            "label": "chamber temperature",
-            "variable_role": "fixed",
-            "process_context": ["thermal processing"],
-        },
-        "varied-factor": {
-            "signal_type": "variable",
-            "label": "holding time",
-            "variable_role": "varied",
-            "process_context": ["thermal processing"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "conversion efficiency",
-            "process_context": ["thermal processing"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            *[
-                _paragraph(source_ref, source_ref, position + 2, "Study")
-                for position, source_ref in enumerate(signal_specs)
-            ],
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.reconciliation_payloads) == 1
-    assert {
-        signal["label"]
-        for signal in extractor.reconciliation_payloads[0]["signals"]
-    } == {"holding time", "conversion efficiency"}
-    assert len(skim.studies) == 1
-    assert skim.studies[0].relationships[0].varied_factors == ("holding time",)
-    assert {
-        (signal.label, signal.variable_role, signal.reason)
-        for signal in skim.unresolved_signals
-    } == {
-        (
-            "ambient pressure",
-            "context",
-            "variable role 'context' is not eligible for relationship construction",
-        ),
-        (
-            "chamber temperature",
-            "fixed",
-            "variable role 'fixed' is not eligible for relationship construction",
-        ),
-    }
-
-
-def test_reconciliation_validation_rejects_an_ineligible_returned_signal():
-    def signal(label: str, signal_type: str, variable_role: str) -> PaperResearchSignal:
-        return PaperResearchSignal.from_mapping(
-            {
-                "document_id": "paper-1",
-                "signal_type": signal_type,
-                "label": label,
-                "variable_role": variable_role,
-                "source_refs": [
-                    {"source_kind": "block", "source_ref": f"source-{label}"}
-                ],
-                "confidence": 0.9,
-            }
-        )
-
-    fixed = signal("reactor volume", "variable", "fixed")
-    varied = signal("residence time", "variable", "varied")
-    outcome = signal("product yield", "outcome", "not_applicable")
-    signal_inputs = tuple(
-        PaperMapSignalInput(signal=item, source_contexts=())
-        for item in (fixed, varied, outcome)
-    )
-    parsed = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": [
-                                fixed.signal_id,
-                                varied.signal_id,
-                                outcome.signal_id,
-                            ],
-                            "confidence": 0.88,
-                        }
-                    ]
-                }
-            ]
-        }
-    )
-
-    studies, unresolved = PaperMapAggregator._validate_signal_reconciliation(
-        parsed,
-        signal_inputs,
-        document_id="paper-1",
-    )
-
-    assert len(studies) == 1
-    assert studies[0].relationships[0].varied_factors == ("residence time",)
-    assert [(item.label, item.reason) for item in unresolved] == [
-        (
-            "reactor volume",
-            "variable role 'fixed' is not eligible for relationship construction",
-        )
-    ]
-
-
-def test_reconciliation_shares_the_paper_judgment_budget(monkeypatch):
-    monkeypatch.setenv("CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS", "0")
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("abstract", "Abstract", 1),
-            _paragraph(
-                "scope-signals",
-                "VARIABLE_SIGNAL OUTCOME_SIGNAL",
-                2,
-                "Abstract",
-            ),
-        ]
-    )
-    extractor = _WindowExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert extractor.reconciliation_payloads == []
-    assert skim.studies == ()
-    assert {signal.label for signal in skim.unresolved_signals} == {
-        "laser power",
-        "relative density",
-    }
-    assert all(
-        signal.reason == "paper-map judgment budget exhausted before reconciliation"
-        for signal in skim.unresolved_signals
-    )
-    assert {item.status.value for item in skim.source_unit_coverage} == {
-        "unresolved_signal_emitted"
-    }
-
-
-def test_reconciliation_stops_after_using_the_remaining_paper_budget(monkeypatch):
-    monkeypatch.setenv("CORE_PAPER_RESEARCH_MAP_MAX_RECOVERY_CALLS", "1")
-    signal_specs = {
-        "power": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "process_context": ["LPBF"],
-        },
-        "speed": {
-            "signal_type": "variable",
-            "label": "scan speed",
-            "process_context": ["LPBF"],
-        },
-        "density": {
-            "signal_type": "outcome",
-            "label": "relative density",
-            "process_context": ["LPBF"],
-        },
-        "porosity": {
-            "signal_type": "outcome",
-            "label": "porosity",
-            "process_context": ["LPBF"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("abstract", "Abstract", 1),
-            *[
-                _paragraph(source_ref, source_ref, position + 2, "Abstract")
-                for position, source_ref in enumerate(signal_specs)
-            ],
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.payloads) == 1
-    assert len(extractor.reconciliation_payloads) == 1
-    assert {
-        relationship.outcome
-        for study in skim.studies
-        for relationship in study.relationships
-    } == {"relative density"}
-    assert [(signal.label, signal.reason) for signal in skim.unresolved_signals] == [
-        (
-            "porosity",
-            "paper-map judgment budget exhausted before reconciliation",
-        )
-    ]
-
-
-def test_reconciliation_batches_repeat_one_outcome_without_dropping_variables():
-    signal_specs = {
-        f"variable-{position}": {
-            "signal_type": "variable",
-            "label": f"process variable {position}",
-            "process_context": ["LPBF"],
-        }
-        for position in range(1, 6)
-    }
-    signal_specs["outcome"] = {
-        "signal_type": "outcome",
-        "label": "relative density",
-        "process_context": ["LPBF"],
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            *[
-                _paragraph(
-                    source_ref,
-                    source_ref,
-                    position + 1,
-                    "Study",
-                )
-                for position, source_ref in enumerate(signal_specs)
-            ],
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert [
-        len(payload["signals"]) for payload in extractor.reconciliation_payloads
-    ] == [3, 3, 2]
-    outcome_ids = [
-        next(
-            signal["signal_id"]
-            for signal in payload["signals"]
-            if signal["signal_type"] == "outcome"
-        )
-        for payload in extractor.reconciliation_payloads
-    ]
-    assert len(set(outcome_ids)) == 1
-    assert all(
-        sum(signal["signal_type"] == "outcome" for signal in payload["signals"])
-        == 1
-        for payload in extractor.reconciliation_payloads
-    )
-    assert {
-        factor
-        for study in skim.studies
-        for relationship in study.relationships
-        for factor in relationship.varied_factors
-    } == {f"process variable {position}" for position in range(1, 6)}
-    assert skim.unresolved_signals == ()
-
-
-@pytest.mark.parametrize(
-    "response_mode",
-    ["duplicate_relationships", "duplicate_signal_id"],
-)
-def test_duplicate_reconciliation_relationship_keeps_valid_siblings(response_mode):
-    signal_specs = {
-        "power": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "process_context": ["LPBF"],
-        },
-        "speed": {
-            "signal_type": "variable",
-            "label": "scan speed",
-            "process_context": ["LPBF"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "relative density",
-            "process_context": ["LPBF"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            *[
-                _paragraph(source_ref, source_ref, position + 1, "Study")
-                for position, source_ref in enumerate(signal_specs)
-            ],
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(
-        signal_specs,
-        response_mode=response_mode,
-    )
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    relationships = [
-        relationship
-        for study in skim.studies
-        for relationship in study.relationships
-    ]
-    assert len(relationships) == 2
-    assert {relationship.varied_factors for relationship in relationships} == {
-        ("laser power",),
-        ("scan speed",),
-    }
-    assert next(
-        relationship
-        for relationship in relationships
-        if relationship.varied_factors == ("laser power",)
-    ).confidence == pytest.approx(0.7)
-    assert len({relationship.relationship_id for relationship in relationships}) == 2
-    assert skim.unresolved_signals == ()
-
-
-def test_material_only_distant_signals_do_not_enter_reconciliation():
-    signal_specs = {
-        "variable": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "material_scope": ["316L stainless steel"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "relative density",
-            "material_scope": ["316L stainless steel"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("variable", "variable", 2, "Methods"),
-            *[
-                _paragraph(
-                    f"background-{position}",
-                    "background",
-                    position + 2,
-                    "Methods",
-                )
-                for position in range(1, 14)
-            ],
-            _paragraph("outcome", "outcome", 16, "Methods"),
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert extractor.reconciliation_payloads == []
-    assert skim.studies == ()
-    assert {signal.label for signal in skim.unresolved_signals} == {
-        "laser power",
-        "relative density",
-    }
-    assert all(
-        signal.reason == "no paper-scope bridge was found in this paper"
-        for signal in skim.unresolved_signals
-    )
-
-
-def test_a_linked_outcome_is_not_unresolved_by_a_later_candidate_batch():
-    signal_specs = {
-        "variable-1": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "process_context": ["LPBF"],
-        },
-        "variable-2": {
-            "signal_type": "variable",
-            "label": "scan speed",
-            "process_context": ["LPBF"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "relative density",
-            "process_context": ["LPBF"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            *[
-                _paragraph(source_ref, source_ref, position + 1, "Study")
-                for position, source_ref in enumerate(signal_specs)
-            ],
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(
-        signal_specs,
-        prompt_signal_limit=2,
-        reject_later_batches=True,
-    )
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(extractor.reconciliation_payloads) == 2
-    assert len(skim.studies) == 1
-    assert skim.studies[0].relationships[0].outcome == "relative density"
-    assert [signal.label for signal in skim.unresolved_signals] == ["scan speed"]
-
-
-def test_backend_derives_unresolved_signals_omitted_by_one_batch_response():
-    signal_specs = {
-        "variable": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "process_context": ["LPBF"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "relative density",
-            "process_context": ["LPBF"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            _paragraph("variable", "variable", 2, "Study"),
-            _paragraph("outcome", "outcome", 3, "Study"),
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(
-        signal_specs,
-        response_mode="omit_all",
-    )
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert skim.studies == ()
-    assert len(skim.unresolved_signals) == 2
-    assert all(
-        signal.reason == "not linked in this candidate batch"
-        for signal in skim.unresolved_signals
-    )
-
-
-def test_backend_ignores_model_unresolved_copy_of_a_linked_signal():
-    signal_specs = {
-        "variable": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "process_context": ["LPBF"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "relative density",
-            "process_context": ["LPBF"],
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            _paragraph("variable", "variable", 2, "Study"),
-            _paragraph("outcome", "outcome", 3, "Study"),
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(
-        signal_specs,
-        response_mode="duplicate_linked_unresolved",
-    )
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(skim.studies) == 1
-    assert skim.unresolved_signals == ()
-
-
-def test_one_outcome_can_support_separate_context_compatible_study_groups():
-    signal_specs = {
-        "lpbf-variable": {
-            "signal_type": "variable",
-            "label": "laser power",
-            "process_context": ["LPBF"],
-        },
-        "heat-variable": {
-            "signal_type": "variable",
-            "label": "heat-treatment temperature",
-            "process_context": ["heat treatment"],
-        },
-        "outcome": {
-            "signal_type": "outcome",
-            "label": "microhardness",
-        },
-    }
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("study", "Study", 1),
-            _paragraph("lpbf-variable", "lpbf-variable", 2, "Study"),
-            _paragraph("heat-variable", "heat-variable", 3, "Study"),
-            _paragraph("outcome", "outcome", 4, "Study"),
-        ]
-    )
-    extractor = _BoundedSignalReconciliationExtractor(
-        signal_specs,
-        response_mode="separate_relationships",
-    )
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert len(skim.studies) == 2
-    assert {
-        (study.process_context, study.relationships[0].varied_factors)
-        for study in skim.studies
-    } == {
-        (("LPBF",), ("laser power",)),
-        (("heat treatment",), ("heat-treatment temperature",)),
-    }
-    assert {
-        relationship.outcome
-        for study in skim.studies
-        for relationship in study.relationships
-    } == {"microhardness"}
-    assert skim.unresolved_signals == ()
-
-
-def test_signals_from_different_experiments_remain_unresolved():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("heat-variable", "HEAT_VARIABLE_SIGNAL", 2, "Methods"),
-            _heading("results", "Results", 3),
-            _paragraph(
-                "corrosion-outcome",
-                "CORROSION_OUTCOME_SIGNAL",
-                4,
-                "Results",
-            ),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(reconciliation="unresolved"),
-    )[0]
-
-    assert skim.studies == ()
-    assert {signal.label for signal in skim.unresolved_signals} == {
-        "heat-treatment temperature",
-        "corrosion potential",
-    }
-    assert all(signal.reason for signal in skim.unresolved_signals)
-
-
-def test_reconciliation_keeps_broad_outcome_and_candidate_variable_unresolved():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("variable", "VARIABLE_SIGNAL", 2, "Methods"),
-            _heading("results", "Results", 3),
-            _paragraph("outcome", "BROAD_OUTCOME_SIGNAL", 4, "Results"),
-        ]
-    )
-
-    skim = _build_skims(artifacts, tree, _WindowExtractor())[0]
-
-    assert skim.studies == ()
-    assert {signal.label for signal in skim.unresolved_signals} == {
-        "laser power",
-        "tensile properties",
-    }
-    assert all(
-        signal.reason == "outcome requires one specific measurable property"
-        for signal in skim.unresolved_signals
-    )
-
-
-def test_conflicting_relationship_does_not_discard_valid_reconciliation():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph(
-                "variables",
-                "VARIABLE_SIGNAL HEAT_VARIABLE_SIGNAL",
-                2,
-                "Methods",
-            ),
-            _heading("results", "Results", 3),
-            _paragraph("outcome", "OUTCOME_SIGNAL", 4, "Results"),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(reconciliation="mixed_conflict"),
-    )[0]
-
-    assert len(skim.studies) == 1
-    assert skim.studies[0].relationships[0].varied_factors == ("laser power",)
-    assert skim.studies[0].relationships[0].outcome == "relative density"
-    assert [signal.label for signal in skim.unresolved_signals] == [
-        "heat-treatment temperature"
-    ]
-    assert "process_context" in (skim.unresolved_signals[0].reason or "")
-
-
-def test_relationships_with_distinct_contexts_become_separate_studies():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph(
-                "variables",
-                "VARIABLE_SIGNAL HEAT_VARIABLE_SIGNAL",
-                2,
-                "Methods",
-            ),
-            _heading("results", "Results", 3),
-            _paragraph(
-                "outcomes",
-                "OUTCOME_SIGNAL HEAT_OUTCOME_SIGNAL",
-                4,
-                "Results",
-            ),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(reconciliation="grouped_contexts"),
-    )[0]
-
-    assert len(skim.studies) == 2
-    assert {
-        (study.process_context, study.relationships[0].outcome)
-        for study in skim.studies
-    } == {
-        (("LPBF",), "relative density"),
-        (("heat treatment",), "microhardness"),
-    }
-    assert skim.unresolved_signals == ()
-
-
-def test_invalid_reconciliation_ids_retain_all_signals_as_unresolved():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("variable", "VARIABLE_SIGNAL", 2, "Methods"),
-            _heading("results", "Results", 3),
-            _paragraph("outcome", "OUTCOME_SIGNAL", 4, "Results"),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(reconciliation="invalid_id"),
-    )[0]
-
-    assert skim.studies == ()
-    assert len(skim.unresolved_signals) == 2
-    assert all(signal.reason == "paper signal reconciliation failed" for signal in skim.unresolved_signals)
-
-
-def test_complete_candidate_survives_signal_reconciliation_failure():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph(
-                "method-candidate",
-                "METHOD_CANDIDATE VARIABLE_SIGNAL",
-                2,
-                "Methods",
-            ),
-            _heading("results", "Results", 3),
-            _paragraph("outcome", "OUTCOME_SIGNAL", 4, "Results"),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(reconciliation="raise"),
-    )[0]
-
-    assert len(skim.studies) == 1
-    assert skim.studies[0].relationships[0].varied_factors == ("laser power",)
-    assert [signal.label for signal in skim.unresolved_signals] == [
-        "relative density"
-    ]
-
-
-def test_one_signal_role_is_retained_without_a_reconciliation_call():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("methods", "Methods", 1),
-            _paragraph("variable", "VARIABLE_SIGNAL", 2, "Methods"),
-        ]
-    )
-    extractor = _WindowExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    assert extractor.reconciliation_payloads == []
-    assert len(skim.unresolved_signals) == 1
-    assert skim.unresolved_signals[0].reason == "no outcome signal was found in this paper"
 
 
 def test_equivalent_candidates_from_multiple_windows_are_consolidated_once():

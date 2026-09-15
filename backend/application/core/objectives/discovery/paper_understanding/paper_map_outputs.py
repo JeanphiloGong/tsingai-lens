@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from .common import (
-    PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT,
     PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
     PAPER_RESEARCH_MAP_WARNING_LIMIT,
@@ -16,8 +14,6 @@ from .common import (
     _PAPER_MAP_VARIED_FACTOR_LIMIT,
     _REVIEW_CITATION_LEAD_LIMIT,
     _REVIEW_KNOWLEDGE_ITEM_LIMIT,
-    _SOURCE_SIGNAL_CONTEXT_LIMIT,
-    _SOURCE_SIGNAL_LIMIT,
     _STUDY_CONTEXT_VALUE_CHARS,
     _normalize_list,
     _normalize_warnings,
@@ -32,7 +28,7 @@ class PaperMapFactorAssertionModelOutput(_PaperResearchMapResponse):
     role: Literal["varied", "compared", "modeled"]
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
-    ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1)
 
     @field_validator("source_labels", mode="before")
     @classmethod
@@ -58,7 +54,7 @@ class PaperMapRelationshipModelOutput(_PaperResearchMapResponse):
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
-    ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1)
     confidence: float = 0.0
 
     @field_validator("factor_assertions", "source_labels", mode="before")
@@ -156,7 +152,7 @@ class PaperMapSignalModelOutput(_PaperResearchMapResponse):
     ] = Field(default_factory=list, max_length=_PAPER_MAP_CONTEXT_LIMIT)
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
-    ] = Field(min_length=1, max_length=PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT)
+    ] = Field(min_length=1)
     confidence: float = 0.0
 
     @field_validator(
@@ -218,156 +214,6 @@ class ExperimentalPaperMapModelOutput(_PaperResearchMapResponse):
         return _normalize_warnings(value)
 
 
-class PaperSourceSignalModelOutput(_PaperResearchMapResponse):
-    """One explicit scientific axis from one Source, before relationship assembly."""
-
-    signal_type: Literal["variable", "outcome"]
-    label: Annotated[str, Field(min_length=1, max_length=80)]
-    variable_role: Literal[
-        "varied",
-        "compared",
-        "modeled",
-        "fixed",
-        "context",
-        "uncertain",
-        "not_applicable",
-    ]
-    experiment_label: str | None = Field(default=None, max_length=120)
-    design_type: Literal[
-        "experimental",
-        "observational",
-        "modeling",
-        "mixed",
-        "uncertain",
-    ] = "uncertain"
-    claim_scope: Literal[
-        "current_work",
-        "synthesis",
-        "background",
-        "uncertain",
-    ] = "uncertain"
-    material_scope: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
-    process_context: list[
-        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
-    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
-    confidence: float = 0.0
-
-    @field_validator(
-        "material_scope",
-        "process_context",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
-    def identity_key(self) -> tuple[object, ...]:
-        def normalized_values(values: list[str]) -> tuple[str, ...]:
-            return tuple(
-                sorted(
-                    {
-                        value.strip().casefold()
-                        for value in values
-                        if value.strip()
-                    }
-                )
-            )
-
-        return (
-            self.signal_type,
-            self.label.strip().casefold(),
-            self.variable_role,
-            self.experiment_label.strip().casefold()
-            if self.experiment_label
-            else None,
-            self.design_type,
-            self.claim_scope,
-            normalized_values(self.material_scope),
-            normalized_values(self.process_context),
-        )
-
-    @model_validator(mode="after")
-    def _validate_variable_role(self) -> "PaperSourceSignalModelOutput":
-        if self.signal_type == "variable" and self.variable_role == "not_applicable":
-            raise ValueError("variable signal requires a scientific variable role")
-        if self.signal_type == "outcome" and self.variable_role != "not_applicable":
-            raise ValueError("outcome signal variable role must be not_applicable")
-        return self
-
-
-class PaperSourceSignalScreenModelOutput(_PaperResearchMapResponse):
-    """Bounded source-local signals used when paper-scope mapping fails."""
-
-    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
-        "uncertain"
-    )
-    signals: list[PaperSourceSignalModelOutput] = Field(
-        default_factory=list,
-        max_length=_SOURCE_SIGNAL_LIMIT,
-    )
-    output_saturated: bool = False
-    evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
-    confidence: float = 0.0
-    warnings: list[
-        Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
-    ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
-
-    @model_validator(mode="before")
-    @classmethod
-    def _isolate_malformed_signals(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        raw_signals = value.get("signals")
-        if not isinstance(raw_signals, list):
-            return value
-
-        signals: list[PaperSourceSignalModelOutput] = []
-        malformed_count = 0
-        for raw_signal in raw_signals:
-            try:
-                signals.append(PaperSourceSignalModelOutput.model_validate(raw_signal))
-            except ValidationError:
-                malformed_count += 1
-        if not malformed_count:
-            return value
-
-        signal_label = "signal" if malformed_count == 1 else "signals"
-        warning = (
-            f"Omitted {malformed_count} malformed source {signal_label}; retained "
-            "the valid source-local signals."
-        )
-        existing_warnings = (
-            value.get("warnings") if isinstance(value.get("warnings"), list) else []
-        )
-        updated = dict(value)
-        updated["signals"] = signals
-        updated["warnings"] = [warning, *existing_warnings][
-            : PAPER_RESEARCH_MAP_WARNING_LIMIT[0]
-        ]
-        if raw_signals and not signals:
-            updated["output_saturated"] = True
-        return updated
-
-    @field_validator("signals", mode="before")
-    @classmethod
-    def _normalize_signals(cls, value: object) -> object:
-        return _normalize_list(value)
-
-    @field_validator("warnings", mode="before")
-    @classmethod
-    def _normalize_diagnostic_warnings(cls, value: object) -> object:
-        return _normalize_warnings(value)
-
-    @model_validator(mode="after")
-    def _validate_signal_identities(self) -> PaperSourceSignalScreenModelOutput:
-        identities = [signal.identity_key() for signal in self.signals]
-        if len(identities) != len(set(identities)):
-            raise ValueError("source signal screen contains duplicate signal identities")
-        return self
-
-
 class ReviewMapKnowledgeItemModelOutput(_PaperResearchMapResponse):
     """One model-returned review statement linked by a short Source label."""
 
@@ -390,7 +236,7 @@ class ReviewMapKnowledgeItemModelOutput(_PaperResearchMapResponse):
     )
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
-    ] = Field(min_length=1, max_length=4)
+    ] = Field(min_length=1)
     confidence: float = 0.0
 
     @field_validator(

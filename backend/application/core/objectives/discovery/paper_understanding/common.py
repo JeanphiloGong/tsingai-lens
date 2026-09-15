@@ -5,15 +5,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-PAPER_RESEARCH_MAP_SOURCE_UNIT_LIMIT = 12
-PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT = 4
 PAPER_RESEARCH_MAP_WARNING_LIMIT = (2, 240)
 PAPER_RESEARCH_MAP_SCOPE_LIMIT = 4
 PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT = 6
 # A bounded paper-map window can legitimately mention more than eight distinct
 # variables/outcomes. Keep the map lightweight, but do not turn a valid scope
 # response into a JSON failure merely because one batch contains nine or ten
-# unresolved signals. Downstream reconciliation still caps work per document.
+# unresolved signals. Contextual rereading remains bounded per document.
 PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT = 12
 
 _STUDY_CONTEXT_LIMIT = 12
@@ -22,8 +20,6 @@ _VARIED_FACTOR_LIMIT = 12
 _PAPER_MAP_STUDY_LIMIT = 2
 _PAPER_MAP_CONTEXT_LIMIT = 4
 _PAPER_MAP_VARIED_FACTOR_LIMIT = 6
-_SOURCE_SIGNAL_CONTEXT_LIMIT = 4
-_SOURCE_SIGNAL_LIMIT = 8
 _REVIEW_KNOWLEDGE_ITEM_LIMIT = 2
 _REVIEW_CITATION_LEAD_LIMIT = 3
 

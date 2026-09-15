@@ -97,7 +97,9 @@ class CreateFindingDraftCapability:
             "The draft names Evidence from one published Objective version but does "
             "not validate those bindings, publish a Finding, or change any existing "
             "record. Use the separate approved Finding write only after inspecting "
-            "and validating the exact Evidence."
+            "and validating the exact Evidence. If the disputed Finding relies on "
+            "incorrectly extracted facts, draft their Evidence correction first; "
+            "rebuild this Finding from the subsequently published Evidence."
         ),
         risk=ToolRisk.DRAFT,
         input_model=CreateFindingDraftArguments,

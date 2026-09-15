@@ -199,6 +199,13 @@ def select_tool_specs(
     completed_writes.update(inherited_completed_writes or ())
     allowed_names.difference_update(completed_writes)
     if (
+        calls and calls[-1].name in {"create_evidence_draft", "create_evidence_version"}
+        and calls[-1].error_code == "source_read_incomplete"
+        and all(calls[-1].arguments.get(key) for key in ("document_id", "source_kind", "source_ref"))
+        and "read_source" in registered_names
+    ):
+        return tuple(spec for spec in specs if spec.name == "read_source")
+    if (
         "revise_research_plan" in allowed_names
         and "inspect_research_plans" in registered_names
         and not successful_results.get("inspect_research_plans")
@@ -338,8 +345,8 @@ def select_tool_specs(
         and call.status is ToolCallStatus.SUCCEEDED
         for call in calls
     )
-    finding_draft_this_turn = any(
-        call.name == "create_finding_draft"
+    correction_draft_this_turn = any(
+        call.name in {"create_finding_draft", "create_evidence_draft"}
         and call.status is ToolCallStatus.SUCCEEDED
         for call in calls
     )
@@ -403,7 +410,7 @@ def select_tool_specs(
             }
         else:
             allowed_names = set()
-    elif finding_draft_this_turn:
+    elif correction_draft_this_turn and not persist_requested:
         allowed_names = set()
         mandatory_stage = True
     elif proposed_plan and plan_intent and persist_requested:
@@ -424,11 +431,9 @@ def select_tool_specs(
     elif plan_revision_requested and persist_requested and plan_intent:
         allowed_names = {"revise_research_plan"}
     elif finding_draft_requested and not mandatory_stage:
-        # A Finding is the starting point of review, not proof that its Sources
-        # have been checked. Keep discovered readers and discovery available.
-        allowed_names = {"create_finding_draft"} | loaded_names.intersection(
-            intent_policy.SOURCE_READ_CAPABILITIES | {"inspect_published_finding"}
-        )
+        # Review may reveal a faulty Evidence extraction. Preserve discovered
+        # capabilities so the model can draft that prerequisite correction.
+        allowed_names.add("create_finding_draft")
     elif inspected_finding and plan_intent:
         allowed_names = {"propose_research_plan"}
     elif plan_intent:
@@ -476,8 +481,10 @@ def select_tool_specs(
     if (
         not mandatory_stage
         and capabilities.discovery.tools
-        and (finding_draft_requested or failed_source_read or required_tool_before_answer(
-            tuple(spec.name for spec in selected), successful_results=successful_results,
+        and (finding_draft_requested or failed_source_read
+             or allowed_names.intersection({"create_evidence_version", "create_finding_version"})
+             or required_tool_before_answer(
+            tuple(spec.name for spec in selected), successful_results=successful_results, calls=calls,
         ) is None)
     ):
         return (*selected, capabilities.discovery.spec)
@@ -488,6 +495,7 @@ def required_tool_before_answer(
     tool_names: tuple[str, ...],
     *,
     successful_results: Mapping[str, list[Mapping[str, Any]]] | None = None,
+    calls: list[ChatToolCall] | None = None,
 ) -> str | None:
     if tuple(tool_names) == ("inspect_document_sources",) and _pending_document_overviews(successful_results or {}):
         return "inspect_document_sources"
@@ -497,13 +505,23 @@ def required_tool_before_answer(
         or (successful_results is not None and successful_results.get("inspect_published_finding"))
     ):
         return next(name for name in tool_names if name in review_writes)
+    for write_name in ("create_evidence_version", "create_finding_version"):
+        if write_name not in tool_names or (successful_results or {}).get(write_name):
+            continue
+        if calls and calls[-1].name == write_name and calls[-1].status is ToolCallStatus.FAILED:
+            continue
+        return write_name
     if (
         "create_finding_draft" in tool_names
         and successful_results is not None
         and successful_results.get("inspect_published_finding")
         and not successful_results.get("create_finding_draft")
+        and not successful_results.get("create_evidence_draft")
     ):
-        return "create_finding_draft"
+        return (
+            "create_finding_draft or create_evidence_draft"
+            if "create_evidence_draft" in tool_names else "create_finding_draft"
+        )
     reader_names = {"read_source", "inspect_table"}
     source_reader_names = {*reader_names, "inspect_document_sources"}
     if (
@@ -917,6 +935,36 @@ def stage_instruction(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
 ) -> str | None:
     content: str | None = None
+    if (
+        tool_names == ("read_source",) and calls
+        and calls[-1].name in {"create_evidence_draft", "create_evidence_version"}
+        and calls[-1].error_code == "source_read_incomplete"
+    ):
+        source = {key: calls[-1].arguments.get(key) for key in ("document_id", "source_kind", "source_ref")}
+        return (
+            "The Evidence proposal has not reached approval: its complete Source was not read "
+            "in this request. Recover by calling read_source with this exact locator and following "
+            "any continuation offsets. Use the returned complete digest and verbatim excerpt to "
+            "review the factual draft, then resubmit the requested approval proposal. Earlier "
+            "notes are not a complete-source verification token. Source locator: "
+            + json.dumps(source, ensure_ascii=False)
+        )
+    for draft_name, write_name in (
+        ("create_evidence_draft", "create_evidence_version"),
+        ("create_finding_draft", "create_finding_version"),
+    ):
+        drafts = successful_results.get(draft_name, ())
+        if write_name in tool_names and drafts and isinstance(drafts[-1].get("draft"), Mapping):
+            draft = {key: value for key, value in drafts[-1]["draft"].items() if key != "draft_id"}
+            return (
+                "The requested structured draft has been created. Complete the requested publication "
+                f"by calling {write_name} to open exact user approval. The proposal does not execute "
+                "publication. Confirm its version and Evidence bindings against the inspected records; "
+                "read again only to resolve a concrete missing or conflicting detail. Do not restart "
+                "the investigation or create another draft merely because context was compacted. "
+                "The following is the actual transient draft, not a saved result or authority to write:\n"
+                + json.dumps(draft, ensure_ascii=False)
+            )
     pending_documents = _pending_document_overviews(successful_results, calls)
     failed_finding_draft = next(
         (
@@ -1043,8 +1091,11 @@ def stage_instruction(
             "page and next_offset; inspect the cited results tables when needed. One complete Source "
             "only means that passage was read. When relevant body text is available but unchecked, "
             "continue reading instead of replacing the requested check with an unread-paper disclaimer. "
-            "Once each question is resolved or blocked by unavailable content, call create_finding_draft "
-            "with the supported correction and explicit unfinished checks. An untruncated outline lists "
+            "Once each question is resolved or blocked by unavailable content, compare the stored Evidence "
+            "fields with the exact Source. If extraction is wrong, discover and call create_evidence_draft "
+            "for the corrected facts first; the Finding remains pending until those facts are published "
+            "and its Evidence roles are reconsidered. If the Evidence is correct, call create_finding_draft "
+            "with the supported synthesis and explicit unfinished checks. An untruncated outline lists "
             "all prepared sections; if only front matter exists, read its relevant passage once and "
             "continue with other papers. Additional searches cannot recover an unprepared body. "
             "The following counts record complete passage reads, not scientific verification. "

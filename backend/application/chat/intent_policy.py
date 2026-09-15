@@ -416,12 +416,17 @@ def _write_targets(text: str) -> set[str]:
     targets: set[str] = set()
     if mentions_terms(text, ("反馈", "标注", "feedback")):
         targets.add("record_finding_feedback")
-    if mentions_terms(text, ("修订", "curation", "curate", "revision")):
+    if mentions_terms(text, ("人工修订", "human revision", "curation", "curate")):
         targets.add("curate_finding")
+    elif mentions_terms(text, ("修订", "revision", "revise")):
+        targets.add(
+            "create_evidence_version"
+            if mentions_terms(text, ("evidence", "证据")) else "create_finding_version"
+        )
     if mentions_terms(text, ("分析", "analysis")):
         targets.update({"start_objective_analysis", "publish_agent_objective_analysis"})
     if mentions_terms(text, ("方案", "计划", "plan")):
-        targets.difference_update({"curate_finding"})
+        targets.difference_update({"curate_finding", "create_finding_version", "create_evidence_version"})
         targets.update({"create_research_plan", "revise_research_plan"})
     if mentions_terms(text, ("新版本", "new version", "新 finding", "新finding", "独立", "new finding")):
         if not targets.intersection({"start_objective_analysis", "publish_agent_objective_analysis"}):

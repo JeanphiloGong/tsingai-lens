@@ -178,14 +178,17 @@ class _RunProgress:
         transitions = {
             "inspect_published_finding": ("inspect_finding", "inspect_sources"),
             "create_finding_draft": ("validate_claim", "approval"),
+            "create_evidence_draft": ("validate_claim", "approval"),
         }
         transition = transitions.get(tool_name)
         if transition is None:
             return
         current, next_step = transition
-        if tool_name == "create_finding_draft":
+        if tool_name in {"create_finding_draft", "create_evidence_draft"}:
             for item in self.research_plan:
-                if item["id"] in {"inspect_sources", "validate_claim", "draft_finding"}:
+                if item["id"] in {"inspect_sources", "validate_claim"} or (
+                    item["id"] == "draft_finding" and tool_name == "create_finding_draft"
+                ):
                     item["status"] = "completed"
             next_step = "approval"
         current_item = next((item for item in self.research_plan if item["id"] == current), None)
@@ -634,6 +637,7 @@ class ResearchAgentRunner:
                             require_tool_call=capability_policy.required_tool_before_answer(
                                 tool_names,
                                 successful_results=capability_policy.active_successful_results_by_name(messages),
+                                calls=calls,
                             ) is not None,
                         ),
                         tool_specs, progress, text_delta_callback,
@@ -751,6 +755,7 @@ class ResearchAgentRunner:
                 required_tool = capability_policy.required_tool_before_answer(
                     tool_names,
                     successful_results=capability_policy.active_successful_results_by_name(messages),
+                    calls=calls,
                 )
                 if (
                     not turn.tool_calls

@@ -158,6 +158,30 @@ remaining relevant sections before drafting; fully read passages from an outline
 batch count as reads and do not require a duplicate individual read. Unavailable
 checks remain explicit in a partial draft. The visible reading step stays active
 until a reviewed draft is actually produced.
+The review compares stored Evidence fields with their Source before choosing a
+draft. Incorrect extraction requires an Evidence draft, its exact approved
+publication, and then a new Finding synthesized from current eligible Evidence.
+Correct Evidence remains unchanged when only the synthesis needs revision.
+Discovered Evidence tools stay available throughout Finding review. An Evidence
+draft can fulfill the immediate correction-draft request while the dependent
+Finding remains pending; a draft-only request cannot publish either record.
+Feedback and curation are separately requested annotations, not substitutes for
+correcting canonical facts or publishing their dependent conclusion.
+Compaction notes retain attributed results of completed checks; a partial archive
+batch does not reopen every earlier check. Re-reading addresses a disputed detail
+or a missing exact authoring input. Notes never replace canonical Source digest,
+excerpt and ownership validation for Evidence authoring.
+An explicit Evidence or Finding publication request must reach its actual approval
+proposal, including when its draft belongs to an earlier turn. Discovery remains
+available for required reads and drafts. A failed proposal may be explained or
+repaired; a prose confirmation cannot satisfy a write that has not been attempted.
+If an Evidence proposal lacks a complete Source read in the active request, its
+rejection reopens the exact Source reader. Successful reading restores the normal
+proposal flow; a failed read remains a technical failure, never write authority.
+After a requested publication's draft succeeds, the execution hint carries that
+exact draft forward to approval instead of restarting the investigation. A new
+concrete uncertainty can still require reading; compaction alone does not require
+another draft, and the draft remains subject to canonical write validation.
 Finding draft parameters describe Evidence roles relative to the proposed
 conclusion, including when it corrects a disputed parent. Missing supporting
 Evidence returns `finding_supporting_evidence_required` so argument repair can

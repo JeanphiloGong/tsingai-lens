@@ -2500,6 +2500,126 @@ async def test_finding_recheck_emits_a_progressive_research_plan() -> None:
     assert plans[-1][-1] == {"id": "approval", "status": "in_progress"}
 
 
+@pytest.mark.parametrize("request_publication", [False, True])
+async def test_finding_review_can_draft_evidence_correction_before_rebuilding_finding(request_publication) -> None:
+    from application.chat.capabilities.document_sources import ReadSourceArguments
+
+    class EvidenceDraftArguments(ReadSourceArguments):
+        source_digest: str
+
+    source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
+    inspect = _Capability("inspect_published_finding", ToolRisk.READ, result_data={
+        "finding": {"finding_id": "finding-1"},
+        "evidence": [{"evidence_id": "evidence-1", **source,
+                      "reported_result": {"direction": "decrease"}}],
+    })
+    read = _Capability("read_source", ToolRisk.READ, ReadSourceArguments, result_data={
+        **source, "content_truncated": False, "source_digest": "a" * 64,
+        "content": "Elongation increased and then decreased as annealing temperature increased.",
+    })
+    evidence_draft = _Capability("create_evidence_draft", ToolRisk.DRAFT, EvidenceDraftArguments)
+    finding_draft = _Capability("create_finding_draft", ToolRisk.DRAFT)
+    evidence_write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceDraftArguments)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("inspect_published_finding", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
+        ModelTurn(tool_calls=(ModelToolCall("create_evidence_draft", {**source, "source_digest": "a" * 64}),)),
+        (ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),))
+         if request_publication else
+         ModelTurn(content="原始依据把先升后降简化成下降。已形成依据修订草案，保存后还需重新综合结论。")),
+        discover=("inspect_published_finding", "read_source", "create_finding_draft", "create_evidence_draft"),
+        source_inspection_required=True,
+    )
+    events: list[dict[str, object]] = []
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
+        inspect, read, evidence_draft, finding_draft,
+        evidence_write,
+        _Capability("create_finding_version", ToolRisk.WRITE),
+        _Capability("curate_finding", ToolRisk.WRITE),
+    ))).run_turn(
+        context=_context(), previous_messages=(),
+        user_message=("请核对这个 Finding 的原文，给出修订草案并保存证据修订为新版本。" if request_publication else
+                      "请核对这个 Finding 的原文，先给修订草案，不要保存或发布。"),
+        progress_callback=events.append,
+    )
+
+    assert result.status is (AgentRunStatus.APPROVAL_REQUIRED if request_publication else AgentRunStatus.COMPLETED)
+    expected_calls = [
+        "inspect_published_finding", "read_source", "create_evidence_draft",
+    ]
+    if request_publication:
+        expected_calls.append("create_evidence_version")
+        assert result.pending_approval.name == "create_evidence_version"
+    assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
+    assert not evidence_write.executed_arguments
+    assert not finding_draft.executed_arguments
+    plan = next(event["research_plan"] for event in reversed(events) if event.get("research_plan"))
+    assert next(item for item in plan if item["id"] == "draft_finding")["status"] == "pending"
+    assert plan[-1] == {"id": "approval", "status": "in_progress"}
+
+
+@pytest.mark.parametrize("write_before_read", [False, True])
+async def test_evidence_save_request_requires_real_approval_after_complete_read(write_before_read) -> None:
+    from application.chat.capabilities.document_sources import ReadSourceArguments
+
+    class EvidenceWriteArguments(ReadSourceArguments):
+        source_digest: str
+
+    source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
+    read = _Capability("read_source", ToolRisk.READ, ReadSourceArguments, result_data={
+        **source, "content_truncated": False, "source_digest": "a" * 64,
+        "content": "Elongation increased and then decreased as annealing temperature increased.",
+    })
+    write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceWriteArguments)
+    model = _Model(
+        *( [ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),))]
+           if write_before_read else [] ),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
+        ModelTurn(content="The Evidence correction is ready. Please confirm saving it."),
+        ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),)),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read, write))).run_turn(
+        context=_context(), previous_messages=(), user_message="Read the Source and save the corrected Evidence as a new version.",
+    )
+    assert result.status is AgentRunStatus.APPROVAL_REQUIRED
+    assert result.pending_approval.name == "create_evidence_version"
+    assert not write.executed_arguments
+    if write_before_read:
+        assert result.tool_results[0].error_code == "source_read_incomplete"
+        assert model.tool_spec_names[1] == ("read_source",)
+
+
+@pytest.mark.parametrize("kind", ["evidence", "finding"])
+def test_publication_hint_retains_actual_draft_instead_of_restarting_review(kind) -> None:
+    draft = {"draft_id": "reviewed-1", "source_analysis_version": 7,
+             "supporting_evidence_ids": ["corrected-evidence-1"], "statement": "Condition-dependent elongation."}
+    instruction = capability_policy.stage_instruction(
+        ("read_source", "inspect_published_finding", f"create_{kind}_draft", f"create_{kind}_version"),
+        [], successful_results={
+            "inspect_published_finding": [{"finding": {"finding_id": "parent-1"}}],
+            f"create_{kind}_draft": [{"draft": draft, "persistence": "transient_chat_result"}],
+        },
+    )
+    retained = json.loads(instruction.split("\n", 1)[1])
+    assert retained == {key: value for key, value in draft.items() if key != "draft_id"}
+    assert f"calling create_{kind}_version" in instruction
+    assert "call create_finding_draft" not in instruction
+
+
+async def test_publishing_an_earlier_finding_draft_requires_actual_approval() -> None:
+    write = _Capability("create_finding_version", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(content="The earlier draft is ready. Please approve publication."),
+        ModelTurn(tool_calls=(ModelToolCall("create_finding_version", {}),)),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Publish the reviewed Finding as a new version.",
+    )
+    assert result.status is AgentRunStatus.APPROVAL_REQUIRED
+    assert result.pending_approval.name == "create_finding_version"
+    assert not write.executed_arguments
+
+
 async def test_exact_finding_inspection_narrows_next_step_to_research_plan_draft() -> None:
     inspect = _Capability("inspect_published_finding", ToolRisk.READ)
     propose = _Capability(
@@ -3044,6 +3164,9 @@ def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None
     ("Save feedback for this Finding, but do not save the curation or publish a new analysis.", {"record_finding_feedback"}),
     ("Check the complete table and save the corrected Evidence as a new version.", {"create_evidence_version"}),
     ("Save the human revision of this Finding; do not publish a new Finding.", {"curate_finding"}),
+    ("请保存这个 Finding 的修订。", {"create_finding_version"}),
+    ("Save the revision of this Finding.", {"create_finding_version"}),
+    ("请保存证据修订，保留旧记录。", {"create_evidence_version"}),
     ("保存这个 Finding 的反馈，先不要保存任何内容。", set()),
     ("只读查看 Finding 已保存的错误反馈和人工修订，不要写入。", set()),
     ("Read-only: inspect the saved Finding revision.", set()),

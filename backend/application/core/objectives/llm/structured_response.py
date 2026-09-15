@@ -12,6 +12,7 @@ from typing import Any
 
 import tiktoken
 from openai import LengthFinishReasonError, OpenAI
+from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, ValidationError
 
 from application.core.structured_extraction.json_support import (
@@ -350,7 +351,7 @@ class StructuredResponseClient:
                 "type": "json_schema",
                 "json_schema": {
                     "name": json_schema_name,
-                    "schema": response_model.model_json_schema(),
+                    "schema": to_strict_json_schema(response_model),
                     "strict": True,
                 },
             }

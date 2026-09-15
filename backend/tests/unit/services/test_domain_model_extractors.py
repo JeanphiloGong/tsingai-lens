@@ -22,10 +22,12 @@ from application.core.objectives.analysis.finding_synthesis import (
     build_finding_synthesis_prompt,
 )
 from application.core.objectives.analysis.source_extraction import (
+    DirectEvidenceExtractionsModelOutput,
     ObjectiveSourceExtractor,
     EvidenceContextModelOutput,
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,
+    RequestedContextFactsModelOutput,
     _normalize_objective_evidence_payload,
     _objective_evidence_repair_instruction,
     build_objective_evidence_prompt,
@@ -747,6 +749,20 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "collection-test" not in user_prompt
 
 
+def _assert_strict_object_schemas(schema, path: str = "$") -> None:
+    if isinstance(schema, list):
+        for index, item in enumerate(schema):
+            _assert_strict_object_schemas(item, f"{path}/{index}")
+    elif isinstance(schema, dict):
+        for key, value in schema.items():
+            _assert_strict_object_schemas(value, f"{path}/{key}")
+        if schema.get("type") == "object":
+            assert schema.get("additionalProperties") is False, path
+            assert set(schema.get("required", [])) == set(
+                schema.get("properties", {})
+            ), f"{path}: strict schemas must require every property"
+
+
 class _FakeCompletions:
     def __init__(self, content: str | list[str]) -> None:
         self._contents = [content] if isinstance(content, str) else list(content)
@@ -754,6 +770,9 @@ class _FakeCompletions:
 
     def create(self, **kwargs):  # noqa: ANN003, ARG002
         self.calls.append(kwargs)
+        response_format = kwargs.get("response_format", {})
+        if response_format.get("type") == "json_schema":
+            _assert_strict_object_schemas(response_format["json_schema"]["schema"])
         content = self._contents[min(len(self.calls) - 1, len(self._contents) - 1)]
         return SimpleNamespace(
             model="fake-model",
@@ -3893,11 +3912,73 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
         "structured_evidence_extractions"
     )
     assert text_call["response_format"]["json_schema"]["strict"] is True
-    assert text_call["response_format"]["json_schema"]["schema"] == (
-        EvidenceExtractionsModelOutput.model_json_schema()
-    )
+    _assert_strict_object_schemas(text_call["response_format"]["json_schema"]["schema"])
     assert "JSON schema:" not in text_call["messages"][1]["content"]
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
+
+
+@pytest.mark.parametrize(
+    "response_model",
+    (
+        EvidenceExtractionsModelOutput,
+        DirectEvidenceExtractionsModelOutput,
+        RequestedContextFactsModelOutput,
+    ),
+)
+def test_named_json_schema_requires_nested_keys_without_changing_values(response_model):
+    original_schema = response_model.model_json_schema()
+    empty_response = response_model()
+    client = _FakeOpenAIClient(empty_response.model_dump_json())
+
+    parsed, _ = _response_client(client).complete_json(
+        messages=[{"role": "user", "content": "Extract only facts in this Source."}],
+        response_model=response_model,
+        max_completion_tokens=3072,
+        json_schema_name="source_facts",
+    )
+
+    assert parsed == empty_response
+    assert response_model.model_json_schema() == original_schema
+    assert len(client.chat.completions.calls) == 1
+    response_format = client.chat.completions.calls[0]["response_format"]
+    assert response_format["json_schema"]["strict"] is True
+    schema = response_format["json_schema"]["schema"]
+    _assert_strict_object_schemas(schema)
+    for name, definition in schema["$defs"].items():
+        original_properties = original_schema["$defs"][name]["properties"]
+        for field, property_schema in definition["properties"].items():
+            original = original_properties[field]
+            # Required keys do not imply known measurements or known context.
+            for keyword in ("anyOf", "enum", "maxItems", "minItems"):
+                if keyword in original:
+                    assert property_schema[keyword] == original[keyword]
+            if original.get("default") is not None:
+                assert property_schema["default"] == original["default"]
+
+
+def test_named_json_schema_keeps_unknown_context_empty_and_nullable():
+    client = _FakeOpenAIClient(
+        '{"facts":[{"name":"alloy","value":"316L","unit":null,'
+        '"context_scope":"experimental","applies_to_outcomes":[],"group_label":null}]}'
+    )
+
+    parsed, _ = _response_client(client).complete_json(
+        messages=[{"role": "user", "content": "The specimens were 316L."}],
+        response_model=RequestedContextFactsModelOutput,
+        max_completion_tokens=1024,
+        json_schema_name="structured_requested_context_facts",
+    )
+
+    fact = parsed.facts[0]
+    assert fact.value == "316L"
+    assert fact.unit is None
+    assert fact.group_label is None
+    assert fact.applies_to_outcomes == []
+    properties = client.chat.completions.calls[0]["response_format"]["json_schema"][
+        "schema"
+    ]["$defs"]["RequestedContextFactModelOutput"]["properties"]
+    assert {"type": "null"} in properties["unit"]["anyOf"]
+    assert {"type": "null"} in properties["group_label"]["anyOf"]
 
 
 def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text() -> None:

@@ -110,10 +110,36 @@ a navigation task. Existing-conclusion review reads the Finding and Evidence
 before the Source requirement can advance to paper inspection.
 The review obtains the prepared outline for linked papers, then reads the exact
 Sources already linked by that Finding before broad navigation. The outline
-reports section headings, pages, counts and first Source references independently
-of search filters. Exact `heading_path` filters and offsets support progressive
+reports section headings, pages and counts independently of search filters;
+initial navigation also supplies first Source references for those sections.
+Exact `heading_path` filters and offsets support progressive
 section reading. The current turn's complete Source reads are counted per section;
 reading one passage does not mark the whole paper or scientific check complete.
+The per-paper reading ledger also retains papers from earlier searches in the
+same request, even when later searches narrow their scope. A paper without an
+inspected outline remains visible with unknown prepared coverage; a failed
+inspection is not treated as an empty paper. Prepared pages, completely read
+passages, and unread sections remain distinct. The runner regenerates this
+ledger from the complete request trajectory before context selection, so model
+compaction notes cannot erase a pending paper. Browsing a Collection alone does
+not select every listed paper for investigation. The ledger supplies coverage
+facts; the model still decides which sections address the research question.
+For requested sections, the ledger preserves unfinished batch offsets and the
+returned parser block types through compaction. Reading a section heading is
+recorded separately from other passages. The model can continue the exact
+section from its offset, or reduce parallel requests when the result allowance
+only fits headings; a successful heading read does not complete a Methods check.
+Source placeholders also remain pending after the last section page; their
+exact text/table reader clears them only when whole-source coverage is recorded.
+Section reads retain all outline headings, pages and counts, while repeating
+detailed size and locator metadata only for the selected section to leave room
+for its body. Final result-size checks still enforce the supplied context budget.
+
+The comparison instructions apply these checks to ordinary paper comparisons as
+well as Finding corrections: inspect available material/feedstock, fabrication,
+treatment, control and measurement details before deciding comparability.
+Finding one difference does not finish the other requested checks; unavailable
+prepared content remains an explicit limitation for that paper.
 
 For example, a researcher challenges a claim that annealing reduces elongation
 in every paper. The Agent checks the disputed Finding and Evidence, identifies

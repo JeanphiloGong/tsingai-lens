@@ -740,7 +740,14 @@ class InspectDocumentSourcesCapability:
         # Keep complete passages together. Reserve space for the outline,
         # Source locators, result framing, and continuation metadata.
         outline = list(sections.values())[:80]
-        remaining_tokens = max(256, context.max_result_tokens - ChatContextBuilder.estimate_tokens(outline) - 1800)
+        if arguments.heading_path is not None:
+            # A section read needs body space; retain every section's coverage
+            # but repeat detailed size/locator metadata only for the requested one.
+            outline = [section if section["heading_path"] == arguments.heading_path else
+                       {key: section[key] for key in ("heading_path", "pages", "source_count")}
+                       for section in outline]
+        framing_tokens = 900 if arguments.heading_path is not None else 1800
+        remaining_tokens = max(256, context.max_result_tokens - ChatContextBuilder.estimate_tokens(outline) - framing_tokens)
         visible = []
         for source in matches[arguments.offset : arguments.offset + arguments.limit]:
             cost = ChatContextBuilder.estimate_tokens(json.dumps(source, ensure_ascii=True)) + 250

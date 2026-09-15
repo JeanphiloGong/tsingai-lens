@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -15,7 +16,7 @@ from application.chat.capabilities.document_sources import (
     ReadSourceCapability,
     SearchSourcesCapability,
 )
-from domain.chat import ChatToolCall, ChatToolResult, ToolRisk
+from domain.chat import ChatToolCall, ChatToolResult, ToolCallStatus, ToolRisk
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from tests.unit.application.test_chat_p002_source_fixture import _P002CollectionService, _P002SourceRepository
 from tests.unit.application.test_research_agent_runner import _Model
@@ -63,6 +64,161 @@ async def test_document_outline_survives_empty_search_and_supports_section_readi
             document_id=DOCUMENT, heading_path=heading, limit=1, offset=first.data["next_offset"],
         ))
         assert second.data["sources"][0]["source_ref"] != first.data["sources"][0]["source_ref"]
+
+
+def test_comparison_progress_keeps_paper_without_outline_after_exact_results_read():
+    results = {
+        "search_sources": [{"document_ids": ["eli", "hp-lpbf", "lpbf"], "matches": []}],
+        "inspect_document_sources": [{
+            "document": {"document_id": document_id},
+            "prepared_source_pages": [1], "outline_truncated": False,
+            "document_outline": [{"heading_path": "Abstract", "pages": [1], "source_count": 1}],
+        } for document_id in ("eli", "lpbf")],
+        "read_source": [{
+            "document_id": "hp-lpbf", "source_kind": "text_window", "source_ref": "results-109",
+            "source_digest": "hp-results", "heading_path": "Results", "page": 10,
+            "content_truncated": False,
+        }],
+    }
+    progress = {item["document_id"]: item for item in capability_policy._section_reading_progress(results)}
+
+    assert set(progress) == {"eli", "hp-lpbf", "lpbf"}
+    assert progress["hp-lpbf"]["outline_status"] == "not_inspected"
+    assert progress["hp-lpbf"]["prepared_source_pages"] is None
+    assert progress["hp-lpbf"]["sections"] is None
+    assert progress["hp-lpbf"]["completely_read_passages"] == 1
+    assert progress["eli"]["prepared_source_pages"] == [1]
+
+    results["inspect_document_sources"].append({
+        "document": {"document_id": "hp-lpbf"}, "prepared_source_pages": list(range(1, 14)),
+        "outline_truncated": False,
+        "document_outline": [
+            {"heading_path": "Materials and methods", "pages": [2, 3, 4], "source_count": 18},
+            {"heading_path": "Results", "pages": [10], "source_count": 4},
+        ],
+    })
+    progress = {item["document_id"]: item for item in capability_policy._section_reading_progress(results)}
+    assert progress["hp-lpbf"]["outline_status"] == "inspected"
+    assert progress["hp-lpbf"]["prepared_source_pages"] == list(range(1, 14))
+    assert progress["hp-lpbf"]["sections"][0]["available_passages"] == 18
+    assert progress["hp-lpbf"]["sections"][0]["completely_read_passages"] == 0
+    assert progress["hp-lpbf"]["sections"][1]["completely_read_passages"] == 1
+
+
+@pytest.mark.parametrize("outline_failed", [False, True])
+def test_reading_progress_keeps_earlier_search_scope_and_distinguishes_failed_outline(outline_failed):
+    calls = [ChatToolCall.requested(
+        tool_call_id="search", session_id="s", assistant_message_id="a", position=0,
+        name="search_sources", arguments={"document_ids": ["eli", "hp-lpbf"]}, risk=ToolRisk.READ,
+    )]
+    if outline_failed:
+        calls.append(replace(ChatToolCall.requested(
+            tool_call_id="outline", session_id="s", assistant_message_id="b", position=0,
+            name="inspect_document_sources", arguments={"document_id": "hp-lpbf"}, risk=ToolRisk.READ,
+        ), status=ToolCallStatus.FAILED, error_code="source_document_not_found",
+           finished_at="2026-09-15T00:00:00+00:00"))
+    results = {
+        "browse_collection_papers": [{"papers": [{"document_id": "unselected-paper"}]}],
+        "search_sources": [{"document_ids": ["eli"], "matches": []}],
+    }
+    instruction = capability_policy.stage_instruction(("inspect_document_sources",), calls, successful_results=results)
+    assert instruction is not None
+    progress = {item["document_id"]: item for item in json.loads(instruction.rsplit("\n", 1)[1])}
+    assert set(progress) == {"eli", "hp-lpbf"}
+    assert progress["hp-lpbf"]["outline_status"] == ("inspection_failed" if outline_failed else "not_inspected")
+    assert progress["hp-lpbf"]["prepared_source_pages"] is None
+    assert progress["hp-lpbf"]["outline_truncated"] is None
+
+
+@pytest.mark.parametrize("name,arguments", [
+    ("search_sources", {"document_ids": None}),
+    ("search_sources", {"document_ids": "hp-lpbf"}),
+    ("search_sources", {"document_ids": [None, {"document_id": "hp-lpbf"}]}),
+    ("inspect_document_sources", {"document_id": {"id": "hp-lpbf"}}),
+])
+def test_reading_progress_tolerates_invalid_document_arguments_during_repair(name, arguments):
+    call = ChatToolCall.requested(
+        tool_call_id="invalid", session_id="s", assistant_message_id="a", position=0,
+        name=name, arguments=arguments, risk=ToolRisk.READ,
+    )
+    results = {"search_sources": [{"document_ids": ["eli"], "matches": []}]}
+    progress = capability_policy._section_reading_progress(results, calls=[call])
+    assert [item["document_id"] for item in progress] == ["eli"]
+
+
+def test_requested_section_keeps_continuation_when_only_its_heading_was_returned():
+    heading = "2. Materials and methods"
+    overview = {
+        "document": {"document_id": "hp-lpbf"}, "heading_path": heading,
+        "document_outline": [{"heading_path": heading, "pages": [2, 3], "source_count": 3}],
+        "offset": 0, "next_offset": 1, "match_total": 3,
+        "sources": [{
+            "source_kind": "text_window", "source_ref": "heading", "block_type": "heading",
+            "heading_path": heading, "source_digest": "title-digest",
+            "content": heading, "content_truncated": False,
+        }],
+    }
+    results = {"inspect_document_sources": [overview]}
+    progress = capability_policy._section_reading_progress(results)[0]
+    assert progress["sections"][0]["completely_read_heading_passages"] == 1
+    assert progress["pending_section_reads"] == [{
+        "arguments": {"document_id": "hp-lpbf", "heading_path": heading, "offset": 1},
+        "last_batch_block_types": ["heading"],
+    }]
+
+    results["inspect_document_sources"].append({
+        **overview, "offset": 1, "next_offset": None,
+        "sources": [{
+            "source_kind": "text_window", "source_ref": ref, "block_type": "paragraph",
+            "heading_path": heading, "source_digest": f"{ref}-digest",
+            "content": text, "content_truncated": False,
+        } for ref, text in (("treatment", "Annealed at 850 C for two hours."),
+                            ("measurement", "Three specimens per state; room-temperature tensile tests."))],
+    })
+    progress = capability_policy._section_reading_progress(results)[0]
+    assert progress["sections"][0]["completely_read_passages"] == 3
+    assert progress["sections"][0]["completely_read_heading_passages"] == 1
+    assert progress["pending_section_reads"] == []
+
+
+def test_source_placeholder_remains_pending_after_section_pagination_finishes():
+    source = {
+        "source_kind": "text_window", "source_ref": "tensile-protocol", "source_digest": "protocol-digest",
+        "heading_path": "Methods", "block_type": "paragraph", "content": "", "content_truncated": True,
+    }
+    results = {"inspect_document_sources": [{
+        "document": {"document_id": "hp-lpbf"}, "heading_path": "Methods", "next_offset": None,
+        "document_outline": [{"heading_path": "Methods", "pages": [3], "source_count": 1}],
+        "sources": [source],
+    }]}
+    progress = capability_policy._section_reading_progress(results)[0]
+    assert progress["pending_source_reads"] == [{
+        "tool_name": "read_source",
+        "arguments": {"document_id": "hp-lpbf", "source_kind": "text_window", "source_ref": "tensile-protocol"},
+    }]
+    results["read_source"] = [{**source, "document_id": "hp-lpbf", "content": "Three specimens per state.", "content_truncated": False}]
+    assert capability_policy._section_reading_progress(results)[0]["pending_source_reads"] == []
+
+
+@pytest.mark.anyio
+async def test_section_read_preserves_body_space_when_paper_has_many_other_headings():
+    repository = _P002SourceRepository()
+    methods = next(block for block in repository.document.blocks if block.block_id == METHODS)
+    repository.document = replace(repository.document, blocks=(
+        methods, *(replace(methods, block_id=f"other-{index}", block_order=index + 100,
+                           heading_path=f"Supplementary characterization protocol {index}", text="Other measurements.")
+                   for index in range(30)),
+    ), tables=(), figures=())
+    capability = InspectDocumentSourcesCapability(collection_service=_P002CollectionService(), source_artifact_repository=repository)
+    result = await capability.execute(CapabilityExecutionContext(
+        "session-p002", "researcher-1", "collection-p002", "section", max_result_tokens=3200,
+    ), capability.spec.input_model(document_id=DOCUMENT, heading_path=methods.heading_path))
+    assert result.status.value == "succeeded"
+    assert capability._result_tokens(result) <= 3200
+    assert result.data["sources"][0]["source_ref"] == METHODS
+    assert result.data["sources"][0]["content_truncated"] is False
+    assert result.data["sources"][0]["content"] == methods.text.strip()
+    assert any(item["heading_path"] == methods.heading_path for item in result.data["document_outline"])
 
 
 def test_finding_review_checks_document_structure_even_after_an_abstract_search():

@@ -78,6 +78,82 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("partial_section", [False, True])
+async def test_comparison_scope_is_regenerated_from_calls_after_context_compaction(partial_section):
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, capability_policy
+    from application.chat.agent_runner import _RunProgress
+    from domain.chat import ChatToolCall, ToolRisk
+
+    active = _user("active", "Compare the heat treatment conditions in the selected papers.")
+    calls = []
+    messages = [active]
+    observations = [
+        ("search_sources", {"document_ids": ["eli", "hp-lpbf"]}, {"document_ids": ["eli", "hp-lpbf"], "matches": []}),
+        ("inspect_document_sources", {"document_id": "eli"}, {
+            "document": {"document_id": "eli"}, "prepared_source_pages": [1],
+            "outline_truncated": False, "document_outline": [],
+        }),
+        ("search_sources", {"document_ids": ["eli"]}, {"document_ids": ["eli"], "matches": []}),
+    ]
+    if partial_section:
+        observations.insert(2, ("inspect_document_sources", {
+            "document_id": "hp-lpbf", "heading_path": "Methods",
+        }, {
+            "document": {"document_id": "hp-lpbf"}, "heading_path": "Methods",
+            "prepared_source_pages": [1, 2, 3], "next_offset": 2,
+            "document_outline": [{"heading_path": "Methods", "pages": [2, 3], "source_count": 18}],
+            "sources": [{"block_type": "heading", "source_kind": "text_window", "source_ref": "methods-title",
+                         "source_digest": "heading-digest", "content_truncated": False, "heading_path": "Methods"},
+                        {"block_type": "paragraph", "source_kind": "text_window", "source_ref": "protocol",
+                         "source_digest": "protocol-digest", "content_truncated": True, "heading_path": "Methods"}],
+        }))
+    for index, (name, arguments, data) in enumerate(observations):
+        call_id = f"call-{index}"
+        request, response = _tool_pair(call_id=call_id, payload=data)
+        request = replace(request, tool_calls=(ChatToolRequest(
+            tool_call_id=call_id, name=name, arguments=arguments, position=0,
+        ),))
+        messages.extend((request, response))
+        calls.append(ChatToolCall.requested(
+            tool_call_id=call_id, session_id="chat-1", assistant_message_id=request.message_id,
+            position=0, name=name, arguments=arguments, risk=ToolRisk.READ,
+        ))
+    notes = {"scope": "ELI abstract", "checks": [], "next_actions": []}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=4))
+    progress = _RunProgress(runner.limits)
+    for index in range(2):
+        instruction = capability_policy.stage_instruction(
+            ("inspect_document_sources",), calls,
+            successful_results=capability_policy.active_successful_results_by_name(messages),
+        )
+        assert instruction is not None
+        stage = _user(f"stage-{index}", instruction)
+        view = await runner._prepare_model_context((*messages, stage), (), progress, active_user_message_id="active")
+        assert messages[1].message_id in progress.compacted_message_ids
+        assert messages[1] not in view.messages
+        assert stage in view.messages
+        ledger = {item["document_id"]: item for item in json.loads(stage.content.rsplit("\n", 1)[1])}
+        assert set(ledger) == {"eli", "hp-lpbf"}
+        assert ledger["eli"]["prepared_source_pages"] == [1]
+        if partial_section:
+            assert ledger["hp-lpbf"]["outline_status"] == "inspected"
+            assert ledger["hp-lpbf"]["pending_section_reads"] == [{
+                "arguments": {"document_id": "hp-lpbf", "heading_path": "Methods", "offset": 2},
+                "last_batch_block_types": ["heading", "paragraph"],
+            }]
+            assert ledger["hp-lpbf"]["pending_source_reads"] == [{
+                "tool_name": "read_source",
+                "arguments": {"document_id": "hp-lpbf", "source_kind": "text_window", "source_ref": "protocol"},
+            }]
+        else:
+            assert ledger["hp-lpbf"]["outline_status"] == "not_inspected"
+            assert ledger["hp-lpbf"]["prepared_source_pages"] is None
+    assert len(model.contexts) == 1
+
+
+@pytest.mark.anyio
 async def test_failed_compaction_does_not_discard_archived_observations():
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
     from application.chat.agent_runner import _RunProgress

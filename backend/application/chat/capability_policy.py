@@ -660,15 +660,59 @@ def _pending_finding_sources(
 
 def _section_reading_progress(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
+    *,
+    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
 ) -> list[dict[str, Any]]:
     completed = complete_source_reads(successful_results)
+    documents: set[str] = set()
+    failed_outlines: set[str] = set()
+    failed_reads: dict[str, int] = {}
+    # Search candidates are scoped to the latest batch elsewhere. Reading scope
+    # must retain earlier requested papers even if later searches narrow it.
+    for call in calls:
+        if call.name == "search_sources":
+            requested_ids = call.arguments.get("document_ids")
+            if isinstance(requested_ids, (list, tuple)):
+                documents.update(item.strip() for item in requested_ids if isinstance(item, str))
+        elif call.name in {"inspect_document_sources", "read_source", "inspect_table"}:
+            document_id = call.arguments.get("document_id")
+            if not isinstance(document_id, str) or not document_id.strip():
+                continue
+            document_id = document_id.strip()
+            documents.add(document_id)
+            if call.status is ToolCallStatus.FAILED:
+                if call.name == "inspect_document_sources":
+                    failed_outlines.add(document_id)
+                else:
+                    failed_reads[document_id] = failed_reads.get(document_id, 0) + 1
+    for result in successful_results.get("search_sources", ()):
+        documents.update(str(item) for item in result.get("document_ids", ()))
+    for result in successful_results.get("inspect_published_finding", ()):
+        items = [*result.get("evidence", ()), *result.get("replacement_evidence", ())]
+        finding = result.get("finding")
+        if isinstance(finding, Mapping):
+            items.extend(finding.get("paper_contributions", ()))
+        documents.update(str(item.get("document_id") or "") for item in items)
     outlines = {}
     sections: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    headings: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    section_batches: dict[tuple[str, str], dict[str, Any]] = {}
+    incomplete_sources: dict[tuple[str, str, str, str], Mapping[str, Any]] = {}
+    read_pages: dict[str, set[int]] = {}
     sources = []
     for result in successful_results.get("inspect_document_sources", ()):
         document_id = str(result.get("document", {}).get("document_id") or "")
+        documents.add(document_id)
         if "document_outline" in result:
             outlines[document_id] = result
+        if result.get("heading_path") is not None:
+            filters = {key: result[key] for key in ("heading_path", "page", "query", "source_ref", "source_types")
+                       if result.get(key) not in (None, "", [], ())}
+            section_batches[(document_id, json.dumps(filters, sort_keys=True))] = {
+                "arguments": {"document_id": document_id, **filters, "offset": result.get("next_offset")},
+                "last_batch_block_types": sorted({str(item.get("block_type") or item.get("source_type") or "unknown")
+                                                  for item in result.get("sources", ())}),
+            }
         sources.extend({**item, "document_id": document_id} for item in result.get("sources", ()))
     sources.extend(successful_results.get("read_source", ()))
     sources.extend({**item, "source_kind": "table", "source_ref": item.get("table_ref")}
@@ -676,19 +720,57 @@ def _section_reading_progress(
     for source in sources:
         identity = tuple(str(source.get(key) or "") for key in
                          ("document_id", "source_kind", "source_ref", "source_digest"))
+        documents.add(identity[0])
+        if source.get("content_truncated") is True and all(identity) and identity not in completed:
+            incomplete_sources[identity] = source
         if identity in completed:
             key = (identity[0], " ".join(str(source.get("heading_path") or "").split()))
             sections.setdefault(key, set()).add((identity[1], identity[2]))
-    return [{
-        "document_id": document_id,
-        "outline_truncated": overview.get("outline_truncated", False),
-        "sections": [{
+            if source.get("block_type") == "heading":
+                headings.setdefault(key, set()).add((identity[1], identity[2]))
+            if type(source.get("page")) is int:
+                read_pages.setdefault(identity[0], set()).add(source["page"])
+    progress = []
+    for document_id in sorted(documents - {""}):
+        overview = outlines.get(document_id)
+        section_progress = [{
             "heading_path": section["heading_path"],
             "pages": section["pages"],
             "available_passages": section["source_count"],
             "completely_read_passages": len(sections.get((document_id, section["heading_path"]), ())),
-        } for section in overview["document_outline"]],
-    } for document_id, overview in outlines.items()]
+            "completely_read_heading_passages": len(headings.get((document_id, section["heading_path"]), ())),
+        } for section in overview["document_outline"]] if overview is not None else None
+        pending = []
+        for (doc, _filters), batch in section_batches.items():
+            if doc != document_id or type(batch["arguments"]["offset"]) is not int:
+                continue
+            if any(section["heading_path"] == batch["arguments"]["heading_path"]
+                   and section["completely_read_passages"] >= section["available_passages"]
+                   for section in section_progress or ()):
+                continue
+            pending.append(batch)
+        progress.append({
+            "document_id": document_id,
+            "outline_status": ("inspected" if overview is not None else
+                               "inspection_failed" if document_id in failed_outlines else "not_inspected"),
+            "outline_truncated": overview.get("outline_truncated", False) if overview is not None else None,
+            "prepared_source_pages": overview.get("prepared_source_pages") if overview is not None else None,
+            "completely_read_passages": len({(kind, ref) for doc, kind, ref, _digest in completed if doc == document_id}),
+            "pages_with_complete_passage_reads": sorted(read_pages.get(document_id, ())),
+            "failed_read_attempts": failed_reads.get(document_id, 0),
+            "sections": section_progress,
+            "pending_section_reads": pending,
+            "pending_source_reads": [{
+                "tool_name": "inspect_table" if kind == "table" else "read_source",
+                "arguments": ({"document_id": doc, "table_ref": ref,
+                               **({"row_offset": source["next_row_offset"]} if type(source.get("next_row_offset")) is int else {})}
+                              if kind == "table" else
+                              {"document_id": doc, "source_kind": kind, "source_ref": ref,
+                               **({"offset": source["next_offset"]} if "content_offset" in source
+                                  and type(source.get("next_offset")) is int else {})}),
+            } for (doc, kind, ref, _digest), source in incomplete_sources.items() if doc == document_id],
+        })
+    return progress
 
 
 def has_successful_exact_source_read(
@@ -903,14 +985,30 @@ def stage_instruction(
             )
         )
     if "inspect_document_sources" in tool_names:
-        coverage = _section_reading_progress(successful_results)
+        coverage = _section_reading_progress(successful_results, calls=calls)
         if coverage:
             content = (
                 (content + "\n\n" if content else "")
-                + "Do not repeat a completed Source batch. The deterministic reading ledger below "
-                "counts complete passages by document and heading. Select an unread heading, "
-                "paper, or exact next_offset; if no relevant prepared Source remains, state the "
-                "coverage gap instead of rereading the same content:\n"
+                + "The deterministic reading ledger below covers papers searched or inspected in this request, "
+                "including those whose outlines have not been checked. An unknown or failed outline means "
+                "prepared coverage is unverified, not that body text is unavailable. Inspect that paper's "
+                "outline to locate the remaining checks before declaring a coverage gap. "
+                "prepared_source_pages describes availability for that paper only; complete passage counts "
+                "do not mean complete pages, a complete paper read, or scientific verification. "
+                "For a comparison, check each paper's relevant conditions, comparator and measurement "
+                "against its available sections before synthesizing a shared claim. Continue into relevant "
+                "unread sections using heading_path or next_offset. A failed read is a technical failure, "
+                "not scientific absence. Do not repeat a completed Source batch; distinguish unavailable "
+                "content from unchecked content in the answer. pending_section_reads lists unfinished "
+                "section requests with their exact continuation arguments. A batch containing only a "
+                "heading has not read that section's scientific content. Continue these requested checks "
+                "with inspect_document_sources at the recorded offset before treating them as checked; "
+                "pending_source_reads lists located passages whose full text was not delivered. Resolve "
+                "relevant entries using their exact reader and arguments before moving past them; a section's "
+                "last page does not close these holes. Request these reads individually when a shared batch "
+                "budget only returned placeholders. Use fewer simultaneous section requests when small "
+                "batches return mostly headings. "
+                "These cursors remain valid after context compaction:\n"
                 + json.dumps(coverage, ensure_ascii=False)
             )
     if ("create_finding_draft" in tool_names
@@ -951,7 +1049,7 @@ def stage_instruction(
             "continue with other papers. Additional searches cannot recover an unprepared body. "
             "The following counts record complete passage reads, not scientific verification. "
             "Use unread relevant methods/results, not already read passages or irrelevant front matter:\n"
-            + json.dumps(_section_reading_progress(successful_results), ensure_ascii=False)
+            + json.dumps(_section_reading_progress(successful_results, calls=calls), ensure_ascii=False)
         )
     elif tool_names == ("inspect_objective_analysis",):
         objective_ids = _confirmed_objective_ids(successful_results)

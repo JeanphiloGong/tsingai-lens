@@ -163,7 +163,7 @@ def test_core_prompt_keeps_source_context_without_hidden_expectations(
     assert "DO_NOT_SEND_TO_MODEL" not in messages
     assert "jointly varied laser power and scan speed" in messages
     assert '"research_interest": null' in requests[0]["messages"][1]["content"]
-    assert result["trace"]["prompt_version"] == "objective_question_formation.v1"
+    assert result["trace"]["prompt_version"] == "objective_question_formation.v2"
 
 
 def test_relevance_is_not_rechecked_with_the_agent_exact_factor_matcher(
@@ -211,3 +211,25 @@ def test_valid_abstention_is_recorded_separately(probe, scenario):
     assert result["status"] == "completed"
     assert result["candidates"] == []
     assert result["abstention_reason"]
+
+
+@pytest.mark.parametrize("abstain", [True, False])
+def test_unsupported_interest_audit_separates_schema_success_from_scope_success(
+    probe, scenario, output, abstain
+):
+    scenario["interest"] = "How does laser power affect corrosion current density?"
+    scenario["expectation"]["abstain"] = True
+    if abstain:
+        output = {
+            "proposals": [],
+            "abstention_reason": "The supplied paper reports porosity, not corrosion.",
+        }
+    result, requests = run(probe, scenario, output)
+    assert result["status"] == "completed"
+    assert result["audit"]["reference_errors"] == []
+    assert result["audit"]["expected_abstention"] is abstain
+    assert "requires_review" in result["audit"]["scientific_acceptance"]
+    input_payload, _ = json.JSONDecoder().raw_decode(
+        requests[0]["messages"][1]["content"]
+    )
+    assert input_payload["research_interest"] == scenario["interest"]

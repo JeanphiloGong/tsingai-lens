@@ -84,6 +84,14 @@ paper's relevance reason, limitations, original map, and cited Source text.
 Power and speed remain different factors; C remains a joint-factor study.
 Missing map relationships do not veto relevance supported by original passages.
 
+The prompt treats optional research interest as the requested exploration scope:
+it can clarify or split questions, but cannot replace an unsupported endpoint
+with another one, even with disclosure. Partial coverage of a multi-endpoint
+interest is explained in the supported proposal's reason. Without interest,
+collection-wide exploration remains available. Limitations describe inspected
+comparisons or open checks, not paper-wide verdicts inferred from missing
+context. Within-series controls and cross-series changes stay distinct.
+
 `question_formation.py` owns the prompt and direct `*ModelOutput` contracts.
 The candidate service binds returned document/Source pairs to supplied text;
 the model does not reproduce quotations. Its application result reuses

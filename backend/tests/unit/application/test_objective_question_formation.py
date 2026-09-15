@@ -153,7 +153,7 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     assert len(requests) == 1
     assert (
         client.consume_last_trace()["prompt_version"]
-        == "objective_question_formation.v1"
+        == "objective_question_formation.v2"
     )
 
 
@@ -214,6 +214,35 @@ def test_abstention_requires_an_explanation_and_is_not_technical_failure(reading
     client, _ = model_client({"proposals": [], "abstention_reason": None})
     with pytest.raises(ValueError):
         form(reading, client)
+
+
+def test_prompt_treats_research_interest_as_scope_not_permission_to_change_topic(
+    reading,
+):
+    interest = "How does laser power affect corrosion current density in Ti-6Al-4V?"
+    gap = "The supplied passages report porosity, not corrosion current density."
+    client, requests = model_client({"proposals": [], "abstention_reason": gap})
+    result = form(reading, client, research_interest=interest)
+    assert result.candidates == ()
+    assert result.abstention_reason == gap
+    messages = requests[0]["messages"]
+    input_payload, _ = json.JSONDecoder().raw_decode(messages[1]["content"])
+    assert input_payload["research_interest"] == interest
+    # Guards prompt policy; live replay, not this stub, checks model compliance.
+    prompt = " ".join(messages[0]["content"].split())
+    assert "Keep the requested material, process and outcome scope" in prompt
+    assert "even when the substitution is explicitly disclosed" in prompt
+    assert '"proposals": []' in prompt
+
+
+def test_prompt_scopes_limitations_to_observed_comparisons(reading, proposal):
+    client, requests = model_client(proposal)
+    form(reading, client)
+    prompt = " ".join(requests[0]["messages"][0]["content"].split())
+    assert "Scope each limitation to the inspected comparison" in prompt
+    assert "missing context is an open check, not a paper-wide verdict" in prompt
+    assert "within-series contrasts" in prompt
+    assert "C cannot by itself establish an isolated power effect" not in prompt
 
 
 @pytest.mark.parametrize(

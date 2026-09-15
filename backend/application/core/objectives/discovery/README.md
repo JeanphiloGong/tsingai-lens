@@ -100,7 +100,9 @@ subdivision, or hidden SDK retries. Technical and reference failures propagate
 with model-call traces; a valid empty proposal needs an abstention explanation.
 Callers must supply authorized paper snapshots and original excerpts.
 
-The evaluation can omit research interest for automatic exploration. Replacing
+The benchmark entry point is
+[`objective_question_probe.py`](../../../../scripts/benchmarks/objective_question_probe.py).
+It can omit research interest to evaluate automatic exploration. Replacing
 default discovery and deciding how reviewed reading selections enter scope
 screening remain separate decisions. Current scope screening still has its
 existing complete-variable matching behavior; this evaluation does not bypass

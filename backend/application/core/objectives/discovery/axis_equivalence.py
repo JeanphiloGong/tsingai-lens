@@ -26,13 +26,13 @@ class _AxisEquivalenceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class StructuredAxisPairDecision(_AxisEquivalenceResponse):
+class AxisPairDecisionModelOutput(_AxisEquivalenceResponse):
     pair_id: str = Field(min_length=1, max_length=80)
     equivalent: bool
 
 
-class StructuredAxisCanonicalizationPlan(_AxisEquivalenceResponse):
-    decisions: list[StructuredAxisPairDecision] = Field(default_factory=list)
+class AxisCanonicalizationPlanModelOutput(_AxisEquivalenceResponse):
+    decisions: list[AxisPairDecisionModelOutput] = Field(default_factory=list)
 
     @field_validator("decisions", mode="before")
     @classmethod
@@ -134,13 +134,13 @@ class ResearchAxisEquivalenceClassifier:
     def classify(
         self,
         payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
+    ) -> AxisCanonicalizationPlanModelOutput:
         system_prompt, user_prompt = build_research_axis_canonicalization_prompt(
             payload
         )
 
         def validate_axis_accounting(response: BaseModel) -> None:
-            if not isinstance(response, StructuredAxisCanonicalizationPlan):
+            if not isinstance(response, AxisCanonicalizationPlanModelOutput):
                 raise TypeError(
                     "unexpected research axis canonicalization response type"
                 )
@@ -171,20 +171,20 @@ class ResearchAxisEquivalenceClassifier:
         response = self.response_client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredAxisCanonicalizationPlan,
+            response_model=AxisCanonicalizationPlanModelOutput,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
             json_completion=complete_json_with_contract,
             postprocess_response=validate_axis_accounting,
             task_type="research_axis_canonicalization",
             prompt_version=RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
         )
-        if not isinstance(response, StructuredAxisCanonicalizationPlan):
+        if not isinstance(response, AxisCanonicalizationPlanModelOutput):
             raise TypeError("unexpected research axis canonicalization response type")
         return response
 
 
 def _validate_axis_candidate_accounting(
-    response: StructuredAxisCanonicalizationPlan,
+    response: AxisCanonicalizationPlanModelOutput,
     *,
     axis_pairs: Any,
 ) -> None:
@@ -205,7 +205,7 @@ def _validate_axis_candidate_accounting(
 
 __all__ = [
     "ResearchAxisEquivalenceClassifier",
-    "StructuredAxisCanonicalizationPlan",
-    "StructuredAxisPairDecision",
+    "AxisCanonicalizationPlanModelOutput",
+    "AxisPairDecisionModelOutput",
     "build_research_axis_canonicalization_prompt",
 ]

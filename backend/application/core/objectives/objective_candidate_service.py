@@ -13,7 +13,7 @@ from application.core.objectives import property_matching
 from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
 from domain.core import (
     ObjectiveFactSet,
@@ -967,7 +967,7 @@ class ObjectiveCandidateService:
                     }
                 )
                 decisions.extend(decision.model_dump() for decision in plan.decisions)
-            canonicalization_plan = StructuredAxisCanonicalizationPlan(
+            canonicalization_plan = AxisCanonicalizationPlanModelOutput(
                 decisions=decisions
             )
         except Exception:
@@ -1300,7 +1300,7 @@ class ObjectiveCandidateService:
     @classmethod
     def _axis_mapping_from_plan(
         cls,
-        canonicalization_plan: StructuredAxisCanonicalizationPlan,
+        canonicalization_plan: AxisCanonicalizationPlanModelOutput,
         *,
         axis_candidates: dict[str, list[str]],
         axis_pairs: Mapping[str, AxisPair],

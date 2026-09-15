@@ -37,7 +37,7 @@ from application.core.objectives.analysis.source_screening import (
 )
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
     build_research_axis_canonicalization_prompt,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
@@ -1275,7 +1275,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     assert result == parsed
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"].__name__ == (
-        "_StructuredModelFindingSynthesis"
+        "FindingSynthesisModelOutput"
     )
     assert parse_call["max_completion_tokens"] == 1024
     trace = extractor.consume_last_trace()
@@ -2391,7 +2391,7 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         }
     )
 
-    assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
+    assert isinstance(canonicalization_plan, AxisCanonicalizationPlanModelOutput)
     assert [item.model_dump() for item in canonicalization_plan.decisions] == [
         {
             "pair_id": "axis_pair_0001",

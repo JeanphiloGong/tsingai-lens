@@ -15,7 +15,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
@@ -132,9 +132,9 @@ class FakeObjectiveExtractor:
     def classify(
         self,
         payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
+    ) -> AxisCanonicalizationPlanModelOutput:
         self.canonicalization_payloads.append(payload)
-        return StructuredAxisCanonicalizationPlan(
+        return AxisCanonicalizationPlanModelOutput(
             decisions=[
                 {
                     "pair_id": pair["pair_id"],

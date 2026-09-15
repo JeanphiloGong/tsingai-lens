@@ -21,7 +21,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
@@ -149,7 +149,7 @@ class FakeDomainModelExtractor:
             )
         elif response_model is StructuredPaperResearchMap:
             response = self.extract(payload)
-        elif response_model is StructuredAxisCanonicalizationPlan:
+        elif response_model is AxisCanonicalizationPlanModelOutput:
             response = self.classify(payload)
         elif response_model is PaperFrameBatchModelOutput:
             frame = self.screen_batch(payload)
@@ -425,8 +425,8 @@ class FakeDomainModelExtractor:
     def classify(
         self,
         payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
-        return StructuredAxisCanonicalizationPlan(
+    ) -> AxisCanonicalizationPlanModelOutput:
+        return AxisCanonicalizationPlanModelOutput(
             decisions=[
                 {
                     "pair_id": str(pair["pair_id"]),

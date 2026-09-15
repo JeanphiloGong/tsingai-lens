@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
+from application.core.objectives.analysis import finding_synthesis
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
@@ -26,8 +27,9 @@ from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
+from application.core.objectives.discovery import axis_equivalence
 from application.core.objectives.discovery.paper_understanding import paper_map_outputs
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
@@ -53,7 +55,7 @@ def test_model_clients_are_owned_by_their_domains() -> None:
 def test_objective_judgments_own_their_response_contracts() -> None:
     expected_owners = {
         StructuredPaperResearchMap: "application.core.objectives.discovery.paper_understanding.paper_map_results",
-        StructuredAxisCanonicalizationPlan: (
+        AxisCanonicalizationPlanModelOutput: (
             "application.core.objectives.discovery.axis_equivalence"
         ),
         PaperFrameBatchModelOutput: (
@@ -78,9 +80,11 @@ def test_objective_judgments_own_their_response_contracts() -> None:
     [
         (paper_map_outputs, "ExperimentalPaperMapModelOutput"),
         (paper_map_outputs, "ReviewPaperMapModelOutput"),
+        (axis_equivalence, "AxisCanonicalizationPlanModelOutput"),
+        (finding_synthesis, "FindingSynthesisModelOutput"),
     ],
 )
-def test_discovery_model_outputs_keep_nested_output_names(module, model_name):
+def test_objective_model_outputs_keep_nested_output_names(module, model_name):
     output_model = getattr(module, model_name)
     schema = output_model.model_json_schema()
 

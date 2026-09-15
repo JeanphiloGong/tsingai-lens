@@ -28,7 +28,9 @@ from application.chat import capability_policy, intent_policy
 from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
-    RESEARCH_COMPACTION_SYSTEM_PROMPT, ResearchWorkingCheck, ResearchWorkingNotes,
+    RESEARCH_COMPACTION_SYSTEM_PROMPT,
+    ResearchWorkingCheckModelOutput,
+    ResearchWorkingNotesModelOutput,
 )
 from application.core.structured_extraction.json_support import extract_json_object
 from domain.chat import (
@@ -989,7 +991,7 @@ class ResearchAgentRunner:
                     )
                     if compacted.tool_calls:
                         raise ValueError("compaction cannot request tools")
-                    notes = ResearchWorkingNotes.model_validate_json(extract_json_object(compacted.content))
+                    notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
                     allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
                     if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
                         raise ValueError("working note cites an unobserved message")
@@ -1045,31 +1047,31 @@ class ResearchAgentRunner:
         return replace(view, max_context_tokens=self.limits.max_context_tokens)
 
     def _bounded_working_notes(
-        self, notes: ResearchWorkingNotes, *, max_tokens: int,
-    ) -> ResearchWorkingNotes:
+        self, notes: ResearchWorkingNotesModelOutput, *, max_tokens: int,
+    ) -> ResearchWorkingNotesModelOutput:
         """Keep validated navigation notes within their reserved context space."""
-        checks = [ResearchWorkingCheck(
+        checks = [ResearchWorkingCheckModelOutput(
             statement=check.statement[:600],
             conditions=check.conditions[:400],
             basis_message_ids=check.basis_message_ids[:8],
             unresolved=check.unresolved[:400],
         ) for check in notes.checks]
         next_actions = [str(action)[:400] for action in notes.next_actions[:8]]
-        candidate = ResearchWorkingNotes(
+        candidate = ResearchWorkingNotesModelOutput(
             scope=notes.scope[:1000], checks=checks, next_actions=next_actions,
         )
         while checks and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
             checks.pop()
-            candidate = ResearchWorkingNotes(
+            candidate = ResearchWorkingNotesModelOutput(
                 scope=candidate.scope, checks=checks, next_actions=next_actions,
             )
         while next_actions and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
             next_actions.pop()
-            candidate = ResearchWorkingNotes(
+            candidate = ResearchWorkingNotesModelOutput(
                 scope=candidate.scope, checks=checks, next_actions=next_actions,
             )
         if self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            candidate = ResearchWorkingNotes(
+            candidate = ResearchWorkingNotesModelOutput(
                 scope=candidate.scope[:400], checks=[], next_actions=[],
             )
         return candidate

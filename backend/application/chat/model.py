@@ -36,7 +36,7 @@ same paper and measurement, not a time trend", "basis_message_ids":["msg-result-
 """
 
 
-class ResearchWorkingCheck(BaseModel):
+class ResearchWorkingCheckModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     statement: str = Field(min_length=1, max_length=1200)
     conditions: str = Field(max_length=1000)
@@ -44,14 +44,16 @@ class ResearchWorkingCheck(BaseModel):
     unresolved: str = Field(max_length=1000)
 
 
-class ResearchWorkingNotes(BaseModel):
+class ResearchWorkingNotesModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scope: str = Field(min_length=1, max_length=1500)
-    checks: list[ResearchWorkingCheck] = Field(max_length=16)
+    checks: list[ResearchWorkingCheckModelOutput] = Field(max_length=16)
     next_actions: list[str] = Field(max_length=8)
 
 
-RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(ResearchWorkingNotes.model_json_schema())
+RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
+    ResearchWorkingNotesModelOutput.model_json_schema()
+)
 
 
 RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v15.15"

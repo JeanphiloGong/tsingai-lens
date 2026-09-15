@@ -1,8 +1,11 @@
+import json
 from pathlib import Path
 
 import pytest
 
+from application.chat import model as chat_model
 from application.core.document_profiles.extraction import DocumentProfileExtractor
+from application.core.objectives import finding_summary
 from application.core.objectives.analysis import finding_synthesis
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
@@ -82,15 +85,26 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         (paper_map_outputs, "ReviewPaperMapModelOutput"),
         (axis_equivalence, "AxisCanonicalizationPlanModelOutput"),
         (finding_synthesis, "FindingSynthesisModelOutput"),
+        (finding_summary, "FindingSummaryModelOutput"),
+        (chat_model, "ResearchWorkingCheckModelOutput"),
+        (chat_model, "ResearchWorkingNotesModelOutput"),
     ],
 )
-def test_objective_model_outputs_keep_nested_output_names(module, model_name):
+def test_model_outputs_keep_nested_output_names(module, model_name):
     output_model = getattr(module, model_name)
     schema = output_model.model_json_schema()
 
     assert output_model.__module__ == module.__name__
     assert schema["title"] == model_name
     assert all(name.endswith("ModelOutput") for name in schema.get("$defs", {}))
+
+
+def test_compaction_prompt_uses_the_working_notes_output_schema():
+    schema = json.loads(
+        chat_model.RESEARCH_COMPACTION_SYSTEM_PROMPT.split("\nOUTPUT_SCHEMA\n", 1)[1]
+    )
+
+    assert schema == chat_model.ResearchWorkingNotesModelOutput.model_json_schema()
 
 
 @pytest.mark.parametrize(

@@ -95,6 +95,7 @@ def test_summary_returns_one_paragraph_with_exact_citations():
     result = summarize_finding_evidence(
         finding=finding, evidence=evidence, language="en", response_client=model
     )
+    assert model.calls[0]["response_model"].__name__ == "FindingSummaryModelOutput"
     payload = json.loads(model.calls[0]["user_prompt"])
     assert payload["evidence"] == evidence
     assert payload["finding"] == {

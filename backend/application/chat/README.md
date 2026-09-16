@@ -270,6 +270,13 @@ have no default ceiling. Their optional environment settings accept a positive
 limit; unset or zero disables that ceiling. Usage remains observable telemetry.
 Individual model/read requests retain a 180-second timeout, cancellation and
 the repeated-observation guard.
+Provider failures use structured HTTP status, known stream error codes and
+chained transport exceptions. HTTP 408/429/5xx and known transient stream or
+connection failures receive up to five retries with exponential jittered
+backoff; authentication, malformed requests, exhausted quota and unclassified
+errors stop visibly. Successful tool observations remain in the trajectory
+during retries. Trace records contain normalized reasons, status, attempt and
+delay, never exception messages, response bodies or tracebacks.
 Model requests recheck the remaining output allowance after context preparation;
 an exhausted optional cumulative allowance cannot produce a zero or negative
 provider output limit.

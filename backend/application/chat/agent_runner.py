@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asyncio import Semaphore, gather, wait_for
+from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -11,6 +11,7 @@ from hashlib import sha256
 import json
 import logging
 from math import isfinite
+from random import uniform
 from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
@@ -61,19 +62,45 @@ _REQUIRED_ACTION_RETRY_LIMIT = 1
 _MAX_TOOL_CALLS_PER_RESPONSE = 32
 
 
-def _is_retryable_provider_exception(exc: BaseException) -> bool:
-    """Recognize transient provider failures without inspecting exception text."""
-    if isinstance(exc, (TimeoutError, ConnectionError)):
-        return True
-    exception_name = type(exc).__name__.lower()
-    return any(
-        marker in exception_name
-        for marker in (
-            "timeout", "connection", "ratelimit", "rate_limit", "serviceunavailable",
-            "internalserver", "badgateway", "gatewaytimeout", "temporarilyunavailable",
-            "overloaded",
-        )
-    )
+def _provider_failure_details(exc: BaseException) -> dict[str, Any]:
+    """Classify SDK/transport failures without retaining provider messages or bodies."""
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and all(current is not item for item in chain):
+        chain.append(current)
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+    status = None
+    codes: set[str] = set()
+    names = {base.__name__ for item in chain for base in type(item).__mro__}
+    for item in chain:
+        value = getattr(item, "status_code", None)
+        if value is None:
+            value = getattr(getattr(item, "response", None), "status_code", None)
+        if status is None and type(value) is int and 100 <= value <= 599:
+            status = value
+        body = getattr(item, "body", None)
+        error = body.get("error", body) if isinstance(body, Mapping) else {}
+        if isinstance(error, Mapping):
+            codes.update(value for key in ("code", "type")
+                         if isinstance(value := error.get(key), str))
+    timeout = bool(names.intersection({"TimeoutError", "TimeoutException", "APITimeoutError"}))
+    transport = timeout or bool(names.intersection({
+        "ConnectionError", "TransportError", "APIConnectionError",
+    }))
+    if codes.intersection({"insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"}):
+        retryable, reason = False, "quota_exhausted"
+    elif status is not None:
+        retryable = status in {408, 429} or status >= 500
+        reason = "provider_timeout" if status == 408 else "http_status"
+    elif transport:
+        retryable, reason = True, "provider_timeout" if timeout else "transport_error"
+    elif codes.intersection({"rate_limit_exceeded", "server_error", "internal_server_error",
+                             "overloaded_error", "temporarily_unavailable"}):
+        retryable, reason = True, "transient_provider_error"
+    else:
+        retryable, reason = False, "unclassified_provider_error"
+    return {"exception_type": type(exc).__name__, "http_status": status,
+            "retryable": retryable, "reason": reason}
 _FINAL_ANSWER_INSTRUCTION = (
     "The bounded research-reading budget is now exhausted. Give the researcher "
     "the best useful final answer supported by the completed trajectory. State "
@@ -322,7 +349,8 @@ class _RunProgress:
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
               requested_count: int = 0, new_resources: int = 0,
               termination_reason: str | None = None, final_answer: bool = False,
-              retry_attempt: int | None = None, retry_reason: str | None = None) -> None:
+              retry_attempt: int | None = None, retry_reason: str | None = None,
+              http_status: int | None = None, retry_delay_ms: int | None = None) -> None:
         payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
@@ -339,6 +367,7 @@ class _RunProgress:
             "research_plan": [dict(item) for item in self.research_plan] if self.research_plan else None,
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
+            "http_status": http_status, "retry_delay_ms": retry_delay_ms,
         }
         logger.info("Research Agent cycle %s", json.dumps(payload, separators=(",", ":")))
         if self.progress_callback is not None:
@@ -702,25 +731,25 @@ class ResearchAgentRunner:
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
                     )
-                    retryable_provider = _is_retryable_provider_exception(exc)
+                    failure = _provider_failure_details(exc)
                     logger.warning(
-                        "Research Agent model call failed model=%s "
-                        "exception_type=%s retryable=%s",
-                        model_name,
-                        type(exc).__name__,
-                        retryable_provider,
+                        "Research Agent model call failed model=%s details=%s",
+                        model_name, json.dumps(failure, separators=(",", ":")),
                     )
                     if (
-                        retryable_provider
+                        failure["retryable"]
                         and response_retries < _MODEL_RESPONSE_RETRY_LIMIT
                         and progress.remaining_seconds() > 0
                     ):
                         response_retries += 1
+                        delay = min(0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1),
+                                    progress.remaining_seconds())
                         progress.trace(
                             context,
                             phase="model_retry",
                             retry_attempt=response_retries,
-                            retry_reason=type(exc).__name__.lower(),
+                            retry_reason=failure["reason"], http_status=failure["http_status"],
+                            retry_delay_ms=round(delay * 1000),
                         )
                         logger.info(
                             "Retrying Research Agent provider response model=%s "
@@ -728,8 +757,9 @@ class ResearchAgentRunner:
                             model_name,
                             response_retries + 1,
                         )
+                        await sleep(delay)
                         continue
-                    provider_timeout = "timeout" in type(exc).__name__.lower()
+                    provider_timeout = failure["reason"] == "provider_timeout"
                     messages.append(
                         self._assistant(
                             context,
@@ -744,6 +774,7 @@ class ResearchAgentRunner:
                         termination_reason=(
                             "provider_timeout" if provider_timeout else "model_unavailable"
                         ),
+                        retry_reason=failure["reason"], http_status=failure["http_status"],
                     )
                     return self._result(
                         AgentRunStatus.FAILED,

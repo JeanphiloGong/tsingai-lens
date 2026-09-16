@@ -576,6 +576,106 @@ async def test_transient_provider_timeout_is_retried_up_to_success() -> None:
     assert len(model.request_limits) == 2
 
 
+@pytest.mark.parametrize("status,retryable", [(408, True), (429, True), (503, True), (401, False), (403, False), (400, False), (None, False)])
+def test_generic_provider_errors_use_structured_status(status, retryable):
+    class APIError(Exception):
+        status_code = status
+
+    details = agent_runner_module._provider_failure_details(APIError("private provider request"))
+    assert details["retryable"] is retryable
+    assert details["http_status"] == status
+    assert "private provider request" not in json.dumps(details)
+
+
+def test_provider_error_cause_and_permanent_quota_are_distinguished():
+    import httpx
+
+    class APIError(Exception):
+        status_code = None
+
+    error = APIError("private response")
+    error.__cause__ = httpx.RemoteProtocolError("private connection")
+    assert agent_runner_module._provider_failure_details(error)["retryable"]
+    error.status_code = 429
+    error.body = {"error": {"code": "insufficient_quota", "message": "private account"}}
+    details = agent_runner_module._provider_failure_details(error)
+    assert not details["retryable"]
+    assert details["reason"] == "quota_exhausted"
+
+
+@pytest.mark.parametrize("body,retryable", [
+    ({"code": "internal_server_error"}, True),
+    ({"type": "server_error"}, True),
+    ({"error": {"code": "rate_limit_exceeded"}}, True),
+    ({"code": "insufficient_quota", "type": "server_error"}, False),
+    ({"code": "invalid_api_key"}, False),
+    ({"code": ["malformed"]}, False),
+    ({"message": "unknown provider error"}, False),
+])
+def test_stream_api_error_uses_known_structured_codes_without_status(body, retryable):
+    import httpx
+    from openai import APIError
+
+    error = APIError("private stream response", request=httpx.Request("POST", "https://example.test"), body=body)
+    details = agent_runner_module._provider_failure_details(error)
+    assert details["retryable"] is retryable
+    assert details["http_status"] is None
+    assert "private stream response" not in json.dumps(details)
+
+
+async def test_generic_provider_failure_recovers_after_five_retries_without_repeating_read(monkeypatch, caplog):
+    class APIError(Exception):
+        status_code = 503
+
+    delays = []
+
+    async def wait(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(agent_runner_module, "sleep", wait)
+    read = _Capability("test_source", ToolRisk.READ, result_data={"content": "Known paper result"})
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("test_source", {}),)),
+        *(APIError("private request and credential") for _ in range(5)),
+        ModelTurn(content="The inspected paper result is retained."),
+    )
+    events = []
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Read the paper and explain the result.",
+        progress_callback=events.append,
+    )
+    assert result.status is AgentRunStatus.COMPLETED
+    assert len(read.executed_arguments) == 1
+    retries = [event for event in events if event["phase"] == "model_retry"]
+    assert [event["retry_attempt"] for event in retries] == [1, 2, 3, 4, 5]
+    assert all(event["http_status"] == 503 for event in retries)
+    assert len(delays) == 5 and all(left < right for left, right in zip(delays, delays[1:]))
+    assert "private request and credential" not in caplog.text
+    assert "private request and credential" not in json.dumps(events)
+
+
+async def test_retryable_api_error_stops_after_initial_attempt_and_five_retries(monkeypatch):
+    import httpx
+    from openai import APIError
+
+    async def wait(delay):
+        pass
+
+    monkeypatch.setattr(agent_runner_module, "sleep", wait)
+    error = APIError("private response", request=httpx.Request("POST", "https://example.test"),
+                     body={"type": "server_error"})
+    model = _Model(*(error for _ in range(7)))
+    events = []
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(())).run_turn(
+        context=_context(), previous_messages=(), user_message="Hello", progress_callback=events.append,
+    )
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "model_unavailable"
+    assert len(model.request_limits) == 6
+    assert len([event for event in events if event["phase"] == "model_retry"]) == 5
+    assert events[-1]["retry_reason"] == "transient_provider_error"
+
+
 async def test_finalization_uses_remaining_time_and_its_own_output_limit(monkeypatch) -> None:
     now = [0.0]
     monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
@@ -3579,4 +3679,8 @@ async def test_unexpected_model_failure_remains_model_unavailable(caplog) -> Non
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_unavailable"
     assert "provider connection failed" not in caplog.text
-    assert "exception_type=RuntimeError" in caplog.text
+    record = next(record for record in caplog.records if "Research Agent model call failed" in record.message)
+    assert json.loads(record.message.split("details=", 1)[1]) == {
+        "exception_type": "RuntimeError", "http_status": None,
+        "retryable": False, "reason": "unclassified_provider_error",
+    }

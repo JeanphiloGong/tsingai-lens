@@ -106,3 +106,21 @@ def test_extract_pdf_table_visual_text_preserves_continuous_page_layout():
     assert "Specimens" in visual_text
     assert "as-SLM(100/" in visual_text
     assert "441.5" in visual_text
+
+
+def test_pdf_table_visual_text_keeps_wrapped_label_block_together():
+    import fitz
+
+    with fitz.open() as pdf:
+        page = pdf.new_page(width=300, height=200)
+        page.insert_text((30, 40), "HIP-SLM\n(120/\n200)", fontsize=10)
+        page.insert_text((180, 40), "95.92", fontsize=10)
+        page.insert_text((30, 150), "Unrelated paragraph", fontsize=10)
+        payload = pdf.tobytes()
+    table = SimpleNamespace(prov=[SimpleNamespace(
+        page_no=1, bbox=SimpleNamespace(l=20, t=20, r=260, b=90),
+    )])
+    view = extract_pdf_table_visual_text(payload=payload, table=table)
+    assert "HIP-SLM\n(120/\n200)" in view
+    assert "95.92" in view
+    assert "Unrelated paragraph" not in view

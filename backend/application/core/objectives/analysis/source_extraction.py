@@ -43,6 +43,8 @@ from application.core.objectives.analysis.source_validation import (
 )
 from application.core.objectives.analysis.table_repair import (
     _objective_table_source_needs_llm_structural_repair,
+    build_table_reading_context,
+    find_table_label_continuation,
     normalize_table_matrix,
     repair_table_source,
 )
@@ -1857,7 +1859,6 @@ def _extract_source_round(
             [],
         ).append(seed)
     llm_evidence_unavailable: dict[tuple[str, str], Exception] = {}
-    llm_table_repair_unavailable: dict[tuple[str, str], Exception] = {}
     resolved_paper_facts_extractor = paper_facts_extractor
     document_metadata = _progress_document_metadata(
         document_trees_by_document_id=document_trees_by_document_id,
@@ -1940,15 +1941,7 @@ def _extract_source_round(
             route=route,
             source=source,
             paper_facts_extractor=resolved_paper_facts_extractor,
-            unavailable_error=llm_table_repair_unavailable.get(document_key),
         )
-        if table_repair_error is not None and _provider_is_temporarily_unavailable(
-            table_repair_error
-        ):
-            llm_table_repair_unavailable.setdefault(
-                document_key,
-                table_repair_error,
-            )
         payload["source"] = _objective_evidence_prompt_source(source)
         context_bundle = (
             _build_objective_same_paper_context_bundle(
@@ -4428,15 +4421,19 @@ def _build_objective_route_source_payload(
             for cell in table_cells or []
             if str(getattr(cell, "table_id", "") or "") == route.source_ref
         )
+        caption_text = _objective_table_caption_text(table=table, blocks=blocks)
+        continuation = find_table_label_continuation(
+            table=table, tables=tables, caption_text=caption_text or "",
+        )
+        reading_context, context_omissions = build_table_reading_context(
+            table=table, tables=tables, blocks=blocks, caption_text=caption_text or "",
+        )
         return {
             "source_kind": "table",
             "source_ref": route.source_ref,
             "document_id": route.document_id,
             "page": getattr(table, "page", None),
-            "caption_text": _objective_table_caption_text(
-                table=table,
-                blocks=blocks,
-            ),
+            "caption_text": caption_text,
             "heading_path": getattr(table, "heading_path", None),
             "column_headers": column_headers,
             "header_row_count": header_row_count,
@@ -4447,6 +4444,9 @@ def _build_objective_route_source_payload(
                 header_row_count=header_row_count,
             ),
             "table_visual_text": table_visual_text or None,
+            **({"table_label_continuation": continuation} if continuation else {}),
+            **({"table_reading_context": reading_context} if reading_context else {}),
+            **({"table_reading_context_omissions": context_omissions} if context_omissions else {}),
             "table_cells": [
                 {
                     "row_index": getattr(cell, "row_index", None),

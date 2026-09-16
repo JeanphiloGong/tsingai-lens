@@ -932,7 +932,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
         "finding_synthesis": "finding_synthesis.v15",
-        "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v5",
+        "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v6",
     }
 
 
@@ -3113,6 +3113,22 @@ def test_table_matrix_repair_prompt_hides_backend_lineage_and_slice_offsets():
         "total_body_rows",
     ):
         assert internal_value not in user_prompt
+
+
+def test_table_matrix_repair_prompt_keeps_neighbor_context_separate_from_grid():
+    system_prompt, user_prompt = build_table_matrix_repair_prompt({
+        "source": {
+            "table_markdown": "| Specimen | Density (%) |\n| HT | 98.0 |",
+            "reading_context": [{
+                "source_ref": "note-1", "source_kind": "text_window", "page": 4,
+                "relation": "following_text", "text": "HT denotes furnace heat treatment.",
+            }],
+        },
+    })
+    assert "HT denotes furnace heat treatment." in user_prompt
+    assert '"reading_context"' in user_prompt
+    assert "neighboring" in system_prompt
+    assert "not measurement cells of the current table" in user_prompt
 
 
 def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():

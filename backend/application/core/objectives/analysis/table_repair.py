@@ -19,6 +19,187 @@ from domain.source import render_markdown_table
 logger = logging.getLogger(__name__)
 
 _TABLE_MATRIX_REPAIR_PROMPT_TOKEN_LIMIT = 12_000
+_TABLE_NUMBER = re.compile(
+    r"^(?:table|tab\.?)\s+([A-Za-z0-9][A-Za-z0-9.\-]*)", re.IGNORECASE,
+)
+_CONTINUED_TABLE = re.compile(
+    r"^(?:table|tab\.?)\s+([A-Za-z0-9][A-Za-z0-9.\-]*)"
+    r"\s*(?:\(\s*continued\s*\)|continued)$", re.IGNORECASE,
+)
+_TABLE_READING_CONTEXT_CHAR_LIMIT = 8_000
+_TABLE_READING_CONTEXT_BLOCK_LIMIT = 6
+
+
+def build_table_reading_context(
+    *, table: Any, tables: list[Any], blocks: list[Any], caption_text: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Read bounded neighbors; their prose is not part of the table's grid."""
+    page = getattr(table, "page", None)
+    if page is None:
+        return [], []
+    neighbors = sorted(
+        (block for block in blocks
+         if getattr(block, "document_id", None) == table.document_id
+         and getattr(block, "page", None) in (page - 1, page, page + 1)),
+        key=lambda block: getattr(block, "block_order", 0),
+    )
+    caption_block_id = getattr(table, "caption_block_id", None)
+    caption_index = next((index for index, block in enumerate(neighbors)
+        if (caption_block_id and block.block_id == caption_block_id)
+        or (caption_text and block.text.strip() == caption_text.strip())), None)
+    selected: dict[str, tuple[Any, str]] = {}
+    if caption_index is not None:
+        for step, relation in ((-1, "preceding_text"), (1, "following_text")):
+            for distance in (1, 2):
+                index = caption_index + step * distance
+                if index < 0 or index >= len(neighbors):
+                    break
+                block = neighbors[index]
+                if getattr(block, "block_type", "paragraph") not in ("paragraph", "list_item"):
+                    break
+                selected[block.block_id] = (block, relation)
+    number = _TABLE_NUMBER.match(caption_text.strip())
+    if number:
+        table_number = number.group(1).rstrip(".")
+        mention = re.compile(
+            r"\b(?:table|tab\.?)\s+" + re.escape(table_number) + r"(?![\w\-]|\.\d)",
+            re.IGNORECASE,
+        )
+        for block in neighbors:
+            if getattr(block, "block_type", "paragraph") in ("paragraph", "list_item") and mention.search(block.text):
+                selected.setdefault(block.block_id, (block, "table_reference"))
+    context: list[dict[str, Any]] = []
+    omitted: list[dict[str, str]] = []
+    chars = 0
+    for block, relation in sorted(selected.values(), key=lambda item: getattr(item[0], "block_order", 0)):
+        text = block.text.strip()
+        if not text:
+            continue
+        if len(context) >= _TABLE_READING_CONTEXT_BLOCK_LIMIT or chars + len(text) > _TABLE_READING_CONTEXT_CHAR_LIMIT:
+            omitted.append({"source_ref": block.block_id, "reason": "context_budget"})
+            continue
+        context.append({
+            "source_kind": "text_window", "source_ref": block.block_id,
+            "page": block.page, "relation": relation, "text": text,
+        })
+        chars += len(text)
+    order = getattr(table, "table_order", None)
+    candidates = [candidate for candidate in tables
+        if candidate.document_id == table.document_id
+        and order is not None and getattr(candidate, "table_order", None) == order + 1
+        and getattr(candidate, "page", None) in (page, page + 1)]
+    if number and len(candidates) == 1:
+        candidate = candidates[0]
+        labels = [str(candidate.caption_text or ""),
+                  *(str(cell) for row in candidate.table_matrix[:2] for cell in row)]
+        markers = [match for label in labels
+                   if (match := _CONTINUED_TABLE.fullmatch(label.strip()))]
+        headers = [" ".join(header.split()).casefold() for header in table.column_headers]
+        donor_headers = [" ".join(header.rsplit(">", 1)[-1].split()).casefold()
+                         for header in candidate.column_headers]
+        if (headers and headers == donor_headers and markers
+            and all(match.group(1).rstrip(".").casefold() == table_number.casefold()
+                    for match in markers)):
+            markdown = render_markdown_table(
+                candidate.table_matrix, candidate.column_headers,
+                header_row_count=candidate.header_row_count,
+            )
+            if chars + len(markdown) <= _TABLE_READING_CONTEXT_CHAR_LIMIT:
+                context.append({
+                    "source_kind": "table", "source_ref": candidate.table_id,
+                    "page": candidate.page, "relation": "printed_table_continuation",
+                    "table_markdown": markdown,
+                })
+            else:
+                omitted.append({"source_ref": candidate.table_id, "reason": "context_budget"})
+    return context, omitted
+
+
+def find_table_label_continuation(
+    *,
+    table: Any,
+    tables: list[Any],
+    caption_text: str,
+) -> dict[str, Any] | None:
+    """Locate an explicit label-only carryover, never infer a specimen name."""
+    number = _TABLE_NUMBER.match(caption_text.strip())
+    matrix = normalize_table_matrix(list(getattr(table, "table_matrix", ()) or ()))
+    if number is None or len(matrix) < 2:
+        return None
+    table_number = number.group(1).rstrip(".").casefold()
+    last_row = matrix[-1]
+    fragment = re.sub(r"\s+", "", last_row[0]).casefold() if last_row else ""
+    if (
+        not fragment
+        or any(char.isalpha() for char in fragment)
+        or not any(char.isdigit() for char in fragment)
+        or not any(last_row[1:])
+    ):
+        return None
+    page = getattr(table, "page", None)
+    order = getattr(table, "table_order", None)
+    if page is None or order is None:
+        return None
+    candidates = [
+        candidate for candidate in tables
+        if getattr(candidate, "document_id", None) == getattr(table, "document_id", None)
+        and getattr(candidate, "table_order", None) == order + 1
+        and getattr(candidate, "page", None) in (page, page + 1)
+    ]
+    if len(candidates) != 1:
+        return None
+    candidate = candidates[0]
+    headers = [
+        " ".join(str(value).split()).casefold()
+        for value in getattr(table, "column_headers", ())
+    ]
+    donor_headers = [
+        " ".join(str(value).rsplit(">", 1)[-1].split()).casefold()
+        for value in getattr(candidate, "column_headers", ())
+    ]
+    if not headers or headers != donor_headers or len(headers) != len(last_row):
+        return None
+    donor_matrix = normalize_table_matrix(
+        list(getattr(candidate, "table_matrix", ()) or ())
+    )
+    marker = _CONTINUED_TABLE.fullmatch(
+        str(getattr(candidate, "caption_text", "") or "").strip()
+    )
+    for donor_row_index, row in enumerate(donor_matrix):
+        cells = [" ".join(cell.split()) for cell in row if cell]
+        markers = [_CONTINUED_TABLE.fullmatch(cell) for cell in cells]
+        if markers and all(markers):
+            if any(
+                item.group(1).rstrip(".").casefold() != table_number
+                for item in markers
+            ):
+                return None
+            marker = markers[0]
+            continue
+        if [cell.casefold() for cell in cells] == headers:
+            continue
+        break
+    else:
+        return None
+    if marker is None or marker.group(1).rstrip(".").casefold() != table_number:
+        return None
+    donor_row = donor_matrix[donor_row_index]
+    if len(donor_row) != len(headers) or not donor_row[0] or any(donor_row[1:]):
+        return None
+    label = re.sub(r"\s+", "", donor_row[0]).casefold()
+    if (
+        not label.endswith(fragment)
+        or not any(char.isalpha() for char in label)
+        or _objective_cell_text_looks_structurally_fragmented(donor_row[0])
+        or NUMBER_PATTERN.findall(label) != NUMBER_PATTERN.findall(fragment)
+    ):
+        return None
+    return {
+        "source_ref": str(candidate.table_id),
+        "page": candidate.page,
+        "row_index": donor_row_index,
+        "row": donor_row,
+    }
 
 
 def repair_table_source(
@@ -27,7 +208,6 @@ def repair_table_source(
     route: EvidenceCandidate,
     source: dict[str, Any],
     paper_facts_extractor: PaperFactsExtractor | None,
-    unavailable_error: Exception | None = None,
 ) -> tuple[dict[str, Any], Exception | None]:
     if not _objective_table_source_needs_llm_structural_repair(
         route=route,
@@ -39,6 +219,14 @@ def repair_table_source(
         source=source,
         matrix=original_matrix,
     )
+    raw_canonical_matrix = canonical_matrix
+    continuation = source.get("table_label_continuation")
+    repair_source = source
+    if continuation:
+        canonical_matrix = [*canonical_matrix, list(continuation["row"])]
+        repair_source = {
+            **source, "table_matrix": canonical_matrix, "header_row_count": 1,
+        }
     model_request_count = 0
     model_row_count: int | None = None
     final_row_count: int | None = None
@@ -57,13 +245,13 @@ def repair_table_source(
                 "table_id": route.source_ref,
                 "page": source.get("page"),
                 "status": status,
-                "original_row_count": len(canonical_matrix),
+                "original_row_count": len(raw_canonical_matrix),
                 "model_row_count": model_row_count,
                 "final_row_count": final_row_count,
                 "model_request_count": model_request_count,
                 "model_repair_count": model_repair_count,
                 "fragment_row_reduction_count": (
-                    max(0, len(canonical_matrix) - final_row_count)
+                    max(0, len(raw_canonical_matrix) - final_row_count)
                     if final_row_count is not None
                     else 0
                 ),
@@ -71,21 +259,28 @@ def repair_table_source(
                 "number_sequence_verified": number_sequence_verified,
                 "warnings": list(dict.fromkeys(warnings)),
                 "failure_reason": failure_reason,
+                **({
+                    "continuation_source_ref": continuation["source_ref"],
+                    "continuation_row_index": continuation["row_index"],
+                    "repair_input_row_count": len(canonical_matrix),
+                } if continuation else {}),
+                **({
+                    "reading_context_source_refs": [
+                        item["source_ref"] for item in source["table_reading_context"]
+                    ],
+                } if source.get("table_reading_context") else {}),
+                **({
+                    "reading_context_omissions": source["table_reading_context_omissions"],
+                } if source.get("table_reading_context_omissions") else {}),
             }
         )
 
-    if unavailable_error is not None:
-        record_trace(
-            "provider_failed",
-            f"{unavailable_error.__class__.__name__}: {unavailable_error}",
-        )
-        return source, unavailable_error
     try:
         if paper_facts_extractor is None:
             raise RuntimeError("table repair extractor is unavailable")
         repair_payloads = _build_objective_table_matrix_repair_payloads(
             route=route,
-            source=source,
+            source=repair_source,
             paper_facts_extractor=paper_facts_extractor,
         )
         parsed_repair_items = []
@@ -144,6 +339,14 @@ def repair_table_source(
         reason = "table matrix repair returned no usable matrix"
         record_trace("rejected", reason)
         return source, ValueError(reason)
+    if continuation and (
+        len(repaired_matrix) > len(raw_canonical_matrix)
+        or re.sub(r"\s+", "", repaired_matrix[-1][0]).casefold()
+        != re.sub(r"\s+", "", continuation["row"][0]).casefold()
+    ):
+        reason = "table matrix repair did not bind the continuation label to the final row"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
     repaired_matrix, residual_repairs = (
         _cleanup_objective_repaired_table_matrix_residual_fragments(
             original_matrix=canonical_matrix,
@@ -184,6 +387,10 @@ def repair_table_source(
     if not _objective_table_repair_preserves_source_tokens(
         original_matrix=canonical_matrix,
         repaired_matrix=repaired_matrix,
+        visual_text=(
+            str(source.get("table_visual_text") or "")
+            + ("\n" + continuation["row"][0] if continuation else "")
+        ),
     ):
         reason = "table matrix repair introduced tokens not present in source"
         record_trace("rejected", reason)
@@ -201,9 +408,13 @@ def repair_table_source(
     repaired_source["table_matrix_structural_repair_applied"] = True
     repair_attestation = {
         "schema_version": "objective_table_repair_attestation.v1",
-        "raw_matrix_sha256": _objective_table_matrix_sha256(canonical_matrix),
+        "raw_matrix_sha256": _objective_table_matrix_sha256(raw_canonical_matrix),
         "repaired_matrix_sha256": _objective_table_matrix_sha256(repaired_matrix),
     }
+    if continuation:
+        repaired_source["table_label_continuation"] = {
+            **continuation, "target_row_index": len(repaired_matrix) - 1,
+        }
     visual_text = str(source.get("table_visual_text") or "").strip()
     if visual_text:
         repair_attestation["visual_text_sha256"] = sha256(
@@ -306,6 +517,7 @@ def _build_objective_table_matrix_repair_payload(
         ),
         "table_visual_text": str(source.get("table_visual_text") or "").strip()
         or None,
+        "reading_context": source.get("table_reading_context", []),
         "table_slice": {
             "first_source_row_index": first_source_row_index,
             "end_source_row_index": end + 1,
@@ -409,14 +621,16 @@ def _objective_table_repair_preserves_source_tokens(
     *,
     original_matrix: list[list[str]],
     repaired_matrix: list[list[str]],
+    visual_text: str = "",
 ) -> bool:
     """Reject repair text that cannot be assembled from the supplied table.
 
     Structural repair may move a parser-spilled label or join adjacent cells, but
     it must not create a new specimen name, process label, or numeric level. A
     multiset check is deliberately conservative: omission is allowed so the
-    existing residual-fragment cleanup can remove a carried prefix, while any
-    newly introduced lexical token is left unresolved for a researcher.
+    existing residual-fragment cleanup can remove a carried prefix. If the grid
+    lost label characters, the exact ordered labels need independent support
+    in the supplied clipped PDF view; other cells cannot acquire new tokens.
     """
     if not original_matrix or not repaired_matrix:
         return False
@@ -436,10 +650,41 @@ def _objective_table_repair_preserves_source_tokens(
             " ".join(str(cell or "").split()).casefold()
         )
     )
-    return all(
+    if all(
         repaired_tokens[token] <= original_tokens[token]
         for token in repaired_tokens
+    ):
+        return True
+    if not visual_text.strip():
+        return False
+    # A parser can omit characters from a wrapped specimen label. Accept
+    # them only when every full label is present, in order, in the same
+    # table's PDF view. Non-label content still uses the original grid.
+    original_values = Counter(
+        token for row in original_matrix[1:] for cell in row[1:]
+        for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(cell.casefold())
     )
+    repaired_values = Counter(
+        token for row in repaired_matrix[1:] for cell in row[1:]
+        for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(cell.casefold())
+    )
+    if repaired_values - original_values:
+        return False
+    position = 0
+    for row in repaired_matrix[1:]:
+        label = re.sub(r"\s+", "", row[0])
+        if not label or not any(char.isalpha() for char in label):
+            return False
+        pattern = (
+            r"(?<![\w-])"
+            + r"\s*".join(re.escape(char) for char in label)
+            + r"(?![\w-])"
+        )
+        match = re.search(pattern, visual_text[position:], flags=re.IGNORECASE)
+        if match is None:
+            return False
+        position += match.end()
+    return True
 
 
 def _objective_table_repair_preserves_row_label_order(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -43,7 +44,7 @@ from domain.core import (
 )
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from httpx import Request, Response
-from openai import BadRequestError
+from openai import APITimeoutError, BadRequestError
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -12355,6 +12356,311 @@ def test_research_objective_table_repair_rejects_lost_p004_uncertainty():
             repaired_matrix=repaired_matrix,
         )
     )
+
+
+@pytest.mark.parametrize("all_fail", [False, True])
+def test_research_objective_table_repair_timeout_is_source_scoped(all_fail):
+    class RepairExtractor:
+        def __init__(self):
+            self.source_refs = []
+
+        def repair_table_matrix(self, payload):
+            source_ref = payload["source"]["source_ref"]
+            self.source_refs.append(source_ref)
+            if all_fail or source_ref == "table-a":
+                raise APITimeoutError(
+                    request=Request("POST", "http://llm.test/v1/chat/completions")
+                )
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=[
+                    ["Specimens", "Elongation (%)"],
+                    ["HT-SLM (140/280)", "9.1"],
+                ],
+                confidence=0.9,
+            )
+
+    class UnexpectedEvidenceExtractor:
+        def extract_source(self, _payload):
+            pytest.fail("The repaired result table is deterministically readable")
+
+    objective = _research_objective({
+        "objective_id": "obj-elongation", "variables": ["heat treatment"],
+        "outcomes": ["elongation"],
+    })
+    routes = tuple(EvidenceCandidate.from_mapping({
+        "objective_id": objective.objective_id, "document_id": "paper-1",
+        "source_kind": "table", "source_ref": ref,
+        "role": "current_experimental_evidence", "extractable": True,
+    }) for ref in ("table-a", "table-b"))
+    tables = [SourceTable(
+        table_id=route.source_ref, document_id="paper-1", table_order=index,
+        caption_text="Heat treatment and elongation", caption_block_id=None,
+        page=4, heading_path="Results",
+        column_headers=("Specimens", "Elongation (%)"),
+        table_matrix=(("Specimens", "Elongation (%)"),
+                      ("HT-SLM (140/", "9.1"), ("280)", "")),
+    ) for index, route in enumerate(routes, start=1)]
+    extractor = RepairExtractor()
+    read_audits = []
+    with capture_analysis_diagnostics() as diagnostics:
+        units = extract_and_validate_source_facts(
+            read_audits=read_audits, collection_id="col-test",
+            source_extractor=UnexpectedEvidenceExtractor(),
+            paper_facts_extractor=extractor, objectives=(objective,),
+            objective_paper_frames=(), objective_evidence_routes=routes,
+            blocks_by_document_id={}, tables_by_document_id={"paper-1": tables},
+            document_trees_by_document_id={},
+        )
+    assert extractor.source_refs == ["table-a", "table-b"]
+    failures = [audit for audit in read_audits if audit.disposition == "technical_failure"]
+    assert [audit.source_ref for audit in failures] == (
+        ["table-a", "table-b"] if all_fail else ["table-a"]
+    )
+    repair_traces = [item for item in diagnostics.records if item["trace_type"] == "table_matrix_repair"]
+    assert [item["model_request_count"] for item in repair_traces] == [1, 1]
+    if all_fail:
+        assert units == ()
+    else:
+        assert any(unit.source_ref == "table-b" and unit.reported_result
+                   and unit.reported_result.value == 9.1
+                   and unit.reported_result.unit == "%" for unit in units)
+
+
+def test_p004_table_repair_reads_explicit_continuation_label_and_keeps_lineage():
+    fixture = json.loads((Path(__file__).parents[2] / "fixtures/p004_table_continuation.json").read_text())
+    fixture["tables"][0]["metadata"] = {
+        "visual_text": (Path(__file__).parents[2] / "fixtures/p004_table_2_visual.txt").read_text(),
+    }
+    tables = [SourceTable.from_record(record) for record in fixture["tables"]]
+    primary, continuation = tables
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": "obj-density", "document_id": primary.document_id,
+        "source_kind": "table", "source_ref": primary.table_id,
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    source = source_extraction._build_objective_route_source_payload(
+        route=route, blocks=[], tables=tables,
+    )
+
+    class RepairExtractor:
+        def repair_table_matrix(self, payload):
+            # The donor label must actually be present in the repair request.
+            assert "| HIP-SLM (140/ 200) |  |  |  |  |  |" in payload["source"]["table_markdown"]
+            labels = [f"{state}-SLM ({power}/{speed})" for power in (100, 120, 140)
+                      for speed in (100, 200, 280) for state in ("as", "HT", "HIP")][:24]
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=[list(primary.column_headers), *[
+                    [label, *row[1:]] for label, row in zip(labels, primary.table_matrix[1:], strict=True)
+                ]], confidence=0.9,
+            )
+
+    repaired, error = table_repair.repair_table_source(
+        collection_id="col-test", route=route, source=source,
+        paper_facts_extractor=RepairExtractor(),
+    )
+    assert error is None
+    assert repaired["table_matrix"][-1] == [fixture["expected_boundary"]["specimen"], "HIP", "140", "200", "194", "98.75"]
+    assert repaired["raw_table_matrix"] == [list(row) for row in primary.table_matrix]
+    assert tables == [SourceTable.from_record(record) for record in fixture["tables"]]
+    refs = source_validation._objective_route_source_refs(
+        route=route, source=repaired, row_index=24, col_index=5,
+        source_excerpt="Density (%): 98.75",
+    )
+    assert refs[0]["source_ref"] == primary.table_id
+    assert refs[0]["table_matrix_repair_attestation"]["raw_matrix_sha256"] == table_repair._objective_table_matrix_sha256(
+        [list(row) for row in primary.table_matrix]
+    )
+    assert refs[1]["source_ref"] == continuation.table_id
+    assert refs[1]["row_index"] == 2
+    assert refs[1]["col_index"] == 0
+    assert refs[1]["supports"] == ["scientific_context.sample"]
+    assert len(source_validation._objective_route_source_refs(
+        route=route, source=repaired, row_index=23,
+    )) == 1
+    objective = _research_objective({
+        "objective_id": route.objective_id, "variables": ["heat treatment"],
+        "outcomes": ["density"], "material_scope": ["316L stainless steel"],
+    })
+    read_audits = []
+    units = extract_and_validate_source_facts(
+        read_audits=read_audits, collection_id="col-test", source_extractor=None,
+        paper_facts_extractor=RepairExtractor(), objectives=(objective,),
+        objective_paper_frames=(), objective_evidence_routes=(route,),
+        blocks_by_document_id={}, tables_by_document_id={primary.document_id: tables},
+        document_trees_by_document_id={},
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test", objective_id=objective.objective_id,
+        analysis_version=1, total_document_count=1,
+        document_inputs=(PreparedDocumentInput(document_id=primary.document_id, preparation_fingerprint="fixture"),),
+        pipeline_version="test", model_name=None, prompt_versions={},
+    )
+    evidence, _ = evidence_materialization.materialize_evidence(
+        collection_id="col-test", analysis=analysis, objective=objective,
+        observations=units, technical_audits=tuple(read_audits), paper_maps=(),
+        frames=(), routes=(route,), blocks_by_document_id={},
+        tables_by_document_id={primary.document_id: tables}, figures_by_document_id={},
+    )
+    boundary = next(item for item in evidence if item.reported_result
+                    and item.reported_result.value == fixture["expected_boundary"]["density"])
+    assert boundary.reported_result.unit == "%"
+    assert any(ref["source_ref"] == continuation.table_id and ref["row_index"] == 2
+               for ref in boundary.related_source_refs)
+    assert any(item.value == fixture["expected_boundary"]["specimen"]
+               for item in boundary.scientific_context.sample)
+
+
+@pytest.mark.parametrize("mismatch", [
+    "document", "page", "order", "table_number", "headers", "numeric_donor",
+    "wrong_label", "duplicate", "missing_marker", "complete_primary_label",
+])
+def test_table_label_continuation_rejects_unproven_link(mismatch):
+    fixture = json.loads((Path(__file__).parents[2] / "fixtures/p004_table_continuation.json").read_text())
+    primary, donor = fixture["tables"]
+    if mismatch == "document":
+        donor["document_id"] = "another-paper"
+    elif mismatch == "page":
+        donor["page"] = primary["page"] + 2
+    elif mismatch == "order":
+        donor["table_order"] += 1
+    elif mismatch == "table_number":
+        donor["table_matrix"][0] = ["Table 8 (continued)"] * 6
+    elif mismatch == "headers":
+        donor["column_headers"][-1] = "Elongation (%)"
+    elif mismatch == "numeric_donor":
+        donor["table_matrix"][2][-1] = "99.0"
+    elif mismatch == "wrong_label":
+        donor["table_matrix"][2][0] = "HIP-SLM (140/280)"
+    elif mismatch == "missing_marker":
+        donor["table_matrix"] = donor["table_matrix"][1:]
+    elif mismatch == "complete_primary_label":
+        primary["table_matrix"][-1][0] = "HIP-SLM (140/200)"
+    tables = [SourceTable.from_record(record) for record in (primary, donor)]
+    if mismatch == "duplicate":
+        tables.append(SourceTable.from_record({**donor, "table_id": "duplicate-donor"}))
+    assert table_repair.find_table_label_continuation(
+        table=tables[0], tables=tables, caption_text=primary["caption_text"],
+    ) is None
+    context, _ = table_repair.build_table_reading_context(
+        table=tables[0], tables=tables, blocks=[], caption_text=primary["caption_text"],
+    )
+    # Reading an explicit continuation is broader than joining its first row.
+    # An incompatible label or populated row cannot be joined, but it can be read.
+    assert bool(context) == (mismatch in {"complete_primary_label", "numeric_donor", "wrong_label"})
+
+
+@pytest.mark.parametrize("defect", ["missing_view", "absent_label", "wrong_order", "invented_value"])
+def test_visual_table_labels_cannot_bypass_source_grounding(defect):
+    original = [["Specimen", "Density (%)"], ["HT (1/", "98.0"], ["2) HIP", "99.0"]]
+    repaired = [["Specimen", "Density (%)"], ["HT (1/2)", "98.0"], ["HIP (1/2)", "99.0"]]
+    view = "Specimen\nHT\n(1/2)\n98.0\nHIP\n(1/2)\n99.0"
+    if defect == "missing_view":
+        view = ""
+    elif defect == "absent_label":
+        view = view.replace("HIP", "OTHER")
+    elif defect == "wrong_order":
+        view = "HIP (1/2) 99.0\nHT (1/2) 98.0"
+    elif defect == "invented_value":
+        repaired[1][1] = "100.0"
+    assert not table_repair._objective_table_repair_preserves_source_tokens(
+        original_matrix=original, repaired_matrix=repaired, visual_text=view,
+    )
+
+
+def test_table_repair_reads_neighbors_and_explicit_continuation_with_source_identity():
+    fixture = json.loads((Path(__file__).parents[2] / "fixtures/p004_table_continuation.json").read_text())
+    tables = [SourceTable.from_record(record) for record in fixture["tables"]]
+    table, donor = tables
+    blocks = [SimpleNamespace(
+        block_id=ref, document_id=document_id, block_type=kind, block_order=order,
+        text=text, page=page,
+    ) for order, (ref, document_id, kind, text, page) in enumerate([
+        ("far", table.document_id, "paragraph", "Unrelated earlier experiment", 1),
+        ("different-number", table.document_id, "paragraph", "Measurements are in Table 2.1.", 3),
+        ("methods", table.document_id, "paragraph", "Measured densities are summarized in Table 2.", 3),
+        ("section", table.document_id, "heading", "Results", 3),
+        ("before", table.document_id, "paragraph", "HT denotes the furnace heat-treated specimens.", 4),
+        (table.caption_block_id, table.document_id, "table_caption", table.caption_text, 4),
+        ("note", table.document_id, "paragraph", "The values in parentheses identify power and scan speed.", 4),
+        ("heading", table.document_id, "heading", "Other measurements", 4),
+        ("unrelated", table.document_id, "paragraph", "An unrelated experiment measured 72 percent.", 4),
+        ("foreign", "another-paper", "paragraph", "Another paper's specimen definition", 4),
+    ])]
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": "obj-test", "document_id": table.document_id,
+        "source_kind": "table", "source_ref": table.table_id,
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    source = source_extraction._build_objective_route_source_payload(
+        route=route, blocks=blocks, tables=tables,
+    )
+    context = source["table_reading_context"]
+    assert [item["source_ref"] for item in context] == ["methods", "before", "note", donor.table_id]
+    assert context[0]["page"] == 3
+    assert context[0]["relation"] == "table_reference"
+    assert context[-1]["relation"] == "printed_table_continuation"
+    assert "HIP-SLM (140/ 200)" in context[-1]["table_markdown"]
+    payloads = table_repair._build_objective_table_matrix_repair_payloads(
+        route=route, source=source, paper_facts_extractor=SimpleNamespace(),
+    )
+    assert payloads[0]["source"]["reading_context"] == context
+    assert source["table_matrix"] == [list(row) for row in table.table_matrix]
+
+
+def test_table_reading_context_omits_oversized_blocks_without_silent_truncation():
+    table = SourceTable(
+        table_id="table-1", document_id="paper-1", table_order=1,
+        caption_text="Table 1. Measurements", caption_block_id="caption",
+        page=2, heading_path="Results", column_headers=("Specimen", "Value"),
+        table_matrix=(("Specimen", "Value"), ("HT (1/", "99")),
+    )
+    blocks = [SimpleNamespace(
+        block_id=ref, document_id=table.document_id, block_type=kind,
+        block_order=order, text=text, page=2,
+    ) for order, (ref, kind, text) in enumerate([
+        ("long", "paragraph", "x" * 9000),
+        ("caption", "table_caption", table.caption_text),
+        ("short", "paragraph", "The table reports percent values."),
+    ])]
+    context, omitted = table_repair.build_table_reading_context(
+        table=table, tables=[table], blocks=blocks, caption_text=table.caption_text,
+    )
+    assert [item["source_ref"] for item in context] == ["short"]
+    assert omitted == [{"source_ref": "long", "reason": "context_budget"}]
+
+
+def test_table_repair_cannot_borrow_measurement_from_neighboring_prose():
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": "obj-density", "document_id": "paper-1",
+        "source_kind": "table", "source_ref": "table-1",
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    source = {
+        "source_kind": "table", "source_ref": "table-1", "page": 4,
+        "column_headers": ["Specimen", "Density (%)"],
+        "table_matrix": [["Specimen", "Density (%)"], ["HT (10/", "98.0"], ["20)", ""]],
+        "table_reading_context": [{
+            "source_kind": "text_window", "source_ref": "note-1", "page": 4,
+            "relation": "following_text", "text": "Another experiment measured 99.0% density.",
+        }],
+    }
+
+    class BorrowingExtractor:
+        def repair_table_matrix(self, payload):
+            assert "99.0%" in payload["source"]["reading_context"][0]["text"]
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=[["Specimen", "Density (%)"], ["HT (10/20)", "99.0"]],
+            )
+
+    with capture_analysis_diagnostics() as diagnostics:
+        result, error = table_repair.repair_table_source(
+            collection_id="col-test", route=route, source=source,
+            paper_facts_extractor=BorrowingExtractor(),
+        )
+    assert result is source
+    assert str(error) == "table matrix repair changed or reordered source result numbers"
+    assert diagnostics.records[-1]["status"] == "rejected"
+    assert diagnostics.records[-1]["reading_context_source_refs"] == ["note-1"]
 
 
 def test_research_objective_table_repair_bad_request_is_route_scoped():

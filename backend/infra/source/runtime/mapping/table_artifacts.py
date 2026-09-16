@@ -190,7 +190,12 @@ def extract_pdf_table_visual_text(
             )
             if clip.is_empty or clip.width <= 0 or clip.height <= 0:
                 return None
-            text = page.get_text("text", clip=clip, sort=True)
+            # Keep a wrapped cell's lines together instead of interleaving
+            # neighboring columns into its specimen label.
+            text = "\n".join(
+                block[4] for block in page.get_text("blocks", clip=clip, sort=True)
+                if block[6] == 0
+            )
     except Exception:  # noqa: BLE001
         return None
     lines = [" ".join(line.split()) for line in str(text or "").splitlines()]

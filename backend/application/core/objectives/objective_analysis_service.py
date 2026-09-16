@@ -85,7 +85,7 @@ class ObjectiveAnalysisInputs(ObjectiveSourceInputs):
     paper_maps: tuple[PaperResearchMap, ...]
 
 
-_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v1"
+_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v2"
 OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
     ("paper_framing", OBJECTIVE_PAPER_FRAME_PROMPT_VERSION),
     ("evidence_routing", OBJECTIVE_EVIDENCE_ROUTING_VERSION),

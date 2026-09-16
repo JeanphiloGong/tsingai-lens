@@ -16,12 +16,32 @@ Read the analysis responsibilities in real research order:
    payload construction, deterministic table interpretation, model extraction,
    and route-scoped technical failures. It calls `table_repair.repair_table_source`
    for bounded continuous-row structural recovery before interpreting the table.
+   A timeout affects that table's read only; it does not suppress repair of
+   later tables in the paper. Each selected table retains its bounded attempt,
+   and a provider error does not trigger wider scientific reading.
+   The repair request includes up to two text blocks on each side of the
+   caption, stopping at a heading or another caption, plus nearby paragraphs
+   explicitly referencing the printed table number. These candidates stay in
+   the same paper and within one page of the table. At most six text blocks
+   and one explicitly numbered adjacent continuation are supplied, within an
+   8,000-character context budget. Oversized blocks are omitted whole and
+   recorded in the repair trace. This reading context explains existing
+   labels and notes; it cannot contribute measurement cells to the current
+   table. Context Source identities and omissions remain in the trace without
+   making every inspected paragraph an Evidence reference.
    A PDF table Source carries both the Docling logical grid and an
    optional clipped page-layout view. The grid preserves cell identity and
    numeric tokens; the layout view preserves the continuous row wrapping a
    researcher sees in the PDF. Repair may use the latter to resolve a split
    label or uncertainty, but it must conserve the supplied tokens and numeric
-   column sequence. Oversized repair inputs repeat the caption and flattened
+   column sequence. The clipped view is extracted automatically from Docling's
+   table region using PDF text blocks, keeping wrapped cell lines together.
+   If the grid omitted label digits, recovery requires every complete specimen
+   label to occur literally, in order, in that view; non-label cells must still
+   conserve grid tokens and numeric sequences. Older Sources without this
+   optional view may remain unresolved until reparsed from the original PDF.
+   Analysis does not rewrite those stored Sources or fabricate a missing view.
+   Oversized repair inputs repeat the caption and flattened
    header on every slice, then merge in Source row order. A final row
    containing only carried label and uncertainty fragments may merge into the
    preceding logical row. Mean-plus-uncertainty result columns are rebound from
@@ -38,6 +58,12 @@ Read the analysis responsibilities in real research order:
    and excerpt hash. The expert audit recomputes those values from the
    persisted Source artifact; unattested or stale repaired rows cannot satisfy
    Source-grounding checks.
+   For an explicit adjacent continuation with matching headers, a label-only
+   first data row may complete the primary table's final numeric row. The
+   labels must share the same numeric suffix; ambiguous matches are rejected.
+   The original primary matrix hash stays unchanged, and the affected Evidence
+   row additionally cites the continuation's original row and label cell.
+   Other continuation measurements remain in their own Source.
 4. `source_validation.py` immediately checks each model-authored observation against
    the exact Source being inspected. Extraction and validation therefore
    alternate per Source; they are not two collection-wide passes. Validation

@@ -2504,9 +2504,19 @@ def _objective_route_source_refs(
                 _objective_source_excerpt_sha256(source_excerpt)
             )
         ref["table_matrix_repair_attestation"] = attestation
-    return (
-        {key: value for key, value in ref.items() if value not in (None, "", [], {})},
-    )
+    refs = [{key: value for key, value in ref.items() if value not in (None, "", [], {})}]
+    continuation = source.get("table_label_continuation")
+    if isinstance(repair_attestation, Mapping) and isinstance(continuation, Mapping) and (
+        row_index is None or row_index == continuation.get("target_row_index")
+    ):
+        refs.append({
+            "source_kind": "table", "source_ref": continuation["source_ref"],
+            "role": "condition_context", "page": continuation["page"],
+            "row_index": continuation["row_index"], "col_index": 0,
+            "source_excerpt": continuation["row"][0],
+            "supports": ["scientific_context.sample"],
+        })
+    return tuple(refs)
 
 
 def _objective_source_matrix_sha256(value: Any) -> str:

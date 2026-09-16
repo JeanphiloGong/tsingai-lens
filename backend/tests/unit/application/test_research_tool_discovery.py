@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pytest
 
 from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
@@ -156,7 +157,11 @@ async def test_followup_answer_keeps_prior_source_read_separate_from_current_pro
     instruction = runner._answer_instruction(_context(), messages, [], [], budget_exhausted=True)
     assert "this request only, not the whole conversation" in instruction.content
     assert "Exact paper Sources read (0)" in instruction.content
-    assert "source_ref=methods, digest=original-version" in instruction.content
+    summary = json.loads(instruction.content.split("EARLIER REQUESTS: COMPLETE SOURCES INSPECTED\n", 1)[1].splitlines()[0])
+    assert summary["papers"][0]["document_id"] == "p1"
+    source = summary["papers"][0]["sources"][0]
+    assert source["source_ref"] == "methods"
+    assert source["source_digest"] == "original-version"
     assert "Zero new reads does not erase earlier reading" in instruction.content
     from application.chat.capability_policy import active_successful_results_by_name, has_successful_exact_source_read
     assert not has_successful_exact_source_read(active_successful_results_by_name(messages))

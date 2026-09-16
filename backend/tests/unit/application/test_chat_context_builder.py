@@ -43,6 +43,99 @@ def test_context_token_budget_preserves_complete_call_result_batches():
         assert (call in view.messages) == (result in view.messages)
 
 
+def test_recent_user_scope_survives_larger_tool_results():
+    original = _user("scope", "Keep HP-LPBF and L-PBF in the heat-treatment reading list.")
+    active = _user("active", "Also include ELI; defer only the review paper.")
+    pairs = [_tool_pair(call_id=f"lookup-{index}", payload={"content": "paper metadata " * 300})
+             for index in range(4)]
+    messages = (original, *(message for pair in pairs for message in pair), active)
+    view = ChatContextBuilder(max_messages=5).for_model(messages, max_input_tokens=3000)
+    assert original in view.messages and active in view.messages
+    assert len(view.messages) <= 5
+    assert ChatContextBuilder.estimate_tokens(view.provider_messages("test")) <= 3000
+    for call, result in pairs:
+        assert (call in view.messages) == (result in view.messages)
+
+
+def test_current_request_follows_old_scope_and_runtime_hints_in_provider_context():
+    from application.chat.context_builder import ChatModelContext
+
+    prior = _user("prior", "Identify paper A only; do not read its results yet.")
+    active = _user("active", "Now inspect its treatment conditions and tensile measurements.")
+    hint = _user("hint", "The current reading ledger lists the completed passages.")
+    view = ChatContextBuilder().for_model((prior, active, hint), active_user_message_id="active")
+    payload = view.provider_messages("system")
+    assert payload[-1]["content"].startswith("[CURRENT RESEARCHER REQUEST]\n" + active.content)
+    assert prior.content not in payload[-1]["content"]
+    assert "retain their choices only where this request does not change them" in payload[-1]["content"]
+    compact = ChatModelContext((active, prior), compacting=True, active_user_message_id="active")
+    assert compact.provider_messages("compact")[-1]["content"].endswith("do not answer it.")
+
+
+@pytest.mark.anyio
+async def test_previous_complete_abstract_is_retained_when_notes_and_new_search_omit_it():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, capability_policy
+    from application.chat.agent_runner import _RunProgress
+
+    prior_user = _user("prior-user", "Read the four abstracts before comparing elongation.")
+    abstract = _tool_pair(call_id="old-abstract", payload={
+        "document_id": "fourth-paper", "source_kind": "text_window", "source_ref": "abstract-1",
+        "source_digest": "original-version", "content_truncated": False,
+        "heading_path": "Abstract", "page": 1,
+        "content": "The elongation values are cited from earlier work, not new measurements.",
+    })
+    abstract = (replace(abstract[0], tool_calls=(ChatToolRequest(
+        tool_call_id="old-abstract", name="read_source", arguments={}, position=0,
+    ),)), abstract[1])
+    active = _user("active", "Continue checking the necessary Methods and Results.")
+    search = _tool_pair(call_id="new-search", payload={"document_ids": ["fourth-paper"], "matches": []})
+    search = (replace(search[0], tool_calls=(ChatToolRequest(
+        tool_call_id="new-search", name="search_sources", arguments={"query": "elongation"}, position=0,
+    ),)), search[1])
+    messages = (prior_user, *abstract, active, *search)
+    notes = {"scope": "other papers", "checks": [], "next_actions": []}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=4))
+    view = await runner._prepare_model_context(messages, (), _RunProgress(runner.limits), active_user_message_id="active")
+    retained = json.loads(view.prior_reading_summary)
+    paper = next(paper for paper in retained["papers"] if paper["document_id"] == "fourth-paper")
+    assert paper["complete_source_count"] == 1
+    assert paper["sources"][0]["source_digest"] == "original-version"
+    assert "earlier work" in paper["sources"][0]["excerpt"]
+    assert not capability_policy.has_successful_exact_source_read(
+        capability_policy.active_successful_results_by_name(list(messages)))
+    assert abstract[1] not in view.messages
+    assert prior_user in view.messages
+    assert "original-version" in json.dumps(view.provider_messages("test"))
+
+
+def test_prior_reading_keeps_abstract_before_later_metadata_within_token_budget():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+
+    abstract = "This abstract cites elongation from earlier work and reports no new elongation measurements. " * 12
+    pairs = []
+    for index, content in enumerate((abstract, *("Publication metadata and copyright." for _ in range(20)))):
+        call_id = f"read-{index}"
+        pair = _tool_pair(call_id=call_id, payload={
+            "document_id": "fourth-paper", "source_kind": "text_window",
+            "source_ref": f"passage-{index}", "source_digest": f"version-{index}",
+            "content_truncated": False, "content": content,
+        })
+        pairs.extend((replace(pair[0], tool_calls=(ChatToolRequest(
+            tool_call_id=call_id, name="read_source", arguments={}, position=0,
+        ),)), pair[1]))
+    messages = (_user("prior", "Read the abstract."), *pairs, _user("active", "Continue checking the comparison."))
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    summary = runner._prior_source_reading(messages, active_user_message_id="active", max_tokens=800)
+    assert ChatContextBuilder.estimate_tokens(summary) <= 800
+    paper = json.loads(summary)["papers"][0]
+    assert paper["complete_source_count"] == 21
+    assert paper["omitted_source_count"] > 0
+    assert paper["sources"][0]["source_ref"] == "passage-0"
+    assert paper["sources"][0]["excerpt"] == abstract
+
+
 @pytest.mark.anyio
 async def test_compaction_preserves_research_notes_and_full_archived_history():
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner

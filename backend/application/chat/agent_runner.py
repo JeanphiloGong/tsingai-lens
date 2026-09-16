@@ -985,11 +985,18 @@ class ResearchAgentRunner:
         input_budget = self.limits.max_context_tokens - self.limits.max_model_output_tokens - overhead - 2048
         if tool_specs:
             input_budget -= min(16_000, max(0, input_budget // 3))
+        prior_reading = self._prior_source_reading(
+            messages, active_user_message_id=active_user_message_id,
+            max_tokens=min(4500, max(256, input_budget // 8)),
+        )
+        if prior_reading:
+            input_budget -= self.context_builder.estimate_tokens(prior_reading) + 200
         available = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
         view = self.context_builder.for_model(
             available, active_user_message_id=active_user_message_id,
             max_input_tokens=input_budget, working_summary=progress.working_summary,
         )
+        view = replace(view, prior_reading_summary=prior_reading)
         kept = {message.message_id for message in view.messages}
         omitted = tuple(message for message in available if message.message_id not in kept)
         active = next(message for message in messages if message.message_id == active_user_message_id)
@@ -1006,7 +1013,8 @@ class ResearchAgentRunner:
             batch: list[ChatMessage] = []
             for unit in units:
                 candidate = ChatModelContext((active, *batch, *unit), compacting=True,
-                                             working_summary=progress.working_summary)
+                                             working_summary=progress.working_summary,
+                                             active_user_message_id=active_user_message_id)
                 tokens = self.context_builder.estimate_tokens(candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT))
                 if tokens + 8192 + 2048 > self.limits.max_context_tokens:
                     break
@@ -1020,7 +1028,8 @@ class ResearchAgentRunner:
             for attempt in range(2):
                 try:
                     compacted = await self._respond(
-                        ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary),
+                        ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
+                                         active_user_message_id=active_user_message_id),
                         (), progress, None,
                     )
                     if compacted.tool_calls:
@@ -1078,7 +1087,82 @@ class ResearchAgentRunner:
         if any(unit[0].message_id not in retained for unit in self.context_builder._protocol_units(remaining)):
             return await self._prepare_model_context(messages, tool_specs, progress,
                                                      active_user_message_id=active_user_message_id)
-        return replace(view, max_context_tokens=self.limits.max_context_tokens)
+        return replace(view, max_context_tokens=self.limits.max_context_tokens, prior_reading_summary=prior_reading)
+
+    def _prior_source_reading(
+        self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
+        active_user_message_id: str, max_tokens: int,
+    ) -> str:
+        """Retain bounded reading facts across turns without granting current write authority."""
+        active_index = next(index for index, message in enumerate(messages)
+                            if message.message_id == active_user_message_id)
+        prior = messages[:active_index]
+        names = {call.tool_call_id: call.name for message in prior for call in message.tool_calls}
+        results: dict[str, list[Mapping[str, Any]]] = {}
+        sources = []
+        for message in prior:
+            result = message.tool_result
+            name = names.get(message.tool_call_id)
+            if (result is None or result.status is not ToolResultStatus.SUCCEEDED
+                    or name not in {"read_source", "inspect_table", "inspect_document_sources"}):
+                continue
+            results.setdefault(name, []).append(result.data)
+            if name == "inspect_document_sources":
+                document_id = str(result.data.get("document", {}).get("document_id") or "")
+                sources.extend({**source, "document_id": document_id} for source in result.data.get("sources", ())
+                               if isinstance(source, Mapping))
+            elif name == "inspect_table":
+                sources.append({**result.data, "source_kind": "table", "source_ref": result.data.get("table_ref")})
+            else:
+                sources.append(result.data)
+        completed = capability_policy.complete_source_reads(results)
+        if not completed:
+            return ""
+        documents: dict[str, dict[tuple[str, ...], dict[str, Any]]] = {}
+        for source in reversed(sources):
+            identity = tuple(str(source.get(key) or "") for key in
+                             ("document_id", "source_kind", "source_ref", "source_digest"))
+            if identity not in completed:
+                continue
+            record = {key: source[key] for key in ("source_kind", "source_ref", "source_digest", "page", "heading_path", "content_offset")
+                      if isinstance(source.get(key), (str, int))}
+            content = source.get("content")
+            if isinstance(content, str) and content:
+                record.update(excerpt=content[:1600], excerpt_truncated=len(content) > 1600)
+            documents.setdefault(identity[0], {}).setdefault(identity, record)
+        payload: dict[str, Any] = {"papers": [], "omitted_paper_count": len(documents)}
+
+        def fits() -> bool:
+            return self.context_builder.estimate_tokens(payload) <= max_tokens
+
+        queues = []
+        for document_id, records in documents.items():
+            paper = {"document_id": document_id, "complete_source_count": len(records),
+                     "sources": [], "omitted_source_count": len(records)}
+            payload["papers"].append(paper)
+            payload["omitted_paper_count"] -= 1
+            if not fits():
+                payload["papers"].pop()
+                payload["omitted_paper_count"] += 1
+                break
+            # Recent metadata tails must not displace the longer passages already read.
+            queues.append((paper, sorted(records.values(),
+                                        key=lambda record: len(record.get("excerpt", "")), reverse=True)))
+        # Allocate excerpts across papers before adding more passages from one paper.
+        for index in range(max((len(records) for _, records in queues), default=0)):
+            for paper, records in queues:
+                if index >= len(records):
+                    continue
+                record = dict(records[index])
+                paper["sources"].append(record)
+                paper["omitted_source_count"] -= 1
+                if not fits():
+                    record.pop("excerpt", None)
+                    record.pop("excerpt_truncated", None)
+                if not fits():
+                    paper["sources"].pop()
+                    paper["omitted_source_count"] += 1
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
     def _bounded_working_notes(
         self, notes: ResearchWorkingNotesModelOutput, *, max_tokens: int,
@@ -1180,23 +1264,8 @@ class ResearchAgentRunner:
     ) -> ChatMessage:
         active_request = self._active_user_request(messages)
         last_user = max((index for index, message in enumerate(messages) if message.role is ChatMessageRole.USER), default=0)
-        prior_messages = messages[:last_user]
-        prior_names = {
-            request.tool_call_id: request.name
-            for message in prior_messages for request in message.tool_calls
-        }
-        prior_reads = capability_policy.complete_source_reads({
-            name: [
-                message.tool_result.data for message in prior_messages
-                if message.tool_result is not None
-                and message.tool_result.status is ToolResultStatus.SUCCEEDED
-                and prior_names.get(message.tool_call_id) == name
-            ]
-            for name in ("read_source", "inspect_table", "inspect_document_sources")
-        })
-        prior_reading = "\n".join(
-            f"- document_id={document_id}, kind={kind}, source_ref={ref}, digest={digest}"
-            for document_id, kind, ref, digest in sorted(prior_reads)[:30]
+        prior_reading = self._prior_source_reading(
+            messages, active_user_message_id=messages[last_user].message_id, max_tokens=1500,
         ) or "No complete Source read is recorded in earlier requests."
         structured_deliverable = self._latest_structured_deliverable(results)
         deliverable_section = (

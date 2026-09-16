@@ -299,6 +299,27 @@ uncertainties and next actions. It validates references before retiring those
 operations from model input. The full trajectory remains in storage. Working
 notes are not primary evidence, approval or published results. Source claims require
 their actual passages. A failed compaction preserves history and fails visibly.
+Recent user requests receive a reserved share of the context before tool
+outputs. Adding one paper or deferring a review preserves other paper choices;
+compaction retains those choices separately from Agent recommendations.
+The active request is also identified after historical records and runtime hints,
+including during compaction. Its token cost is reserved in context selection.
+A later request for detailed results supersedes an earlier identification-only
+request while preserving the selected paper.
+Across user requests, a bounded reading summary is rebuilt from successful
+historical Source results, including versioned references, verbatim excerpts
+and explicit omissions. A new empty search cannot erase an earlier abstract
+read. Historical reading is context, not scientific validation or current-turn
+write authority: exact Evidence publication prerequisites remain independent.
+Comparisons distinguish supported agreement, supported difference and unresolved
+attributes. An unspecified ELI grade is unresolved, not a demonstrated grade
+difference; each paper's treatment variables and result remain attributed to it.
+The compaction instructions preserve the same uncertainty and attribution, so
+working notes must not strengthen a claim while the original operations retire.
+The comparison answer exposes an attribute-by-paper table so inspected values,
+confirmed differences and unconfirmed conditions remain distinguishable to the
+researcher. Shared conclusions and paper-specific counterexamples use separate
+attributed statements. This answer structure does not certify model correctness.
 
 For example, a researcher asking to inspect the P002 group definitions can load
 paper navigation, locate the canonical Methods Source, and read its exact

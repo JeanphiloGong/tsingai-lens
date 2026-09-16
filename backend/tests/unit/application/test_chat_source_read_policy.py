@@ -400,7 +400,8 @@ def test_search_for_a_new_source_version_cannot_reuse_an_old_complete_read():
     assert capability_policy.required_tool_before_answer(("read_source",), successful_results=results) == "read_source"
 
 
-def test_evidence_for_a_new_source_version_requires_reading_that_version():
+@pytest.mark.parametrize("prior_turn", [False, True])
+def test_evidence_requires_current_request_read_of_exact_source_version(prior_turn):
     from application.chat.capabilities import CreateEvidenceDraftArguments
     from tests.unit.application.test_research_agent_runner import _Capability
     from domain.chat import ChatMessage, ChatMessageRole, ChatToolRequest
@@ -414,11 +415,14 @@ def test_evidence_for_a_new_source_version_requires_reading_that_version():
         ChatMessage(message_id="a", session_id="s", role=ChatMessageRole.ASSISTANT, content="", created_at="2026-09-09T00:00:00Z", tool_calls=(ChatToolRequest(tool_call_id="read", name="read_source", arguments={}, position=0),)),
         ChatMessage(message_id="t", session_id="s", role=ChatMessageRole.TOOL, content="", created_at="2026-09-09T00:00:00Z", tool_call_id="read", tool_result=read_result),
     ]
+    if prior_turn:
+        messages.append(ChatMessage.user(message_id="followup", session_id="s",
+            content="Now draft Evidence from those methods.", created_at="2026-09-09T00:01:00Z"))
     handler = _Capability("create_evidence_draft", ToolRisk.DRAFT, CreateEvidenceDraftArguments)
     call = ChatToolCall.requested(tool_call_id="draft", session_id="s", assistant_message_id="a2", position=0,
         name="create_evidence_draft", risk=ToolRisk.DRAFT, arguments={
             **source, "draft_id": "draft", "objective_id": "objective", "source_analysis_version": 1,
-            "source_excerpt": "Changed source text", "source_digest": "b" * 64,
+            "source_excerpt": "Source text", "source_digest": ("a" if prior_turn else "b") * 64,
             "evidence_role": "condition_context", "attribution_scope": "descriptive_only",
         })
     error, _ = capability_policy.validate_batch(CapabilityRegistry((handler,)), [(call, handler)], messages)

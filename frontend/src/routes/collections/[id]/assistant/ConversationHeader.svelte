@@ -37,7 +37,7 @@
 		flex: 0 0 auto;
 		align-items: center;
 		min-height: 44px;
-		padding: 8px 32px;
+		padding: 6px 32px;
 		box-sizing: border-box;
 	}
 

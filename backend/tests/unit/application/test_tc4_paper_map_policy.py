@@ -4,10 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
-)
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
 from application.core.objectives.paper_research_map_service import (
@@ -52,12 +49,13 @@ def _study(*, outcome: str, source_unit_ids: list[str]) -> dict[str, Any]:
 class _MultiAxisExtractor:
     def __init__(self) -> None:
         self.payloads: list[dict[str, Any]] = []
-        self.reconciliation_payloads: list[dict[str, Any]] = []
 
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         self.payloads.append(payload)
         units = payload.get("source_units") or ()
         text = " ".join(str(unit.get("content") or "") for unit in units)
@@ -116,33 +114,11 @@ class _MultiAxisExtractor:
             confidence=0.9,
         )
 
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        self.reconciliation_payloads.append(payload)
-        signals = payload["signals"]
-        variable = next(
-            signal for signal in signals if signal["signal_type"] == "variable"
-        )
-        return StructuredPaperSignalReconciliation(
-            studies=[
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": [variable["signal_id"], signal["signal_id"]],
-                            "confidence": 0.9,
-                        }
-                        for signal in signals
-                        if signal["signal_type"] == "outcome"
-                    ]
-                }
-            ]
-        )
-
 
 class _BoundedExpansionExtractor(_MultiAxisExtractor):
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         parsed = super().extract(payload)
         result_units = [
             unit
@@ -153,10 +129,9 @@ class _BoundedExpansionExtractor(_MultiAxisExtractor):
             return parsed
         dynamic_studies = [
             _study(
-                outcome=f"dynamic-{unit['source_ref']}",
-                source_unit_ids=[str(unit["source_unit_id"])],
+                outcome="dynamic-read-response",
+                source_unit_ids=[str(unit["source_unit_id"]) for unit in result_units],
             )
-            for unit in result_units
         ]
         return StructuredPaperResearchMap(
             doc_role=parsed.doc_role,
@@ -239,7 +214,6 @@ def test_tc4_multi_axis_map_reads_results_after_a_visible_relationship():
         profile=None,
         document_tree=tree,
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )
 
     outcomes = {
@@ -287,7 +261,6 @@ def test_tc4_paper_map_caps_expansion_sources_and_keeps_round_ids_distinct():
         profile=None,
         document_tree=tree,
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )
 
     expansion_rounds = {
@@ -302,9 +275,9 @@ def test_tc4_paper_map_caps_expansion_sources_and_keeps_round_ids_distinct():
         for unit in payload.get("source_units") or ()
     }
     assert expansion_rounds == {2, 3, 4}
-    assert len(expansion_source_refs) == 24
+    assert len(expansion_source_refs - {"abstract"}) == 24
     assert all(
-        payload["window_id"].startswith(f"round-{payload['reading_round']}.")
+        payload["window_id"].startswith(f"context-round-{payload['reading_round']}")
         for payload in extractor.payloads
         if "reading_round" in payload
     )
@@ -342,7 +315,6 @@ def test_tc4_expansion_prioritizes_specific_metrics_for_a_broad_outcome():
         profile=None,
         document_tree=tree,
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )
 
     mapped_refs = {
@@ -382,7 +354,6 @@ def test_tc4_concrete_relationship_resolves_same_source_broad_signals():
         profile=None,
         document_tree=tree,
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )
 
     assert not any(
@@ -424,7 +395,6 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
         profile=None,
         document_tree=tree,
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )
 
     expansion_source_refs = {
@@ -434,7 +404,7 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
         for unit in payload.get("source_units") or ()
     }
     assert "results-31" in expansion_source_refs
-    assert len(expansion_source_refs) <= 8
+    assert len(expansion_source_refs - {"abstract"}) <= 8
     assert not any(
         signal.signal_type == "outcome"
         for signal in paper_map.unresolved_signals
@@ -612,7 +582,6 @@ def test_tc4_later_expansion_reads_methods_after_finding_a_specific_outcome():
         profile=None,
         document_tree=tree,
         paper_map_extractor=extractor,
-        signal_reconciler=extractor,
     )
 
     mapped_refs = {

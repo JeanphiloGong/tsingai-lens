@@ -1,20 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from time import monotonic
 from typing import Any
 
-from application.core.objectives.discovery.signal_reconciliation import (
-    PaperSignalReconciler,
-)
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
 from application.core.objectives.paper_map_aggregation import (
     PaperMapAggregator,
-    PaperMapSignalInput,
     notify_progress,
 )
 from application.core.objectives.paper_map_extraction import (
@@ -24,6 +21,7 @@ from application.core.objectives.paper_map_extraction import (
 from application.core.objectives.paper_map_sources import PaperMapSourceSelector
 from domain.core import (
     PaperResearchMap,
+    PaperResearchSignal,
 )
 from domain.source import SourceDocument, SourceDocumentTree
 
@@ -54,7 +52,6 @@ class PaperResearchMapService:
         profile: Any,
         document_tree: SourceDocumentTree | None,
         paper_map_extractor: PaperResearchMapExtractor,
-        signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None = None,
     ) -> PaperResearchMap:
         return self.build_collection_paper_maps(
@@ -63,7 +60,6 @@ class PaperResearchMapService:
             profiles_by_document_id={document.document_id: profile},
             document_trees_by_document_id={document.document_id: document_tree},
             paper_map_extractor=paper_map_extractor,
-            signal_reconciler=signal_reconciler,
             progress_callback=progress_callback,
         )[0]
 
@@ -78,7 +74,6 @@ class PaperResearchMapService:
             SourceDocumentTree | None,
         ],
         paper_map_extractor: PaperResearchMapExtractor,
-        signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[PaperResearchMap, ...]:
         logger.info(
@@ -117,7 +112,7 @@ class PaperResearchMapService:
                 paper_map_extractor=paper_map_extractor,
             )
             window_maps: list[PaperResearchMap] = []
-            paper_signals: list[PaperMapSignalInput] = []
+            paper_signals: list[PaperResearchSignal] = []
             window_count = len(payloads)
             selected_source_unit_count = sum(
                 len(payload.get("source_units") or ()) for payload in payloads
@@ -163,7 +158,7 @@ class PaperResearchMapService:
             paper_map = self._paper_map_aggregator.drop_signals_resolved_by_relationships(paper_map)
             assessment = self._paper_map_aggregator.assess(
                 paper_map,
-                signals=tuple(item.signal for item in paper_signals),
+                signals=tuple(paper_signals),
                 final=False,
             )
             expansion_round = 0
@@ -171,18 +166,11 @@ class PaperResearchMapService:
             while (
                 assessment.expansion_focus is not None
                 and remaining_expansion_sources > 0
+                and expansion_round < 3
             ):
                 expansion_focus = assessment.expansion_focus
                 if expansion_round and expansion_focus == "outcome_specificity":
                     expansion_focus = "missing_scope"
-                before_fact_count = (
-                    sum(
-                        len(study.relationships)
-                        for study in paper_map.studies
-                    )
-                    + len(paper_map.unresolved_signals)
-                    + len(paper_signals)
-                )
                 selected_source_keys = frozenset(
                     (
                         str(unit.get("source_kind") or ""),
@@ -216,12 +204,38 @@ class PaperResearchMapService:
                     reading_round=expansion_round + 2,
                     excluded_source_keys=selected_source_keys,
                 )
-                if not expansion_payloads:
-                    break
                 remaining_expansion_sources -= sum(
                     len(payload.get("source_units") or ())
                     for payload in expansion_payloads
                 )
+                expansion_payloads = self._paper_map_sources.build_context_reading_payloads(
+                    previous_payloads=payloads,
+                    new_payloads=expansion_payloads,
+                    unresolved_signals=paper_map.unresolved_signals,
+                    paper_map_extractor=paper_map_extractor,
+                    reading_round=expansion_round + 2,
+                )
+                # Identical reading cannot supply missing context. Do not turn
+                # uncertainty into repeated calls on the same passages.
+                read_passages = {
+                    frozenset(
+                        (unit["source_unit_id"], json.dumps(unit.get("content"), sort_keys=True))
+                        for unit in prior.get("source_units") or ()
+                    )
+                    for prior in payloads
+                }
+                new_readings = []
+                for candidate in expansion_payloads:
+                    passages = frozenset(
+                        (unit["source_unit_id"], json.dumps(unit.get("content"), sort_keys=True))
+                        for unit in candidate.get("source_units") or ()
+                    )
+                    if not any(passages <= prior for prior in read_passages):
+                        new_readings.append(candidate)
+                        read_passages.add(passages)
+                expansion_payloads = new_readings
+                if not expansion_payloads:
+                    break
                 extraction_budget.add_capacity(len(expansion_payloads))
                 for expansion_position, payload in enumerate(
                     expansion_payloads,
@@ -263,32 +277,11 @@ class PaperResearchMapService:
                 )
                 paper_map = self._paper_map_aggregator.drop_signals_resolved_by_relationships(paper_map)
                 expansion_round += 1
-                after_fact_count = (
-                    sum(
-                        len(study.relationships)
-                        for study in paper_map.studies
-                    )
-                    + len(paper_map.unresolved_signals)
-                    + len(paper_signals)
-                )
-                if after_fact_count <= before_fact_count:
-                    break
                 assessment = self._paper_map_aggregator.assess(
                     paper_map,
-                    signals=tuple(item.signal for item in paper_signals),
+                    signals=tuple(paper_signals),
                     final=False,
                 )
-            paper_map = self._paper_map_aggregator.reconcile_signals(
-                paper_map,
-                paper_signals,
-                signal_reconciler=signal_reconciler,
-                extraction_budget=extraction_budget,
-                progress_callback=progress_callback,
-                document_position=document_position,
-                document_count=document_count,
-                document_title=getattr(document, "title", None),
-                source_filename=source_filename,
-            )
             paper_map = self._paper_map_aggregator.drop_signals_resolved_by_relationships(paper_map)
             final_assessment = self._paper_map_aggregator.assess(
                 paper_map,

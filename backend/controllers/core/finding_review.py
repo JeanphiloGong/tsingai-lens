@@ -69,7 +69,9 @@ async def create_evidence_version(
         evidence={
             **result.evidence.to_record(),
             "supports_finding": result.evidence.supports_finding,
+            "eligible_for_finding_authoring": result.evidence.eligible_for_finding_authoring,
         },
+        affected_finding_ids=list(result.affected_finding_ids),
     )
 
 

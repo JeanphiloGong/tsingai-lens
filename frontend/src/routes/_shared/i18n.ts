@@ -278,6 +278,39 @@ const translations: Record<Language, Translations> = {
 			messageLabel: 'Message',
 			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
+			tree: {
+				title: 'Conversation branches',
+				root: 'Conversation start',
+				branchCount: '{count} branches',
+				zoom: 'Tree zoom',
+				zoomIn: 'Zoom in',
+				zoomOut: 'Zoom out',
+				fit: 'Fit tree',
+				locate: 'Locate selected node',
+				close: 'Close branches',
+				back: 'Back to tree',
+				refresh: 'Refresh branches',
+				loading: 'Loading conversation branches...',
+				empty: 'No saved turns yet',
+				current: 'Current path',
+				question: 'Question',
+				answer: 'Answer',
+				select: 'Switch to this point',
+				edit: 'Edit and branch',
+				submit: 'Create branch and send',
+				checkpoint: 'Historical checkpoint',
+				latest: 'Return to latest',
+				noAnswer: 'No completed answer',
+				status: {
+					completed: 'Completed',
+					running: 'Working',
+					approval_required: 'Awaiting approval',
+					failed: 'Failed',
+					interrupted: 'Interrupted',
+					incomplete: 'Incomplete',
+					draft: 'Unsent'
+				}
+			},
 			revision: {
 				edit: 'Edit message',
 				regenerate: 'Regenerate response',
@@ -325,7 +358,32 @@ const translations: Record<Language, Translations> = {
 				cycle: 'Cycle {cycle}',
 				actions: '{completed} / {total} research actions',
 				toggleHistory: 'Toggle research progress history',
-				historyLabel: 'Completed research stages'
+				historyLabel: 'Completed research stages',
+				sourceState: {
+					reading: 'Reading',
+					received: 'Latest retrieved content',
+					failed: 'Reading failed'
+				},
+				sourceKind: {
+					passage: 'Passage',
+					table: 'Table',
+					search: 'Source search',
+					outline: 'Document sections'
+				},
+				sourcePage: 'Page {page}',
+				currentPaper: 'Current paper',
+				searchQuery: 'Search: {query}',
+				plan: {
+					title: 'Research plan',
+					status: { pending: 'Waiting', in_progress: 'In progress', completed: 'Completed', blocked: 'Blocked' },
+					steps: {
+						inspect_finding: 'Inspect published Finding',
+						inspect_sources: 'Inspect linked Sources',
+						validate_claim: 'Validate the claim',
+						draft_finding: 'Prepare Finding draft',
+						approval: 'Await researcher approval'
+					}
+				}
 			},
 			upload: {
 				add: 'Add papers',
@@ -574,6 +632,42 @@ const translations: Record<Language, Translations> = {
 			emptyValue: '--',
 			findingReview: {
 				coverage: 'Evidence coverage',
+				savedReview: 'Saved review',
+				loadingReview: 'Loading saved review...',
+				reviewLoadFailed: 'Saved review could not be loaded',
+				retryReview: 'Retry',
+				savedFeedback: 'Recorded feedback',
+				savedCuration: 'Saved human revision',
+				correctionReason: 'Reason for correction',
+				reviewer: 'Reviewer',
+				unrecorded: 'Not recorded',
+				curationScope: 'Revised scope and evidence',
+				noSavedReview: 'No saved review',
+				publishedOriginal: 'Original published conclusion',
+				feedbackStatus: {
+					correct: 'Correct',
+					partial: 'Partially correct',
+					incorrect: 'Incorrect',
+					unclear: 'Unclear'
+				},
+				curationStatus: {
+					supported: 'Supported',
+					limited: 'Limited',
+					conflicted: 'Conflicted',
+					unsupported: 'Unsupported'
+				},
+				basisUpdated: 'Evidence updated, review required',
+				mixedDirection: 'Mixed direction',
+				basisUpdatedDetail:
+					'The cited evidence has changed. This conclusion retains its original evidence and awaits reassessment.',
+				reviewWithAgent: 'Review with Agent',
+				reviewDraft:
+					'Please review Finding {finding} for Objective {objective}. Compare its original and updated evidence against the sources, explain whether the conclusion still holds, and prepare a revised Finding with current evidence. Ask for my approval before saving the new version.',
+				reviseFinding: 'Revise conclusion',
+				derivedFindings: 'Subsequent versions',
+				parentFinding: 'Original conclusion',
+				replacedSelection:
+					'Updated evidence needs a new role assessment before this conclusion can be saved.',
 				coverageCount: '{count} records',
 				gapCount: '{count} to review',
 				coverageTotal: '{count} source records · {results} results',
@@ -2970,6 +3064,39 @@ const translations: Record<Language, Translations> = {
 			messageLabel: '消息',
 			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
+			tree: {
+				title: '会话分支',
+				root: '会话起点',
+				branchCount: '{count} 个分支',
+				zoom: '树图缩放',
+				zoomIn: '放大',
+				zoomOut: '缩小',
+				fit: '适应树图大小',
+				locate: '定位选中节点',
+				close: '关闭会话分支',
+				back: '返回分支树',
+				refresh: '刷新分支',
+				loading: '正在加载会话分支...',
+				empty: '暂无已保存的对话',
+				current: '当前路径',
+				question: '问题',
+				answer: '回复',
+				select: '切换到这里',
+				edit: '编辑并分叉',
+				submit: '创建分支并发送',
+				checkpoint: '历史状态点',
+				latest: '回到最新',
+				noAnswer: '暂无完整回复',
+				status: {
+					completed: '已完成',
+					running: '正在工作',
+					approval_required: '等待审批',
+					failed: '失败',
+					interrupted: '已中断',
+					incomplete: '未完成',
+					draft: '尚未发送'
+				}
+			},
 			revision: {
 				edit: '编辑消息',
 				regenerate: '重新生成回复',
@@ -3017,7 +3144,23 @@ const translations: Record<Language, Translations> = {
 				cycle: '第 {cycle} 轮',
 				actions: '已完成 {completed} / {total} 个研究动作',
 				toggleHistory: '展开或收起研究进度历史',
-				historyLabel: '已完成的研究阶段'
+				historyLabel: '已完成的研究阶段',
+				sourceState: { reading: '正在读取', received: '最近取得的内容', failed: '读取失败' },
+				sourceKind: { passage: '原文片段', table: '表格', search: '原文检索', outline: '文档章节' },
+				sourcePage: '第 {page} 页',
+				currentPaper: '当前论文',
+				searchQuery: '检索：{query}',
+				plan: {
+					title: '研究计划',
+					status: { pending: '待处理', in_progress: '进行中', completed: '已完成', blocked: '已阻塞' },
+					steps: {
+						inspect_finding: '检查已发布结论',
+						inspect_sources: '检查关联原文',
+						validate_claim: '核对结论依据',
+						draft_finding: '形成结论草案',
+						approval: '等待研究者确认'
+					}
+				}
 			},
 			upload: {
 				add: '添加论文',
@@ -3253,6 +3396,41 @@ const translations: Record<Language, Translations> = {
 			emptyValue: '--',
 			findingReview: {
 				coverage: '证据覆盖',
+				savedReview: '已保存的审阅',
+				loadingReview: '正在读取审阅记录...',
+				reviewLoadFailed: '审阅记录读取失败',
+				retryReview: '重试',
+				savedFeedback: '已记录的反馈',
+				savedCuration: '已保存的人工修订',
+				correctionReason: '修订原因',
+				reviewer: '审阅人',
+				unrecorded: '未记录',
+				curationScope: '修订范围与依据',
+				noSavedReview: '尚无审阅记录',
+				publishedOriginal: '原始发布结论',
+				feedbackStatus: {
+					correct: '正确',
+					partial: '部分正确',
+					incorrect: '不正确',
+					unclear: '暂不确定'
+				},
+				curationStatus: {
+					supported: '有依据支持',
+					limited: '范围受限',
+					conflicted: '存在冲突',
+					unsupported: '缺少支持'
+				},
+				basisUpdated: '依据已更新，待复核',
+				mixedDirection: '多种变化方向',
+				basisUpdatedDetail:
+					'引用的证据已有变化。这条结论保留了原有依据，需要重新判断是否仍然成立。',
+				reviewWithAgent: '请 Agent 复核',
+				reviewDraft:
+					'请复核研究问题 {objective} 下的 Finding {finding}。对照原文比较修订前后的证据，说明原结论是否仍然成立，并根据当前证据形成修订后的 Finding 草案。保存新版本前请让我确认。',
+				reviseFinding: '修订结论',
+				derivedFindings: '后续版本',
+				parentFinding: '原结论',
+				replacedSelection: '已有证据更新，保存前需要重新判断更新后的证据承担什么作用。',
 				coverageCount: '{count} 条',
 				gapCount: '{count} 条待核查',
 				coverageTotal: '{count} 条原文记录 · {results} 条结果',

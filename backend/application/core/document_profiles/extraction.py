@@ -4,16 +4,11 @@ import json
 import logging
 import os
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from openai import OpenAI, OpenAIError
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from application.core.document_profiles.prompts import (
-    DOCUMENT_PROFILE_PROMPT_VERSION,
-    build_document_profile_prompt,
-)
-from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
     extract_json_object,
@@ -31,6 +26,49 @@ _SUPPORTED_EXTRACTION_MODES = {_JSON_TEXT}
 _MAX_COMPLETION_TOKENS = 1024
 _REPAIR_OUTPUT_CHARS = 4000
 _TRACE_OUTPUT_PREVIEW_CHARS = 1000
+
+
+class DocumentProfileModelOutput(BaseModel):
+    """Validated model output for coarse document triage."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    doc_type: Literal["experimental", "review", "mixed", "uncertain"] = "uncertain"
+    profile_warnings: list[
+        Literal["insufficient_content", "classification_uncertain"]
+    ] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_default_confidence(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+
+
+DOCUMENT_PROFILE_PROMPT_VERSION = "document_profile.v1"
+
+_DOCUMENT_PROFILE_SYSTEM_PROMPT = """
+You are doing document triage for a materials-literature backend.
+
+Non-negotiable rules:
+- This is coarse document classification, not knowledge extraction.
+- Return exactly one JSON object and nothing else.
+- Do not write natural-language summaries or explanations.
+- `doc_type` must be one of: experimental, review, mixed, uncertain.
+- `profile_warnings` may only use: insufficient_content, classification_uncertain.
+- If the input is weak or ambiguous, return `uncertain`.
+""".strip()
+
+
+def build_document_profile_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    user_prompt = (
+        "Classify this document for lightweight Core document triage.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data. Do not add any explanation."
+    )
+    return _DOCUMENT_PROFILE_SYSTEM_PROMPT, user_prompt
 
 
 class DocumentProfileExtractionError(RuntimeError):
@@ -53,12 +91,6 @@ class DocumentProfileExtractor:
             model or os.getenv("LLM_MODEL", "gpt-4o-mini")
         ).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
-        self.enable_thinking = os.getenv("LLM_ENABLE_THINKING", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
         self.reasoning_effort = (
             os.getenv("LLM_REASONING_EFFORT", "").strip() or None
         )
@@ -71,7 +103,7 @@ class DocumentProfileExtractor:
     def extract_document_profile(
         self,
         payload: dict[str, Any],
-    ) -> StructuredDocumentProfile:
+    ) -> DocumentProfileModelOutput:
         record_llm_prompt_version(
             "document_profile",
             DOCUMENT_PROFILE_PROMPT_VERSION,
@@ -136,7 +168,7 @@ class DocumentProfileExtractor:
         messages: list[dict[str, str]],
         *,
         attempts: list[dict[str, Any]],
-    ) -> tuple[StructuredDocumentProfile, str]:
+    ) -> tuple[DocumentProfileModelOutput, str]:
         request_kwargs = {
             "model": self.model,
             "temperature": 0,
@@ -200,7 +232,7 @@ class DocumentProfileExtractor:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
-                parsed = StructuredDocumentProfile.model_validate(
+                parsed = DocumentProfileModelOutput.model_validate(
                     load_json_payload(extract_json_object(raw_content))
                 )
                 attempts.append(
@@ -258,7 +290,7 @@ class DocumentProfileExtractor:
         user_prompt: str,
     ) -> list[dict[str, str]]:
         schema = json.dumps(
-            StructuredDocumentProfile.model_json_schema(),
+            DocumentProfileModelOutput.model_json_schema(),
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -276,13 +308,13 @@ class DocumentProfileExtractor:
         ]
 
     def _provider_request_options(self) -> dict[str, Any]:
-        options: dict[str, Any] = {}
-        if not self.enable_thinking:
-            options["extra_body"] = {
-                "chat_template_kwargs": {
-                    "enable_thinking": False,
-                }
+        # Core extraction needs compact schema output; provider thinking is
+        # intentionally disabled and is not a runtime configuration option.
+        options: dict[str, Any] = {
+            "extra_body": {
+                "chat_template_kwargs": {"enable_thinking": False}
             }
+        }
         if self.reasoning_effort is not None:
             options["reasoning_effort"] = self.reasoning_effort
         return options
@@ -299,7 +331,7 @@ class DocumentProfileExtractor:
         trace_status: str,
         elapsed_s: float,
         raw_content: str | None = None,
-        parsed_output: StructuredDocumentProfile | None = None,
+        parsed_output: DocumentProfileModelOutput | None = None,
         error: str | None = None,
         attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:

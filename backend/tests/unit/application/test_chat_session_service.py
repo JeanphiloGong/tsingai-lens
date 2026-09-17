@@ -839,7 +839,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
         assert result["completion_reason"] == "resource_budget"
         assert result["warnings"]
         assert "Paper B remains unread" in result["messages"][-1].content
-    assert model.calls == (3 if ending == "timeout" else 4)
+    assert model.calls == 3  # Discovery, exact Source read, then answer or timeout.
     persisted = await service.list_messages_for_user(session.session_id, "user-1")
     source_results = [message.tool_result for message in persisted
                       if message.tool_result and message.tool_result.resource_refs]

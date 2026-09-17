@@ -482,6 +482,14 @@ class _FindingFeedbackService:
         self.feedback_calls: list[dict] = []
         self.curation_calls: list[dict] = []
 
+    async def list_feedback(self, **kwargs) -> tuple:
+        return tuple(_RecordedReview(item) for item in self.feedback_calls
+                     if all(item[key] == value for key, value in kwargs.items()))
+
+    async def list_curations(self, **kwargs) -> tuple:
+        return tuple(_RecordedReview(item) for item in self.curation_calls
+                     if all(item[key] == value for key, value in kwargs.items()))
+
     async def record_feedback(self, **kwargs) -> _RecordedReview:
         self.feedback_calls.append(kwargs)
         return _RecordedReview(
@@ -784,7 +792,7 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
     )
 
     assert result.status.value == "succeeded"
-    assert "bounded table Markdown" in InspectDocumentSourcesCapability.spec.description
+    assert "document_outline" in result.data
     assert "complete table Markdown" not in InspectDocumentSourcesCapability.spec.description
     assert result.data["document"] == {
         "document_id": "paper-1",
@@ -792,6 +800,7 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
     }
     assert result.data["match_total"] == 3
     assert result.data["offset"] == 1
+    assert result.data["prepared_source_pages"] == [1, 5, 6]
     assert result.data["limit"] == 2
     assert result.data["next_offset"] is None
     assert result.data["support_is_evidence"] is False
@@ -811,6 +820,59 @@ async def test_document_source_inspection_returns_bounded_traceable_matches() ->
         "source",
     ]
     assert "source_ref=table-2" in (result.resource_refs[1].href or "")
+
+
+async def test_section_batch_reads_many_complete_passages_and_paginates_by_tokens():
+    from dataclasses import replace
+
+    repository = _SourceArtifactRepository()
+    blocks = tuple(replace(repository.document.blocks[1], block_id=f"results-{i}", block_order=i,
+                           text=f"Specimen {i}: elongation above as-built under the stated annealing condition. " * 8)
+                   for i in range(28))
+    repository.document = replace(repository.document, blocks=blocks)
+    capability = InspectDocumentSourcesCapability(collection_service=_CollectionService(), source_artifact_repository=repository)
+    args = capability.spec.input_model(document_id="paper-1", heading_path="Results / Tensile properties")
+    roomy = await capability.execute(replace(_context(), max_result_tokens=24_000), args)
+    assert len(roomy.data["sources"]) > 12
+    assert all(not source["content_truncated"] for source in roomy.data["sources"])
+    assert roomy.data["document_outline"][0]["estimated_tokens"] > 0
+    assert all("_canonical_content" not in source for source in roomy.data["sources"])
+
+    seen = []
+    offset = 0
+    while True:
+        page = await capability.execute(replace(_context(), max_result_tokens=3200), args.model_copy(update={"offset": offset}))
+        assert page.status.value == "succeeded"
+        assert capability._result_tokens(page) <= 3200
+        assert all(not source["content_truncated"] for source in page.data["sources"])
+        seen.extend(source["source_ref"] for source in page.data["sources"])
+        if page.data["next_offset"] is None:
+            break
+        assert page.data["next_offset"] > offset
+        offset = page.data["next_offset"]
+    assert seen == [*(block.block_id for block in blocks), "table-2", "figure-3"]
+
+
+async def test_oversized_source_is_not_marked_read_and_exact_read_respects_shared_capacity():
+    from dataclasses import replace
+
+    repository = _SourceArtifactRepository()
+    body = "Annealing at 950 C compared with as-built elongation. " * 1800
+    repository.document = replace(repository.document, blocks=(replace(repository.document.blocks[1], text=body),),
+                                  tables=(), figures=())
+    capability = InspectDocumentSourcesCapability(collection_service=_CollectionService(), source_artifact_repository=repository)
+    context = replace(_context(), max_result_tokens=2200)
+    result = await capability.execute(context, capability.spec.input_model(document_id="paper-1"))
+    source = result.data["sources"][0]
+    assert source["content_truncated"] and not source["content"]
+    assert source["canonical_length"] == len(body)
+    assert capability._result_tokens(result) <= context.max_result_tokens
+    reader = ReadSourceCapability(collection_service=_CollectionService(), source_artifact_repository=repository)
+    page = await reader.execute(context, reader.spec.input_model(document_id="paper-1", source_kind="text_window",
+                                                               source_ref=source["source_ref"]))
+    assert page.data["content"] == body[:page.data["next_offset"]]
+    assert not page.data["complete_source"]
+    assert capability._result_tokens(page) <= context.max_result_tokens
 
 
 async def test_source_search_locates_candidates_without_calling_them_evidence() -> None:
@@ -1328,13 +1390,14 @@ def test_finding_authoring_arguments_separate_finding_and_abstention() -> None:
     assert abstained.statement is None
     assert abstained.abstention_reason == "no_comparable_evidence"
 
-    with pytest.raises(ValidationError, match="requires supporting Evidence"):
+    with pytest.raises(ValidationError, match="requires supporting Evidence") as error:
         CreateFindingVersionArguments(
             objective_id="obj-1",
             source_analysis_version=1,
             statement="An unsupported conclusion.",
             assertion_strength="associative",
         )
+    assert error.value.errors(include_input=False)[0]["type"] == "finding_supporting_evidence_required"
 
 
 def test_evidence_authoring_arguments_require_complete_source_and_result_shape() -> None:
@@ -1410,7 +1473,9 @@ async def test_agent_evidence_write_waits_for_approval_and_reuses_service() -> N
                         ],
                     },
                     supports_finding=True,
+                    eligible_for_finding_authoring=True,
                 ),
+                affected_finding_ids=("finding-affected",),
             )
 
     evidence_service = _EvidenceService()
@@ -1437,6 +1502,7 @@ async def test_agent_evidence_write_waits_for_approval_and_reuses_service() -> N
     result = await capability.execute(_context("call-evidence"), arguments)
     assert capability.spec.risk.value == "write"
     assert result.data["evidence"]["evidence_id"] == "evidence-manual-1"
+    assert result.data["affected_finding_ids"] == ["finding-affected"]
     assert result.resource_refs[0].resource_type == "objective_analysis"
     assert result.resource_refs[1].resource_type == "evidence"
     assert evidence_service.calls[0]["created_by_user_id"] == "user-1"
@@ -2327,6 +2393,7 @@ async def test_agent_reads_one_complete_published_finding_before_curation() -> N
     capability = InspectPublishedFindingCapability(
         collection_service=_CollectionService(),
         objective_analysis_service=analysis_service,
+        finding_feedback_service=_FindingFeedbackService(),
     )
 
     result = await capability.execute(
@@ -2345,10 +2412,141 @@ async def test_agent_reads_one_complete_published_finding_before_curation() -> N
     assert result.data["evidence"][0]["source_ref"] == "table-2"
     assert result.data["evidence"][0]["supports_finding"] is True
     assert result.data["finding_is_published"] is True
+    assert result.data["feedback_records"] == []
+    assert result.data["curation_records"] == []
     assert [ref.resource_type for ref in result.resource_refs] == [
         "finding",
         "evidence",
     ]
+
+
+async def test_fresh_finding_inspection_recalls_saved_feedback_and_curation() -> None:
+    feedback_service = _FindingFeedbackService()
+    published = _canonical_finding_record()
+    key = {name: published[name] for name in (
+        "collection_id", "objective_id", "analysis_version", "finding_id",
+    )}
+    feedback = await feedback_service.record_feedback(
+        **key, review_status="incorrect", issue_type="overclaim", note="Only one paper supports this.",
+        reviewer="researcher-1",
+    )
+    corrected = {**published, "statement": "The reported decrease is limited to one paper."}
+    curation = await feedback_service.record_curation(
+        **key, curated_status="limited", curated_finding=corrected,
+        note="Narrowed the cross-paper claim.", reviewer="researcher-1",
+    )
+    capability = InspectPublishedFindingCapability(
+        collection_service=_CollectionService(), objective_analysis_service=_AnalysisService(),
+        finding_feedback_service=feedback_service,
+    )
+    result = await capability.execute(_context(), capability.spec.input_model(
+        objective_id=key["objective_id"], analysis_version=key["analysis_version"], finding_id=key["finding_id"],
+    ))
+    assert result.data["finding"] == published
+    assert result.data["feedback_records"][0]["note"] == feedback.to_record()["note"]
+    assert result.data["curation_records"][0]["curated_finding"] == curation.to_record()["curated_finding"]
+    assert len(feedback_service.feedback_calls) == len(feedback_service.curation_calls) == 1
+
+
+@pytest.mark.parametrize("invalid_read_first,invalid_curation_first", [(False, False), (True, False), (False, True)])
+async def test_finding_correction_rereads_records_drafts_and_saves_only_after_approval(
+    invalid_read_first, invalid_curation_first,
+):
+    published = _canonical_finding_record()
+    source_repository = _SourceArtifactRepository()
+    original_source = source_repository.document
+    feedback = _FindingFeedbackService()
+    collection = _CollectionService()
+    inspect = InspectPublishedFindingCapability(
+        collection_service=collection, objective_analysis_service=_AnalysisService(),
+        finding_feedback_service=feedback,
+    )
+    read = ReadSourceCapability(collection_service=collection, source_artifact_repository=source_repository)
+    curate = CurateFindingCapability(collection_service=collection, finding_feedback_service=feedback)
+    key = {name: published[name] for name in ("objective_id", "analysis_version", "finding_id")}
+    table = {"document_id": "paper-1", "source_kind": "table", "source_ref": "table-2"}
+    corrected = "In the inspected paper, elongation fell from 10.1% to 7.8% across the reported energy-input conditions."
+    draft_arguments = {
+        "draft_id": "correction-1", "objective_id": key["objective_id"],
+        "source_analysis_version": key["analysis_version"], "parent_finding_id": key["finding_id"],
+        "statement": corrected, "assertion_strength": "associative",
+        "supporting_evidence_ids": ["evidence-1"],
+        "limitations": ["Only this paper and its reported conditions were checked."],
+    }
+    decisions = [
+        ModelTurn(tool_calls=(ModelToolCall(inspect.spec.name, key),)),
+        ModelTurn(tool_calls=(ModelToolCall(read.spec.name, table),)),
+    ]
+    if invalid_read_first:
+        decisions.append(ModelTurn(tool_calls=(ModelToolCall(read.spec.name, {"document_id": "paper-1"}),)))
+    # The same inspection tools remain usable when the investigator needs to
+    # check the original Finding again and relate it to another exact passage.
+    decisions.extend((
+        ModelTurn(tool_calls=(
+            ModelToolCall(inspect.spec.name, key),
+            ModelToolCall(read.spec.name, {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "block-result"}),
+        )),
+        ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", draft_arguments),)),
+    ))
+    model = _Model(*decisions, source_inspection_required=True)
+    context = AgentContext("chat-1", "user-1", "col-1")
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
+        inspect, read, CreateFindingDraftCapability(), curate,
+    )))
+    result = await runner.run_turn(
+        context=context, previous_messages=(),
+        user_message="Check this Finding against its exact sources and draft a narrower correction. Do not save or publish.",
+    )
+    assert result.status.value == "completed", result.error_code
+    assert result.pending_approval is None
+    assert feedback.curation_calls == feedback.feedback_calls == []
+    assert len([call for call in result.tool_calls if call.name == inspect.spec.name and call.status.value == "succeeded"]) == 2
+    drafts = [item.data["draft"] for item in result.tool_results if "draft" in item.data]
+    assert drafts == [CreateFindingDraftArguments.model_validate(draft_arguments).model_dump()]
+    assert sum(item.status.value == "failed" for item in result.tool_results) == int(invalid_read_first)
+    assert not model.turns
+
+    curated = {**published, "statement": drafts[0]["statement"], "limitations": drafts[0]["limitations"]}
+    curation_arguments = {
+        **key, "curated_status": "limited", "curated_finding": curated,
+        "note": "The comparison is limited to the inspected paper and treatment conditions.",
+    }
+    save_decisions = []
+    if invalid_curation_first:
+        save_decisions.extend((
+            ModelTurn(tool_calls=(ModelToolCall(curate.spec.name, {
+                **curation_arguments, "curated_finding": {**curated, "direction": "non-monotonic"},
+            }),)),
+            ModelTurn(tool_calls=(ModelToolCall(inspect.spec.name, key),)),
+        ))
+    save_decisions.append(ModelTurn(tool_calls=(ModelToolCall(curate.spec.name, curation_arguments),)))
+    save_runner = ResearchAgentRunner(model=_Model(*save_decisions),
+                                     capabilities=CapabilityRegistry((curate, inspect)))
+    pending = await save_runner.run_turn(
+        context=context, previous_messages=result.messages,
+        user_message="Save the human revision of this Finding; do not publish a new Finding.",
+    )
+    assert pending.status.value == "approval_required", pending.error_code
+    assert feedback.curation_calls == []
+    if invalid_curation_first:
+        failed = [item for item in pending.tool_results if item.status.value == "failed"]
+        assert len(failed) == 1
+        assert "curated_finding.direction" in failed[0].error_message
+        assert "mixed" in failed[0].error_message
+        assert "non-monotonic" not in failed[0].error_message
+    call = pending.pending_approval
+    with pytest.raises(ValueError):
+        call.approve(user_id=context.user_id, arguments_digest="0" * 64, decided_at="2026-09-14T08:00:00Z")
+    approved = call.approve(user_id=context.user_id, arguments_digest=call.arguments_digest, decided_at="2026-09-14T08:00:00Z")
+    saved = await save_runner.resume_claimed_call(
+        context=context, previous_messages=pending.messages, claimed_call=approved.start("2026-09-14T08:00:01Z"),
+    )
+    assert saved.status.value == "completed"
+    assert len(feedback.curation_calls) == 1
+    recalled = await inspect.execute(_context("fresh-read"), inspect.spec.input_model(**key))
+    assert recalled.data["finding"] == published
+    assert recalled.data["curation_records"][0]["curated_finding"] == curated
+    assert source_repository.document == original_source
 
 
 async def test_missing_published_results_is_a_successful_scientific_absence() -> None:

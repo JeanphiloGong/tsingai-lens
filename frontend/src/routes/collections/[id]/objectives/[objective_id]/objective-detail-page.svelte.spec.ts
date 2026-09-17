@@ -225,7 +225,8 @@ const evidence = {
 	resolution_status: 'resolved',
 	failure_reason: null,
 	confidence: 0.92,
-	supports_finding: true
+	supports_finding: true,
+	eligible_for_finding_authoring: true
 };
 
 const mechanismEvidence = {
@@ -419,6 +420,137 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		);
 	});
 
+	it('flags updated evidence, excludes stale roles, and opens the separately saved revision', async () => {
+		const original = {
+			...finding,
+			mechanisms: [],
+			paper_contributions: [
+				{
+					...finding.paper_contributions[0],
+					context_evidence_ids: [],
+					condition_boundary_evidence_ids: ['evidence-1']
+				}
+			]
+		};
+		const updated = {
+			...evidence,
+			evidence_id: 'evidence-new',
+			supersedes_evidence_id: 'evidence-1',
+			source_excerpt: 'After HIP, tensile strength increased to 620 MPa.'
+		};
+		const oldEvidence = {
+			...evidence,
+			superseded_by_evidence_id: 'evidence-new',
+			eligible_for_finding_authoring: false
+		};
+		const revised = {
+			...original,
+			finding_id: 'finding-revised',
+			parent_finding_id: 'finding-1',
+			statement: 'HIP was associated with higher tensile strength.',
+			paper_contributions: [
+				{
+					...original.paper_contributions[0],
+					supporting_evidence_ids: ['evidence-new'],
+					condition_boundary_evidence_ids: []
+				}
+			]
+		};
+		let version = 1;
+		let submitted: Record<string, unknown> | null = null;
+		installPublishedResponses();
+		const baseFetch = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			const params = new URLSearchParams(current.search);
+			if (current.path.endsWith('/objectives/obj_1/analysis')) {
+				return jsonResponse(
+					objectiveResponse({
+						objective: objective({
+							published_analysis_version: version,
+							active_analysis_version: version
+						}),
+						published_analysis: analysisState('succeeded', version),
+						active_analysis: analysisState('succeeded', version)
+					})
+				);
+			}
+			if (current.path.endsWith('/objectives/obj_1/findings') && current.method === 'POST') {
+				submitted = JSON.parse(String(init?.body));
+				version = 2;
+				return jsonResponse({
+					analysis: analysisState('succeeded', version),
+					finding: { ...revised, analysis_version: version },
+					abstention_reason: null
+				});
+			}
+			if (current.path.endsWith('/objectives/obj_1/findings')) {
+				const items = (version === 1 ? [original] : [original, revised]).map((item) => ({
+					...item,
+					analysis_version: version
+				}));
+				return jsonResponse({
+					items,
+					total: items.length,
+					evidence_reviews: {
+						'finding-1': {
+							needs_review: true,
+							evidence_replacements: { 'evidence-1': 'evidence-new' }
+						},
+						'finding-revised': { needs_review: false, evidence_replacements: {} }
+					}
+				});
+			}
+			if (current.path.endsWith('/objectives/obj_1/evidence')) {
+				const items =
+					params.get('finding_id') === 'finding-1'
+						? [oldEvidence]
+						: params.get('finding_id') === 'finding-revised'
+							? [updated]
+							: [oldEvidence, updated];
+				return jsonResponse({ items, total: items.length });
+			}
+			return baseFetch(input, init);
+		});
+		render(Page);
+		await expect
+			.element(browserPage.getByRole('region', { name: 'Evidence updated, review required' }))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Review with Agent' }))
+			.toHaveAttribute('href', expect.stringContaining('review_finding_id=finding-1'));
+		await browserPage.getByRole('button', { name: 'Revise conclusion', exact: true }).click();
+		await expect.element(browserPage.getByText('0 条支持证据 · 1 条可用 Evidence')).toBeVisible();
+		await browserPage.getByRole('button', { name: '创建 Finding', exact: true }).click();
+		expect(submitted).toBeNull();
+		await browserPage.getByLabelText('在 Finding 中的作用').selectOptions('supporting');
+		await browserPage.getByLabelText('结论', { exact: true }).fill(revised.statement);
+		await browserPage.getByRole('button', { name: '创建 Finding', exact: true }).click();
+		await expect
+			.element(browserPage.getByRole('heading', { name: revised.statement, exact: true }))
+			.toBeVisible();
+		expect(submitted).toMatchObject({
+			parent_finding_id: 'finding-1',
+			source_analysis_version: 1,
+			supporting_evidence_ids: ['evidence-new'],
+			condition_boundary_evidence_ids: []
+		});
+		await expect
+			.element(browserPage.getByRole('region', { name: 'Evidence updated, review required' }))
+			.not.toBeInTheDocument();
+		await browserPage
+			.getByRole('button', { name: `Original conclusion: ${original.statement}`, exact: true })
+			.click();
+		await expect
+			.element(browserPage.getByRole('region', { name: 'Evidence updated, review required' }))
+			.toBeVisible();
+		await expect
+			.element(
+				browserPage.getByRole('button', { name: `Subsequent versions: ${revised.statement}` })
+			)
+			.toBeVisible();
+	});
+
 	it('starts a hybrid draft from the selected AI Finding without editing it', async () => {
 		let submitted: Record<string, unknown> | null = null;
 		installPublishedResponses();
@@ -575,8 +707,15 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=evidence-1&source_ref=block-7&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1%3Ffinding_id%3Dfinding-1&page=7'
 			);
 		expect(
-			fetchMock.mock.calls.some(([input]) => String(input).includes('/findings/finding-1'))
+			fetchMock.mock.calls.some(([input]) => /\/findings\/finding-1(?:\?|$)/.test(String(input)))
 		).toBe(false);
+		for (const kind of ['feedback', 'curation']) {
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					String(input).includes(`/findings/finding-1/${kind}`)
+				)
+			).toBe(true);
+		}
 	});
 
 	it('downloads the published Finding dataset with the selected filters', async () => {

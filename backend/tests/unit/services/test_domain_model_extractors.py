@@ -8,17 +8,13 @@ from types import SimpleNamespace
 import pytest
 import tiktoken
 from openai import LengthFinishReasonError
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
 )
-from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.analysis.evidence_routing import (
-    ObjectiveEvidenceRouter,
-    StructuredEvidenceSelections,
-)
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.finding_synthesis import (
     FindingAssertionJudge,
     StructuredFindingMechanism,
@@ -26,66 +22,62 @@ from application.core.objectives.analysis.finding_synthesis import (
     build_finding_synthesis_prompt,
 )
 from application.core.objectives.analysis.source_extraction import (
+    DirectEvidenceExtractionsModelOutput,
     ObjectiveSourceExtractor,
-    StructuredEvidenceContext,
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceContextModelOutput,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
+    RequestedContextFactsModelOutput,
     _normalize_objective_evidence_payload,
     _objective_evidence_repair_instruction,
     build_objective_evidence_prompt,
 )
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
     build_objective_paper_frame_prompt,
 )
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
     build_research_axis_canonicalization_prompt,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    PaperSignalReconciler,
-    StructuredPaperSignalReconciliation,
-    build_paper_signal_reconciliation_prompt,
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
+    ExperimentalPaperMapModelOutput,
+    ReviewPaperMapModelOutput,
 )
-from application.core.objectives.discovery.study_window import (
-    PaperResearchMapExtractor,
-    StructuredExperimentalPaperMap,
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
-    StructuredPaperSourceSignal,
-    StructuredPaperSourceSignalScreen,
-    StructuredReviewPaperMap,
+)
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
     build_paper_research_map_prompt,
-    build_paper_source_signal_prompt,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,
 )
-from application.core.paper_facts.extraction import PaperFactsExtractor
-from application.core.paper_facts.prompts import build_table_matrix_repair_prompt
-from application.core.paper_facts.schemas import (
-    StructuredExtractionBundle,
-    StructuredTableBatchMentions,
-    StructuredTextWindowMentions,
+from application.core.paper_facts.extraction import (
+    PaperFactsExtractor,
+    TableMatrixRepairModelOutput,
+    build_table_matrix_repair_prompt,
 )
 from domain.pipeline import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
 
 
 def test_paper_research_map_contract_bounds_model_output():
-    experimental_schema = StructuredExperimentalPaperMap.model_json_schema()
+    experimental_schema = ExperimentalPaperMapModelOutput.model_json_schema()
     schema = experimental_schema["properties"]
 
     assert schema["studies"]["maxItems"] == 2
     assert schema["unresolved_signals"]["maxItems"] == 12
     assert schema["output_saturated"]["type"] == "boolean"
-    study_schema = experimental_schema["$defs"]["StructuredPaperMapStudy"][
+    study_schema = experimental_schema["$defs"]["PaperMapStudyModelOutput"][
         "properties"
     ]
     relationship_schema = experimental_schema["$defs"][
-        "StructuredPaperMapRelationship"
+        "PaperMapRelationshipModelOutput"
     ]["properties"]
     assert study_schema["material_scope"]["maxItems"] == 4
     assert study_schema["process_context"]["maxItems"] == 4
@@ -98,15 +90,15 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "varied_factors" not in relationship_schema
     assert relationship_schema["factor_assertions"]["maxItems"] == 6
     factor_schema = experimental_schema["$defs"][
-        "StructuredPaperMapFactorAssertion"
+        "PaperMapFactorAssertionModelOutput"
     ]["properties"]
     assert factor_schema["role"]["enum"] == ["varied", "compared", "modeled"]
     assert factor_schema["source_labels"]["minItems"] == 1
-    assert factor_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in factor_schema["source_labels"]
     assert "source_unit_ids" not in relationship_schema
     assert relationship_schema["source_labels"]["minItems"] == 1
-    assert relationship_schema["source_labels"]["maxItems"] == 4
-    signal_schema = experimental_schema["$defs"]["StructuredPaperMapSignal"][
+    assert "maxItems" not in relationship_schema["source_labels"]
+    signal_schema = experimental_schema["$defs"]["PaperMapSignalModelOutput"][
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
@@ -125,17 +117,17 @@ def test_paper_research_map_contract_bounds_model_output():
     assert "test_context" not in signal_schema
     assert "source_unit_ids" not in signal_schema
     assert signal_schema["source_labels"]["minItems"] == 1
-    assert signal_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in signal_schema["source_labels"]
     assert "source_unit_coverage" not in schema
     assert "review_synthesis" not in schema
     assert schema["warnings"]["items"]["maxLength"] == 240
 
-    review_model_schema = StructuredReviewPaperMap.model_json_schema()
-    review_schema = review_model_schema["$defs"]["StructuredReviewMapSynthesis"][
+    review_model_schema = ReviewPaperMapModelOutput.model_json_schema()
+    review_schema = review_model_schema["$defs"]["ReviewMapSynthesisModelOutput"][
         "properties"
     ]
     review_item_schema = review_model_schema["$defs"][
-        "StructuredReviewMapKnowledgeItem"
+        "ReviewMapKnowledgeItemModelOutput"
     ]["properties"]
     assert "studies" not in review_model_schema["properties"]
     assert "unresolved_signals" not in review_model_schema["properties"]
@@ -143,11 +135,11 @@ def test_paper_research_map_contract_bounds_model_output():
     assert review_schema["disputes"]["maxItems"] == 2
     assert review_schema["evidence_gaps"]["maxItems"] == 2
     assert review_schema["citation_leads"]["maxItems"] == 3
-    assert review_item_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in review_item_schema["source_labels"]
     assert review_item_schema["content"]["maxLength"] == 240
     assert "source_unit_ids" not in review_item_schema
     assert review_item_schema["source_labels"]["minItems"] == 1
-    assert review_item_schema["source_labels"]["maxItems"] == 4
+    assert "maxItems" not in review_item_schema["source_labels"]
 
 
 def test_experimental_paper_map_accepts_five_unresolved_signals_without_failure():
@@ -171,39 +163,25 @@ def test_experimental_paper_map_accepts_five_unresolved_signals_without_failure(
         "confidence": 0.8,
     }
 
-    parsed = StructuredExperimentalPaperMap.model_validate(payload)
+    parsed = ExperimentalPaperMapModelOutput.model_validate(payload)
 
     assert len(parsed.unresolved_signals) == 5
 
 
-def test_paper_source_signal_screen_contract_is_source_local_and_compact():
-    model_schema = StructuredPaperSourceSignalScreen.model_json_schema()
-    schema = model_schema["properties"]
-    signal_schema = model_schema["$defs"]["StructuredPaperSourceSignal"][
-        "properties"
-    ]
-
-    assert schema["signals"]["maxItems"] == 8
-    assert schema["output_saturated"]["type"] == "boolean"
-    assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
-    assert signal_schema["variable_role"]["enum"] == [
-        "varied",
-        "compared",
-        "modeled",
-        "fixed",
-        "context",
-        "uncertain",
-        "not_applicable",
-    ]
-    assert signal_schema["material_scope"]["maxItems"] == 4
-    assert signal_schema["process_context"]["maxItems"] == 4
-    assert "sample_context" not in signal_schema
-    assert "test_context" not in signal_schema
-    assert "comparator" not in signal_schema
-    assert "fixed_conditions" not in signal_schema
-    assert "source_unit_ids" not in signal_schema
-    assert "relationships" not in schema
-    assert "studies" not in schema
+@pytest.mark.parametrize(
+    ("response_model", "field_name", "value"),
+    [
+        (ExperimentalPaperMapModelOutput, "doc_role", "experimental-paper"),
+        (StructuredPaperResearchMap, "doc_role", "experimental-paper"),
+    ],
+)
+def test_paper_map_rejects_unknown_enum_values_instead_of_downgrading_them(
+    response_model: type[BaseModel],
+    field_name: str,
+    value: str,
+):
+    with pytest.raises(ValidationError):
+        response_model.model_validate({field_name: value})
 
 
 def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_lineage():
@@ -276,263 +254,6 @@ def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_linea
     assert relationship.source_unit_ids == ["source-unit-2", "source-unit-1"]
 
 
-@pytest.mark.parametrize(
-    ("signal_type", "variable_role"),
-    [
-        ("variable", "varied"),
-        ("variable", "fixed"),
-        ("variable", "context"),
-        ("outcome", "not_applicable"),
-    ],
-)
-def test_paper_source_signal_contract_requires_scientific_variable_role(
-    signal_type: str,
-    variable_role: str,
-):
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
-        {
-            "signals": [
-                {
-                    "signal_type": signal_type,
-                    "label": "processing speed" if signal_type == "variable" else "density",
-                    "variable_role": variable_role,
-                }
-            ]
-        }
-    )
-
-    assert parsed.signals[0].variable_role == variable_role
-
-
-@pytest.mark.parametrize(
-    ("signal_type", "variable_role"),
-    [
-        ("variable", "not_applicable"),
-        ("outcome", "varied"),
-    ],
-)
-def test_paper_source_signal_contract_rejects_role_type_mismatch(
-    signal_type: str,
-    variable_role: str,
-):
-    with pytest.raises(ValidationError, match="variable role"):
-        StructuredPaperSourceSignal.model_validate(
-            {
-                "signal_type": signal_type,
-                "label": "research axis",
-                "variable_role": variable_role,
-            }
-        )
-
-
-@pytest.mark.parametrize(
-    ("left_context", "right_context"),
-    [
-        ({"design_type": "experimental"}, {"design_type": "observational"}),
-        (
-            {"process_context": ["laser powder bed fusion"]},
-            {"process_context": ["heat treatment"]},
-        ),
-        ({"experiment_label": "tensile"}, {"experiment_label": "hardness"}),
-    ],
-)
-def test_paper_source_signal_identity_preserves_distinct_experiment_context(
-    left_context: dict[str, object],
-    right_context: dict[str, object],
-):
-    common = {
-        "signal_type": "outcome",
-        "label": "yield strength",
-        "variable_role": "not_applicable",
-        "experiment_label": "tensile test",
-        "claim_scope": "current_work",
-        "material_scope": ["Ti-6Al-4V"],
-    }
-
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
-        {
-            "signals": [
-                {**common, **left_context},
-                {**common, **right_context},
-            ]
-        }
-    )
-
-    assert len(parsed.signals) == 2
-
-
-def test_paper_source_signal_screen_isolates_one_malformed_signal():
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
-        {
-            "signals": [
-                {
-                    "signal_type": "variable",
-                    "label": "reheating cycle",
-                    "variable_role": "varied",
-                },
-                {
-                    "signal_type": "outcome",
-                    "label": "grain morphology",
-                    "variable_role": "not_applicable",
-                },
-                {
-                    "signal_type": "outcome",
-                    "label": "a complete observation sentence " * 4,
-                    "variable_role": "not_applicable",
-                },
-            ]
-        }
-    )
-
-    assert [signal.label for signal in parsed.signals] == [
-        "reheating cycle",
-        "grain morphology",
-    ]
-    assert parsed.output_saturated is False
-    assert parsed.warnings == [
-        (
-            "Omitted 1 malformed source signal; retained the valid source-local "
-            "signals."
-        )
-    ]
-
-
-def test_paper_source_signal_screen_marks_all_malformed_signals_incomplete():
-    parsed = StructuredPaperSourceSignalScreen.model_validate(
-        {
-            "signals": [
-                {
-                    "signal_type": "outcome",
-                    "label": "a complete observation sentence " * 4,
-                }
-            ]
-        }
-    )
-
-    assert parsed.signals == []
-    assert parsed.output_saturated is True
-
-
-def test_paper_source_signal_prompt_preserves_review_and_primary_source_roles():
-    _, user_prompt = build_paper_source_signal_prompt(
-        {
-            "document_id": "review-paper",
-            "title": "Heat treatment review",
-            "window_id": "results-1.retry-left",
-            "window_role": "results",
-            "source_units": [
-                {
-                    "source_unit_id": "source-unit-000071",
-                    "source_kind": "block",
-                    "source_ref": "block-71",
-                    "section_path": "Review > Preheating",
-                    "content": (
-                        "Miranda et al. increased build plate temperature and "
-                        "reported lower residual stress."
-                    ),
-                }
-            ],
-        }
-    )
-
-    assert "source-local scientific signal screening" in user_prompt
-    assert "not relationship construction" in user_prompt
-    assert "paper-level reconciliation" in user_prompt
-    assert "claim_scope=background" in user_prompt
-    assert "claim_scope=current_work" in user_prompt
-    assert "Do not return or copy Source-unit IDs" in user_prompt
-    assert "Do not infer a causal relationship" in user_prompt
-    assert "Miranda et al." in user_prompt
-    assert "phase, grain shape, or other observation on that axis" in user_prompt
-    assert "outcome='microstructure'" in user_prompt
-    assert "do not also return 'mechanical properties'" in user_prompt
-    assert "'etc.' or 'including' do not name hidden axes" in user_prompt
-    assert "only when more than 8 distinct explicit research axes" in user_prompt
-
-
-def test_paper_source_signal_screen_binds_source_identity_in_backend():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "doc_role": "review",
-                "signals": [
-                    {
-                        "signal_type": "variable",
-                        "label": "build plate temperature",
-                        "variable_role": "compared",
-                        "experiment_label": "Miranda et al.",
-                        "claim_scope": "background",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["laser powder bed fusion"],
-                        "confidence": 0.88,
-                    },
-                    {
-                        "signal_type": "outcome",
-                        "label": "residual stress",
-                        "variable_role": "not_applicable",
-                        "experiment_label": "Miranda et al.",
-                        "claim_scope": "background",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["laser powder bed fusion"],
-                        "confidence": 0.86,
-                    },
-                ],
-                "evidence_density": "medium",
-                "confidence": 0.87,
-            }
-        )
-    )
-    extractor = PaperResearchMapExtractor(_response_client(client))
-
-    skim = extractor.extract_source_signals(
-        {
-            "collection_id": "collection-internal",
-            "document_id": "review-paper",
-            "window_id": "results-1.retry-left",
-            "window_role": "results",
-            "document_profile": {
-                "doc_type": "review",
-                "profile_warnings": ["parser internal warning"],
-            },
-            "source_units": [
-                {
-                    "source_unit_id": "source-unit-000071",
-                    "source_kind": "block",
-                    "source_ref": "block-71",
-                    "section_path": "Review > Preheating",
-                    "content": (
-                        "Miranda et al. increased build plate temperature and "
-                        "reported lower residual stress."
-                    ),
-                }
-            ],
-        }
-    )
-
-    assert skim.studies == []
-    assert skim.doc_role == "review"
-    assert [signal.claim_scope for signal in skim.unresolved_signals] == [
-        "background",
-        "background",
-    ]
-    assert [signal.source_unit_ids for signal in skim.unresolved_signals] == [
-        ["source-unit-000071"],
-        ["source-unit-000071"],
-    ]
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
-    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
-    assert '"label": "S1"' in request_text
-    for internal_value in (
-        "collection-internal",
-        "review-paper",
-        "results-1.retry-left",
-        "source-unit-000071",
-        "block-71",
-        "parser internal warning",
-    ):
-        assert internal_value not in request_text
-
-
 def test_paper_research_map_contract_represents_bounded_preliminary_scope():
     varied_factors = [
         "HIP temperature",
@@ -572,72 +293,6 @@ def test_paper_research_map_contract_represents_bounded_preliminary_scope():
         "mechanical polishing",
     ]
     assert parsed.studies[0].relationships[0].varied_factors == varied_factors
-
-
-def test_paper_signal_reconciliation_contract_requires_source_signal_ids():
-    parsed = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [
-                {
-                    "relationships": [
-                        {
-                            "signal_ids": ["signal-variable", "signal-outcome"],
-                            "confidence": 0.88,
-                        }
-                    ]
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-unlinked",
-                    "reason": "The result belongs to a different experiment.",
-                }
-            ],
-        }
-    )
-
-    assert parsed.studies[0].relationships[0].signal_ids == [
-        "signal-variable",
-        "signal-outcome",
-    ]
-    with pytest.raises(ValidationError):
-        StructuredPaperSignalReconciliation.model_validate(
-            {
-                "studies": [
-                    {
-                        "relationships": [
-                            {"signal_ids": ["signal-variable"]}
-                        ]
-                    }
-                ]
-            }
-        )
-
-
-def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
-    model_schema = StructuredPaperSignalReconciliation.model_json_schema()
-    response_schema = model_schema["properties"]
-    study_schema = model_schema["$defs"]["StructuredPaperSignalStudy"]["properties"]
-
-    assert response_schema["studies"]["maxItems"] == 1
-    assert response_schema["unresolved_signals"]["maxItems"] == 12
-    assert study_schema["relationships"]["maxItems"] == 11
-
-
-def test_paper_signal_reconciliation_bounds_diagnostic_reason_text():
-    parsed = StructuredPaperSignalReconciliation.model_validate(
-        {
-            "studies": [],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-outcome",
-                    "reason": "reason " * 100,
-                }
-            ],
-        }
-    )
-
-    assert len(parsed.unresolved_signals[0].reason) == 240
 
 
 def test_paper_research_map_contract_bounds_diagnostic_warnings():
@@ -720,7 +375,7 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "Copy every directly supporting Source label" in user_prompt
-    assert "at most 4 unique `source_labels`" in user_prompt
+    assert "Copy `source_labels` only from the allowed list" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 2 studies" in user_prompt
     assert "up to 6 relationships per study" in user_prompt
@@ -1094,55 +749,18 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "collection-test" not in user_prompt
 
 
-def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
-    _, user_prompt = build_paper_signal_reconciliation_prompt(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    "label": "laser power",
-                    "sources": [
-                        {
-                            "source_kind": "block",
-                            "source_ref": "methods-1",
-                            "section_path": "Methods",
-                            "excerpt": "Laser power was varied from 150 to 250 W.",
-                        }
-                    ],
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    "label": "relative density",
-                    "sources": [
-                        {
-                            "source_kind": "block",
-                            "source_ref": "results-1",
-                            "section_path": "Results",
-                            "excerpt": "Relative density was recorded for each condition.",
-                        }
-                    ],
-                },
-            ],
-        }
-    )
-
-    assert "membership adjudication" in user_prompt
-    assert "same stated paper-owned research scope" in user_prompt
-    assert "one bounded candidate neighborhood" in user_prompt
-    assert "exactly one outcome anchor" in user_prompt
-    assert "omitted paper signals are outside this batch" in user_prompt
-    assert "backend derives final whole-paper accounting" in user_prompt
-    assert "Do not link signals merely because they occur in the same paper" in user_prompt
-    assert "backend treats every omitted input signal as unresolved" in user_prompt
-    assert "never invent a reason merely to repeat a label" in user_prompt
-    assert "copy only input `signal_label` values" in user_prompt
-    assert "same signal membership more than once" in user_prompt
-    assert "Split high-level statement" in user_prompt
-    assert "Different scopes" in user_prompt
-    assert "Do not infer sample groups, controls, test settings" in user_prompt
+def _assert_strict_object_schemas(schema, path: str = "$") -> None:
+    if isinstance(schema, list):
+        for index, item in enumerate(schema):
+            _assert_strict_object_schemas(item, f"{path}/{index}")
+    elif isinstance(schema, dict):
+        for key, value in schema.items():
+            _assert_strict_object_schemas(value, f"{path}/{key}")
+        if schema.get("type") == "object":
+            assert schema.get("additionalProperties") is False, path
+            assert set(schema.get("required", [])) == set(
+                schema.get("properties", {})
+            ), f"{path}: strict schemas must require every property"
 
 
 class _FakeCompletions:
@@ -1152,6 +770,9 @@ class _FakeCompletions:
 
     def create(self, **kwargs):  # noqa: ANN003, ARG002
         self.calls.append(kwargs)
+        response_format = kwargs.get("response_format", {})
+        if response_format.get("type") == "json_schema":
+            _assert_strict_object_schemas(response_format["json_schema"]["schema"])
         content = self._contents[min(len(self.calls) - 1, len(self._contents) - 1)]
         return SimpleNamespace(
             model="fake-model",
@@ -1247,40 +868,32 @@ def _paper_facts_extractor(client: _FakeOpenAIClient) -> PaperFactsExtractor:
     )
 
 
-def test_domain_model_extractors_validate_json_text_response():
+def test_table_repair_validates_json_text_response():
     client = _FakeOpenAIClient(
-        """```json
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": []
-        }
-        ```"""
+        '```json\n{"repaired_table_matrix":'
+        '[["Sample", "Strength (MPa)"], ["A", "560"]]}\n```'
     )
     extractor = _paper_facts_extractor(client)
 
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
+    repaired = extractor.repair_table_matrix(
+        {"source": {"table_markdown": "| Sample | Strength (MPa) |\n| A | 560 |"}}
     )
 
-    assert isinstance(mentions, StructuredTextWindowMentions)
-    assert mentions.result_claims == []
+    assert isinstance(repaired, TableMatrixRepairModelOutput)
+    assert repaired.repaired_table_matrix == [["Sample", "Strength (MPa)"], ["A", "560"]]
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
-    assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
-    assert client.chat.completions.calls[0]["response_format"] == {
-        "type": "json_object"
-    }
-    assert client.chat.completions.calls[0]["extra_body"] == {
+    request = client.chat.completions.calls[0]
+    assert "JSON schema:" in request["messages"][1]["content"]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "available"
+    assert trace["response_model"] == "TableMatrixRepairModelOutput"
+    assert trace["parsed_output"]["repaired_table_matrix"] == repaired.repaired_table_matrix
+    assert extractor.consume_last_trace() is None
 
 
 def test_domain_model_extractors_record_provider_reported_usage() -> None:
@@ -1288,8 +901,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
         '{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}'
     )
     facts_client = _FakeOpenAIClient(
-        '{"method_mentions":[],"material_mentions":[],"variant_mentions":[],'
-        '"condition_mentions":[],"baseline_mentions":[],"result_claims":[]}'
+        '{"repaired_table_matrix":[]}'
     )
     objective_client = _FakeOpenAIClient(
         "unused",
@@ -1300,13 +912,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
         _document_profile_extractor(document_client).extract_document_profile(
             {"title": "Paper", "abstract_or_lead_text": "Experimental study."}
         )
-        _paper_facts_extractor(facts_client).extract_text_window_mentions(
-            {
-                "document_title": "Paper",
-                "document_profile": {"doc_type": "experimental"},
-                "text_window": {"text": "Laser power was 200 W."},
-            }
-        )
+        _paper_facts_extractor(facts_client).repair_table_matrix({"source": {}})
         FindingAssertionJudge(
             StructuredResponseClient(
                 client=objective_client,
@@ -1326,7 +932,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
         "finding_synthesis": "finding_synthesis.v15",
-        "paper_fact_text_window": "paper_fact_text_window.v1",
+        "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v6",
     }
 
 
@@ -1428,53 +1034,23 @@ def test_document_profile_extractor_does_not_hide_programming_errors():
         )
 
 
-def test_domain_model_extractors_ignores_top_level_extra_json_text_fields():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": [],
-          "confidence": 0.9
-        }
-        """
-    )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
-    )
-
-    assert isinstance(mentions, StructuredTextWindowMentions)
-    assert mentions.result_claims == []
-
-
-def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
+def test_table_repair_defaults_to_provider_parse_mode(monkeypatch):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    parsed_mentions = StructuredTextWindowMentions()
-    client = _FakeOpenAIClient("unused", parsed=parsed_mentions)
+    parsed = TableMatrixRepairModelOutput(
+        repaired_table_matrix=[["Sample", "Strength (MPa)"], ["A", "560"]]
+    )
+    client = _FakeOpenAIClient("unused", parsed=parsed)
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
+    repaired = extractor.repair_table_matrix(
+        {"source": {"table_markdown": "| Sample | Strength (MPa) |\n| A | 560 |"}}
     )
 
-    assert mentions == parsed_mentions
+    assert repaired == parsed
     assert client.chat.completions.calls == []
     assert len(client.beta.chat.completions.calls) == 1
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredTextWindowMentions
+    assert parse_call["response_format"] is TableMatrixRepairModelOutput
     assert "JSON schema:" not in parse_call["messages"][1]["content"]
     assert parse_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -1511,52 +1087,6 @@ def test_paper_research_map_prompt_token_estimate_counts_complete_schema_prompt(
     estimated_tokens = PaperResearchMapExtractor(extractor).estimate_prompt_tokens(payload)
 
     assert estimated_tokens > 1_000
-    assert client.beta.chat.completions.calls == []
-    assert client.chat.completions.calls == []
-
-
-def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prompt():
-    client = _FakeOpenAIClient("unused")
-    extractor = StructuredResponseClient(
-        client=client,
-        model="fake-model",
-        extraction_mode="provider_parse",
-    )
-    payload = {
-        "document_id": "paper-1",
-        "signals": [
-            {
-                "signal_id": "signal-variable",
-                "signal_type": "variable",
-                "label": "laser power",
-                "sources": [
-                    {
-                        "source_unit_id": "source-unit-000001",
-                        "section_path": "Methods",
-                        "excerpt": "Laser power was varied from 150 to 250 W.",
-                    }
-                ],
-            },
-            {
-                "signal_id": "signal-outcome",
-                "signal_type": "outcome",
-                "label": "relative density",
-                "sources": [
-                    {
-                        "source_unit_id": "source-unit-000010",
-                        "section_path": "Results",
-                        "excerpt": "Relative density was measured for each condition.",
-                    }
-                ],
-            },
-        ],
-    }
-
-    estimated_tokens = PaperSignalReconciler(extractor).estimate_prompt_tokens(
-        payload
-    )
-
-    assert estimated_tokens > 500
     assert client.beta.chat.completions.calls == []
     assert client.chat.completions.calls == []
 
@@ -1670,7 +1200,7 @@ def test_paper_research_map_saturation_logs_bounded_source_trace(caplog):
 
     with caplog.at_level(
         "WARNING",
-        logger="application.core.objectives.discovery.study_window",
+        logger="application.core.objectives.discovery.paper_understanding.workflow",
     ), pytest.raises(StructuredOutputSaturatedError):
         extractor.extract(
             {
@@ -1764,7 +1294,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     assert result == parsed
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"].__name__ == (
-        "_StructuredModelFindingSynthesis"
+        "FindingSynthesisModelOutput"
     )
     assert parse_call["max_completion_tokens"] == 1024
     trace = extractor.consume_last_trace()
@@ -2056,31 +1586,14 @@ def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
     assert "Return only labels present in `context_evidence`" in user_prompt
 
 
-def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
+def test_table_repair_allows_explicit_json_text_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "json_text")
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": []
-        }
-        """
-    )
+    client = _FakeOpenAIClient('{"repaired_table_matrix":[]}')
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {"text": "Laser power was 200 W.", "heading_path": "Methods"},
-        }
-    )
+    repaired = extractor.repair_table_matrix({"source": {}})
 
-    assert isinstance(mentions, StructuredTextWindowMentions)
+    assert repaired == TableMatrixRepairModelOutput()
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
 
@@ -2487,7 +2000,7 @@ def test_paper_research_map_retries_duplicate_study_identities_before_returning(
     assert "duplicate study identities" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
-    assert "at most 4 labels" in client.chat.completions.calls[1]["messages"][-1][
+    assert "unique Source labels from the input" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
 
@@ -2664,7 +2177,7 @@ def test_provider_parsed_paper_research_map_repairs_duplicate_study_identities(m
     }
     client = _FakeOpenAIClient(
         json.dumps(valid),
-        parsed=StructuredExperimentalPaperMap.model_validate(invalid),
+        parsed=ExperimentalPaperMapModelOutput.model_validate(invalid),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 
@@ -2868,293 +2381,6 @@ def test_paper_research_map_bounds_overflow_and_marks_output_saturated():
     assert len(client.chat.completions.calls) == 1
 
 
-def test_domain_model_extractors_validates_paper_signal_reconciliation():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "studies": [
-                    {
-                        "relationships": [
-                            {
-                                "signal_labels": ["V1", "O1"],
-                                "confidence": 0.89,
-                            }
-                        ]
-                    }
-                ],
-                "unresolved_signals": [],
-            }
-        )
-    )
-    extractor = _response_client(client)
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {"signal_id": "signal-variable", "signal_type": "variable"},
-                {"signal_id": "signal-outcome", "signal_type": "outcome"},
-            ],
-        }
-    )
-
-    assert isinstance(reconciliation, StructuredPaperSignalReconciliation)
-    assert reconciliation.studies[0].relationships[0].signal_ids == [
-        "signal-variable",
-        "signal-outcome",
-    ]
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
-
-
-def test_paper_signal_reconciliation_prompt_hides_backend_lineage():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "studies": [
-                    {
-                        "relationships": [
-                            {
-                                "signal_labels": ["V1", "O1"],
-                                "confidence": 0.89,
-                            }
-                        ]
-                    }
-                ],
-                "unresolved_signals": [],
-            }
-        )
-    )
-
-    reconciliation = PaperSignalReconciler(_response_client(client)).reconcile(
-        {
-            "document_id": "document-internal",
-            "signals": [
-                {
-                    "signal_id": "signal-variable-internal",
-                    "signal_type": "variable",
-                    "label": "laser power",
-                    "sources": [
-                        {
-                            "source_unit_id": "source-variable-internal",
-                            "section_path": "Methods",
-                            "excerpt": "Laser power was varied.",
-                        }
-                    ],
-                },
-                {
-                    "signal_id": "signal-outcome-internal",
-                    "signal_type": "outcome",
-                    "label": "porosity",
-                    "sources": [
-                        {
-                            "source_unit_id": "source-outcome-internal",
-                            "section_path": "Results",
-                            "excerpt": "Porosity decreased with laser power.",
-                        }
-                    ],
-                },
-            ],
-        }
-    )
-
-    assert reconciliation.studies[0].relationships[0].signal_ids == [
-        "signal-variable-internal",
-        "signal-outcome-internal",
-    ]
-    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
-    assert '"signal_label":"V1"' in request_text
-    assert '"signal_label":"O1"' in request_text
-    assert "Laser power was varied." in request_text
-    for internal_value in (
-        "document-internal",
-        "signal-variable-internal",
-        "signal-outcome-internal",
-        "source-variable-internal",
-        "source-outcome-internal",
-    ):
-        assert internal_value not in request_text
-
-
-@pytest.mark.parametrize(
-    ("context_field", "variable_context", "outcome_context"),
-    [
-        ("material_scope", ["316L stainless steel"], ["Ti-6Al-4V"]),
-        ("process_context", ["laser powder bed fusion"], ["heat treatment"]),
-    ],
-)
-def test_paper_signal_reconciliation_repairs_conflicting_contexts(
-    context_field,
-    variable_context,
-    outcome_context,
-):
-    invalid = {
-        "studies": [
-            {
-                "relationships": [
-                    {
-                        "signal_labels": ["V1", "O1"],
-                        "confidence": 0.89,
-                    }
-                ]
-            }
-        ],
-        "unresolved_signals": [],
-    }
-    repaired = {
-        "studies": [],
-        "unresolved_signals": [
-            {
-                "signal_label": "V1",
-                "reason": "The signals describe different experimental contexts.",
-            },
-            {
-                "signal_label": "O1",
-                "reason": "The signals describe different experimental contexts.",
-            },
-        ],
-    }
-    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(repaired)])
-    extractor = _response_client(client)
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    context_field: variable_context,
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    context_field: outcome_context,
-                },
-            ],
-        }
-    )
-
-    assert reconciliation.studies == []
-    assert len(reconciliation.unresolved_signals) == 2
-    assert len(client.chat.completions.calls) == 2
-    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "context-compatible" in repair_prompt
-    assert context_field in repair_prompt
-
-
-def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
-    monkeypatch,
-):
-    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    invalid = {
-        "studies": [
-            {
-                "relationships": [
-                    {
-                        "signal_labels": ["V1", "O1"],
-                        "confidence": 0.89,
-                    }
-                ]
-            }
-        ]
-    }
-    repaired = {
-        "studies": [],
-        "unresolved_signals": [
-            {
-                "signal_label": signal_label,
-                "reason": "The signals describe different material contexts.",
-            }
-            for signal_label in ("V1", "O1")
-        ],
-    }
-    client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
-    extractor = StructuredResponseClient(client=client, model="fake-model")
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    "material_scope": ["316L stainless steel"],
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    "material_scope": ["Ti-6Al-4V"],
-                },
-            ],
-        }
-    )
-
-    assert reconciliation.studies == []
-    assert len(reconciliation.unresolved_signals) == 2
-    assert len(client.beta.chat.completions.calls) == 1
-    assert len(client.chat.completions.calls) == 1
-    repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "context-compatible" in repair_prompt
-    assert "material_scope" in repair_prompt
-
-
-def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
-    invalid = {
-        "studies": [
-            {
-                "relationships": [
-                    {
-                        "signal_labels": ["V1", "O1"],
-                        "confidence": 0.9,
-                    },
-                    {
-                        "signal_labels": ["V2", "O1"],
-                        "confidence": 0.8,
-                    },
-                ]
-            }
-        ],
-        "unresolved_signals": [],
-    }
-    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(invalid)])
-    extractor = _response_client(client)
-
-    reconciliation = PaperSignalReconciler(extractor).reconcile(
-        {
-            "document_id": "paper-1",
-            "signals": [
-                {
-                    "signal_id": "signal-variable",
-                    "signal_type": "variable",
-                    "process_context": ["laser powder bed fusion"],
-                },
-                {
-                    "signal_id": "signal-conflicting-variable",
-                    "signal_type": "variable",
-                    "process_context": ["heat treatment"],
-                },
-                {
-                    "signal_id": "signal-outcome",
-                    "signal_type": "outcome",
-                    "process_context": ["laser powder bed fusion"],
-                },
-            ],
-        }
-    )
-
-    assert len(reconciliation.studies) == 1
-    assert len(reconciliation.studies[0].relationships) == 1
-    assert reconciliation.studies[0].relationships[0].signal_ids == [
-        "signal-variable",
-        "signal-outcome",
-    ]
-    assert [
-        signal.signal_id for signal in reconciliation.unresolved_signals
-    ] == ["signal-conflicting-variable"]
-    assert "process_context" in reconciliation.unresolved_signals[0].reason
-    assert len(client.chat.completions.calls) == 2
-
-
 def test_domain_model_extractors_validates_axis_canonicalization_response():
     client = _FakeOpenAIClient(
         """
@@ -3184,7 +2410,7 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         }
     )
 
-    assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
+    assert isinstance(canonicalization_plan, AxisCanonicalizationPlanModelOutput)
     assert [item.model_dump() for item in canonicalization_plan.decisions] == [
         {
             "pair_id": "axis_pair_0001",
@@ -3308,13 +2534,13 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
         }
     )
 
-    assert isinstance(frame, StructuredPaperFrameBatch)
+    assert isinstance(frame, PaperFrameBatchResult)
     assert frame.relevance == "high"
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-2"]
     assert frame.source_accounting_origin == "model"
     assert frame.source_accounting_errors == ()
-    frame_schema = StructuredPaperFrameBatch.model_json_schema()
+    frame_schema = PaperFrameBatchResult.model_json_schema()
     assert "source_accounting_origin" not in frame_schema["properties"]
     assert "source_accounting_errors" not in frame_schema["properties"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
@@ -3414,7 +2640,7 @@ def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_id
     assert frame.screening_note == "x" * 320
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert len(client.chat.completions.calls) == 1
-    assert "background" not in StructuredPaperFrameBatch.model_json_schema()[
+    assert "background" not in PaperFrameBatchResult.model_json_schema()[
         "properties"
     ]
 
@@ -3889,6 +3115,22 @@ def test_table_matrix_repair_prompt_hides_backend_lineage_and_slice_offsets():
         assert internal_value not in user_prompt
 
 
+def test_table_matrix_repair_prompt_keeps_neighbor_context_separate_from_grid():
+    system_prompt, user_prompt = build_table_matrix_repair_prompt({
+        "source": {
+            "table_markdown": "| Specimen | Density (%) |\n| HT | 98.0 |",
+            "reading_context": [{
+                "source_ref": "note-1", "source_kind": "text_window", "page": 4,
+                "relation": "following_text", "text": "HT denotes furnace heat treatment.",
+            }],
+        },
+    })
+    assert "HT denotes furnace heat treatment." in user_prompt
+    assert '"reading_context"' in user_prompt
+    assert "neighboring" in system_prompt
+    assert "not measurement cells of the current table" in user_prompt
+
+
 def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
     client = _FakeOpenAIClient("unused")
     extractor = _response_client(client)
@@ -3925,114 +3167,6 @@ def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
     assert estimated_tokens > prompt_tokens_without_schema + 100
     assert client.beta.chat.completions.calls == []
     assert client.chat.completions.calls == []
-
-
-def test_domain_model_extractors_validates_objective_evidence_routes_response():
-    client = _FakeOpenAIClient(
-        """
-            {
-              "selections": [
-                {
-                  "role": "current_experimental_evidence",
-                  "extractable": true,
-                  "confidence": 0.88
-                }
-              ]
-            }
-        """
-    )
-    extractor = _response_client(client)
-
-    routes = ObjectiveEvidenceRouter(extractor).route_source(
-        {
-            "collection_id": "col-1",
-            "objective": {"question": "How does heat treatment affect corrosion?"},
-            "paper_frame": {"frame_id": "opf-1"},
-            "current_source": {"source_kind": "table", "source_ref": "table-1"},
-        }
-    )
-
-    assert isinstance(routes, StructuredEvidenceSelections)
-    assert routes.selections[0].role == "current_experimental_evidence"
-    assert "reason" not in routes.selections[0].model_dump()
-
-
-def test_domain_model_extractors_rejects_legacy_objective_route_batches():
-    client = _FakeOpenAIClient('{"selections": []}')
-    extractor = _response_client(client)
-
-    with pytest.raises(ValueError):
-        ObjectiveEvidenceRouter(extractor).route_source(
-            {
-                "collection_id": "col-1",
-                "objective": {"question": "How does heat treatment affect corrosion?"},
-                "paper_frame": {"frame_id": "opf-1"},
-                "source_candidates": [
-                    {"source_kind": "table", "source_ref": "table-1"}
-                ],
-            }
-        )
-
-
-def test_domain_model_extractors_rejects_verbose_objective_route_objects():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "selections": [
-            {
-              "role": "current_experimental_evidence",
-              "extractable": true,
-              "reason": "Target result table.",
-              "table_schema": {
-                "column_headers": ["sample", "corrosion current"]
-              },
-              "confidence": 0.88
-            }
-          ]
-        }
-        """
-    )
-    extractor = _response_client(client)
-
-    with pytest.raises(ValidationError):
-        ObjectiveEvidenceRouter(extractor).route_source(
-            {
-                "collection_id": "col-1",
-                "objective": {"question": "How does heat treatment affect corrosion?"},
-                "paper_frame": {"frame_id": "opf-1"},
-                "current_source": {"source_kind": "table", "source_ref": "table-1"},
-            }
-        )
-
-
-def test_domain_model_extractors_rejects_source_ids_in_objective_routes():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "selections": [
-            {
-              "source_kind": "table",
-              "source_ref": "table-1",
-              "role": "current_experimental_evidence",
-              "extractable": true,
-              "reason": "Target result table.",
-              "confidence": 0.88
-            }
-          ]
-        }
-        """
-    )
-    extractor = _response_client(client)
-
-    with pytest.raises(ValidationError):
-        ObjectiveEvidenceRouter(extractor).route_source(
-            {
-                "collection_id": "col-1",
-                "objective": {"question": "How does heat treatment affect corrosion?"},
-                "paper_frame": {"frame_id": "opf-1"},
-                "current_source": {"source_kind": "table", "source_ref": "table-1"},
-            }
-        )
 
 
 def test_domain_model_extractors_validates_objective_evidence_response():
@@ -4098,7 +3232,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
         }
     )
 
-    assert isinstance(extractions, StructuredEvidenceExtractions)
+    assert isinstance(extractions, EvidenceExtractionsModelOutput)
     extraction = extractions.extractions[0]
     assert extraction.evidence_role == "direct_result"
     assert extraction.changed_variables[0].name == "heat treatment"
@@ -4138,7 +3272,7 @@ def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
 
 
 def test_structured_objective_evidence_normalizes_compact_context_attributes():
-    context = StructuredEvidenceContext.model_validate(
+    context = EvidenceContextModelOutput.model_validate(
         {
             "material": ["316L stainless steel"],
             "sample": [
@@ -4184,7 +3318,7 @@ def test_structured_objective_evidence_rejects_single_variable_joint_effect():
         ValidationError,
         match="joint effect requires multiple changed variables",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4221,7 +3355,7 @@ def test_structured_objective_evidence_rejects_repeated_variable_intervals():
         ValidationError,
         match="changed variable names must be unique per extraction",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4264,7 +3398,7 @@ def test_structured_objective_evidence_rejects_unbound_experimental_attribution(
         ValidationError,
         match="experimental attribution requires baseline and target values",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4509,7 +3643,7 @@ def test_structured_objective_evidence_rejects_unchanged_factor_as_changed_varia
         ValidationError,
         match="changed variables require distinct baseline and target values",
     ):
-        StructuredEvidenceExtraction.model_validate(
+        EvidenceExtractionModelOutput.model_validate(
             {
                 "evidence_role": "direct_result",
                 "changed_variables": [
@@ -4541,7 +3675,7 @@ def test_structured_objective_evidence_rejects_unchanged_factor_as_changed_varia
 
 
 def test_structured_objective_evidence_allows_unbound_variable_draft():
-    extraction = StructuredEvidenceExtraction.model_validate(
+    extraction = EvidenceExtractionModelOutput.model_validate(
         {
             "evidence_role": "direct_result",
             "changed_variables": [
@@ -4681,138 +3815,17 @@ def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields
         )
 
 
-def test_domain_model_extractors_sanitizes_json_text_and_coerces_text_window_enums():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [
-            {
-              "method_role": "simulation",
-              "method_name": "finite element model",
-              "details": null,
-              "evidence_quote": "finite element model",
-              "confidence": 0.82
-            },
-          ],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [
-            {
-              "condition_type": "heating",
-              "condition_text": "with in situ heating",
-              "normalized_value": null,
-              "unit": null,
-              "evidence_quote": "with in situ heating",
-              "confidence": 0.8
-            },
-          ],
-          "baseline_mentions": [
-            {
-              "baseline_label": "as-built sample",
-              "baseline_type": "as built",
-              "evidence_quote": "as-built sample",
-              "confidence": 0.76
-            }
-          ],
-          "result_claims": [
-            {
-              "claim_text": "Prior work reported lower residual stress.",
-              "property_normalized": "residual stress",
-              "result_type": "trend",
-              "value_text": null,
-              "unit": null,
-              "claim_scope": "prior work",
-              "eligible_for_measurement_result": false,
-              "evidence_quote": "Prior work reported lower residual stress.",
-              "confidence": 0.74
-            },
-          ],
-        }
-        """
-    )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {
-                "text": "Prior work reported lower residual stress with in situ heating.",
-                "heading_path": "Introduction",
-            },
-        }
-    )
-
-    assert mentions.method_mentions[0].method_role == "other"
-    assert mentions.condition_mentions[0].condition_type == "other"
-    assert mentions.baseline_mentions[0].baseline_type == "as-built"
-    assert mentions.result_claims[0].claim_scope == "prior_work"
-
-
-def test_domain_model_extractors_accepts_null_result_property_names():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "method_mentions": [],
-          "material_mentions": [],
-          "variant_mentions": [],
-          "condition_mentions": [],
-          "baseline_mentions": [],
-          "result_claims": [
-            {
-              "claim_text": "The behavior was improved.",
-              "property_normalized": null,
-              "result_type": "trend",
-              "value_text": null,
-              "unit": null,
-              "claim_scope": "current_work",
-              "eligible_for_measurement_result": false,
-              "evidence_quote": "The behavior was improved.",
-              "confidence": 0.7
-            }
-          ]
-        }
-        """
-    )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_text_window_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "text_window": {
-                "text": "The behavior was improved.",
-                "heading_path": "Results",
-            },
-        }
-    )
-
-    assert mentions.result_claims[0].property_normalized == ""
-
-
-def test_domain_model_extractors_caps_provider_parse_completion_tokens_for_table_batches(
-    monkeypatch,
-):
+def test_table_repair_caps_provider_parse_completion_tokens(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
+    client = _FakeOpenAIClient("unused", parsed=TableMatrixRepairModelOutput())
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    mentions = extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
-            "supporting_text_windows": [],
-        }
-    )
+    repaired = extractor.repair_table_matrix({"source": {}})
 
-    assert mentions == StructuredTableBatchMentions()
+    assert repaired == TableMatrixRepairModelOutput()
     parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredTableBatchMentions
+    assert parse_call["response_format"] is TableMatrixRepairModelOutput
     assert parse_call["max_completion_tokens"] == 4096
-    assert parse_call["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
 
 
 def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_json_text(
@@ -4831,7 +3844,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
         }
     )
 
-    assert profile == StructuredDocumentProfile(
+    assert profile == DocumentProfileModelOutput(
         doc_type="experimental",
         profile_warnings=[],
         confidence=0.91,
@@ -4847,22 +3860,17 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_domain_model_extractors_can_opt_in_to_provider_thinking(monkeypatch):
+def test_table_repair_keeps_thinking_disabled_when_legacy_env_is_set(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
-    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
+    client = _FakeOpenAIClient("unused", parsed=TableMatrixRepairModelOutput())
     extractor = PaperFactsExtractor(client=client, model="fake-model")
 
-    extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [],
-            "supporting_text_windows": [],
-        }
-    )
+    extractor.repair_table_matrix({"source": {}})
 
-    assert "extra_body" not in client.beta.chat.completions.calls[0]
+    assert client.beta.chat.completions.calls[0]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
 
 
 def test_domain_model_extractors_leave_reasoning_effort_unset_by_default(monkeypatch):
@@ -4892,41 +3900,13 @@ def test_domain_model_extractors_forward_configured_reasoning_effort(
     assert extractor._provider_request_options()["reasoning_effort"] == "none"
 
 
-def test_domain_model_extractors_routes_objective_selections_directly_to_bounded_json_text(
-    monkeypatch,
-):
-    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient('{"selections":[]}')
-    extractor = StructuredResponseClient(client=client, model="fake-model")
-
-    routes = ObjectiveEvidenceRouter(extractor).route_source(
-        {
-            "collection_id": "col-1",
-            "objective": {"question": "How does heat treatment affect corrosion?"},
-            "paper_frame": {"frame_id": "opf-1"},
-            "current_source": {"source_kind": "text_window", "source_ref": "b1"},
-        }
-    )
-
-    assert routes == StructuredEvidenceSelections()
-    assert client.beta.chat.completions.calls == []
-    text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 512
-    assert text_call["response_format"] == {"type": "json_object"}
-    assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert text_call["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
-    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
-
-
 def test_domain_model_extractors_routes_objective_units_through_bounded_json_text(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient(
         '{"extractions":[]}',
-        parsed=StructuredEvidenceExtractions(),
+        parsed=EvidenceExtractionsModelOutput(),
     )
     extractor = StructuredResponseClient(client=client, model="fake-model")
 
@@ -4939,7 +3919,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
         }
     )
 
-    assert units == StructuredEvidenceExtractions()
+    assert units == EvidenceExtractionsModelOutput()
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
     assert text_call["max_completion_tokens"] == 3072
@@ -4948,11 +3928,73 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
         "structured_evidence_extractions"
     )
     assert text_call["response_format"]["json_schema"]["strict"] is True
-    assert text_call["response_format"]["json_schema"]["schema"] == (
-        StructuredEvidenceExtractions.model_json_schema()
-    )
+    _assert_strict_object_schemas(text_call["response_format"]["json_schema"]["schema"])
     assert "JSON schema:" not in text_call["messages"][1]["content"]
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
+
+
+@pytest.mark.parametrize(
+    "response_model",
+    (
+        EvidenceExtractionsModelOutput,
+        DirectEvidenceExtractionsModelOutput,
+        RequestedContextFactsModelOutput,
+    ),
+)
+def test_named_json_schema_requires_nested_keys_without_changing_values(response_model):
+    original_schema = response_model.model_json_schema()
+    empty_response = response_model()
+    client = _FakeOpenAIClient(empty_response.model_dump_json())
+
+    parsed, _ = _response_client(client).complete_json(
+        messages=[{"role": "user", "content": "Extract only facts in this Source."}],
+        response_model=response_model,
+        max_completion_tokens=3072,
+        json_schema_name="source_facts",
+    )
+
+    assert parsed == empty_response
+    assert response_model.model_json_schema() == original_schema
+    assert len(client.chat.completions.calls) == 1
+    response_format = client.chat.completions.calls[0]["response_format"]
+    assert response_format["json_schema"]["strict"] is True
+    schema = response_format["json_schema"]["schema"]
+    _assert_strict_object_schemas(schema)
+    for name, definition in schema["$defs"].items():
+        original_properties = original_schema["$defs"][name]["properties"]
+        for field, property_schema in definition["properties"].items():
+            original = original_properties[field]
+            # Required keys do not imply known measurements or known context.
+            for keyword in ("anyOf", "enum", "maxItems", "minItems"):
+                if keyword in original:
+                    assert property_schema[keyword] == original[keyword]
+            if original.get("default") is not None:
+                assert property_schema["default"] == original["default"]
+
+
+def test_named_json_schema_keeps_unknown_context_empty_and_nullable():
+    client = _FakeOpenAIClient(
+        '{"facts":[{"name":"alloy","value":"316L","unit":null,'
+        '"context_scope":"experimental","applies_to_outcomes":[],"group_label":null}]}'
+    )
+
+    parsed, _ = _response_client(client).complete_json(
+        messages=[{"role": "user", "content": "The specimens were 316L."}],
+        response_model=RequestedContextFactsModelOutput,
+        max_completion_tokens=1024,
+        json_schema_name="structured_requested_context_facts",
+    )
+
+    fact = parsed.facts[0]
+    assert fact.value == "316L"
+    assert fact.unit is None
+    assert fact.group_label is None
+    assert fact.applies_to_outcomes == []
+    properties = client.chat.completions.calls[0]["response_format"]["json_schema"][
+        "schema"
+    ]["$defs"]["RequestedContextFactModelOutput"]["properties"]
+    assert {"type": "null"} in properties["unit"]["anyOf"]
+    assert {"type": "null"} in properties["group_label"]["anyOf"]
 
 
 def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text() -> None:
@@ -5505,140 +4547,54 @@ def test_objective_evidence_repair_prompt_requires_role_result_consistency():
     assert "A fixed control does not make the comparison incomparable" in repair_prompt
 
 
-def test_domain_model_extractors_validates_lightweight_table_batch_mentions():
+def test_table_repair_normalizes_null_optional_output_containers():
     client = _FakeOpenAIClient(
-        """
-        {
-          "row_results": [
-            {
-              "row_index": 1,
-              "row_subjects": [
-                {
-                  "variant_label": "Sample A",
-                  "family": null,
-                  "composition": null,
-                  "variable_axis_type": null,
-                  "variable_value": null,
-                  "quote": "Sample A"
-                }
-              ],
-              "process_mentions": null,
-              "test_condition_mentions": [
-                {
-                  "name": "test temperature",
-                  "value_text": "25",
-                  "unit": "C",
-                  "quote": "25 C"
-                }
-              ],
-              "baseline_mentions": [],
-              "result_claims": [
-                {
-                  "property_normalized": "hardness",
-                  "result_type": "scalar",
-                  "value_text": "210",
-                  "unit": "HV",
-                  "variant_label": "Sample A",
-                  "baseline_label": null,
-                  "claim_scope": "current work",
-                  "claim_text": "Hardness reached 210 HV.",
-                  "quote": "210 HV"
-                }
-              ]
-            }
-          ]
-        }
-        """
+        '{"repaired_table_matrix":null,"repairs":null,"warnings":null,"confidence":null}'
     )
+
+    repaired = _paper_facts_extractor(client).repair_table_matrix({"source": {}})
+
+    assert repaired.model_dump() == {
+        "repaired_table_matrix": [],
+        "repairs": [],
+        "warnings": [],
+        "confidence": 0.0,
+    }
+    assert len(client.chat.completions.calls) == 1
+
+
+def test_table_repair_rejects_unknown_extra_keys_after_bounded_retry():
+    client = _FakeOpenAIClient('{"keywords":["yield strength"],"repaired_table_matrix":[]}')
     extractor = _paper_facts_extractor(client)
 
-    mentions = extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [{"row_index": 1, "row_summary": "Sample A | 210 HV", "cells": []}],
-            "supporting_text_windows": [],
-        }
-    )
+    with pytest.raises(ValidationError, match="keywords"):
+        extractor.repair_table_matrix({"source": {}})
 
-    row_result = mentions.row_results[0]
-    assert row_result.row_index == 1
-    assert row_result.row_subjects[0].variant_label == "Sample A"
-    assert row_result.process_mentions == []
-    assert row_result.test_condition_mentions[0].name == "test temperature"
-    assert row_result.result_claims[0].claim_scope == "current_work"
+    assert len(client.chat.completions.calls) == 2
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "failed"
+    assert trace["response_model"] == "TableMatrixRepairModelOutput"
 
 
-def test_structured_bundle_defaults_null_backend_metadata():
-    bundle = StructuredExtractionBundle.model_validate(
-        {
-            "sample_variants": [
-                {
-                    "variant_label": "Sample A",
-                    "confidence": None,
-                    "epistemic_status": None,
-                }
-            ],
-            "measurement_results": [
-                {
-                    "claim_text": "Hardness reached 210 HV.",
-                    "property_normalized": "hardness",
-                    "result_type": "scalar",
-                    "confidence": None,
-                }
-            ],
-        }
-    )
-
-    assert bundle.sample_variants[0].confidence == 0.85
-    assert bundle.sample_variants[0].epistemic_status == "normalized_from_evidence"
-    assert bundle.measurement_results[0].confidence == 0.85
-
-
-def test_domain_model_extractors_accepts_empty_table_batch_mentions():
+def test_table_repair_falls_back_to_json_when_provider_parse_is_unavailable():
     client = _FakeOpenAIClient(
-        """
-        {
-          "row_results": []
-        }
-        """
+        '{"repaired_table_matrix":[["Sample","Strength (MPa)"],["A","560"]]}',
+        parse_error=RuntimeError("provider parse unavailable"),
     )
-    extractor = _paper_facts_extractor(client)
-
-    mentions = extractor.extract_table_batch_mentions(
-        {
-            "document_title": "LPBF Paper",
-            "document_profile": {"doc_type": "experimental"},
-            "target_rows": [{"row_index": 1, "row_summary": "Sample A | no grounded result", "cells": []}],
-            "supporting_text_windows": [],
-        }
+    extractor = PaperFactsExtractor(
+        client=client, model="fake-model", extraction_mode="provider_parse"
     )
 
-    assert mentions == StructuredTableBatchMentions()
-
-
-def test_domain_model_extractors_still_rejects_unknown_table_batch_extra_keys():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "keywords": ["yield strength"],
-          "row_results": []
-        }
-        """
+    repaired = extractor.repair_table_matrix(
+        {"source": {"table_markdown": "| Sample | Strength (MPa) |\n| A | 560 |"}}
     )
-    extractor = _paper_facts_extractor(client)
 
-    with pytest.raises(ValidationError) as exc_info:
-        extractor.extract_table_batch_mentions(
-            {
-                "document_title": "LPBF Paper",
-                "document_profile": {"doc_type": "experimental"},
-                "target_rows": [{"row_index": 1, "row_summary": "Sample A | 560 MPa", "cells": []}],
-                "supporting_text_windows": [],
-            }
-        )
-
-    assert "keywords" in str(exc_info.value)
+    assert repaired.repaired_table_matrix[1] == ["A", "560"]
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "available"
+    assert trace["extraction_mode"] == "provider_parse->json_text"
 
 
 def test_domain_model_extractors_falls_back_to_default_for_invalid_mode(monkeypatch, caplog):

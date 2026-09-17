@@ -33,11 +33,13 @@ export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export DOCUMENT_PREPARATION_MAX_CONCURRENCY=10
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
-export LENS_AGENT_MAX_TURN_SECONDS=600
-export LENS_AGENT_MAX_TOOL_CALLS=24
-export LENS_AGENT_MAX_MODEL_TOKENS=240000
+export LENS_AGENT_MAX_TURN_SECONDS=0
+export LENS_AGENT_MAX_TOOL_CALLS=0
+export LENS_AGENT_MAX_MODEL_TOKENS=0
 export LENS_AGENT_NO_PROGRESS_LIMIT=2
-export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
+export LENS_AGENT_EMERGENCY_MAX_CYCLES=0
+export LENS_AGENT_MAX_REQUEST_SECONDS=180
+export LENS_AGENT_CONTEXT_TOKENS=65536
 export LENS_AGENT_MAX_PARALLEL_READS=4
 export LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS=16384
 export LENS_AGENT_MAX_FINALIZATION_SECONDS=300
@@ -69,11 +71,13 @@ curl "$LLM_BASE_URL/models"
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.
 If the provider returns an empty, reasoning-only, or structurally invalid
-streamed response, the runner retries once when no user-visible text was
-received. A second invalid response returns `model_response_invalid`; this is
-distinct from provider connectivity or availability failure.
-The nine `LENS_AGENT_*` variables above are optional; the shown values are their
-defaults. Time must be finite and positive; counts must be positive integers.
+streamed response, the runner retries up to five times when no user-visible
+text was received. A sixth invalid response returns `model_response_invalid`;
+this is distinct from provider connectivity or availability failure.
+The `LENS_AGENT_*` variables above are optional. Whole-turn seconds, tool calls,
+cumulative model tokens and total model cycles default to no ceiling; unset or
+zero disables those four limits. Positive values enable an operator-selected
+limit. Other settings require finite positive values (integers for counts).
 Invalid values are logged and use their defaults. These limits protect one
 technical turn and do not measure scientific completeness. A new Source can
 continue beyond six decisions. A batch with only previously seen observations
@@ -84,18 +88,21 @@ and pages remain new observations. This is a repetition guard, not a scientific
 completeness judgment. Only explicitly parallel-safe reads share the
 parallel-read allowance; writes always require exact approval.
 
-Model calls, read/draft calls, and answer-only finalization share the turn
-deadline. Finalization may use up to `LENS_AGENT_MAX_FINALIZATION_SECONDS`, but
-only within the remaining turn time. It never starts after that deadline.
-An awaited model timeout returns `failed` with `provider_timeout`, preserving
-completed observations without issuing a second model request. If a read uses
-the remaining time, its completed peers remain visible and the unavailable
-final answer is reported as `final_answer_unavailable`. Approved writes retain
+Each model/read request is bounded by `LENS_AGENT_MAX_REQUEST_SECONDS` and model
+requests also respect `LLM_REQUEST_TIMEOUT_SECONDS`. If a whole-turn deadline
+is explicitly enabled, all requests share it. Finalization also respects
+`LENS_AGENT_MAX_FINALIZATION_SECONDS` and any remaining whole-turn time.
+An awaited model timeout returns `failed` with `provider_timeout` when the
+whole-turn deadline is exhausted. A transient provider timeout or connection
+failure that returns before that deadline is retried up to five times, sharing
+the remaining turn time. If a read uses the remaining time, its completed peers
+remain visible and the unavailable final answer is reported as
+`final_answer_unavailable`. Approved writes retain
 their existing completion and exact-approval rules; they are not forcibly
 cancelled mid-mutation. Durable checkpoint I/O can also outlive the model/read
 deadline.
 
-`LENS_AGENT_MAX_MODEL_TOKENS` is an admission threshold for cumulative
+When enabled, `LENS_AGENT_MAX_MODEL_TOKENS` is an admission threshold for cumulative
 provider-reported input plus output usage, not an exact billing ceiling. Usage
 is known after a response, so the last admitted prompt can cross the threshold.
 An already returned answer is preserved with `resource_budget` and scope
@@ -111,12 +118,23 @@ applies. Finalization cannot resume tools or execute an unchecked draft. These g
 limits include reasoning tokens. A provider `length` finish reason is a
 truncated response, not a completed answer or executable tool request.
 
+`LENS_AGENT_CONTEXT_TOKENS` is the total request window, default 65,536.
+Configure it for the deployed model; it is not inferred from cumulative usage.
+System instructions, tools, complete message envelopes, review payloads and
+reserved output all count. Estimates use cl100k with 20% reserve and a protocol
+margin because compatible providers may use different tokenizers. Oversized
+requests fail locally before provider submission. Completed operations are
+compacted into provisional research notes; original messages remain stored.
+Notes retain conditions, unresolved checks and exact basis message references,
+but scientific review requires actual records and Sources, not the summary.
+Compaction failure cannot erase the original research history.
+
 Chat uses cancellable async model I/O and closes response streams on success,
 error, and cancellation. There is no detached synchronous provider thread.
 Closing local I/O does not guarantee immediate remote cancellation or zero
 billing for an in-flight request. Chat disables hidden SDK retries;
 `LLM_MAX_RETRIES` remains applicable to other model clients. The Runner owns
-its one invalid-response retry and records usage from invalid responses when
+its bounded response retries and records usage from invalid responses when
 available. Missing usage is counted explicitly; time, per-request output,
 tools, and the emergency cycle ceiling still bound execution.
 

@@ -17,16 +17,14 @@ from application.core.objectives.analysis.finding_synthesis import (
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
-    StructuredEvidenceSelections,
 )
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.objective_analysis_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
@@ -40,6 +38,7 @@ from application.core.objectives.objective_input_service import (
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    SourceObservation,
     ObjectiveFactSet,
     PaperContribution,
     PaperResearchMap,
@@ -86,7 +85,7 @@ def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version(
 def test_document_evidence_checkpoint_uses_current_source_extraction_version():
     assert (
         "source_extraction",
-        "objective_evidence_extraction.v27",
+        "objective_evidence_extraction.v28",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -174,7 +173,7 @@ def test_table_context_can_complete_material_for_result_reconstruction() -> None
             "outcomes": ["tensile strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-table-5",
             "objective_id": objective.objective_id,
@@ -316,11 +315,11 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        def extract_source(self, payload: dict[str, Any]) -> StructuredEvidenceExtractions:
+        def extract_source(self, payload: dict[str, Any]) -> EvidenceExtractionsModelOutput:
             source_ref = str(payload["source"]["source_ref"])
             self.calls.append(source_ref)
             if source_ref.endswith("-methods"):
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {
                         "extractions": [
                             {
@@ -382,7 +381,7 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                 )
 
             baseline, target = result_values[source_ref]
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -450,7 +449,9 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
     }
 
     extractor = SourceExtractor()
+    read_audits = []
     extracted = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id=collection_id,
         source_extractor=extractor,
         objectives=(objective,),
@@ -487,7 +488,7 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
-        drafts=reconstructed,
+        observations=reconstructed,
         paper_maps=(),
         frames=frames,
         routes=routes,
@@ -561,20 +562,11 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         )
 
 
-class _FailingRouteExtractor(_ObjectiveExtractor):
-    def route_source(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
-        self.route_payloads.append(payload)
-        raise RuntimeError("route model failed")
-
-
 class _FailingFrameExtractor(_ObjectiveExtractor):
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         self.frame_payloads.append(payload)
         raise RuntimeError("frame model failed")
 
@@ -1012,7 +1004,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
         {"source_kind": "text_window", "source_ref": "block-1"}
     ]
     drafts = (
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "normal-context",
                 "objective_id": objective.objective_id,
@@ -1030,7 +1022,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.95,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "repair-result",
                 "objective_id": objective.objective_id,
@@ -1066,7 +1058,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.8,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "repair-result",
                 "objective_id": objective.objective_id,
@@ -1102,7 +1094,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.8,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "failed-short",
                 "objective_id": objective.objective_id,
@@ -1120,7 +1112,7 @@ async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids
                 "confidence": 0.0,
             }
         ),
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": "failed-short",
                 "objective_id": objective.objective_id,
@@ -1409,7 +1401,7 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
     )
 
 
-async def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
+async def test_objective_analysis_does_not_invoke_a_route_model(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -1494,17 +1486,16 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
         objective.objective_id,
     )
 
-    failing_extractor = _FailingRouteExtractor()
-    service._objective_evidence_router = failing_extractor
+    failing_extractor = _ObjectiveExtractor()
     service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
 
-    assert failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
-    assert artifacts.contributions[0].warnings == (
-        "2 Source unit(s) used deterministic evidence routing fallback.",
+    assert all(
+        "deterministic evidence routing fallback" not in warning
+        for warning in artifacts.contributions[0].warnings
     )
     assert all(
         evidence.analysis_version == analysis.analysis_version
@@ -1604,7 +1595,6 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
 
     facts = await service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
-    assert extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
 

@@ -148,6 +148,7 @@ handoff record or a second research-result identity.
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/branches`
+- `GET /api/v1/chat-sessions/{session_id}/tree`
 - `PUT /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback`
 - `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
@@ -167,6 +168,24 @@ owned `ChatSession` with `root_session_id`, `parent_session_id`,
 for an original session. The same UUID and revision return the same branch.
 Reusing a UUID for different content is rejected with 422.
 
+The optional `mode` is `revise` by default. `mode: continue` requires a new
+`message` and retains the selected question's completed answer before starting
+that question on a new branch. Its `fork_message_id` identifies the retained
+assistant answer and `fork_position` is the first position after that answer.
+An incomplete answer cannot be used as a continuation checkpoint (422).
+Continuation drafts have no new Source attachments: earlier messages retain
+their own Source context. Both modes use the existing branch storage and require
+an idle session with no unresolved approvals or tool results.
+
+`GET /tree` returns the owned session family's `root_session_id`, `active_path`
+(canonical user-message IDs), and `nodes`. Each node contains its saved `message`,
+`parent_message_id` (the preceding canonical user turn or null), `answer`,
+`status`, and `can_branch`. Copied prefixes appear once. Status is `completed`,
+`running`, `approval_required`, `failed`, `interrupted`, `incomplete`, or `draft`;
+partial answer text comes only from the server-owned response snapshot. A draft
+is a synthetic user message with stable `draft_{session_id}` identity. The
+endpoint checks current user and Collection ownership and does not mutate state.
+
 Branch creation atomically copies complete turns before the selected question,
 assigning new message and call identities while retaining canonical Source and
 resource references. Later answers and writes stay in their original branch.
@@ -178,7 +197,7 @@ invalid revision or stale Source.
 
 To execute the saved revision, `POST /messages` accepts `branch_revision: true`
 with the exact `fork_content`. The backend restores Source contexts from the
-original question, validates them against current Sources, and accepts this
+original question for revisions (none for continuations), validates them against current Sources, and accepts this
 branch's initial turn at most once. A repeated send returns 409
 `chat_branch_already_started`; the client reads the saved trajectory to recover.
 Both ordinary JSON and SSE submission support this behavior.
@@ -312,7 +331,22 @@ approval. The production Research Agent currently exposes these capabilities:
   canonical content and a `content_truncated` flag; callers must not treat a
   truncated quote as the complete Source. It returns canonical Document and
   Source links; matched content remains inspection material rather than
-  verified Evidence;
+  verified Evidence. `document_outline` lists up to 80 prepared headings with
+  pages, Source counts, kinds, canonical character lengths, estimated tokens
+  and the first Source reference;
+  `outline_section_total` and `outline_truncated` expose outline truncation.
+  This overview and `prepared_source_pages` are independent of search filters
+  and describe prepared content, not the original PDF's total pages. The optional
+  exact `heading_path` filter, with `offset` and `next_offset`, supports reading
+  a section progressively. Omitting `limit` permits up to 200 complete records,
+  packed to the current context allowance; explicit `limit` remains a record cap.
+  `batch_token_budget` and `returned_source_count` describe the actual batch.
+  An oversized first Source is returned without text and with
+  `content_truncated=true`; use its exact reference with `read_source` or
+  `inspect_table`. `next_offset` continues after the returned records, and must
+  not be interpreted as proof that a truncated record was completely read.
+  An empty filtered result does not prove scientific
+  absence or mean that the document has no body;
 - `read_source` reads one exact canonical Source by its Document ID, Source
   kind, and Source reference. It returns the complete content when it fits the
   bounded response, a stable complete-Source digest, and a continuation offset
@@ -321,7 +355,8 @@ approval. The production Research Agent currently exposes these capabilities:
   tables should use `inspect_table` for row-aware windows. An offset at or past
   the end of a non-empty Source returns `source_offset_out_of_range` rather than
   a successful empty excerpt; offset zero remains valid for an empty parsed
-  Source;
+  Source. Successful reads include the canonical `document_title`, page and
+  heading for displaying the current reading location;
 - `search_sources` searches canonical Source units only inside an explicit
   Document scope. It returns bounded candidate locations, complete-Source
   digests, and pagination state. A search hit is an inspection lead, not
@@ -345,14 +380,18 @@ approval. The production Research Agent currently exposes these capabilities:
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
 - `inspect_published_finding` returns one complete canonical published Finding
-  and a bounded page of its linked Evidence. This exact read, followed by any
+  and a bounded page of its linked Evidence, plus saved `feedback_records` and
+  `curation_records` for the exact Finding identity. These review records remain
+  separate from the original published Finding. This exact read, followed by any
   necessary Source inspection, is required before the Agent proposes a review
   or a new conclusion;
 - `create_finding_draft` records a structured, transient conclusion or
   abstention proposal in the Chat trajectory. It reuses the canonical Finding
   authoring input shape but does not validate Evidence bindings, publish a
   Finding, or modify an Objective analysis. The later formal write remains a
-  distinct approval event;
+  distinct approval event. The runner checks its scientific claims before
+  execution; a successful final draft appears as the exact structured result
+  with a deterministic unsaved-status message, without another model rewrite;
 - `create_finding_version` is a `write` capability. It accepts the same
   statement, assertion strength, version-local Evidence roles, limitations,
   optional parent Finding, or explicit abstention as the human Finding
@@ -733,6 +772,23 @@ include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
 
+Finding lists include `evidence_reviews`, keyed by the returned Finding IDs;
+Finding detail includes `evidence_review`. Each contains `needs_review` and
+`evidence_replacements` (referenced Evidence ID to its latest replacement ID,
+or `null` for an unresolved lineage). The projection covers support,
+contradiction, and context/condition references in the selected published
+snapshot. It is separate from the canonical Finding and from expert curation.
+An updated input requires reassessment, not automatic scientific rejection.
+A parent remains a historical judgment even after a child is saved; readers
+can follow `parent_finding_id` to distinguish original and revised conclusions.
+
+Evidence reads expose `eligible_for_finding_authoring`: the Evidence must be
+structurally eligible and not superseded. `supports_finding` retains its
+historical structural meaning. New Finding writes reject superseded Evidence
+in every selected role with `409`; existing Findings retain their original
+Evidence and remain readable. Replacement never transfers a scientific role
+automatically.
+
 Each Finding and Evidence record exposes its `origin`, optional
 `created_by_user_id`, and optional `created_by_tool_call_id`. The tool-call field
 is populated for an `agent_authored` record and for an Agent-assisted revision;
@@ -801,7 +857,15 @@ An Evidence correction never overwrites the old record. Supplying
 locator; publication clones the complete source snapshot into the next
 immutable analysis version, marks the old record as superseded, and leaves old
 Findings pointing at their original Evidence. A successful command returns
-  `201` with the new analysis and Evidence. Stale versions, running analyses,
+`201` with the new analysis, Evidence, and `affected_finding_ids`, including
+Findings referencing earlier ancestors of the corrected Evidence. The Agent
+receives these same IDs. `inspect_published_finding` includes the complete
+linked Evidence page, review metadata, and `replacement_evidence` for that
+page so it can compare old and current facts. It must recheck Sources, roles,
+measurement identity, conditions, and scope before proposing a parent-linked
+Finding draft. Publishing that draft requires a separate exact approval; the
+Evidence approval never authorizes downstream Finding writes.
+Stale versions, running analyses,
 unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
 already superseded record return `409`; malformed scientific shapes return
   `422`. The Research Agent exposes the same operation as the approved

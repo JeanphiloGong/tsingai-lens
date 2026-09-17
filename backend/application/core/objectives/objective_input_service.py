@@ -13,13 +13,8 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    PaperSignalReconciler,
-    PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
-)
-from application.core.objectives.discovery.study_window import (
+from application.core.objectives.discovery.paper_understanding.workflow import (
     PAPER_RESEARCH_MAP_PROMPT_VERSION,
-    PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
     PaperResearchMapExtractor,
 )
 from application.core.objectives.llm.structured_response import (
@@ -61,10 +56,8 @@ class ObjectiveSourceInputs(TypedDict):
 _PAPER_MAP_DOCUMENT_MAX_CONCURRENCY = 10
 PAPER_RESEARCH_MAP_POLICY_VERSION = "+".join(
     (
-        "paper_research_map_selection.v2",
+        "paper_research_map_selection.v3",
         PAPER_RESEARCH_MAP_PROMPT_VERSION,
-        PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
-        PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
     )
 )
 
@@ -272,7 +265,6 @@ class ObjectiveInputService:
                         document_id
                     ],
                     paper_map_extractor=PaperResearchMapExtractor(self.response_client),
-                    signal_reconciler=PaperSignalReconciler(self.response_client),
                     progress_callback=report_document_progress,
                 )
             paper_map = replace(

@@ -7,21 +7,19 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
-)
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
 )
-from application.core.objectives.discovery.study_window import (
-    StructuredExperimentalPaperMap,
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
+    ExperimentalPaperMapModelOutput,
+)
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
 from tests.support.fake_domain_model_extractor import (
@@ -48,15 +46,15 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         system_prompt: str,
         user_prompt: str,
         response_model: type[Any],
-        parsed_validator: Any = None,
+        postprocess_response: Any = None,
         **options: Any,
     ) -> Any:
-        if response_model.__name__ != "_StructuredPaperFrameModelBatch":
+        if response_model.__name__ != "PaperFrameBatchModelOutput":
             return super().complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=response_model,
-                parsed_validator=parsed_validator,
+                postprocess_response=postprocess_response,
                 **options,
             )
 
@@ -107,8 +105,8 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             relevant_source_labels=[] if is_review else source_labels,
             excluded_source_labels=source_labels if is_review else [],
         )
-        if parsed_validator is not None:
-            validated = parsed_validator(response)
+        if postprocess_response is not None:
+            validated = postprocess_response(response)
             if validated is not None:
                 response = validated
         return response
@@ -116,9 +114,9 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
     def extract_document_profile(
         self,
         payload: dict[str, Any],
-    ) -> StructuredDocumentProfile:
+    ) -> DocumentProfileModelOutput:
         title = str(payload.get("title") or payload.get("source_filename") or "")
-        return StructuredDocumentProfile(
+        return DocumentProfileModelOutput(
             doc_type="review" if "review" in title.casefold() else "experimental",
             profile_warnings=[],
             confidence=0.95,
@@ -127,7 +125,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
     def extract(
         self,
         payload: dict[str, Any],
-    ) -> StructuredExperimentalPaperMap | StructuredPaperResearchMap:
+    ) -> ExperimentalPaperMapModelOutput | StructuredPaperResearchMap:
         title = str(payload.get("title") or "").casefold()
         source_text = " ".join(
             str(source.get("content") or "")
@@ -186,7 +184,7 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
                     "confidence": 0.94,
                 }
             ]
-        return StructuredExperimentalPaperMap(
+        return ExperimentalPaperMapModelOutput(
             doc_role="experimental",
             studies=studies,
             unresolved_signals=[],
@@ -195,39 +193,20 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             warnings=[],
         )
 
-    def route_source(self, payload: dict[str, Any]) -> StructuredEvidenceSelections:
-        source = payload.get("current_source") or {}
-        if not isinstance(source, dict) or not source.get("source_ref"):
-            return StructuredEvidenceSelections()
-        text = str(source.get("text_hint") or "").casefold()
-        return StructuredEvidenceSelections(
-            selections=[
-                StructuredEvidenceSelection(
-                    role=(
-                        "current_experimental_evidence"
-                        if "decreased porosity from" in text
-                        else "process_or_treatment"
-                    ),
-                    extractable=True,
-                    confidence=0.92,
-                )
-            ]
-        )
-
-    def extract_source(self, payload: dict[str, Any]) -> StructuredEvidenceExtractions:
+    def extract_source(self, payload: dict[str, Any]) -> EvidenceExtractionsModelOutput:
         source = payload.get("source") or {}
         text = str(source.get("text") or "").strip()
         lowered = text.casefold()
         if "decreased porosity from" not in lowered:
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
         stress_relaxed = "stress-relieved sample state" in lowered
         values = (1.5, 0.6) if stress_relaxed else (1.9, 0.7)
         if "2.4%" in text:
             values = (2.4, 0.8)
-        return StructuredEvidenceExtractions(
+        return EvidenceExtractionsModelOutput(
             extractions=[
-                StructuredEvidenceExtraction(
+                EvidenceExtractionModelOutput(
                     evidence_role="direct_result",
                     changed_variables=[
                         {

@@ -22,8 +22,11 @@ class DiscoverResearchToolsArguments(BaseModel):
         description=(
             "Whether the current request requires checking what a particular paper says, "
             "its measurements, or cross-paper scientific support. True also for claims "
-            "attributed to reviews or methods papers. False for paper selection, status, "
-            "or reviewing already published analysis without a new paper claim. "
+            "attributed to reviews or methods papers, and for rechecking or correcting an "
+            "existing Finding against its original papers, even if the first tool only "
+            "reads that Finding. Classify the entire user request, not only the next tool. "
+            "False for paper selection, status, or merely recalling saved analysis/review "
+            "records without checking their scientific correctness. "
             "This records a reading prerequisite, not approval or scientific support."
         ),
     )

@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from application.core.document_profiles.extraction import DocumentProfileExtractionError
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.objective_input_service import (
     ResearchObjectivesNotReadyError,
 )
@@ -35,7 +35,7 @@ def test_upload_classification_retry_content_and_research_readiness(app_client):
                 raise DocumentProfileExtractionError(
                     "controlled transient model failure"
                 )
-            return StructuredDocumentProfile(
+            return DocumentProfileModelOutput(
                 doc_type="experimental", profile_warnings=[], confidence=0.9
             )
 

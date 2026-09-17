@@ -10,9 +10,8 @@ summaries derived from normalized Source artifacts.
   summary used by downstream Core workflows.
 - `extraction.py`
   Calls the configured model provider and owns document-profile completion
-  limits, retry behavior, and extraction traces.
-- `prompts.py` and `schemas.py`
-  Define the document-triage prompt and its validated response contract.
+  limits, retry behavior, extraction traces, the document-triage prompt, and
+  its validated model output contract.
 
 ## Boundary
 

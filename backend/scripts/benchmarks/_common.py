@@ -13,53 +13,11 @@ from typing import Any
 
 from dotenv import dotenv_values
 from openai import OpenAI
-from pydantic import BaseModel
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT_S = 180.0
 _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
-
-
-DEFAULT_TEXT_WINDOW_PAYLOAD: dict[str, Any] = {
-    "document_profile": {
-        "doc_type": "experimental",
-    },
-    "document_title": (
-        "9a72157535fe48449b93c7b989764f12_Residual stress analysis of in situ surface "
-        "layer heating effects on laser powder bed fusion of 316L stainless steel.pdf"
-    ),
-    "source_filename": (
-        "Residual stress analysis of in situ surface layer heating effects on laser powder "
-        "bed fusion of 316L stainless steel.pdf"
-    ),
-    "text_window": {
-        "heading": "1. Introduction",
-        "heading_path": "1. Introduction",
-        "page": 1,
-        "text": (
-            "Fabricating  parts  using  laser  powder  bed  fusion  (LPBF)  is  of  growing  "
-            "interest  to  many  fields,  ranging  from medical to aerospace, but this process "
-            "is often plagued with residual stresses that can reach magnitudes as high as the "
-            "yield strength of the material. Previous work has demonstrated the ability to "
-            "reduce residual stress during LPBF by over 90% using an in situ annealing method "
-            "that makes use of large area, shaped light illumination from a set of laser "
-            "diodes. In this work, an in-depth analysis of the effectiveness of this in situ "
-            "residual stress reduction technique is presented. A custom LPBF system was used "
-            "to fabricate 316L stainless steel parts, and the stresses of these  parts  were  "
-            "analyzed  using  the  contour  method  and  neutron  diffraction  on  various  "
-            "planes  within  the samples. These spatial measurements revealed stress reductions "
-            "near the edges and base of the samples in each of the three measured orthogonal "
-            "stress directions, in addition to an overall reduction in stress owing to in situ "
-            "application of laser diode heating. The experimental results were found to be in "
-            "excellent agreement with numerical thermomechanical simulations that captured the "
-            "effects of various processing parameters. Furthermore, in cases where the annealing "
-            "was only performed once every 5 layers, the residual stress was similarly reduced, "
-            "which indicates that further optimization might be achieved to limit additional "
-            "processing time during the builds while still relieving equivalent amounts of stress."
-        ),
-    },
-}
 
 
 @dataclass(frozen=True)
@@ -218,32 +176,6 @@ def build_openai_client(runtime: ResolvedRuntime) -> OpenAI:
         base_url=runtime.base_url or None,
         timeout=runtime.timeout_s,
     )
-
-
-def load_json_payload(payload_file: Path | None) -> dict[str, Any]:
-    if payload_file is None:
-        return json.loads(json.dumps(DEFAULT_TEXT_WINDOW_PAYLOAD))
-    resolved = payload_file.expanduser().resolve()
-    return json.loads(resolved.read_text(encoding="utf-8"))
-
-
-def build_schema_anchored_user_prompt(
-    *,
-    user_prompt: str,
-    response_model: type[BaseModel],
-) -> tuple[str, str]:
-    schema_json = json.dumps(
-        response_model.model_json_schema(),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    final_user_prompt = (
-        f"{user_prompt}\n\n"
-        "Return exactly one JSON object that matches this schema. "
-        "Do not include markdown fences or commentary.\n"
-        f"JSON schema:\n{schema_json}"
-    )
-    return final_user_prompt, schema_json
 
 
 def coerce_message_text(content: Any) -> str:

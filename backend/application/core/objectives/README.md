@@ -33,7 +33,7 @@ Paper Map construction is intentionally split by responsibility:
 - `paper_map_extraction.py` owns model extraction, structured-output recovery,
   and window-result normalization;
 - `paper_map_aggregation.py` owns window consolidation, study identity merging,
-  unresolved-signal reconciliation, and final status assessment.
+  unresolved-scope retention, and final status assessment.
 
 The coordinator must remain the only place that orders these steps. Moving a
 helper does not authorize changing Source order, recovery budgets, or map
@@ -60,7 +60,7 @@ the scientific engine to discover those dependencies.
 | Approved creation, confirmation, or derivation | `objective_authoring_service.py` | `test_objective_derivation_persistence.py` |
 | Initial or expanded Paper Map reading scope | `paper_map_sources.py` | `test_paper_research_map_service.py` |
 | Map extraction and technical recovery | `paper_map_extraction.py` | `test_paper_research_map_service.py` |
-| Map merging, reconciliation, or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
+| Map merging or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
 | One paper's scientific Evidence flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
 | Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.py` | `test_finding_summary.py` |
@@ -94,7 +94,8 @@ become Evidence, and only compatible Evidence may become a Finding.
    metric terms and explicit condition or group values; selection stops when the
    smallest candidate set covers the unresolved map fields or when no remaining
    Source can add coverage;
-5. reconciles unresolved signals without inventing Source facts;
+5. reads new passages together with original unresolved context through the same
+   extractor, skipping identical or subset-only rereads;
 6. records map status and limitations.
 
 This is lightweight preparation for scope decisions. It does not reconstruct
@@ -106,7 +107,7 @@ A mapped relationship may use a factor only when the supplied Source states
 that the paper varied it, compared groups defined by it, or modeled it as an
 independent axis. Fixed settings, generic parameter lists, background context,
 and uncertain roles remain unresolved map signals with Source lineage; neither
-the reconciliation model nor Objective discovery may promote them to
+contextual reading nor Objective discovery may promote them to
 `varied_factors`.
 
 ## Candidate Discovery

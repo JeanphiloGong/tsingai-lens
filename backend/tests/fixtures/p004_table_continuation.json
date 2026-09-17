@@ -1,0 +1,301 @@
+{
+  "description": "Retained Docling Sources for P004 PDF page 4, printed Table 2 and its same-page continuation. The final left-column row carries 98.75%; its sample label appears at the top of the right column. This fixture is not a model-generated oracle.",
+  "tables": [
+    {
+      "table_id": "tbl_doc_a3cedb1c7570_2_table_2",
+      "document_id": "doc_a3cedb1c7570",
+      "table_order": 2,
+      "caption_text": "Table 2 Experimental conditions and measured density for the SLM SS316L samples. Typical furnace-type of HT and HIP were conducted after the SLM process.",
+      "caption_block_id": "blk_doc_a3cedb1c7570_61",
+      "page": 4,
+      "heading_path": "P004-Heat treatment effect on the microstructure, mechanical properties, and wear behaviors of stainless steel 316L prepared via selective laser melting.pdf",
+      "column_headers": [
+        "Specimens",
+        "Type of heat treatment",
+        "Laser power (W)",
+        "Scan speed (mm/s)",
+        "Laser energy density (J/ mm 3 )",
+        "Density (%)"
+      ],
+      "header_row_count": 1,
+      "table_matrix": [
+        [
+          "Specimens",
+          "Type of heat treatment",
+          "Laser power (W)",
+          "Scan speed (mm/s)",
+          "Laser energy density (J/ mm 3 )",
+          "Density (%)"
+        ],
+        [
+          "as-SLM (100/",
+          "-",
+          "100",
+          "100",
+          "278",
+          "97.83"
+        ],
+        [
+          "100) HT-SLM (100/",
+          "Furnace HT",
+          "100",
+          "100",
+          "278",
+          "98.70"
+        ],
+        [
+          "100) HIP-SLM (100/",
+          "HIP",
+          "100",
+          "100",
+          "278",
+          "98.15"
+        ],
+        [
+          "100) as-SLM (100/",
+          "-",
+          "100",
+          "200",
+          "139",
+          "91.84"
+        ],
+        [
+          "200) HT-SLM (100/",
+          "Furnace HT",
+          "100",
+          "200",
+          "139",
+          "93.67"
+        ],
+        [
+          "200) HIP-SLM (100/",
+          "HIP",
+          "100",
+          "200",
+          "139",
+          "92.63"
+        ],
+        [
+          "200) as-SLM (100/",
+          "-",
+          "100",
+          "280",
+          "99",
+          "90.30"
+        ],
+        [
+          "280) HT-SLM (100/",
+          "Furnace HT",
+          "100",
+          "280",
+          "99",
+          "91.54"
+        ],
+        [
+          "280) HIP-SLM (100/",
+          "HIP",
+          "100",
+          "280",
+          "99",
+          "91.40"
+        ],
+        [
+          "280) as-SLM (120/",
+          "-",
+          "120",
+          "100",
+          "333",
+          "98.11"
+        ],
+        [
+          "100) HT-SLM (120/",
+          "Furnace HT",
+          "120",
+          "100",
+          "333",
+          "98.45"
+        ],
+        [
+          "100) HIP-SLM",
+          "HIP",
+          "120",
+          "100",
+          "333",
+          "98.19"
+        ],
+        [
+          "(120/ 100) as-SLM",
+          "-",
+          "120",
+          "200",
+          "167",
+          "94.31"
+        ],
+        [
+          "(120/ 200) HT-SLM",
+          "Furnace HT",
+          "120",
+          "200",
+          "167",
+          "96.84"
+        ],
+        [
+          "(120/ 200) HIP-SLM",
+          "HIP",
+          "120",
+          "200",
+          "167",
+          "95.92"
+        ],
+        [
+          "200) as-SLM (120/",
+          "-",
+          "120",
+          "280",
+          "119",
+          "90.04"
+        ],
+        [
+          "280) HT-SLM (120/",
+          "Furnace HT",
+          "120",
+          "280",
+          "119",
+          "93.58"
+        ],
+        [
+          "280) HIP-SLM (120/",
+          "HIP",
+          "120",
+          "280",
+          "119",
+          "92.08"
+        ],
+        [
+          "280) as-SLM (140/",
+          "-",
+          "140",
+          "100",
+          "389",
+          "98.05"
+        ],
+        [
+          "100) HT-SLM (140/",
+          "Furnace HT",
+          "140",
+          "100",
+          "389",
+          "98.33"
+        ],
+        [
+          "100) HIP-SLM",
+          "HIP",
+          "140",
+          "100",
+          "389",
+          "98.16"
+        ],
+        [
+          "(140/ 100) as-SLM",
+          "-",
+          "140",
+          "200",
+          "194",
+          "95.62"
+        ],
+        [
+          "(140/ 200) HT-SLM",
+          "Furnace HT",
+          "140",
+          "200",
+          "194",
+          "97.06"
+        ],
+        [
+          "(140/ 200)",
+          "HIP",
+          "140",
+          "200",
+          "194",
+          "98.75"
+        ]
+      ]
+    },
+    {
+      "table_id": "tbl_doc_a3cedb1c7570_3_table_3",
+      "document_id": "doc_a3cedb1c7570",
+      "table_order": 3,
+      "caption_text": null,
+      "caption_block_id": null,
+      "page": 4,
+      "heading_path": "P004-Heat treatment effect on the microstructure, mechanical properties, and wear behaviors of stainless steel 316L prepared via selective laser melting.pdf",
+      "column_headers": [
+        "Table 2 ( continued ) > Specimens",
+        "Table 2 ( continued ) > Type of heat treatment",
+        "Table 2 ( continued ) > Laser power (W)",
+        "Table 2 ( continued ) > Scan speed (mm/s)",
+        "Table 2 ( continued ) > Laser energy density (J/ mm 3 )",
+        "Table 2 ( continued ) > Density (%)"
+      ],
+      "header_row_count": 2,
+      "table_matrix": [
+        [
+          "Table 2 ( continued )",
+          "Table 2 ( continued )",
+          "Table 2 ( continued )",
+          "Table 2 ( continued )",
+          "Table 2 ( continued )",
+          "Table 2 ( continued )"
+        ],
+        [
+          "Specimens",
+          "Type of heat treatment",
+          "Laser power (W)",
+          "Scan speed (mm/s)",
+          "Laser energy density (J/ mm 3 )",
+          "Density (%)"
+        ],
+        [
+          "HIP-SLM (140/ 200)",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        [
+          "as-SLM (140/",
+          "-",
+          "140",
+          "280",
+          "139",
+          "92.19"
+        ],
+        [
+          "280) HT-SLM (140/ 280)",
+          "Furnace HT",
+          "140",
+          "280",
+          "139",
+          "93.14"
+        ],
+        [
+          "HIP-SLM (140/ 280)",
+          "HIP",
+          "140",
+          "280",
+          "139",
+          "94.68"
+        ]
+      ]
+    }
+  ],
+  "expected_boundary": {
+    "specimen": "HIP-SLM (140/200)",
+    "heat_treatment": "HIP",
+    "laser_power": 140,
+    "scan_speed": 200,
+    "energy_density": 194,
+    "density": 98.75
+  }
+}

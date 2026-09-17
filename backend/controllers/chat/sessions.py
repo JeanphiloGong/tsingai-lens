@@ -31,6 +31,8 @@ from controllers.schemas.chat.session import (
     ChatToolDecisionRequest,
     ChatTurnRequest,
     ChatTurnResponse,
+    ChatTreeResponse,
+    ChatTreeNodeResponse,
 )
 from domain.chat import ChatSourceContext
 
@@ -93,6 +95,7 @@ async def branch_chat_message(
         session = await request.app.state.chat_session_service.branch_message_for_user(
             session_id, payload.message_id, await current_user_id(request),
             request_id=str(payload.request_id), message=payload.message,
+            mode=payload.mode,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -101,6 +104,21 @@ async def branch_chat_message(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"code": "chat_branch_invalid", "message": str(exc)}) from exc
     return ChatSessionResponse.model_validate(session.to_record())
+
+
+@router.get("/{session_id}/tree", response_model=ChatTreeResponse)
+async def get_chat_tree(session_id: str, request: Request) -> ChatTreeResponse:
+    try:
+        tree = await request.app.state.chat_session_service.get_tree_for_user(
+            session_id, await current_user_id(request),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ChatTreeResponse(
+        root_session_id=tree["root_session_id"], active_path=tree["active_path"],
+        nodes=[ChatTreeNodeResponse(**{**node, "message": _message_response(node["message"])})
+               for node in tree["nodes"]],
+    )
 
 
 @router.get(

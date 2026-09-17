@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { t } from '../../../_shared/i18n';
+	import type { CurrentReading } from './conversationPresentation';
 	import {
 		formatChatElapsed,
 		getChatProgressActions,
@@ -7,8 +8,10 @@
 	} from '../../../_shared/chatSessions';
 	export let progress: ChatProgress;
 	export let progressHistory: ChatProgress[] = [];
+	export let readings: CurrentReading[] = [];
 	let progressHistoryExpanded = false;
 	$: progressActions = getChatProgressActions(progress);
+	$: researchPlan = progress.research_plan?.steps ?? [];
 	function progressLabel(value: ChatProgress | null) {
 		if (!value) return '';
 		const phase = value.phase;
@@ -53,6 +56,41 @@
 			<span class="progress-chevron" aria-hidden="true"></span>
 		{/if}
 	</button>
+	{#if researchPlan.length}
+		<section class="research-plan" aria-label={$t('researchAgent.progress.plan.title')}>
+			<strong class="research-plan-title">{$t('researchAgent.progress.plan.title')}</strong>
+			<ol>
+				{#each researchPlan as step (step.id)}
+					<li class:active={step.status === 'in_progress'} class:done={step.status === 'completed'}>
+						<span class="plan-mark" aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'in_progress' ? '·' : '○'}</span>
+						<span class="plan-label">{$t(`researchAgent.progress.plan.steps.${step.id}`)}</span>
+						<small>{$t(`researchAgent.progress.plan.status.${step.status}`)}</small>
+					</li>
+				{/each}
+			</ol>
+		</section>
+	{/if}
+	{#each readings as reading (reading.toolCallId)}
+		<div
+			class="reading-current"
+			data-testid="current-reading"
+			class:failed={reading.status === 'failed'}
+		>
+			<div class="reading-location">
+				<strong>{$t(`researchAgent.progress.sourceState.${reading.status}`)}</strong>
+				<span>{$t(`researchAgent.progress.sourceKind.${reading.kind}`)}</span>
+				{#if reading.page}<span
+						>{$t('researchAgent.progress.sourcePage', { page: reading.page })}</span
+					>{/if}
+			</div>
+			<p class="reading-title">{reading.title || $t('researchAgent.progress.currentPaper')}</p>
+			{#if reading.heading}<p class="reading-heading">{reading.heading}</p>{/if}
+			{#if reading.query}<p class="reading-heading">
+					{$t('researchAgent.progress.searchQuery', { query: reading.query })}
+				</p>{/if}
+			{#if reading.excerpt}<blockquote>{reading.excerpt}</blockquote>{/if}
+		</div>
+	{/each}
 	{#if progressHistoryExpanded && progressHistory.length > 1}
 		<ol class="progress-trail" aria-label={$t('researchAgent.progress.historyLabel')}>
 			{#each progressHistory.slice(0, -1) as entry, index (index)}
@@ -75,6 +113,85 @@
 </div>
 
 <style>
+	.reading-current {
+		min-width: 0;
+		margin: 6px 0 8px 3px;
+		padding: 4px 0 4px 13px;
+		border-left: 2px solid var(--brand-primary);
+		overflow-wrap: anywhere;
+		font-size: 12px;
+	}
+	.research-plan {
+		margin: 4px 0 8px 3px;
+		padding: 6px 0 6px 13px;
+		border-left: 2px solid var(--border-default);
+		font-size: 12px;
+	}
+	.research-plan-title {
+		display: block;
+		margin-bottom: 5px;
+		color: var(--text-primary);
+	}
+	.research-plan ol {
+		display: grid;
+		gap: 3px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.research-plan li {
+		display: grid;
+		grid-template-columns: 14px minmax(0, 1fr) auto;
+		align-items: baseline;
+		gap: 6px;
+		color: var(--text-tertiary);
+	}
+	.research-plan li.active {
+		color: var(--text-primary);
+	}
+	.research-plan li.done {
+		color: var(--text-secondary);
+	}
+	.plan-mark {
+		color: var(--brand-primary);
+		text-align: center;
+	}
+	.plan-label {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.research-plan small {
+		color: var(--text-tertiary);
+		white-space: nowrap;
+	}
+	.reading-current.failed {
+		border-color: var(--danger-border);
+	}
+	.reading-location {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 10px;
+	}
+	.reading-current p {
+		margin: 4px 0;
+	}
+	.reading-title {
+		color: var(--text-primary);
+		font-weight: 500;
+	}
+	.reading-heading {
+		color: var(--text-secondary);
+	}
+	.reading-current blockquote {
+		margin: 6px 0 0;
+		color: var(--text-secondary);
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		line-height: 1.5;
+	}
 	.assistant-progress {
 		display: flex;
 		flex-direction: column;

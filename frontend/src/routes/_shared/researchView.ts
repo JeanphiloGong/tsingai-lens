@@ -336,6 +336,7 @@ export type ObjectiveEvidence = {
 	failure_reason: string | null;
 	confidence: number;
 	supports_finding: boolean;
+	eligible_for_finding_authoring: boolean;
 	origin?: 'system_generated' | 'human_authored' | 'human_revised' | 'agent_authored';
 	source_analysis_version?: number | null;
 	supersedes_evidence_id?: string | null;
@@ -410,11 +411,16 @@ export type ObjectiveAnalysis = {
 	evidence_review: ObjectiveEvidenceReview;
 	warnings: string[];
 };
+export type FindingEvidenceReview = {
+	needs_review: boolean;
+	evidence_replacements: Record<string, string | null>;
+};
 export type ObjectiveFindingPage = {
 	collection_id: string;
 	objective_id: string;
 	analysis_version: number;
 	items: ObjectiveFinding[];
+	evidence_reviews: Record<string, FindingEvidenceReview>;
 	offset: number;
 	limit: number;
 	total: number;
@@ -424,6 +430,7 @@ export type ObjectiveFindingDetail = {
 	objective_id: string;
 	analysis_version: number;
 	finding: ObjectiveFinding;
+	evidence_review: FindingEvidenceReview;
 };
 export type ObjectiveEvidencePage = {
 	collection_id: string;

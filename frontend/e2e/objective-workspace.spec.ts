@@ -153,7 +153,8 @@ const evidence = {
 	resolution_status: 'resolved',
 	failure_reason: null,
 	confidence: 0.92,
-	supports_finding: true
+	supports_finding: true,
+	eligible_for_finding_authoring: true
 };
 
 const additionalTableEvidence = [
@@ -352,6 +353,14 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
+		if (
+			path ===
+				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
+			path ===
+				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/curation`
+		) {
+			return route.fulfill(json({ items: [] }));
+		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
 			return route.fulfill(json(documentContent()));
 		}
@@ -474,6 +483,29 @@ for (const width of [320, 768, 1024, 1440]) {
 		expect(pageErrors).toEqual([]);
 	});
 }
+
+test('wraps unavailable review details and retries without losing the Finding', async ({
+	page
+}) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await mockApis(page);
+	let unavailable = true;
+	const message = `Review unavailable: /collections/${collectionId}/objectives/${objectiveId}/findings/${'finding_'.repeat(20)}`;
+	await page.route('**/findings/finding-1/feedback?*', (route) =>
+		route.fulfill(unavailable ? json({ detail: message }, 404) : json({ items: [] }))
+	);
+	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
+	const review = page.locator('.saved-review');
+	await expect(review.getByRole('alert')).toContainText(message);
+	const fits = await page
+		.locator('.finding-detail')
+		.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
+	expect(fits).toBe(true);
+	unavailable = false;
+	await review.getByRole('button').click();
+	await expect(review.getByRole('alert')).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: finding.statement, exact: true })).toBeVisible();
+});
 
 for (const viewport of [
 	{ name: 'desktop', width: 1280, height: 720 },

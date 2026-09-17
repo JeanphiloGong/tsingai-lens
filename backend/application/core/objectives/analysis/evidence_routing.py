@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Literal, Mapping
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any, Callable, Iterable, Mapping
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.diagnostics import (
@@ -18,7 +15,6 @@ from application.core.objectives.analysis.source_screening import (
     FRAME_TABLE_ROW_LIMIT,
     PaperAnalysisFrame,
 )
-from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     ResearchObjective,
     normalize_objective_confidence,
@@ -55,195 +51,9 @@ _OBJECTIVE_ROUTE_ROLES = {
     "low_value_or_irrelevant",
 }
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
-_ROUTE_MAX_COMPLETION_TOKENS = 512
-OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v3"
-_ROUTE_SYSTEM_PROMPT = """
-You are routing source units for one research objective in an evidence-backed literature comparison backend.
-
-Non-negotiable rules:
-- This is routing only, not final fact extraction.
-- Return exactly one JSON object and nothing else.
-- Decide only the `current_source` unit and return at most one route.
-- Do not return source identity fields; the backend binds the route to the
-  current source unit.
-- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
-- For low-value, review, literature-comparison, composition-only, or unrelated
-  units, return an empty `selections` array (`{"selections": []}`) instead of
-  writing a low-value route unless the source is explicitly frame-excluded.
-- Prefer fewer, higher-confidence extractable routes over speculative coverage.
-""".strip()
-
-
-class StructuredEvidenceSelection(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    role: Literal[
-        "current_experimental_evidence",
-        "process_or_treatment",
-        "test_condition",
-        "composition_or_background",
-        "characterization",
-        "literature_comparison",
-        "modeling_or_prediction",
-        "low_value_or_irrelevant",
-    ] = "low_value_or_irrelevant"
-    extractable: bool = False
-    confidence: float = 0.0
-
-    @field_validator("confidence", mode="before", check_fields=False)
-    @classmethod
-    def _normalize_default_confidence(cls, value: object) -> object:
-        if value is not None:
-            return value
-        return cls.model_fields["confidence"].get_default(call_default_factory=True)
-
-    @field_validator("role", mode="before")
-    @classmethod
-    def _normalize_role(cls, value: object) -> str:
-        normalized = (
-            str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-        )
-        return (
-            normalized
-            if normalized in _OBJECTIVE_ROUTE_ROLES
-            else "low_value_or_irrelevant"
-        )
-
-
-class StructuredEvidenceSelections(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    selections: list[StructuredEvidenceSelection] = Field(
-        default_factory=list,
-        max_length=1,
-    )
-
-    @field_validator("selections", mode="before")
-    @classmethod
-    def _normalize_selections(cls, value: object) -> object:
-        return [] if value is None else value
-
-
-def _objective_evidence_route_model_payload(
-    payload: Mapping[str, Any],
-) -> dict[str, Any]:
-    objective = payload.get("objective")
-    objective_record = objective if isinstance(objective, Mapping) else {}
-    frame = payload.get("paper_frame")
-    frame_record = frame if isinstance(frame, Mapping) else {}
-    tree_position = payload.get("tree_position")
-    tree_record = tree_position if isinstance(tree_position, Mapping) else {}
-    current_source = payload.get("current_source")
-    source_record = current_source if isinstance(current_source, Mapping) else {}
-    return {
-        "objective": {
-            key: objective_record[key]
-            for key in (
-                "question",
-                "material_scope",
-                "variables",
-                "outcomes",
-                "mechanisms",
-                "constraints",
-                "requested_comparator",
-            )
-            if objective_record.get(key) not in (None, "", [], {})
-        },
-        "paper_frame": {
-            key: frame_record[key]
-            for key in (
-                "relevance",
-                "paper_role",
-                "material_match",
-                "changed_variables",
-                "measured_property_scope",
-                "test_environment_scope",
-            )
-            if frame_record.get(key) not in (None, "", [], {})
-        },
-        "source_orientation": {
-            key: tree_record[key]
-            for key in ("node_type", "section_path")
-            if tree_record.get(key) not in (None, "", [], {})
-        },
-        "current_source": {
-            key: source_record[key]
-            for key in (
-                "source_kind",
-                "frame_status",
-                "section_label",
-                "block_type",
-                "text_hint",
-                "caption_text",
-                "heading_path",
-                "column_headers",
-                "row_count",
-                "col_count",
-            )
-            if source_record.get(key) not in (None, "", [], {})
-        },
-    }
-
-
-def build_objective_evidence_route_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    model_payload = _objective_evidence_route_model_payload(payload)
-    user_prompt = (
-        "Route the current source unit for this one research objective.\n\n"
-        f"Input JSON:\n{json.dumps(model_payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with a `selections` array.\n"
-        "Return at most one route for `current_source`. If it is not useful "
-        "for later objective-scoped extraction, return `{\"selections\": []}`.\n"
-        "Each route may contain only `role`, `extractable`, and `confidence`. "
-        "Do not return `source_kind`, `source_ref`, ids, copied source text, "
-        "explanations, or any nested input object.\n"
-        "`role` must be one of: current_experimental_evidence, "
-        "process_or_treatment, test_condition, composition_or_background, "
-        "characterization, literature_comparison, modeling_or_prediction, "
-        "low_value_or_irrelevant.\n"
-        "Use the objective to decide whether `current_source` is direct "
-        "target-outcome evidence, mediator/context evidence, or irrelevant. "
-        "Treat `objective.outcomes` as the only outcomes that answer the "
-        "objective. Treat `objective.mechanisms` as explanatory context unless the "
-        "source explicitly links them to a target outcome.\n"
-        "Use `current_experimental_evidence` only when the source unit likely "
-        "contains current-work target results for the active objective.\n"
-        "Use `process_or_treatment` or `test_condition` when a unit is mainly "
-        "needed to bind samples, process variables, or test environments.\n"
-        "Use `characterization` for microstructure, defect, phase, morphology, "
-        "or grain observations tied to the active objective. Use "
-        "`current_experimental_evidence` for explicit trends, best/worst "
-        "conditions, or author explanations tied to target results.\n"
-        "Use `low_value_or_irrelevant` with `extractable: false` only for "
-        "frame-excluded tables that are passed as `current_source`."
-    )
-    return _ROUTE_SYSTEM_PROMPT, user_prompt
-
-
-class ObjectiveEvidenceRouter:
-    """Classify one screened Source for the transient extraction queue."""
-
-    def __init__(self, response_client: StructuredResponseClient) -> None:
-        self.response_client = response_client
-
-    def route_source(self, payload: dict[str, Any]) -> StructuredEvidenceSelections:
-        if not isinstance(payload.get("current_source"), dict):
-            raise ValueError("objective evidence routing requires current_source")
-        system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
-        response = self.response_client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredEvidenceSelections,
-            max_completion_tokens=_ROUTE_MAX_COMPLETION_TOKENS,
-            force_json_text=True,
-            task_type="objective_evidence_route",
-            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredEvidenceSelections):
-            raise TypeError("unexpected objective evidence route response type")
-        return response
+# Routing is deterministic task organization after semantic screening. Keep a
+# versioned fingerprint so old model-routed analyses are not silently reused.
+OBJECTIVE_EVIDENCE_ROUTING_VERSION = "objective_evidence_routing.v4"
 
 
 @dataclass(frozen=True)
@@ -378,7 +188,6 @@ def _progress_document_metadata(
 def route_sources(
     *,
     collection_id: str,
-    evidence_router: ObjectiveEvidenceRouter,
     objectives: tuple[ResearchObjective, ...],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...],
     blocks_by_document_id: dict[str, list[Any]],
@@ -386,6 +195,11 @@ def route_sources(
     document_trees_by_document_id: dict[str, SourceDocumentTree],
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[EvidenceCandidate, ...]:
+    """Organize screened Sources with deterministic inspection rules.
+
+    Relevance belongs to screening and source-local facts belong to extraction;
+    this step only creates deterministic inspection tasks.
+    """
     objective_by_id = {objective.objective_id: objective for objective in objectives}
     all_tables = tuple(
         table
@@ -553,36 +367,24 @@ def route_sources(
                 source_candidates=source_candidates,
             )
             if not source_scope["eligible"]:
+                # Variable and outcome facts commonly live in different
+                # Methods/Results Sources. Keep the frame and let Source-local
+                # extraction establish or reject each fact instead of
+                # converting a navigation gap into a paper-level exclusion.
                 record_analysis_diagnostic(
                     {
-                        "trace_type": "objective_paper_scope_skipped",
+                        "trace_type": "objective_paper_scope_review",
                         "collection_id": collection_id,
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
                         "paper_role": frame.paper_role,
                         "matched_variables": source_scope["matched_variables"],
                         "matched_outcomes": source_scope["matched_outcomes"],
-                        "missing_axis_families": source_scope[
-                            "missing_axis_families"
-                        ],
+                        "missing_axis_families": source_scope["missing_axis_families"],
                         "lineage_preserved": source_scope["lineage_preserved"],
-                        "reason": (
-                            "primary_experiment_lacks_source_backed_objective_scope"
-                        ),
+                        "disposition": "continue_source_inspection",
                     }
                 )
-                logger.info(
-                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=missing_source_backed_objective_scope missing_axis_families=%s completed_frames=%s remaining_frames=%s",
-                    collection_id,
-                    frame.objective_id,
-                    frame.document_id,
-                    frame_position,
-                    frame_count,
-                    ",".join(source_scope["missing_axis_families"]),
-                    frame_position,
-                    max(frame_count - frame_position, 0),
-                )
-                continue
         frame_route_count_before = len(routes)
         candidate_by_key = {
             (candidate["source_kind"], candidate["source_ref"]): candidate
@@ -619,72 +421,18 @@ def route_sources(
                         )
                     )
                 continue
-            payload = {
-                "collection_id": collection_id,
-                "objective": _route_prompt_objective_record(objective),
-                "paper_frame": _route_prompt_paper_frame_record(frame),
-                "tree_position": _route_tree_position(candidate),
-                "document_state": _empty_objective_document_state(),
-                "current_source": _route_prompt_current_source(candidate),
-            }
-            try:
-                parsed = evidence_router.route_source(payload)
-                # Preserve whether the model actually supplied a confidence.
-                # A Pydantic default of 0.0 is an implementation default, not a
-                # scientific judgment.  Finalization assigns the conservative
-                # deterministic route confidence only when the field was absent.
-                route_records = [
-                    item.model_dump(exclude_unset=True)
-                    for item in parsed.selections[:1]
-                ]
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Research objective evidence routing model failed; using deterministic route collection_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s",
-                    collection_id,
-                    frame.objective_id,
-                    frame.document_id,
-                    candidate.get("source_kind"),
-                    candidate.get("source_ref"),
-                    exc_info=True,
+            # Screening has already made the semantic relevance decision.  The
+            # remaining routing work is deterministic task organization: bind
+            # the Source identity, classify its role from source-local signals,
+            # and preserve explicit direct-result recall.  A second model call
+            # used to repeat this decision and its output was subsequently
+            # overwritten by _finalize_objective_route_record.
+            route_records = [
+                _build_deterministic_objective_route_record(
+                    objective_context=objective_context,
+                    candidate=candidate,
                 )
-                route_records = [
-                    _build_deterministic_objective_route_record(
-                        objective_context=objective_context,
-                        candidate=candidate,
-                    )
-                ]
-            if not route_records and _route_candidate_is_direct_result_candidate(
-                candidate=candidate,
-                objective_context=objective_context,
-            ):
-                # A router is allowed to rank or annotate a direct result, but
-                # it cannot veto reading a Source that the deterministic
-                # candidate pass identified as current-work target evidence.
-                # Researchers do not skip an explicit result paragraph merely
-                # because a preliminary routing judgment returned no route.
-                route_records = [
-                    {
-                        "role": "current_experimental_evidence",
-                        "extractable": True,
-                        "reason": (
-                            "Deterministic recall override: the Source contains "
-                            "a direct Objective result."
-                        ),
-                        "confidence": 0.72,
-                        "used_fallback": True,
-                    }
-                ]
-                record_analysis_diagnostic(
-                    {
-                        "trace_type": "objective_source_recall_override",
-                        "collection_id": collection_id,
-                        "objective_id": frame.objective_id,
-                        "document_id": frame.document_id,
-                        "source_kind": candidate.get("source_kind"),
-                        "source_ref": candidate.get("source_ref"),
-                        "reason": "router_returned_empty_for_direct_result",
-                    }
-                )
+            ]
             for record in route_records:
                 source_kind = str(candidate.get("source_kind") or "")
                 source_ref = str(candidate.get("source_ref") or "")
@@ -838,9 +586,9 @@ def _build_deterministic_objective_route_record(
     return {
         "role": role,
         "extractable": extractable,
-        "reason": "Deterministic route built after model routing failed.",
-        "confidence": 0.62 if extractable else 0.55,
-        "used_fallback": True,
+        "reason": "Deterministic Source task organized from screened source signals.",
+        "confidence": 0.72 if evidence_role == "direct_support" else (0.62 if extractable else 0.55),
+        "used_fallback": False,
     }
 
 
@@ -1554,8 +1302,7 @@ def _build_route_source_candidates(
             "table_schema": table_schema,
             "sample_rows": table_schema["sample_rows"],
             # Candidate recall uses the complete logical table a researcher
-            # can inspect. The routing prompt still receives only its bounded
-            # caption/header preview; extraction receives the complete table.
+            # can inspect; extraction receives the complete table.
             "decision_text": _objective_table_search_text(table),
         }
         candidate["lineage_match"] = _route_candidate_matches_lineage(
@@ -1673,9 +1420,9 @@ def _build_route_source_candidates(
     # Direct result Sources are the recall boundary.  Context Sources are a
     # starting bundle only; missing fields trigger same-paper expansion after
     # extraction.  Keeping this bound here prevents every Methods/background
-    # paragraph from becoming a model call before we know what is missing.
-    # Keep recall-first selection separate from execution order.  The model
-    # may classify direct results before context, but extraction should still
+    # paragraph from becoming an unbounded first read before we know what is
+    # missing. Keep recall-first selection separate from execution order;
+    # extraction should still
     # follow the paper's source order so the resulting trajectory mirrors how
     # a researcher reads and binds Methods, Results, tables, and captions.
     selected_keys = direct_keys | {

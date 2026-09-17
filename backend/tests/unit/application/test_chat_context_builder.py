@@ -10,6 +10,280 @@ from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ChatToo
 from application.chat import ChatContextBuilder
 
 
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+class _CompactionModel:
+    def __init__(self, *turns):
+        self.turns = iter(turns)
+        self.contexts = []
+
+    async def respond(self, *, context, **kwargs):
+        self.contexts.append(context)
+        turn = next(self.turns)
+        if isinstance(turn, Exception):
+            raise turn
+        return turn
+
+
+def test_context_token_budget_preserves_complete_call_result_batches():
+    active = _user("active", "Compare elongation under the same annealing conditions.")
+    pairs = [_tool_pair(call_id=f"source-{i}", payload={
+        "content": "Ti-6Al-4V Methods and Results at 850 and 950 C. " * 100,
+    }) for i in range(5)]
+    messages = (active, *(message for pair in pairs for message in pair))
+    view = ChatContextBuilder().for_model(messages, max_input_tokens=6000)
+    assert active in view.messages
+    assert len(view.messages) < len(messages)
+    assert sum(ChatContextBuilder.estimate_tokens(ChatContextBuilder.model_message(message))
+               for message in view.messages) + ChatContextBuilder.estimate_tokens(view.rollover_summary) <= 6000
+    for call, result in pairs:
+        assert (call in view.messages) == (result in view.messages)
+
+
+def test_recent_user_scope_survives_larger_tool_results():
+    original = _user("scope", "Keep HP-LPBF and L-PBF in the heat-treatment reading list.")
+    active = _user("active", "Also include ELI; defer only the review paper.")
+    pairs = [_tool_pair(call_id=f"lookup-{index}", payload={"content": "paper metadata " * 300})
+             for index in range(4)]
+    messages = (original, *(message for pair in pairs for message in pair), active)
+    view = ChatContextBuilder(max_messages=5).for_model(messages, max_input_tokens=3000)
+    assert original in view.messages and active in view.messages
+    assert len(view.messages) <= 5
+    assert ChatContextBuilder.estimate_tokens(view.provider_messages("test")) <= 3000
+    for call, result in pairs:
+        assert (call in view.messages) == (result in view.messages)
+
+
+def test_current_request_follows_old_scope_and_runtime_hints_in_provider_context():
+    from application.chat.context_builder import ChatModelContext
+
+    prior = _user("prior", "Identify paper A only; do not read its results yet.")
+    active = _user("active", "Now inspect its treatment conditions and tensile measurements.")
+    hint = _user("hint", "The current reading ledger lists the completed passages.")
+    view = ChatContextBuilder().for_model((prior, active, hint), active_user_message_id="active")
+    payload = view.provider_messages("system")
+    assert payload[-1]["content"].startswith("[CURRENT RESEARCHER REQUEST]\n" + active.content)
+    assert prior.content not in payload[-1]["content"]
+    assert "retain their choices only where this request does not change them" in payload[-1]["content"]
+    compact = ChatModelContext((active, prior), compacting=True, active_user_message_id="active")
+    assert compact.provider_messages("compact")[-1]["content"].endswith("do not answer it.")
+
+
+@pytest.mark.anyio
+async def test_previous_complete_abstract_is_retained_when_notes_and_new_search_omit_it():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, capability_policy
+    from application.chat.agent_runner import _RunProgress
+
+    prior_user = _user("prior-user", "Read the four abstracts before comparing elongation.")
+    abstract = _tool_pair(call_id="old-abstract", payload={
+        "document_id": "fourth-paper", "source_kind": "text_window", "source_ref": "abstract-1",
+        "source_digest": "original-version", "content_truncated": False,
+        "heading_path": "Abstract", "page": 1,
+        "content": "The elongation values are cited from earlier work, not new measurements.",
+    })
+    abstract = (replace(abstract[0], tool_calls=(ChatToolRequest(
+        tool_call_id="old-abstract", name="read_source", arguments={}, position=0,
+    ),)), abstract[1])
+    active = _user("active", "Continue checking the necessary Methods and Results.")
+    search = _tool_pair(call_id="new-search", payload={"document_ids": ["fourth-paper"], "matches": []})
+    search = (replace(search[0], tool_calls=(ChatToolRequest(
+        tool_call_id="new-search", name="search_sources", arguments={"query": "elongation"}, position=0,
+    ),)), search[1])
+    messages = (prior_user, *abstract, active, *search)
+    notes = {"scope": "other papers", "checks": [], "next_actions": []}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=4))
+    view = await runner._prepare_model_context(messages, (), _RunProgress(runner.limits), active_user_message_id="active")
+    retained = json.loads(view.prior_reading_summary)
+    paper = next(paper for paper in retained["papers"] if paper["document_id"] == "fourth-paper")
+    assert paper["complete_source_count"] == 1
+    assert paper["sources"][0]["source_digest"] == "original-version"
+    assert "earlier work" in paper["sources"][0]["excerpt"]
+    assert not capability_policy.has_successful_exact_source_read(
+        capability_policy.active_successful_results_by_name(list(messages)))
+    assert abstract[1] not in view.messages
+    assert prior_user in view.messages
+    assert "original-version" in json.dumps(view.provider_messages("test"))
+
+
+def test_prior_reading_keeps_abstract_before_later_metadata_within_token_budget():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+
+    abstract = "This abstract cites elongation from earlier work and reports no new elongation measurements. " * 12
+    pairs = []
+    for index, content in enumerate((abstract, *("Publication metadata and copyright." for _ in range(20)))):
+        call_id = f"read-{index}"
+        pair = _tool_pair(call_id=call_id, payload={
+            "document_id": "fourth-paper", "source_kind": "text_window",
+            "source_ref": f"passage-{index}", "source_digest": f"version-{index}",
+            "content_truncated": False, "content": content,
+        })
+        pairs.extend((replace(pair[0], tool_calls=(ChatToolRequest(
+            tool_call_id=call_id, name="read_source", arguments={}, position=0,
+        ),)), pair[1]))
+    messages = (_user("prior", "Read the abstract."), *pairs, _user("active", "Continue checking the comparison."))
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    summary = runner._prior_source_reading(messages, active_user_message_id="active", max_tokens=800)
+    assert ChatContextBuilder.estimate_tokens(summary) <= 800
+    paper = json.loads(summary)["papers"][0]
+    assert paper["complete_source_count"] == 21
+    assert paper["omitted_source_count"] > 0
+    assert paper["sources"][0]["source_ref"] == "passage-0"
+    assert paper["sources"][0]["excerpt"] == abstract
+
+
+@pytest.mark.anyio
+async def test_compaction_preserves_research_notes_and_full_archived_history():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Correct the elongation comparison; do not save.")
+    old = _tool_pair(call_id="methods", payload={
+        "document_id": "paper-A", "source_ref": "methods-A", "page": 3,
+        "content": "Same material and test method; annealing temperatures differ.",
+    })
+    recent = _tool_pair(call_id="results", payload={"source_ref": "results-A", "page": 10})
+    messages = (active, *old, *recent)
+    notes = {"scope": active.content, "checks": [{
+        "statement": "Paper A methods-A p3 establishes material and tensile method.",
+        "conditions": "Temperature comparison, not time; same baseline required.",
+        "basis_message_ids": [old[1].message_id], "unresolved": "Read the exact result before correcting the Finding.",
+    }], "next_actions": ["Re-read methods-A together with results-A before the final judgment."]}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    view = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert view.messages == (active, *recent)
+    assert json.loads(view.working_summary) == notes
+    assert progress.compacted_message_ids == {message.message_id for message in old}
+    assert messages == (active, *old, *recent)
+    assert old[1].tool_result.data["content"].startswith("Same material")
+    assert model.contexts[0].compacting
+    assert progress.compaction_attempts == 0
+    again = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert again == view
+    assert len(model.contexts) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("partial_section", [False, True])
+async def test_comparison_scope_is_regenerated_from_calls_after_context_compaction(partial_section):
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, capability_policy
+    from application.chat.agent_runner import _RunProgress
+    from domain.chat import ChatToolCall, ToolRisk
+
+    active = _user("active", "Compare the heat treatment conditions in the selected papers.")
+    calls = []
+    messages = [active]
+    observations = [
+        ("search_sources", {"document_ids": ["eli", "hp-lpbf"]}, {"document_ids": ["eli", "hp-lpbf"], "matches": []}),
+        ("inspect_document_sources", {"document_id": "eli"}, {
+            "document": {"document_id": "eli"}, "prepared_source_pages": [1],
+            "outline_truncated": False, "document_outline": [],
+        }),
+        ("search_sources", {"document_ids": ["eli"]}, {"document_ids": ["eli"], "matches": []}),
+    ]
+    if partial_section:
+        observations.insert(2, ("inspect_document_sources", {
+            "document_id": "hp-lpbf", "heading_path": "Methods",
+        }, {
+            "document": {"document_id": "hp-lpbf"}, "heading_path": "Methods",
+            "prepared_source_pages": [1, 2, 3], "next_offset": 2,
+            "document_outline": [{"heading_path": "Methods", "pages": [2, 3], "source_count": 18}],
+            "sources": [{"block_type": "heading", "source_kind": "text_window", "source_ref": "methods-title",
+                         "source_digest": "heading-digest", "content_truncated": False, "heading_path": "Methods"},
+                        {"block_type": "paragraph", "source_kind": "text_window", "source_ref": "protocol",
+                         "source_digest": "protocol-digest", "content_truncated": True, "heading_path": "Methods"}],
+        }))
+    for index, (name, arguments, data) in enumerate(observations):
+        call_id = f"call-{index}"
+        request, response = _tool_pair(call_id=call_id, payload=data)
+        request = replace(request, tool_calls=(ChatToolRequest(
+            tool_call_id=call_id, name=name, arguments=arguments, position=0,
+        ),))
+        messages.extend((request, response))
+        calls.append(ChatToolCall.requested(
+            tool_call_id=call_id, session_id="chat-1", assistant_message_id=request.message_id,
+            position=0, name=name, arguments=arguments, risk=ToolRisk.READ,
+        ))
+    notes = {"scope": "ELI abstract", "checks": [], "next_actions": []}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=4))
+    progress = _RunProgress(runner.limits)
+    for index in range(2):
+        instruction = capability_policy.stage_instruction(
+            ("inspect_document_sources",), calls,
+            successful_results=capability_policy.active_successful_results_by_name(messages),
+        )
+        assert instruction is not None
+        stage = _user(f"stage-{index}", instruction)
+        view = await runner._prepare_model_context((*messages, stage), (), progress, active_user_message_id="active")
+        assert messages[1].message_id in progress.compacted_message_ids
+        assert messages[1] not in view.messages
+        assert stage in view.messages
+        ledger = {item["document_id"]: item for item in json.loads(stage.content.rsplit("\n", 1)[1])}
+        assert set(ledger) == {"eli", "hp-lpbf"}
+        assert ledger["eli"]["prepared_source_pages"] == [1]
+        if partial_section:
+            assert ledger["hp-lpbf"]["outline_status"] == "inspected"
+            assert ledger["hp-lpbf"]["pending_section_reads"] == [{
+                "arguments": {"document_id": "hp-lpbf", "heading_path": "Methods", "offset": 2},
+                "last_batch_block_types": ["heading", "paragraph"],
+            }]
+            assert ledger["hp-lpbf"]["pending_source_reads"] == [{
+                "tool_name": "read_source",
+                "arguments": {"document_id": "hp-lpbf", "source_kind": "text_window", "source_ref": "protocol"},
+            }]
+        else:
+            assert ledger["hp-lpbf"]["outline_status"] == "not_inspected"
+            assert ledger["hp-lpbf"]["prepared_source_pages"] is None
+    assert len(model.contexts) == 1
+
+
+@pytest.mark.anyio
+async def test_failed_compaction_does_not_discard_archived_observations():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Check the same measurement.")
+    messages = (active, *_tool_pair(call_id="old"), *_tool_pair(call_id="new"))
+    invalid = ModelTurn(content=json.dumps({"scope": "same measurement", "checks": [{
+        "statement": "Claim", "conditions": "", "basis_message_ids": ["invented"], "unresolved": "",
+    }], "next_actions": []}))
+    model = _CompactionModel(invalid, invalid)
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    with pytest.raises(ModelResponseError, match="working notes"):
+        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert not progress.compacted_message_ids
+    assert progress.working_summary == ""
+
+
+@pytest.mark.anyio
+async def test_repeated_compaction_has_a_visible_failure_exit():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Keep checking the selected paper.")
+    messages = (active, *_tool_pair(call_id="old", payload={"text": "x" * 5000}),
+                *_tool_pair(call_id="new", payload={"text": "y" * 5000}))
+    notes = {"scope": "selected paper", "checks": [], "next_actions": []}
+    model = _CompactionModel(*(ModelTurn(content=json.dumps(notes)) for _ in range(3)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits, compaction_attempts=3)
+    with pytest.raises(ModelResponseError, match="compacted"):
+        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert messages[2].tool_result is not None
+
+
 def _user(message_id: str, content: str) -> ChatMessage:
     return ChatMessage.user(
         message_id=message_id,

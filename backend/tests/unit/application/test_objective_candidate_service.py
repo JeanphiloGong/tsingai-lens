@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
@@ -22,9 +22,9 @@ class _GroupingExtractor:
     def classify(
         self,
         payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
+    ) -> AxisCanonicalizationPlanModelOutput:
         self.canonicalization_payloads.append(payload)
-        return StructuredAxisCanonicalizationPlan(
+        return AxisCanonicalizationPlanModelOutput(
             decisions=[
                 {
                     "pair_id": pair["pair_id"],
@@ -456,9 +456,9 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -646,9 +646,9 @@ def test_distinct_thermal_processing_interventions_create_distinct_objectives():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -722,9 +722,9 @@ def test_shared_topic_preserves_different_joint_interventions():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -782,9 +782,9 @@ def test_hip_relations_keep_each_intervention_as_a_candidate():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -835,9 +835,9 @@ def test_laser_exposure_theme_does_not_rewrite_precise_axes():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -891,9 +891,9 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1067,9 +1067,9 @@ def test_shared_parent_theme_keeps_each_papers_complete_intervention():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1130,7 +1130,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
             decisions = []
             for pair in payload["axis_pairs"]:
@@ -1153,7 +1153,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
                         "equivalent": False,
                     }
                 )
-            return StructuredAxisCanonicalizationPlan(decisions=decisions)
+            return AxisCanonicalizationPlanModelOutput(decisions=decisions)
 
     skims = (
         _paper_map(
@@ -1209,9 +1209,9 @@ def test_topic_only_pairs_are_classified_once_without_affecting_objectives():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1285,9 +1285,9 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1336,9 +1336,9 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1392,9 +1392,9 @@ def test_property_aliases_are_not_repeated_in_the_objective_outcomes():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1650,7 +1650,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
             diameter_pair = next(
                 pair["pair_id"]
@@ -1658,7 +1658,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
                 if {pair["left"], pair["right"]}
                 == {"maximum defect diameter", "max defect diameter"}
             )
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1719,9 +1719,9 @@ def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1765,9 +1765,9 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -1882,7 +1882,7 @@ def test_verified_aliases_are_consistent_through_context_and_canonicalization():
         "outcome": ["UTS", "ultimate tensile strength"],
     }
     axis_pairs = service._build_axis_candidate_pairs(axis_candidates)
-    plan = StructuredAxisCanonicalizationPlan(
+    plan = AxisCanonicalizationPlanModelOutput(
         decisions=[
             {
                 "pair_id": pair_id,
@@ -1951,7 +1951,7 @@ def test_axis_pair_selection_keeps_every_eligible_pair_and_complete_link_is_orde
             "ultimate tensile strength",
         ),
     }
-    plan = StructuredAxisCanonicalizationPlan(
+    plan = AxisCanonicalizationPlanModelOutput(
         decisions=[
             {
                 "pair_id": pair_id,
@@ -2107,9 +2107,9 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
@@ -2469,9 +2469,9 @@ def test_candidate_review_set_is_bounded_without_losing_relationship_accounting(
         def classify(
             self,
             payload: dict[str, Any],
-        ) -> StructuredAxisCanonicalizationPlan:
+        ) -> AxisCanonicalizationPlanModelOutput:
             self.canonicalization_payloads.append(payload)
-            return StructuredAxisCanonicalizationPlan(
+            return AxisCanonicalizationPlanModelOutput(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],

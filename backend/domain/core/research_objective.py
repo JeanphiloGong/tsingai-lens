@@ -2136,6 +2136,11 @@ class ObjectiveEvidence:
         )
 
     @property
+    def eligible_for_finding_authoring(self) -> bool:
+        # Historical Findings retain their original, structurally valid Evidence.
+        return self.supports_finding and self.superseded_by_evidence_id is None
+
+    @property
     def evidence_status(self) -> str:
         """Return the scientific disposition a researcher can act on.
 

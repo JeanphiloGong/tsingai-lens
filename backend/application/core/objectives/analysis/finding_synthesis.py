@@ -383,7 +383,7 @@ class StructuredFindingSynthesis(_FindingResponse):
         return _normalize_list_container(value)
 
 
-class _StructuredModelFindingMechanism(_FindingResponse):
+class FindingMechanismModelOutput(_FindingResponse):
     source_term: str = Field(min_length=1)
     relation_type: str = Field(min_length=1)
     target_term: str = Field(min_length=1)
@@ -418,12 +418,12 @@ class _StructuredModelFindingMechanism(_FindingResponse):
         )
 
 
-class _StructuredModelFindingItem(_FindingResponse):
+class FindingSynthesisItemModelOutput(_FindingResponse):
     assertion_strength: Literal["causal", "associative", "descriptive"] = (
         "descriptive"
     )
     context_evidence_labels: list[str] = Field(default_factory=list, max_length=24)
-    mechanisms: list[_StructuredModelFindingMechanism] = Field(
+    mechanisms: list[FindingMechanismModelOutput] = Field(
         default_factory=list,
         max_length=8,
     )
@@ -445,8 +445,8 @@ class _StructuredModelFindingItem(_FindingResponse):
         return value
 
 
-class _StructuredModelFindingSynthesis(_FindingResponse):
-    findings: list[_StructuredModelFindingItem] = Field(
+class FindingSynthesisModelOutput(_FindingResponse):
+    findings: list[FindingSynthesisItemModelOutput] = Field(
         default_factory=list,
         max_length=1,
     )
@@ -628,7 +628,7 @@ def _finding_synthesis_model_payload(
 
 
 def _rebind_finding_synthesis(
-    response: _StructuredModelFindingSynthesis,
+    response: FindingSynthesisModelOutput,
     *,
     context_by_label: Mapping[str, Mapping[str, Any]],
 ) -> StructuredFindingSynthesis:
@@ -728,17 +728,17 @@ class FindingAssertionJudge:
         allowed_context_labels = tuple(context_by_label)
 
         def validate_and_rebind(response: BaseModel) -> BaseModel:
-            if not isinstance(response, _StructuredModelFindingSynthesis):
+            if not isinstance(response, FindingSynthesisModelOutput):
                 raise TypeError("unexpected Finding synthesis model response type")
             return _rebind_finding_synthesis(
                 response,
                 context_by_label=context_by_label,
             )
 
-        def parse_json_response(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self._parse_json_response(
+        def complete_json_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._complete_json_response(
                 **kwargs,
-                parsed_validator=validate_and_rebind,
+                postprocess_response=validate_and_rebind,
                 allowed_context_labels=allowed_context_labels,
             )
 
@@ -746,10 +746,10 @@ class FindingAssertionJudge:
             response = self.response_client.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                response_model=_StructuredModelFindingSynthesis,
+                response_model=FindingSynthesisModelOutput,
                 max_completion_tokens=_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS,
-                json_text_parser=parse_json_response,
-                parsed_validator=validate_and_rebind,
+                json_completion=complete_json_with_contract,
+                postprocess_response=validate_and_rebind,
                 task_type="finding_synthesis",
                 prompt_version=_FINDING_SYNTHESIS_PROMPT_VERSION,
             )
@@ -768,16 +768,16 @@ class FindingAssertionJudge:
             raise TypeError("unexpected Finding synthesis response type")
         return response
 
-    def _parse_json_response(
+    def _complete_json_response(
         self,
         *,
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
         max_completion_tokens: int | None,
-        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+        postprocess_response: Callable[[BaseModel], BaseModel | None] | None = None,
         allowed_context_labels: tuple[str, ...] = (),
     ) -> tuple[BaseModel, str | None]:
-        def build_repair_instruction(repair_detail: str) -> str:
+        def build_retry_prompt(repair_detail: str) -> str:
             return (
                 "Previous finding synthesis output failed validation: "
                 f"{repair_detail}. Return at most one schema-valid finding or "
@@ -790,8 +790,8 @@ class FindingAssertionJudge:
             messages=messages,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
-            repair_instruction_builder=build_repair_instruction,
-            parsed_validator=parsed_validator,
+            build_retry_prompt=build_retry_prompt,
+            postprocess_response=postprocess_response,
         )
 
 

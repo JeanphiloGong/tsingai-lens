@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -23,27 +24,27 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionsModelOutput,
     extract_and_validate_source_facts,
     _extract_source_round,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
     PaperAnalysisFrame,
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
 )
-from application.core.paper_facts.schemas import StructuredTableMatrixRepair
+from application.core.paper_facts.extraction import TableMatrixRepairModelOutput
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    SourceObservation,
     ObjectiveEvidenceResult,
     PaperResearchMap,
     PreparedDocumentInput,
 )
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from httpx import Request, Response
-from openai import BadRequestError
+from openai import APITimeoutError, BadRequestError
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -75,7 +76,7 @@ class _BoundedFrameExtractor:
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         assert (
             self.estimate_prompt_tokens(payload)
             <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
@@ -123,7 +124,7 @@ class _BoundedFrameExtractor:
                 )
             )
 
-        return StructuredPaperFrameBatch(
+        return PaperFrameBatchResult(
             relevance=relevance,
             paper_role=next(
                 (
@@ -164,7 +165,7 @@ class _BlockingFrameExtractor(_BoundedFrameExtractor):
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         with self._lock:
             self.active_calls += 1
             self.call_count += 1
@@ -402,7 +403,7 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
             self.payloads.append(payload)
             source_ref = payload["source"]["source_ref"]
             if source_ref == "results-strength":
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {
                         "extractions": [
                             {
@@ -458,10 +459,12 @@ def test_result_extraction_receives_same_paper_context_bundle() -> None:
                         ]
                     }
                 )
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     extractor = CapturingExtractor()
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -687,7 +690,7 @@ def test_validated_context_role_overrides_original_result_route_label() -> None:
             "extractable": True,
         }
     )
-    validated_methods = ExtractedEvidenceDraft.from_mapping(
+    validated_methods = SourceObservation.from_mapping(
         {
             "evidence_id": "validated-methods",
             "objective_id": current.objective_id,
@@ -779,22 +782,16 @@ def test_empty_context_inspection_preserves_route_scope_for_later_result_read() 
         }
     )
 
-    inspected = source_extraction._inspected_objective_source_draft(
-        route=methods_route
-    )
+    inspected = source_extraction._inspected_source_read(route=methods_route)
     seed_routes = source_extraction._objective_seed_context_routes(
-        units=(inspected,),
+        units=(),
+        read_audits=(inspected,),
         route=result_route,
     )
 
-    assert inspected.source_refs == (
-        {
-            "source_kind": "text_window",
-            "source_ref": "methods-manufacturing",
-            "role": "process_or_treatment",
-            "context_fields": [],
-        },
-    )
+    assert inspected.disposition == "inspected_without_fact"
+    assert inspected.source_ref == "methods-manufacturing"
+    assert inspected.role == "process_or_treatment"
     assert [(route.source_ref, route.role, route.context_fields) for route in seed_routes] == [
         ("methods-manufacturing", "process_or_treatment", ("process",))
     ]
@@ -803,7 +800,7 @@ def test_empty_context_inspection_preserves_route_scope_for_later_result_read() 
 def test_bundle_provenance_keeps_only_sources_matching_result_conditions() -> None:
     """Bundle provenance is field-supported rather than whole-bundle provenance."""
 
-    item = source_extraction.StructuredEvidenceExtraction.model_validate(
+    item = source_extraction.EvidenceExtractionModelOutput.model_validate(
         {
             "evidence_role": "direct_result",
             "changed_variables": [
@@ -1040,7 +1037,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -1080,7 +1077,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
         label: str,
         preheating: str,
         include_duplicate_process_name: bool,
-    ) -> ExtractedEvidenceDraft:
+    ) -> SourceObservation:
         process = [
             {
                 "name": "build platform preheating",
@@ -1096,7 +1093,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
                     "context_scope": "experimental",
                 }
             )
-        return ExtractedEvidenceDraft.from_mapping(
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": f"condition-{label}",
                 "objective_id": objective.objective_id,
@@ -1120,7 +1117,7 @@ def test_registered_conditions_keep_shared_process_identity_out_of_changed_axes(
             }
         )
 
-    shared_process = ExtractedEvidenceDraft.from_mapping(
+    shared_process = SourceObservation.from_mapping(
         {
             "evidence_id": "shared-process",
             "objective_id": objective.objective_id,
@@ -1331,11 +1328,11 @@ def test_cited_context_remains_background_and_cannot_bind_current_result() -> No
     )
 
     assert len(records) == 1
-    cited_context = ExtractedEvidenceDraft.from_mapping(records[0])
+    cited_context = SourceObservation.from_mapping(records[0])
     assert cited_context.evidence_role == "background_context"
     assert cited_context.scientific_context.test[0].context_scope == "background"
 
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "current-result",
             "objective_id": objective.objective_id,
@@ -1503,11 +1500,11 @@ def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() ->
         }
     )
     with capture_analysis_diagnostics() as diagnostics:
+        read_audits = []
         drafts = _extract_source_round(
+            read_audits=read_audits,
             collection_id="col-test",
-            source_extractor=_StudySourceEvidenceExtractor(
-                {"conclusion-intent": None}
-            ),
+            source_extractor=_StudySourceEvidenceExtractor({"conclusion-intent": None}),
             objectives=(objective,),
             objective_paper_frames=(frame,),
             objective_evidence_routes=(route,),
@@ -1519,7 +1516,8 @@ def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() ->
             collection_id="col-test",
             analysis=analysis,
             objective=objective,
-            drafts=drafts,
+            observations=drafts,
+            technical_audits=tuple(read_audits),
             paper_maps=(),
             frames=(frame,),
             routes=(route,),
@@ -1528,9 +1526,9 @@ def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() ->
             figures_by_document_id={},
         )
 
-    assert len(drafts) == 1
-    assert drafts[0].selection_status == "rejected"
-    assert drafts[0].evidence_role == "irrelevant"
+    assert drafts == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "inspected_without_fact"
     assert evidence_records == ()
     assert contributions[0].uninspected_source_count == 0
     inspection_trace = next(
@@ -1612,7 +1610,9 @@ def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() 
     )
 
     with capture_analysis_diagnostics() as diagnostics:
+        read_audits = []
         drafts = _extract_source_round(
+            read_audits=read_audits,
             collection_id="col-test",
             source_extractor=_StudySourceEvidenceExtractor(
                 {"introduction-cited-context": None}
@@ -1628,7 +1628,8 @@ def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() 
             collection_id="col-test",
             analysis=analysis,
             objective=objective,
-            drafts=drafts,
+            observations=drafts,
+            technical_audits=tuple(read_audits),
             paper_maps=(),
             frames=(frame,),
             routes=(route,),
@@ -1637,9 +1638,9 @@ def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() 
             figures_by_document_id={},
         )
 
-    assert len(drafts) == 1
-    assert drafts[0].selection_status == "rejected"
-    assert drafts[0].evidence_role == "irrelevant"
+    assert drafts == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "inspected_without_fact"
     assert evidence_records == ()
     assert contributions[0].uninspected_source_count == 0
     inspection_trace = next(
@@ -1672,11 +1673,11 @@ def test_empty_mixed_current_and_cited_result_route_still_needs_context() -> Non
         6,
     )
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
-        source_extractor=_StudySourceEvidenceExtractor(
-            {"results-mixed-context": None}
-        ),
+        source_extractor=_StudySourceEvidenceExtractor({"results-mixed-context": None}),
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=(
@@ -3294,7 +3295,7 @@ def test_objective_result_table_maps_symbol_conditions_to_broad_objective_axes()
         if attribute["name"] != "manufacturing process"
     } == {"°"}
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in records
     )
     comparisons = paper_experiment._build_objective_pairwise_comparison_units(
@@ -3436,7 +3437,7 @@ def test_objective_angle_table_comparison_retains_all_changed_axes():
         }
     )
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
@@ -3552,7 +3553,7 @@ def test_objective_table_keeps_condition_values_units_and_comparison_labels():
     ] == [1, 2]
 
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record) for record in elongation
+        SourceObservation.from_mapping(record) for record in elongation
     )
     comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
@@ -3672,7 +3673,7 @@ class _StudySourceEvidenceExtractor:
         if source_ref == self.failing_source_ref:
             raise RuntimeError("objective evidence provider unavailable")
         record = self.records_by_source_ref[source_ref]
-        return StructuredEvidenceExtractions.model_validate(
+        return EvidenceExtractionsModelOutput.model_validate(
             {"extractions": [record] if record is not None else []}
         )
 
@@ -3738,11 +3739,11 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
     )
 
     with capture_analysis_diagnostics() as diagnostics:
+        read_audits = []
         drafts = _extract_source_round(
+            read_audits=read_audits,
             collection_id="col-test",
-            source_extractor=_StudySourceEvidenceExtractor(
-                {"methods-empty": None}
-            ),
+            source_extractor=_StudySourceEvidenceExtractor({"methods-empty": None}),
             objectives=(objective,),
             objective_paper_frames=(frame,),
             objective_evidence_routes=(route,),
@@ -3754,7 +3755,8 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
             collection_id="col-test",
             analysis=analysis,
             objective=objective,
-            drafts=drafts,
+            observations=drafts,
+            technical_audits=tuple(read_audits),
             paper_maps=(),
             frames=(frame,),
             routes=(route,),
@@ -3799,7 +3801,7 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
 
     class OmittedConfidenceExtractor:
         def extract_source(self, payload):  # noqa: ANN001
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -3838,7 +3840,9 @@ def test_omitted_extraction_confidence_uses_route_fallback() -> None:
                 }
             )
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=OmittedConfidenceExtractor(),
         objectives=(objective,),
@@ -3946,7 +3950,9 @@ def test_objective_outcome_does_not_synthesize_unreported_test_context() -> None
         }
     )
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4012,9 +4018,11 @@ def test_method_context_is_not_created_for_paper_outside_objective_route_scope()
 
     class EmptyExtractor:
         def extract_source(self, payload: dict[str, Any]):
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=EmptyExtractor(),
         objectives=(objective,),
@@ -4154,7 +4162,9 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
         for block in blocks
     )
     with capture_analysis_diagnostics() as diagnostics:
+        read_audits = []
         source_drafts = extract_and_validate_source_facts(
+            read_audits=read_audits,
             collection_id="col-test",
             source_extractor=extractor,
             objectives=(objective,),
@@ -4286,7 +4296,9 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence():
         {"03-results": _cross_source_microstructure_records()["03-results"]}
     )
 
+    read_audits = []
     source_drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4328,7 +4340,9 @@ def test_empty_model_result_keeps_source_as_needs_context_candidate() -> None:
         {"03-results": None}
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4381,7 +4395,9 @@ def test_empty_selected_result_keeps_direct_result_role_when_reason_mentions_con
     )
     extractor = _StudySourceEvidenceExtractor({result_block.block_id: None})
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4430,7 +4446,9 @@ def test_empty_context_route_is_kept_only_in_inspection_ledger() -> None:
     )
     extractor = _StudySourceEvidenceExtractor({methods_block.block_id: None})
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4441,20 +4459,12 @@ def test_empty_context_route_is_kept_only_in_inspection_ledger() -> None:
         document_trees_by_document_id={},
     )
 
-    assert len(drafts) == 1
-    assert drafts[0].evidence_role == "irrelevant"
-    assert drafts[0].selection_status == "rejected"
-    assert drafts[0].resolution_status == "skipped"
-    assert drafts[0].reported_result is None
-    assert drafts[0].source_refs == (
-        {
-            "source_kind": "text_window",
-            "source_ref": "01-methods",
-            "role": "process_or_treatment",
-            "context_fields": [],
-        },
-    )
-    assert "inspected" in (drafts[0].selection_reason or "").casefold()
+    assert drafts == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "inspected_without_fact"
+    assert read_audits[0].source_ref == "01-methods"
+    assert read_audits[0].role == "process_or_treatment"
+    assert "inspected" in read_audits[0].reason.casefold()
 
 
 def test_empty_selected_source_is_retained_when_target_is_not_explicitly_mentioned() -> None:
@@ -4473,7 +4483,9 @@ def test_empty_selected_source_is_retained_when_target_is_not_explicitly_mention
     )
     extractor = _StudySourceEvidenceExtractor({methods_block.block_id: None})
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4497,14 +4509,10 @@ def test_empty_selected_source_is_retained_when_target_is_not_explicitly_mention
         document_trees_by_document_id={},
     )
 
-    assert len(drafts) == 1
-    assert drafts[0].source_ref == methods_block.block_id
-    assert drafts[0].selection_status == "rejected"
-    assert drafts[0].evidence_role == "irrelevant"
-    assert drafts[0].reported_result is None
-    assert drafts[0].resolution_status == "skipped"
-    assert drafts[0].selection_reason is not None
-    assert "inspected" in drafts[0].selection_reason.casefold()
+    assert drafts == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "inspected_without_fact"
+    assert read_audits[0].source_ref == methods_block.block_id
 
 
 def test_empty_direct_result_route_is_retained_without_keyword_match() -> None:
@@ -4536,7 +4544,9 @@ def test_empty_direct_result_route_is_retained_without_keyword_match() -> None:
         }
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4589,7 +4599,9 @@ def test_selected_result_source_is_retained_when_validated_model_record_is_empty
     # scientific payload because the record contains no source-grounded fact.
     extractor = _StudySourceEvidenceExtractor({abstract_block.block_id: {}})
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4642,7 +4654,9 @@ def test_successfully_inspected_extractable_source_leaves_trace_only_marker() ->
     )
     extractor = _StudySourceEvidenceExtractor({abstract_block.block_id: None})
 
+    read_audits = []
     drafts = _extract_source_round(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -4653,12 +4667,10 @@ def test_successfully_inspected_extractable_source_leaves_trace_only_marker() ->
         document_trees_by_document_id={},
     )
 
-    assert len(drafts) == 1
-    assert drafts[0].source_ref == abstract_block.block_id
-    assert drafts[0].evidence_role == "irrelevant"
-    assert drafts[0].selection_status == "rejected"
-    assert drafts[0].resolution_status == "skipped"
-    assert drafts[0].reported_result is None
+    assert drafts == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "inspected_without_fact"
+    assert read_audits[0].source_ref == abstract_block.block_id
 
 
 def test_adaptive_context_uses_nearby_source_when_no_lexical_marker_matches() -> None:
@@ -4671,7 +4683,7 @@ def test_adaptive_context_uses_nearby_source_when_no_lexical_marker_matches() ->
         }
     )
     result_route = _study_source_route(objective.objective_id, "result-3")
-    result_candidate = source_extraction._needs_context_objective_evidence_draft(
+    result_candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     nearby_context = _study_source_block(
@@ -4717,7 +4729,7 @@ def test_needs_context_candidate_selects_same_paper_context_routes() -> None:
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     methods = _study_source_block(
@@ -4750,7 +4762,7 @@ def test_adaptive_context_reads_frame_relevant_source_omitted_by_initial_router(
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-block")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     methods_block = SimpleNamespace(
@@ -4847,7 +4859,7 @@ def test_adaptive_context_does_not_deep_read_every_frame_positive_source() -> No
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-block")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     generic_blocks = [
@@ -4911,7 +4923,7 @@ def test_adaptive_context_selects_context_for_each_incomplete_result_anchor() ->
     )
 
     def result(source_ref: str, baseline_label: str, target_label: str):
-        return source_extraction.ExtractedEvidenceDraft.from_mapping(
+        return source_extraction.SourceObservation.from_mapping(
             {
                 "evidence_id": f"evidence-{source_ref}",
                 "objective_id": objective.objective_id,
@@ -4988,7 +5000,7 @@ def test_adaptive_context_uses_tree_parent_when_source_block_has_no_heading() ->
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     methods_block = SimpleNamespace(
@@ -5058,7 +5070,7 @@ def test_adaptive_context_reads_generic_experimental_design_without_domain_terms
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-roughness")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     experimental_design = _study_source_block(
@@ -5091,7 +5103,7 @@ def test_adaptive_context_selects_one_bundle_for_rows_in_the_same_result_series(
     result_route = _study_source_route(objective.objective_id, "table-results")
 
     def result_row(evidence_id: str, sample_label: str, value: float):
-        return ExtractedEvidenceDraft.from_mapping(
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -5184,7 +5196,7 @@ def test_adaptive_context_trace_does_not_claim_scientific_closure_for_candidates
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     context_block = _study_source_block(
@@ -5228,7 +5240,7 @@ def test_adaptive_context_keeps_late_source_that_contains_missing_objective_cont
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     filler_blocks = [
@@ -5269,7 +5281,7 @@ def test_adaptive_context_prefers_reordered_variable_with_explicit_endpoints() -
         }
     )
     result_route = _study_source_route(objective.objective_id, "table-results")
-    candidate = ExtractedEvidenceDraft.from_mapping(
+    candidate = SourceObservation.from_mapping(
         {
             "evidence_id": "elongation-row",
             "objective_id": objective.objective_id,
@@ -5338,7 +5350,7 @@ def test_complete_result_still_selects_same_paper_fixed_process_controls() -> No
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-microstructure")
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -5426,7 +5438,7 @@ def test_adaptive_context_prefers_method_for_the_result_outcome() -> None:
         objective.objective_id,
         "results-microstructure",
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -5540,7 +5552,7 @@ def test_adaptive_context_keeps_method_intent_narrow_when_other_context_is_missi
         objective.objective_id,
         "results-microstructure",
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -5726,7 +5738,9 @@ def test_fixed_process_controls_join_result_with_methods_source_lineage() -> Non
         }
     )
 
+    read_audits = []
     source_facts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -5777,7 +5791,7 @@ def test_context_binding_changed_axis_alone_does_not_close_fixed_process() -> No
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -5819,7 +5833,7 @@ def test_context_binding_changed_axis_alone_does_not_close_fixed_process() -> No
             "confidence": 0.9,
         }
     )
-    changed_axis_context = ExtractedEvidenceDraft.from_mapping(
+    changed_axis_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-1",
             "objective_id": objective.objective_id,
@@ -5859,7 +5873,7 @@ def test_context_binding_requires_group_shared_fixed_process_controls(
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -5903,7 +5917,7 @@ def test_context_binding_requires_group_shared_fixed_process_controls(
     )
 
     def group_context(label: str, temperature: int, spacing: float):
-        return ExtractedEvidenceDraft.from_mapping(
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": f"context-{label}",
                 "objective_id": objective.objective_id,
@@ -5944,7 +5958,7 @@ def test_context_binding_does_not_borrow_fixed_process_from_another_paper() -> N
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -5980,7 +5994,7 @@ def test_context_binding_does_not_borrow_fixed_process_from_another_paper() -> N
             "confidence": 0.9,
         }
     )
-    other_paper_controls = ExtractedEvidenceDraft.from_mapping(
+    other_paper_controls = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-2",
             "objective_id": objective.objective_id,
@@ -6046,7 +6060,9 @@ def test_adaptive_context_does_not_revisit_result_source_when_context_is_unresol
         }
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -6107,7 +6123,9 @@ def test_source_extraction_reads_duplicate_source_locator_once():
         }
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -6132,7 +6150,7 @@ def test_adaptive_context_bounds_broad_same_paper_expansion_without_losing_exact
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     generic_blocks = [
@@ -6173,7 +6191,7 @@ def test_adaptive_context_does_not_drop_explicit_late_source_after_fixed_quota()
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     distractor_blocks = [
@@ -6221,7 +6239,7 @@ def test_adaptive_context_prefers_minimum_source_set_over_generic_methods_filler
         }
     )
     result_route = _study_source_route(objective.objective_id, "03-results")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     generic_blocks = [
@@ -6335,7 +6353,9 @@ def test_adaptive_context_stops_when_new_sources_repeat_same_context_without_clo
         }
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -6472,7 +6492,9 @@ def test_adaptive_context_stops_after_available_source_scope(
     )
 
     with capture_analysis_diagnostics() as diagnostics:
+        read_audits = []
         drafts = extract_and_validate_source_facts(
+            read_audits=read_audits,
             collection_id="col-test",
             source_extractor=extractor,
             objectives=(objective,),
@@ -6480,9 +6502,7 @@ def test_adaptive_context_stops_after_available_source_scope(
             objective_evidence_routes=(
                 _study_source_route(objective.objective_id, result_block.block_id),
             ),
-            blocks_by_document_id={
-                "paper-1": [result_block, *context_blocks]
-            },
+            blocks_by_document_id={"paper-1": [result_block, *context_blocks]},
             tables_by_document_id={"paper-1": []},
             document_trees_by_document_id={},
         )
@@ -6513,7 +6533,7 @@ def test_context_binding_ignores_matching_context_from_another_document() -> Non
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6549,7 +6569,7 @@ def test_context_binding_ignores_matching_context_from_another_document() -> Non
             "confidence": 0.8,
         }
     )
-    other_document_context = ExtractedEvidenceDraft.from_mapping(
+    other_document_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-2",
             "objective_id": objective.objective_id,
@@ -6585,7 +6605,7 @@ def test_context_binding_accepts_explicit_comparison_labels_in_process_context()
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6614,7 +6634,7 @@ def test_context_binding_accepts_explicit_comparison_labels_in_process_context()
             "confidence": 0.8,
         }
     )
-    methods_context = ExtractedEvidenceDraft.from_mapping(
+    methods_context = SourceObservation.from_mapping(
         {
             "evidence_id": "context-paper-1",
             "objective_id": objective.objective_id,
@@ -6688,7 +6708,7 @@ def test_grouped_context_records_bind_result_to_their_explicit_conditions(
         ),
     }
 
-    def context(group: str, condition: str) -> ExtractedEvidenceDraft:
+    def context(group: str, condition: str) -> SourceObservation:
         validated = source_validation.validate_source_fact(
             route=methods_route,
             source=methods_source,
@@ -6709,9 +6729,9 @@ def test_grouped_context_records_bind_result_to_their_explicit_conditions(
             },
         )
         assert len(validated) == 1
-        return ExtractedEvidenceDraft.from_mapping(validated[0])
+        return SourceObservation.from_mapping(validated[0])
 
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6783,7 +6803,7 @@ def test_explicit_respectively_aliases_bind_results_to_method_conditions() -> No
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6869,7 +6889,7 @@ def test_source_extracted_material_context_retains_its_authoritative_source() ->
             "outcomes": ["strength"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -6889,7 +6909,7 @@ def test_source_extracted_material_context_retains_its_authoritative_source() ->
         }
     )
 
-    material_context = ExtractedEvidenceDraft.from_mapping(
+    material_context = SourceObservation.from_mapping(
         {
             "evidence_id": "material-paper-1",
             "objective_id": objective.objective_id,
@@ -6982,7 +7002,7 @@ def test_ambiguous_group_aliases_do_not_bind_result_conditions(
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -7114,7 +7134,7 @@ def test_partial_result_keeps_source_fact_and_binds_context_without_revisit() ->
             prior_evidence = payload["document_state"].get("prior_evidence") or []
             self.calls.append((source_ref, bool(prior_evidence)))
             if source_ref == "01-methods":
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {
                         "extractions": [
                             {
@@ -7141,13 +7161,15 @@ def test_partial_result_keeps_source_fact_and_binds_context_without_revisit() ->
                     }
                 )
             if source_ref == "03-results":
-                return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput.model_validate(
                     {"extractions": [direct_record]}
                 )
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     extractor = RevisitExtractor()
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -7283,12 +7305,14 @@ def test_context_closure_uses_new_same_paper_label_in_a_later_round() -> None:
                     "confidence": 0.9,
                 },
             }
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {"extractions": [records[source_ref]]}
             )
 
     extractor = ChainedContextExtractor()
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -7389,7 +7413,9 @@ def test_partial_result_expands_same_paper_context_bundle_once() -> None:
         }
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -7441,8 +7467,8 @@ def test_empty_result_is_not_reinterpreted_after_same_paper_context_closure() ->
             source_ref = str(payload["source"]["source_ref"])
             self.calls.append(source_ref)
             if source_ref == "03-results":
-                return StructuredEvidenceExtractions()
-            return StructuredEvidenceExtractions.model_validate(
+                return EvidenceExtractionsModelOutput()
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -7472,7 +7498,9 @@ def test_empty_result_is_not_reinterpreted_after_same_paper_context_closure() ->
             )
 
     extractor = ContextAwareExtractor()
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -7502,7 +7530,7 @@ def test_complete_result_endpoints_still_expand_missing_study_context() -> None:
             "outcomes": ["porosity"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -7570,7 +7598,7 @@ def test_context_bundle_is_not_complete_without_required_study_context():
             "outcomes": ["porosity"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-paper-1",
             "objective_id": objective.objective_id,
@@ -7622,8 +7650,8 @@ def test_research_objective_binds_directional_result_series_to_process_table() -
         sample: str,
         laser_power: str,
         input_current: str = "200 A",
-    ) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    ) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": f"condition-{sample}",
                 "objective_id": "obj-energy-ductility",
@@ -7671,7 +7699,7 @@ def test_research_objective_binds_directional_result_series_to_process_table() -
         "(20 0-70 0), "
         f"{result_text} and then to 15.4% ± 1.3% (20 0-70 0)."
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "result-ductility",
             "objective_id": "obj-energy-ductility",
@@ -7759,7 +7787,7 @@ def test_research_objective_binds_directional_result_series_to_process_table() -
 
 
 def test_objective_extraction_contract_keeps_result_comparison_values() -> None:
-    response = StructuredEvidenceExtractions.model_validate(
+    response = EvidenceExtractionsModelOutput.model_validate(
         {
             "extractions": [
                 {
@@ -7797,7 +7825,7 @@ def test_objective_extraction_contract_keeps_result_comparison_values() -> None:
 
 
 def test_objective_extraction_contract_preserves_multiple_atomic_results() -> None:
-    response = StructuredEvidenceExtractions.model_validate(
+    response = EvidenceExtractionsModelOutput.model_validate(
         {
             "extractions": [
                 {
@@ -7864,7 +7892,7 @@ def test_source_extraction_persists_each_atomic_result_from_one_source() -> None
 
     class MultiResultExtractor:
         def extract_source(self, _payload):
-            return StructuredEvidenceExtractions.model_validate(
+            return EvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         {
@@ -7934,7 +7962,9 @@ def test_source_extraction_persists_each_atomic_result_from_one_source() -> None
                 }
             )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=MultiResultExtractor(),
         objectives=(objective,),
@@ -7972,7 +8002,9 @@ def test_research_objective_records_inspection_without_target_result():
     )
     extractor = _StudySourceEvidenceExtractor({"03-background": None})
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -8006,7 +8038,9 @@ def test_research_objective_records_provider_failure_as_failed_evidence():
         failing_source_ref="03-results",
     )
 
+    read_audits = []
     drafts = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -8019,9 +8053,10 @@ def test_research_objective_records_provider_failure_as_failed_evidence():
         document_trees_by_document_id={},
     )
 
-    assert len(drafts) == 1
-    assert drafts[0].selection_status == "failed"
-    assert drafts[0].failure_reason == (
+    assert drafts == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "technical_failure"
+    assert read_audits[0].reason == (
         "RuntimeError: objective evidence provider unavailable"
     )
 
@@ -8224,7 +8259,7 @@ def test_source_validation_keeps_incomplete_endpoint_comparison_non_attributable
     assert records[0]["attribution_scope"] == "not_attributable"
     # The incomplete record remains valid Evidence and cannot erase other
     # source-grounded results from the paper during materialization.
-    ExtractedEvidenceDraft.from_mapping(records[0])
+    SourceObservation.from_mapping(records[0])
 
 
 def test_source_validation_recovers_objective_factor_from_named_qualitative_groups():
@@ -8606,7 +8641,7 @@ def test_same_paper_conditions_can_upgrade_opaque_labels_to_real_variable_levels
             "confidence": 0.9,
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         source_validation.validate_source_fact(
             route=route,
             source={
@@ -8652,7 +8687,7 @@ def test_same_paper_conditions_can_upgrade_opaque_labels_to_real_variable_levels
     assert result.comparison is not None and not result.comparison.comparable
 
     context_units = tuple(
-        ExtractedEvidenceDraft.from_mapping(
+        SourceObservation.from_mapping(
             {
                 "evidence_id": f"context-{sample}",
                 "objective_id": objective.objective_id,
@@ -8712,8 +8747,8 @@ def test_same_paper_encoded_sample_labels_bind_explicit_method_condition_schema(
         "by tensile testing."
     )
 
-    def result(evidence_id: str, label: str, value: float) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    def result(evidence_id: str, label: str, value: float) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -8814,8 +8849,8 @@ def test_encoded_sample_label_stays_descriptive_when_method_order_is_ambiguous()
         "100/100 and 100/200."
     )
 
-    def result(evidence_id: str, label: str, value: float) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    def result(evidence_id: str, label: str, value: float) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -10859,7 +10894,7 @@ def test_research_objective_prompt_exposes_context_fields_without_values() -> No
     assert "not_a_field" not in prompt
 
 
-def test_research_objective_prompt_derives_context_field_from_route_role() -> None:
+def test_research_objective_prompt_does_not_narrow_from_route_role_alone() -> None:
     _, prompt = source_extraction.build_objective_evidence_prompt(
         {
             "objective": {
@@ -10882,8 +10917,9 @@ def test_research_objective_prompt_derives_context_field_from_route_role() -> No
         }
     )
 
-    assert "CONTEXT FAMILY: process" in prompt
-    assert "manufacturing or process family" in prompt
+    assert "CONTEXT FAMILY: process" not in prompt
+    assert "OBJECTIVE QUESTION:" in prompt
+    assert "SOURCE:" in prompt
 
 
 def test_research_objective_prompt_treats_fixed_manufacturing_facts_as_context() -> None:
@@ -10935,7 +10971,7 @@ def test_context_repair_keeps_manufacturing_facts_out_of_test_context() -> None:
 
 
 def test_process_context_output_contract_materializes_only_requested_family() -> None:
-    parsed = source_extraction.StructuredRequestedContextFacts.model_validate(
+    parsed = source_extraction.RequestedContextFactsModelOutput.model_validate(
         {
             "facts": [
                 {
@@ -10962,7 +10998,7 @@ def test_process_context_output_contract_materializes_only_requested_family() ->
     assert extracted.extractions[0].scientific_context.test == []
 
     with pytest.raises(ValueError, match="context_scope"):
-        source_extraction.StructuredRequestedContextFacts.model_validate(
+        source_extraction.RequestedContextFactsModelOutput.model_validate(
             {"facts": [{"name": "machine", "value": "System M"}]}
         )
 
@@ -10995,7 +11031,7 @@ def test_result_role_with_only_groundable_context_is_preserved_as_context() -> N
     }
 
     normalized = source_extraction._normalize_objective_evidence_payload(payload)
-    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+    parsed = source_extraction.EvidenceExtractionsModelOutput.model_validate(normalized)
 
     assert len(parsed.extractions) == 1
     extraction = parsed.extractions[0]
@@ -11028,7 +11064,7 @@ def test_context_role_with_reported_result_is_preserved_as_result() -> None:
     }
 
     normalized = source_extraction._normalize_objective_evidence_payload(payload)
-    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+    parsed = source_extraction.EvidenceExtractionsModelOutput.model_validate(normalized)
 
     assert len(parsed.extractions) == 1
     extraction = parsed.extractions[0]
@@ -11057,7 +11093,7 @@ def test_result_role_without_result_or_context_remains_invalid() -> None:
     normalized = source_extraction._normalize_objective_evidence_payload(payload)
 
     with pytest.raises(ValueError, match="result evidence requires one reported result"):
-        source_extraction.StructuredEvidenceExtractions.model_validate(normalized)
+        source_extraction.EvidenceExtractionsModelOutput.model_validate(normalized)
 
 
 def test_research_objective_prompt_separates_result_and_context_authority() -> None:
@@ -11150,7 +11186,7 @@ def test_narrow_test_context_prompt_requires_explicit_outcome_applicability() ->
 
 
 def test_context_scope_survives_model_validation_and_source_grounding() -> None:
-    parsed = source_extraction.StructuredEvidenceExtractions.model_validate(
+    parsed = source_extraction.EvidenceExtractionsModelOutput.model_validate(
         {
             "extractions": [
                 {
@@ -11248,7 +11284,7 @@ def test_source_grounding_keeps_single_test_with_empty_outcome_scope() -> None:
 def test_document_context_binds_only_test_method_applicable_to_result_outcome() -> None:
     """A paper-wide method is usable only for the outcome it explicitly measures."""
 
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": "obj-preheating-microstructure",
@@ -11280,8 +11316,8 @@ def test_document_context_binds_only_test_method_applicable_to_result_outcome() 
         name: str,
         value: str,
         applies_to_outcomes: list[str],
-    ) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    ) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": result.objective_id,
@@ -11347,7 +11383,7 @@ def test_simulation_context_does_not_close_experimental_process_gap() -> None:
             "outcomes": ["microstructure"],
         }
     )
-    result = ExtractedEvidenceDraft.from_mapping(
+    result = SourceObservation.from_mapping(
         {
             "evidence_id": "microstructure-result",
             "objective_id": objective.objective_id,
@@ -11381,7 +11417,7 @@ def test_simulation_context_does_not_close_experimental_process_gap() -> None:
             "confidence": 0.9,
         }
     )
-    simulation_context = ExtractedEvidenceDraft.from_mapping(
+    simulation_context = SourceObservation.from_mapping(
         {
             "evidence_id": "simulation-controls",
             "objective_id": objective.objective_id,
@@ -11429,7 +11465,7 @@ def test_adaptive_context_route_carries_missing_fields_to_extraction_prompt() ->
         }
     )
     result_route = _study_source_route(objective.objective_id, "results-roughness")
-    candidate = source_extraction._needs_context_objective_evidence_draft(
+    candidate = source_extraction._needs_context_source_observation(
         route=result_route
     )
     design = _study_source_block(
@@ -11533,13 +11569,14 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
         def extract_source(
             self,
             payload: dict[str, Any],
-        ) -> StructuredEvidenceExtractions:
+        ) -> EvidenceExtractionsModelOutput:
             self.unit_payloads.append(payload)
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     extractor = PayloadCaptureExtractor()
 
     extract_and_validate_source_facts(
+        read_audits=[],
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -11626,9 +11663,9 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
         def repair_table_matrix(
             self,
             payload: dict[str, Any],
-        ) -> StructuredTableMatrixRepair:
+        ) -> TableMatrixRepairModelOutput:
             self.payloads.append(payload)
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["100) HIP-SLM (100/100)", "98.15"],
@@ -11697,7 +11734,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
         def repair_table_matrix(
             self,
             payload: dict[str, Any],
-        ) -> StructuredTableMatrixRepair:
+        ) -> TableMatrixRepairModelOutput:
             self.payloads.append(payload)
             markdown = str(payload["source"]["table_markdown"])
             rows = [
@@ -11709,7 +11746,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
                 ["HIP-SLM (100/100)" if cell == "HIP-SLM (100/" else cell for cell in row]
                 for row in rows
             ]
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=rows,
                 confidence=0.9,
             )
@@ -11775,7 +11812,7 @@ def test_research_objective_rejects_long_table_repair_that_invents_label_tokens(
 def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
     class NumericChangingRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["HIP-SLM (100/100)", "98.25"],
@@ -11846,7 +11883,7 @@ def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
 def test_research_objective_table_repair_rejects_reordered_source_labels():
     class LabelReorderingRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Yield Strength (MPa)"],
                     ["condition B (two)", "100 (+/- 1)"],
@@ -11896,7 +11933,7 @@ def test_research_objective_table_repair_rejects_reordered_source_labels():
 def test_research_objective_table_repair_rejects_invented_label_tokens():
     class InventingRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["Invented-SLM (100/100)", "98.15"],
@@ -11977,7 +12014,7 @@ def test_research_objective_table_repair_accepts_multiple_parser_fragment_merges
 
     class RepairingPaperFactsExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=repaired_matrix,
                 confidence=0.95,
             )
@@ -12050,7 +12087,7 @@ def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
         def repair_table_matrix(self, _payload):
             model_matrix = [list(row) for row in repaired_matrix]
             model_matrix[-1][1] = "162.4 (+/- 5.5)"
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=model_matrix,
                 confidence=0.95,
             )
@@ -12256,7 +12293,7 @@ def test_research_objective_table_repair_recovers_complete_p004_table_4_sequence
                 )
             # This is the real split cell that made one production replay fail.
             repaired[10][2] = "130.9 +/-"
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=repaired,
                 confidence=0.9,
             )
@@ -12321,6 +12358,311 @@ def test_research_objective_table_repair_rejects_lost_p004_uncertainty():
     )
 
 
+@pytest.mark.parametrize("all_fail", [False, True])
+def test_research_objective_table_repair_timeout_is_source_scoped(all_fail):
+    class RepairExtractor:
+        def __init__(self):
+            self.source_refs = []
+
+        def repair_table_matrix(self, payload):
+            source_ref = payload["source"]["source_ref"]
+            self.source_refs.append(source_ref)
+            if all_fail or source_ref == "table-a":
+                raise APITimeoutError(
+                    request=Request("POST", "http://llm.test/v1/chat/completions")
+                )
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=[
+                    ["Specimens", "Elongation (%)"],
+                    ["HT-SLM (140/280)", "9.1"],
+                ],
+                confidence=0.9,
+            )
+
+    class UnexpectedEvidenceExtractor:
+        def extract_source(self, _payload):
+            pytest.fail("The repaired result table is deterministically readable")
+
+    objective = _research_objective({
+        "objective_id": "obj-elongation", "variables": ["heat treatment"],
+        "outcomes": ["elongation"],
+    })
+    routes = tuple(EvidenceCandidate.from_mapping({
+        "objective_id": objective.objective_id, "document_id": "paper-1",
+        "source_kind": "table", "source_ref": ref,
+        "role": "current_experimental_evidence", "extractable": True,
+    }) for ref in ("table-a", "table-b"))
+    tables = [SourceTable(
+        table_id=route.source_ref, document_id="paper-1", table_order=index,
+        caption_text="Heat treatment and elongation", caption_block_id=None,
+        page=4, heading_path="Results",
+        column_headers=("Specimens", "Elongation (%)"),
+        table_matrix=(("Specimens", "Elongation (%)"),
+                      ("HT-SLM (140/", "9.1"), ("280)", "")),
+    ) for index, route in enumerate(routes, start=1)]
+    extractor = RepairExtractor()
+    read_audits = []
+    with capture_analysis_diagnostics() as diagnostics:
+        units = extract_and_validate_source_facts(
+            read_audits=read_audits, collection_id="col-test",
+            source_extractor=UnexpectedEvidenceExtractor(),
+            paper_facts_extractor=extractor, objectives=(objective,),
+            objective_paper_frames=(), objective_evidence_routes=routes,
+            blocks_by_document_id={}, tables_by_document_id={"paper-1": tables},
+            document_trees_by_document_id={},
+        )
+    assert extractor.source_refs == ["table-a", "table-b"]
+    failures = [audit for audit in read_audits if audit.disposition == "technical_failure"]
+    assert [audit.source_ref for audit in failures] == (
+        ["table-a", "table-b"] if all_fail else ["table-a"]
+    )
+    repair_traces = [item for item in diagnostics.records if item["trace_type"] == "table_matrix_repair"]
+    assert [item["model_request_count"] for item in repair_traces] == [1, 1]
+    if all_fail:
+        assert units == ()
+    else:
+        assert any(unit.source_ref == "table-b" and unit.reported_result
+                   and unit.reported_result.value == 9.1
+                   and unit.reported_result.unit == "%" for unit in units)
+
+
+def test_p004_table_repair_reads_explicit_continuation_label_and_keeps_lineage():
+    fixture = json.loads((Path(__file__).parents[2] / "fixtures/p004_table_continuation.json").read_text())
+    fixture["tables"][0]["metadata"] = {
+        "visual_text": (Path(__file__).parents[2] / "fixtures/p004_table_2_visual.txt").read_text(),
+    }
+    tables = [SourceTable.from_record(record) for record in fixture["tables"]]
+    primary, continuation = tables
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": "obj-density", "document_id": primary.document_id,
+        "source_kind": "table", "source_ref": primary.table_id,
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    source = source_extraction._build_objective_route_source_payload(
+        route=route, blocks=[], tables=tables,
+    )
+
+    class RepairExtractor:
+        def repair_table_matrix(self, payload):
+            # The donor label must actually be present in the repair request.
+            assert "| HIP-SLM (140/ 200) |  |  |  |  |  |" in payload["source"]["table_markdown"]
+            labels = [f"{state}-SLM ({power}/{speed})" for power in (100, 120, 140)
+                      for speed in (100, 200, 280) for state in ("as", "HT", "HIP")][:24]
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=[list(primary.column_headers), *[
+                    [label, *row[1:]] for label, row in zip(labels, primary.table_matrix[1:], strict=True)
+                ]], confidence=0.9,
+            )
+
+    repaired, error = table_repair.repair_table_source(
+        collection_id="col-test", route=route, source=source,
+        paper_facts_extractor=RepairExtractor(),
+    )
+    assert error is None
+    assert repaired["table_matrix"][-1] == [fixture["expected_boundary"]["specimen"], "HIP", "140", "200", "194", "98.75"]
+    assert repaired["raw_table_matrix"] == [list(row) for row in primary.table_matrix]
+    assert tables == [SourceTable.from_record(record) for record in fixture["tables"]]
+    refs = source_validation._objective_route_source_refs(
+        route=route, source=repaired, row_index=24, col_index=5,
+        source_excerpt="Density (%): 98.75",
+    )
+    assert refs[0]["source_ref"] == primary.table_id
+    assert refs[0]["table_matrix_repair_attestation"]["raw_matrix_sha256"] == table_repair._objective_table_matrix_sha256(
+        [list(row) for row in primary.table_matrix]
+    )
+    assert refs[1]["source_ref"] == continuation.table_id
+    assert refs[1]["row_index"] == 2
+    assert refs[1]["col_index"] == 0
+    assert refs[1]["supports"] == ["scientific_context.sample"]
+    assert len(source_validation._objective_route_source_refs(
+        route=route, source=repaired, row_index=23,
+    )) == 1
+    objective = _research_objective({
+        "objective_id": route.objective_id, "variables": ["heat treatment"],
+        "outcomes": ["density"], "material_scope": ["316L stainless steel"],
+    })
+    read_audits = []
+    units = extract_and_validate_source_facts(
+        read_audits=read_audits, collection_id="col-test", source_extractor=None,
+        paper_facts_extractor=RepairExtractor(), objectives=(objective,),
+        objective_paper_frames=(), objective_evidence_routes=(route,),
+        blocks_by_document_id={}, tables_by_document_id={primary.document_id: tables},
+        document_trees_by_document_id={},
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test", objective_id=objective.objective_id,
+        analysis_version=1, total_document_count=1,
+        document_inputs=(PreparedDocumentInput(document_id=primary.document_id, preparation_fingerprint="fixture"),),
+        pipeline_version="test", model_name=None, prompt_versions={},
+    )
+    evidence, _ = evidence_materialization.materialize_evidence(
+        collection_id="col-test", analysis=analysis, objective=objective,
+        observations=units, technical_audits=tuple(read_audits), paper_maps=(),
+        frames=(), routes=(route,), blocks_by_document_id={},
+        tables_by_document_id={primary.document_id: tables}, figures_by_document_id={},
+    )
+    boundary = next(item for item in evidence if item.reported_result
+                    and item.reported_result.value == fixture["expected_boundary"]["density"])
+    assert boundary.reported_result.unit == "%"
+    assert any(ref["source_ref"] == continuation.table_id and ref["row_index"] == 2
+               for ref in boundary.related_source_refs)
+    assert any(item.value == fixture["expected_boundary"]["specimen"]
+               for item in boundary.scientific_context.sample)
+
+
+@pytest.mark.parametrize("mismatch", [
+    "document", "page", "order", "table_number", "headers", "numeric_donor",
+    "wrong_label", "duplicate", "missing_marker", "complete_primary_label",
+])
+def test_table_label_continuation_rejects_unproven_link(mismatch):
+    fixture = json.loads((Path(__file__).parents[2] / "fixtures/p004_table_continuation.json").read_text())
+    primary, donor = fixture["tables"]
+    if mismatch == "document":
+        donor["document_id"] = "another-paper"
+    elif mismatch == "page":
+        donor["page"] = primary["page"] + 2
+    elif mismatch == "order":
+        donor["table_order"] += 1
+    elif mismatch == "table_number":
+        donor["table_matrix"][0] = ["Table 8 (continued)"] * 6
+    elif mismatch == "headers":
+        donor["column_headers"][-1] = "Elongation (%)"
+    elif mismatch == "numeric_donor":
+        donor["table_matrix"][2][-1] = "99.0"
+    elif mismatch == "wrong_label":
+        donor["table_matrix"][2][0] = "HIP-SLM (140/280)"
+    elif mismatch == "missing_marker":
+        donor["table_matrix"] = donor["table_matrix"][1:]
+    elif mismatch == "complete_primary_label":
+        primary["table_matrix"][-1][0] = "HIP-SLM (140/200)"
+    tables = [SourceTable.from_record(record) for record in (primary, donor)]
+    if mismatch == "duplicate":
+        tables.append(SourceTable.from_record({**donor, "table_id": "duplicate-donor"}))
+    assert table_repair.find_table_label_continuation(
+        table=tables[0], tables=tables, caption_text=primary["caption_text"],
+    ) is None
+    context, _ = table_repair.build_table_reading_context(
+        table=tables[0], tables=tables, blocks=[], caption_text=primary["caption_text"],
+    )
+    # Reading an explicit continuation is broader than joining its first row.
+    # An incompatible label or populated row cannot be joined, but it can be read.
+    assert bool(context) == (mismatch in {"complete_primary_label", "numeric_donor", "wrong_label"})
+
+
+@pytest.mark.parametrize("defect", ["missing_view", "absent_label", "wrong_order", "invented_value"])
+def test_visual_table_labels_cannot_bypass_source_grounding(defect):
+    original = [["Specimen", "Density (%)"], ["HT (1/", "98.0"], ["2) HIP", "99.0"]]
+    repaired = [["Specimen", "Density (%)"], ["HT (1/2)", "98.0"], ["HIP (1/2)", "99.0"]]
+    view = "Specimen\nHT\n(1/2)\n98.0\nHIP\n(1/2)\n99.0"
+    if defect == "missing_view":
+        view = ""
+    elif defect == "absent_label":
+        view = view.replace("HIP", "OTHER")
+    elif defect == "wrong_order":
+        view = "HIP (1/2) 99.0\nHT (1/2) 98.0"
+    elif defect == "invented_value":
+        repaired[1][1] = "100.0"
+    assert not table_repair._objective_table_repair_preserves_source_tokens(
+        original_matrix=original, repaired_matrix=repaired, visual_text=view,
+    )
+
+
+def test_table_repair_reads_neighbors_and_explicit_continuation_with_source_identity():
+    fixture = json.loads((Path(__file__).parents[2] / "fixtures/p004_table_continuation.json").read_text())
+    tables = [SourceTable.from_record(record) for record in fixture["tables"]]
+    table, donor = tables
+    blocks = [SimpleNamespace(
+        block_id=ref, document_id=document_id, block_type=kind, block_order=order,
+        text=text, page=page,
+    ) for order, (ref, document_id, kind, text, page) in enumerate([
+        ("far", table.document_id, "paragraph", "Unrelated earlier experiment", 1),
+        ("different-number", table.document_id, "paragraph", "Measurements are in Table 2.1.", 3),
+        ("methods", table.document_id, "paragraph", "Measured densities are summarized in Table 2.", 3),
+        ("section", table.document_id, "heading", "Results", 3),
+        ("before", table.document_id, "paragraph", "HT denotes the furnace heat-treated specimens.", 4),
+        (table.caption_block_id, table.document_id, "table_caption", table.caption_text, 4),
+        ("note", table.document_id, "paragraph", "The values in parentheses identify power and scan speed.", 4),
+        ("heading", table.document_id, "heading", "Other measurements", 4),
+        ("unrelated", table.document_id, "paragraph", "An unrelated experiment measured 72 percent.", 4),
+        ("foreign", "another-paper", "paragraph", "Another paper's specimen definition", 4),
+    ])]
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": "obj-test", "document_id": table.document_id,
+        "source_kind": "table", "source_ref": table.table_id,
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    source = source_extraction._build_objective_route_source_payload(
+        route=route, blocks=blocks, tables=tables,
+    )
+    context = source["table_reading_context"]
+    assert [item["source_ref"] for item in context] == ["methods", "before", "note", donor.table_id]
+    assert context[0]["page"] == 3
+    assert context[0]["relation"] == "table_reference"
+    assert context[-1]["relation"] == "printed_table_continuation"
+    assert "HIP-SLM (140/ 200)" in context[-1]["table_markdown"]
+    payloads = table_repair._build_objective_table_matrix_repair_payloads(
+        route=route, source=source, paper_facts_extractor=SimpleNamespace(),
+    )
+    assert payloads[0]["source"]["reading_context"] == context
+    assert source["table_matrix"] == [list(row) for row in table.table_matrix]
+
+
+def test_table_reading_context_omits_oversized_blocks_without_silent_truncation():
+    table = SourceTable(
+        table_id="table-1", document_id="paper-1", table_order=1,
+        caption_text="Table 1. Measurements", caption_block_id="caption",
+        page=2, heading_path="Results", column_headers=("Specimen", "Value"),
+        table_matrix=(("Specimen", "Value"), ("HT (1/", "99")),
+    )
+    blocks = [SimpleNamespace(
+        block_id=ref, document_id=table.document_id, block_type=kind,
+        block_order=order, text=text, page=2,
+    ) for order, (ref, kind, text) in enumerate([
+        ("long", "paragraph", "x" * 9000),
+        ("caption", "table_caption", table.caption_text),
+        ("short", "paragraph", "The table reports percent values."),
+    ])]
+    context, omitted = table_repair.build_table_reading_context(
+        table=table, tables=[table], blocks=blocks, caption_text=table.caption_text,
+    )
+    assert [item["source_ref"] for item in context] == ["short"]
+    assert omitted == [{"source_ref": "long", "reason": "context_budget"}]
+
+
+def test_table_repair_cannot_borrow_measurement_from_neighboring_prose():
+    route = EvidenceCandidate.from_mapping({
+        "objective_id": "obj-density", "document_id": "paper-1",
+        "source_kind": "table", "source_ref": "table-1",
+        "role": "current_experimental_evidence", "extractable": True,
+    })
+    source = {
+        "source_kind": "table", "source_ref": "table-1", "page": 4,
+        "column_headers": ["Specimen", "Density (%)"],
+        "table_matrix": [["Specimen", "Density (%)"], ["HT (10/", "98.0"], ["20)", ""]],
+        "table_reading_context": [{
+            "source_kind": "text_window", "source_ref": "note-1", "page": 4,
+            "relation": "following_text", "text": "Another experiment measured 99.0% density.",
+        }],
+    }
+
+    class BorrowingExtractor:
+        def repair_table_matrix(self, payload):
+            assert "99.0%" in payload["source"]["reading_context"][0]["text"]
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=[["Specimen", "Density (%)"], ["HT (10/20)", "99.0"]],
+            )
+
+    with capture_analysis_diagnostics() as diagnostics:
+        result, error = table_repair.repair_table_source(
+            collection_id="col-test", route=route, source=source,
+            paper_facts_extractor=BorrowingExtractor(),
+        )
+    assert result is source
+    assert str(error) == "table matrix repair changed or reordered source result numbers"
+    assert diagnostics.records[-1]["status"] == "rejected"
+    assert diagnostics.records[-1]["reading_context_source_refs"] == ["note-1"]
+
+
 def test_research_objective_table_repair_bad_request_is_route_scoped():
     class RouteScopedRepairExtractor:
         def __init__(self) -> None:
@@ -12329,7 +12671,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
         def repair_table_matrix(
             self,
             payload: dict[str, Any],
-        ) -> StructuredTableMatrixRepair:
+        ) -> TableMatrixRepairModelOutput:
             source_ref = str(payload["source"]["source_ref"])
             self.source_refs.append(source_ref)
             if source_ref == "table-a":
@@ -12339,7 +12681,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
                     response=Response(400, request=request),
                     body=None,
                 )
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
                     ["HIP-SLM (100/100)", "98.15"],
@@ -12353,7 +12695,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
 
         def extract_source(self, _payload):
             self.calls += 1
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     repair_extractor = RouteScopedRepairExtractor()
     evidence_extractor = UnexpectedEvidenceExtractor()
@@ -12400,7 +12742,9 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
         for table_order, source_ref in enumerate(("table-a", "table-b"), start=1)
     ]
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
@@ -12414,20 +12758,20 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
 
     assert repair_extractor.source_refs == ["table-a", "table-b"]
     assert evidence_extractor.calls == 0
+    assert units == ()
     assert any(
         unit.source_ref == "table-a"
-        and unit.selection_status == "failed"
-        and unit.failure_reason is not None
-        and unit.failure_reason.startswith("BadRequestError:")
-        for unit in units
+        and unit.disposition == "technical_failure"
+        and unit.reason is not None
+        and unit.reason.startswith("BadRequestError:")
+        for unit in read_audits
     )
     assert any(
         unit.source_ref == "table-b"
-        and unit.selection_status == "failed"
-        and unit.failure_reason == (
-            "ValueError: table matrix repair introduced tokens not present in source"
-        )
-        for unit in units
+        and unit.disposition == "technical_failure"
+        and unit.reason
+        == ("ValueError: table matrix repair introduced tokens not present in source")
+        for unit in read_audits
     )
 
 
@@ -12458,7 +12802,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
 ):
     class UnusableRepairExtractor:
         def repair_table_matrix(self, _payload):
-            return StructuredTableMatrixRepair(
+            return TableMatrixRepairModelOutput(
                 repaired_table_matrix=repaired_table_matrix,
                 confidence=0.9,
             )
@@ -12469,7 +12813,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
 
         def extract_source(self, _payload):
             self.calls += 1
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     evidence_extractor = UnexpectedEvidenceExtractor()
     repair_extractor = UnusableRepairExtractor()
@@ -12510,7 +12854,9 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
         ),
     )
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
@@ -12523,10 +12869,11 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
     )
 
     assert evidence_extractor.calls == 0
-    assert len(units) == 1
-    assert units[0].selection_status == "failed"
-    assert units[0].source_ref == "table-1"
-    assert units[0].failure_reason == f"ValueError: {expected_failure_reason}"
+    assert units == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "technical_failure"
+    assert read_audits[0].source_ref == "table-1"
+    assert read_audits[0].reason == f"ValueError: {expected_failure_reason}"
 
 
 def test_research_objective_records_failed_evidence_when_table_repair_fails():
@@ -12544,7 +12891,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
 
         def extract_source(self, _payload):
             self.calls += 1
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
 
     repair_extractor = FailingPaperFactsExtractor()
     evidence_extractor = UnexpectedEvidenceExtractor()
@@ -12586,7 +12933,9 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
     )
 
     with capture_analysis_diagnostics() as diagnostics:
+        read_audits = []
         units = extract_and_validate_source_facts(
+            read_audits=read_audits,
             collection_id="col-test",
             source_extractor=evidence_extractor,
             paper_facts_extractor=repair_extractor,
@@ -12600,10 +12949,11 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
 
     assert repair_extractor.calls == 1
     assert evidence_extractor.calls == 0
-    assert len(units) == 1
-    assert units[0].selection_status == "failed"
-    assert units[0].source_ref == "table-1"
-    assert units[0].failure_reason == "RuntimeError: table repair unavailable"
+    assert units == ()
+    assert len(read_audits) == 1
+    assert read_audits[0].disposition == "technical_failure"
+    assert read_audits[0].source_ref == "table-1"
+    assert read_audits[0].reason == "RuntimeError: table repair unavailable"
     assert diagnostics.records == (
         {
             "trace_type": "table_matrix_repair",
@@ -12636,21 +12986,36 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
         model_name=None,
         prompt_versions={},
     )
-    evidence = evidence_materialization._analysis_evidence_records(
+    evidence, contributions = evidence_materialization.materialize_evidence(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
-        drafts=units,
+        observations=units,
+        technical_audits=tuple(read_audits),
+        experiments=(),
+        paper_maps=(),
+        routes=(route,),
+        frames=(
+            PaperAnalysisFrame.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                }
+            ),
+        ),
         blocks_by_document_id={},
         tables_by_document_id={"paper-1": [table]},
         figures_by_document_id={},
-    )[0]
+    )
 
-    assert evidence.selection_status == "failed"
-    assert evidence.failure_reason == "RuntimeError: table repair unavailable"
-    assert evidence.source_kind == "table"
-    assert evidence.source_ref == "table-1"
-    assert evidence.source_excerpt
+    assert evidence == ()
+    assert contributions[0].analysis_status == "failed"
+    assert contributions[0].evidence_disposition == "extraction_failed"
+    assert contributions[0].failed_source_count == 1
+    assert contributions[0].uninspected_source_count == 0
+    assert contributions[0].warnings
 
 
 def test_research_objective_service_allows_semantic_fallback_for_matrix_test_condition_table():
@@ -12799,7 +13164,9 @@ def test_table_without_deterministic_result_mapping_uses_source_extractor() -> N
         }
     )
 
+    read_audits = []
     units = extract_and_validate_source_facts(
+        read_audits=read_audits,
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -13041,7 +13408,7 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
 
 
 def test_paper_reconstruction_does_not_fill_context_from_preliminary_scope() -> None:
-    evidence = ExtractedEvidenceDraft.from_mapping(
+    evidence = SourceObservation.from_mapping(
         {
             "evidence_id": "density-result",
             "objective_id": "obj-density",
@@ -13158,7 +13525,7 @@ def test_reconstruction_records_validated_context_closure():
             "outcomes": ["relative density"],
         }
     )
-    draft = ExtractedEvidenceDraft.from_mapping(
+    draft = SourceObservation.from_mapping(
         {
             "evidence_id": "result-closure",
             "objective_id": objective.objective_id,
@@ -13260,8 +13627,8 @@ def test_reconstruction_closure_counts_raw_result_anchors_once_when_rows_form_co
         }
     )
 
-    def row(evidence_id: str, value: float, power: int) -> ExtractedEvidenceDraft:
-        return ExtractedEvidenceDraft.from_mapping(
+    def row(evidence_id: str, value: float, power: int) -> SourceObservation:
+        return SourceObservation.from_mapping(
             {
                 "evidence_id": evidence_id,
                 "objective_id": objective.objective_id,
@@ -13442,7 +13809,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison():
         },
     )
     units = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for route in routes
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
@@ -13575,7 +13942,7 @@ def test_cycle_qualified_fatigue_table_binds_to_same_paper_ved_conditions():
         },
     )
     units = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for route in routes
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
@@ -13714,7 +14081,7 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple():
         },
     )
     units = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for route in routes
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
@@ -13781,7 +14148,7 @@ def test_real_ti64_hip_condition_table_builds_comparable_uts_contrast():
         }
     )
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
@@ -13872,7 +14239,7 @@ def test_real_ti64_compound_sample_labels_preserve_orientation_for_hip_contrasts
         }
     )
     measurements = tuple(
-        ExtractedEvidenceDraft.from_mapping(record)
+        SourceObservation.from_mapping(record)
         for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
@@ -14060,7 +14427,7 @@ def test_objective_table_records_preserve_measured_and_predicted_result_kinds():
     }
     assert all(item["attribution_scope"] == "descriptive_only" for item in records)
 
-    drafts = tuple(ExtractedEvidenceDraft.from_mapping(item) for item in records)
+    drafts = tuple(SourceObservation.from_mapping(item) for item in records)
     comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         drafts,
         objectives=(objective,),

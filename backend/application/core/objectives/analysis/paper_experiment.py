@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from hashlib import sha1
 from typing import Any
 
@@ -14,11 +15,18 @@ from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
 )
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
     _objective_missing_context_fields,
     _objective_test_context_applies_to_outcome,
 )
-from domain.core import ResearchObjective
+from domain.core import (
+    BaselineReference,
+    MeasurementResult,
+    PaperExperiment,
+    ResearchObjective,
+    SampleVariant,
+    SourceObservation,
+    TestCondition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +94,10 @@ def _objective_pairwise_attribution_scope(
 def reconstruct_paper_experiments(
     *,
     collection_id: str,
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    source_facts: tuple[SourceObservation, ...],
     objectives: tuple[ResearchObjective, ...],
     document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]] | None = None,
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     # A result Source often omits the paper's material identity.  Reintroduce
     # only an explicit same-paper material statement before context binding;
     # this is a deterministic Source join, not a paper-map guess.
@@ -132,7 +140,304 @@ def reconstruct_paper_experiments(
     return (*paper_facts, *comparisons)
 
 
-def _is_derived_comparison_unit(unit: ExtractedEvidenceDraft) -> bool:
+def assemble_paper_experiments(
+    *,
+    collection_id: str,
+    document_id: str,
+    source_facts: tuple[SourceObservation, ...],
+) -> tuple[PaperExperiment, ...]:
+    """Keep independently sourced result series separate; do not invent study ids."""
+    groups: dict[tuple[Any, ...], list[SourceObservation]] = {}
+    observations_by_id = {item.observation_id: item for item in source_facts}
+    if len(observations_by_id) != len(source_facts):
+        raise ValueError("experiment assembly requires unique observations")
+    for observation in source_facts:
+        if observation.document_id != document_id:
+            raise ValueError("experiment assembly cannot include another document")
+        if observation.derived_from_observation_ids:
+            continue
+        groups.setdefault(_experiment_series_key(observation), []).append(observation)
+    for observation in source_facts:
+        if not observation.derived_from_observation_ids:
+            continue
+        parents = tuple(
+            observations_by_id.get(identifier)
+            for identifier in observation.derived_from_observation_ids
+        )
+        if any(
+            parent is None or parent.derived_from_observation_ids for parent in parents
+        ):
+            raise ValueError(
+                "derived comparison requires its original parent observations"
+            )
+        parent_scopes = {_experiment_series_key(parent) for parent in parents}
+        key = (
+            next(iter(parent_scopes))
+            if len(parent_scopes) == 1
+            else ("unbound_contrast", observation.observation_id)
+        )
+        groups.setdefault(key, []).append(observation)
+    return tuple(
+        assemble_paper_experiment(
+            collection_id=collection_id,
+            document_id=document_id,
+            source_facts=tuple(items),
+        )
+        for items in groups.values()
+    )
+
+
+def _experiment_series_key(observation: SourceObservation) -> tuple[Any, ...]:
+    context = observation.scientific_context
+    # Scope by Source and outcome until the paper establishes a shared study.
+    # Non-identity sample attributes (state, orientation, treatment) stay boundaries.
+    fixed = tuple(
+        sorted(
+            (section, item.name, str(item.value), item.unit or "")
+            for section in ("material", "sample", "test")
+            for item in getattr(context, section)
+            if not (
+                section == "sample"
+                and _objective_table_column_is_sample_key(
+                    _objective_column_key(item.name)
+                )
+                and _objective_sample_values_are_opaque_identifiers(item.value)
+            )
+        )
+    )
+    return (
+        observation.objective_id,
+        observation.source_kind,
+        observation.source_ref,
+        observation.reported_result.outcome if observation.reported_result else None,
+        fixed,
+    )
+
+
+def assemble_paper_experiment(
+    *,
+    collection_id: str,
+    document_id: str,
+    source_facts: tuple[SourceObservation, ...],
+) -> PaperExperiment:
+    """Bind a selected result series using only context already attached to each fact."""
+
+    measurements: list[MeasurementResult] = []
+    test_conditions: list[TestCondition] = []
+    source_observations: list[SourceObservation] = []
+    sample_variants: list[SampleVariant] = []
+    baselines: list[BaselineReference] = []
+    source_observation_ids: list[str] = []
+    uncertainties: list[str] = []
+    for draft in source_facts:
+        if draft.document_id != document_id:
+            raise ValueError("experiment assembly cannot include another document")
+        if draft.collection_id not in {collection_id, "unknown"}:
+            raise ValueError("experiment assembly cannot include another collection")
+        source_kind = draft.source_kind
+        source_ref = draft.source_ref
+        if source_kind and source_ref:
+            source_observation_ids.append(draft.evidence_id)
+            source_observations.append(replace(draft, collection_id=collection_id))
+        result = draft.reported_result
+        context = draft.scientific_context
+        sample_label = _objective_explicit_sample_label(draft)
+        applicable_test = tuple(
+            item
+            for item in context.test
+            if result is not None
+            and (
+                not item.applies_to_outcomes
+                or _objective_test_context_applies_to_outcome(item, result.outcome)
+            )
+        )
+        if (
+            result is not None
+            and source_kind
+            and source_ref
+            and not draft.derived_from_observation_ids
+        ):
+            measurements.append(
+                MeasurementResult.from_mapping(
+                    {
+                        "result_id": draft.evidence_id,
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "variant_id": f"variant_{draft.evidence_id}"
+                        if sample_label
+                        else None,
+                        "test_condition_id": f"tc_{draft.evidence_id}"
+                        if applicable_test
+                        else None,
+                        "baseline_id": f"baseline_{draft.evidence_id}"
+                        if draft.comparison
+                        else None,
+                        "property_normalized": result.outcome,
+                        "result_type": result.result_kind,
+                        "claim_scope": "current_work",
+                        "value_payload": {
+                            "value": result.value,
+                            "baseline_value": result.baseline_value,
+                            "target_value": result.target_value,
+                        },
+                        "unit": result.unit,
+                        "evidence_anchor_ids": list(draft.evidence_anchor_ids),
+                        "traceability_status": "direct"
+                        if draft.status == "validated"
+                        else "unresolved",
+                        "result_source_type": source_kind,
+                        "epistemic_status": draft.status,
+                    }
+                )
+            )
+        if applicable_test and source_kind and source_ref:
+            test_payload = {
+                item.name: {"value": item.value, "unit": item.unit}
+                for item in applicable_test
+            }
+            test_conditions.append(
+                TestCondition.from_mapping(
+                    {
+                        "test_condition_id": f"tc_{draft.evidence_id}",
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "property_type": result.outcome if result else "unknown",
+                        "template_type": "objective_test_context",
+                        "scope_level": "measurement",
+                        "condition_payload": test_payload,
+                        "condition_completeness": "partial",
+                        "evidence_anchor_ids": list(draft.evidence_anchor_ids),
+                        "confidence": draft.confidence,
+                        "epistemic_status": "normalized_from_evidence",
+                    }
+                )
+            )
+        if sample_label and source_kind and source_ref:
+            sample_payload = {
+                item.name: {"value": item.value, "unit": item.unit}
+                for item in context.sample
+            }
+            sample_variants.append(
+                _sample_variant_from_context(
+                    draft=draft,
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    sample_payload=sample_payload,
+                )
+            )
+        if draft.comparison and source_kind and source_ref:
+            baselines.append(
+                _baseline_from_comparison(
+                    draft=draft,
+                    collection_id=collection_id,
+                    document_id=document_id,
+                )
+            )
+    if not measurements:
+        uncertainties.append("No source-grounded measurement was recovered.")
+    if not test_conditions:
+        uncertainties.append("Test conditions remain unresolved from the inspected Sources.")
+    if not sample_variants:
+        uncertainties.append("Sample identity remains unresolved from the inspected Sources.")
+    for measurement in measurements:
+        if measurement.variant_id is None or measurement.test_condition_id is None:
+            uncertainties.append(
+                f"Sample or test binding remains unresolved for {measurement.result_id}."
+            )
+        if measurement.epistemic_status != "validated":
+            uncertainties.append(
+                f"Source validation remains {measurement.epistemic_status} for {measurement.result_id}."
+            )
+    unique_measurements = {item.result_id: item for item in measurements}
+    unique_conditions = {item.test_condition_id: item for item in test_conditions}
+    unique_variants = {item.variant_id: item for item in sample_variants}
+    unique_baselines = {item.baseline_id: item for item in baselines}
+    status = (
+        "bound"
+        if unique_measurements
+        and all(
+            item.variant_id in unique_variants
+            and item.test_condition_id in unique_conditions
+            and item.epistemic_status == "validated"
+            for item in unique_measurements.values()
+        )
+        else "incomplete"
+    )
+    return PaperExperiment(
+        experiment_id="exp_"
+        + sha1(
+            json.dumps(
+                [collection_id, document_id, sorted(source_observation_ids)],
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:24],
+        collection_id=collection_id,
+        document_id=document_id,
+        study_id=None,
+        source_observations=tuple(
+            {item.observation_id: item for item in source_observations}.values()
+        ),
+        sample_variants=tuple(unique_variants.values()),
+        test_conditions=tuple(unique_conditions.values()),
+        baselines=tuple(unique_baselines.values()),
+        measurements=tuple(unique_measurements.values()),
+        source_observation_ids=tuple(dict.fromkeys(source_observation_ids)),
+        uncertainties=tuple(dict.fromkeys(uncertainties)),
+        status=status,
+    )
+
+
+def _sample_variant_from_context(
+    *,
+    draft: SourceObservation,
+    collection_id: str,
+    document_id: str,
+    sample_payload: dict[str, Any],
+) -> SampleVariant:
+    variant_label = _objective_explicit_sample_label(draft)
+    return SampleVariant.from_mapping(
+        {
+            "variant_id": f"variant_{draft.evidence_id}",
+            "document_id": document_id,
+            "collection_id": collection_id,
+            "variant_label": variant_label,
+            "host_material_system": {
+                item.name: item.value for item in draft.scientific_context.material
+            },
+            "process_context": {
+                item.name: item.value for item in draft.scientific_context.process
+            },
+            "profile_payload": sample_payload,
+            "source_anchor_ids": list(draft.evidence_anchor_ids),
+            "confidence": draft.confidence,
+            "epistemic_status": "normalized_from_evidence",
+        }
+    )
+
+
+def _baseline_from_comparison(
+    *,
+    draft: SourceObservation,
+    collection_id: str,
+    document_id: str,
+) -> BaselineReference:
+    assert draft.comparison is not None
+    return BaselineReference.from_mapping(
+        {
+            "baseline_id": f"baseline_{draft.evidence_id}",
+            "document_id": document_id,
+            "collection_id": collection_id,
+            "baseline_type": "objective_comparison",
+            "baseline_label": draft.comparison.baseline_label,
+            "baseline_scope": "reported_result",
+            "evidence_anchor_ids": list(draft.evidence_anchor_ids),
+            "confidence": draft.confidence,
+            "epistemic_status": "normalized_from_evidence",
+        }
+    )
+
+
+def _is_derived_comparison_unit(unit: SourceObservation) -> bool:
     """Identify a deterministic comparison derived from source result anchors.
 
     Derived units are useful outputs, but they are not a second experiment
@@ -145,7 +450,7 @@ def _is_derived_comparison_unit(unit: ExtractedEvidenceDraft) -> bool:
     return unit.evidence_id.startswith(_OBJECTIVE_DERIVED_COMPARISON_ID_PREFIX)
 
 
-def _source_anchor_keys(unit: ExtractedEvidenceDraft) -> frozenset[tuple[str, str]]:
+def _source_anchor_keys(unit: SourceObservation) -> frozenset[tuple[str, str]]:
     refs = list(unit.source_refs)
     if unit.source_kind and unit.source_ref:
         refs.append(
@@ -165,9 +470,9 @@ def _source_anchor_keys(unit: ExtractedEvidenceDraft) -> frozenset[tuple[str, st
 
 
 def _result_anchor_is_covered_by_derived_comparison(
-    result: ExtractedEvidenceDraft,
+    result: SourceObservation,
     *,
-    derived_comparisons: tuple[ExtractedEvidenceDraft, ...],
+    derived_comparisons: tuple[SourceObservation, ...],
     objective: ResearchObjective,
 ) -> bool:
     """Return whether a raw result row participates in a complete comparison.
@@ -203,7 +508,7 @@ def _result_anchor_is_covered_by_derived_comparison(
 def _record_validated_context_closure(
     *,
     collection_id: str,
-    source_facts: tuple[ExtractedEvidenceDraft, ...],
+    source_facts: tuple[SourceObservation, ...],
     objectives: tuple[ResearchObjective, ...],
 ) -> None:
     """Trace the post-binding closure state for each paper and Objective.
@@ -217,7 +522,7 @@ def _record_validated_context_closure(
     """
 
     objectives_by_id = {objective.objective_id: objective for objective in objectives}
-    facts_by_scope: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
+    facts_by_scope: dict[tuple[str, str], list[SourceObservation]] = {}
     for fact in source_facts:
         if fact.objective_id not in objectives_by_id:
             continue
@@ -311,8 +616,8 @@ _OBJECTIVE_CONTEXT_ROLES = {
 
 
 def _bind_unambiguous_document_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    units: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
     """Attach one source-grounded context value to same-paper result facts.
 
     A researcher carries a paper-wide fact such as the test standard into a
@@ -401,7 +706,7 @@ def _bind_unambiguous_document_context(
             unique_values[key] = next(iter(signatures.values()))
         unique_values_by_scope[scope] = unique_values
 
-    bound: list[ExtractedEvidenceDraft] = []
+    bound: list[SourceObservation] = []
     for unit in units:
         is_named_condition = bool(
             unit.reported_result is None and _objective_context_has_group_identity(unit)
@@ -468,7 +773,7 @@ def _bind_unambiguous_document_context(
         payload["source_refs"] = list(
             _dedupe_objective_source_refs(tuple(source_ref_groups))
         )
-        bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+        bound.append(SourceObservation.from_mapping(payload))
     return tuple(bound)
 
 
@@ -497,11 +802,11 @@ def _document_context_source_ref(context: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _append_source_grounded_document_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
     *,
     objectives: tuple[ResearchObjective, ...],
     document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     """Add explicit same-paper material context to the reconstruction stream.
 
     Researchers carry a material identity from a paper's Methods, title, or
@@ -588,7 +893,7 @@ def _append_source_grounded_document_context(
                 default=str,
             )
             augmented.append(
-                ExtractedEvidenceDraft.from_mapping(
+                SourceObservation.from_mapping(
                     {
                         "evidence_id": f"ctx_{sha1(identity.encode('utf-8')).hexdigest()[:24]}",
                         "objective_id": objective_id,
@@ -692,11 +997,11 @@ def _material_window_has_target(
 
 
 def _append_source_grounded_group_alias_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
     *,
     objectives: tuple[ResearchObjective, ...],
     document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     """Materialize explicit ``respectively`` group aliases from paper text.
 
     Methods often define opaque labels once (for example, two specimen sets
@@ -777,7 +1082,7 @@ def _append_source_grounded_group_alias_context(
                     default=str,
                 )
                 augmented.append(
-                    ExtractedEvidenceDraft.from_mapping(
+                    SourceObservation.from_mapping(
                         {
                             "evidence_id": f"ctx_{sha1(identity.encode('utf-8')).hexdigest()[:24]}",
                             "objective_id": objective.objective_id,
@@ -810,11 +1115,11 @@ def _append_source_grounded_group_alias_context(
 
 
 def _annotate_explicit_group_alias_contexts(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
     *,
     objectives: tuple[ResearchObjective, ...],
     document_contexts: Mapping[str, tuple[Mapping[str, Any], ...]],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     """Attach an explicit paper group label to a descriptive condition Source.
 
     A result may call the groups ``NP`` and ``P150`` while a Methods Source
@@ -851,7 +1156,7 @@ def _annotate_explicit_group_alias_contexts(
     if not mappings_by_scope:
         return units
 
-    annotated: list[ExtractedEvidenceDraft] = []
+    annotated: list[SourceObservation] = []
     for unit in units:
         objective = objectives_by_id.get(unit.objective_id)
         mappings = mappings_by_scope.get((unit.objective_id, unit.document_id), ())
@@ -899,12 +1204,12 @@ def _annotate_explicit_group_alias_contexts(
             + label
             + "."
         ).strip()
-        annotated.append(ExtractedEvidenceDraft.from_mapping(payload))
+        annotated.append(SourceObservation.from_mapping(payload))
     return tuple(annotated)
 
 
 def _objective_condition_matches_unit(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     condition: str,
 ) -> bool:
     condition_tokens = _objective_condition_tokens(condition)
@@ -1045,13 +1350,13 @@ def _dedupe_objective_source_refs(
 
 
 def _merge_duplicate_paper_facts(
-    units: tuple[ExtractedEvidenceDraft, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    units: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
     candidates_by_fact: dict[
         tuple[Any, ...],
-        list[tuple[int, ExtractedEvidenceDraft]],
+        list[tuple[int, SourceObservation]],
     ] = {}
-    merged_entries: list[tuple[int, ExtractedEvidenceDraft]] = []
+    merged_entries: list[tuple[int, SourceObservation]] = []
     for position, unit in enumerate(units):
         fact_key = _objective_paper_fact_key(unit)
         if fact_key is None:
@@ -1060,7 +1365,7 @@ def _merge_duplicate_paper_facts(
         candidates_by_fact.setdefault(fact_key, []).append((position, unit))
 
     for candidates in candidates_by_fact.values():
-        clusters: list[tuple[int, ExtractedEvidenceDraft]] = []
+        clusters: list[tuple[int, SourceObservation]] = []
         for position, unit in sorted(
             candidates,
             key=lambda item: (
@@ -1107,8 +1412,8 @@ def _merge_duplicate_paper_facts(
 
 
 def _merge_duplicate_paper_observations(
-    units: tuple[ExtractedEvidenceDraft, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    units: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
     """Merge repeated qualitative claims from overlapping text Sources.
 
     A Results sentence is often present in both a section window and a nearby
@@ -1117,8 +1422,8 @@ def _merge_duplicate_paper_observations(
     stay untouched because their values or condition endpoints may differ.
     """
 
-    merged_by_key: dict[tuple[Any, ...], tuple[int, ExtractedEvidenceDraft]] = {}
-    passthrough: list[tuple[int, ExtractedEvidenceDraft]] = []
+    merged_by_key: dict[tuple[Any, ...], tuple[int, SourceObservation]] = {}
+    passthrough: list[tuple[int, SourceObservation]] = []
     for position, unit in enumerate(units):
         result = unit.reported_result
         if (
@@ -1164,9 +1469,9 @@ def _merge_duplicate_paper_observations(
 
 
 def _objective_merge_duplicate_paper_observation(
-    existing: ExtractedEvidenceDraft,
-    incoming: ExtractedEvidenceDraft,
-) -> ExtractedEvidenceDraft:
+    existing: SourceObservation,
+    incoming: SourceObservation,
+) -> SourceObservation:
     payload = existing.to_record()
     payload["source_refs"] = list(
         _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
@@ -1175,11 +1480,11 @@ def _objective_merge_duplicate_paper_observation(
         dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
     )
     payload["confidence"] = min(existing.confidence, incoming.confidence)
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _objective_paper_fact_key(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
 ) -> tuple[Any, ...] | None:
     result = unit.reported_result
     comparison = unit.comparison
@@ -1228,7 +1533,7 @@ def _objective_paper_fact_key(
 
 
 def _objective_fact_context_values(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
 ) -> dict[tuple[str, str], frozenset[tuple[tuple[str, str], str]]]:
     values: dict[tuple[str, str], set[tuple[tuple[str, str], str]]] = {}
     for section in ("material", "sample", "process", "test"):
@@ -1254,9 +1559,9 @@ def _objective_fact_contexts_compatible(
 
 
 def _objective_merge_duplicate_paper_fact(
-    existing: ExtractedEvidenceDraft,
-    incoming: ExtractedEvidenceDraft,
-) -> ExtractedEvidenceDraft:
+    existing: SourceObservation,
+    incoming: SourceObservation,
+) -> SourceObservation:
     payload = existing.to_record()
     payload["source_refs"] = list(
         _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
@@ -1265,7 +1570,7 @@ def _objective_merge_duplicate_paper_fact(
         dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
     )
     payload["confidence"] = min(existing.confidence, incoming.confidence)
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _objective_fact_scalar_key(value: Any) -> tuple[str, str]:
@@ -1306,10 +1611,10 @@ def _objective_source_refs_with_supports(
 
 
 def _objective_descriptive_result(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
     reason: str,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     payload = unit.to_record()
     payload["changed_variables"] = []
     payload["comparison"] = None
@@ -1328,25 +1633,25 @@ def _objective_descriptive_result(
         }
         for ref in unit.source_refs
     ]
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _objective_source_local_association(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
     reason: str,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     payload = unit.to_record()
     payload["attribution_scope"] = "association_only"
     payload["selection_reason"] = reason
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _bind_objective_result_process_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
     *,
     objectives: tuple[ResearchObjective, ...] = (),
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     units = _bind_results_by_shared_condition_values(units)
     (
         process_context_by_sample,
@@ -1363,7 +1668,7 @@ def _bind_objective_result_process_context(
             conflicting_samples=conflicting_samples,
         )
     )
-    bound: list[ExtractedEvidenceDraft] = []
+    bound: list[SourceObservation] = []
     for unit in expanded_units:
         scope = (unit.objective_id, unit.document_id)
         comparison = unit.comparison
@@ -1484,7 +1789,7 @@ def _bind_objective_result_process_context(
                 payload["comparison"] = comparison_payload
                 payload["attribution_scope"] = "not_attributable"
                 payload["resolution_status"] = "partial"
-                bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+                bound.append(SourceObservation.from_mapping(payload))
                 continue
 
             baseline_process = {
@@ -1625,7 +1930,7 @@ def _bind_objective_result_process_context(
                         baseline_context.confidence,
                         target_context.confidence,
                     )
-                    bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+                    bound.append(SourceObservation.from_mapping(payload))
                     continue
                 incomparability_reasons.append(
                     "bound process conditions do not contain a changed variable"
@@ -1674,7 +1979,7 @@ def _bind_objective_result_process_context(
                 baseline_context.confidence,
                 target_context.confidence,
             )
-            bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+            bound.append(SourceObservation.from_mapping(payload))
             continue
         if (
             unit.reported_result is None
@@ -1752,13 +2057,13 @@ def _bind_objective_result_process_context(
             )
         )
         payload["confidence"] = min(unit.confidence, process_context.confidence)
-        bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+        bound.append(SourceObservation.from_mapping(payload))
     return tuple(bound)
 
 
 def _bind_results_by_shared_condition_values(
-    units: tuple[ExtractedEvidenceDraft, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    units: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
     """Join result rows to condition rows when sample ids are absent.
 
     Papers often identify a result-table row by the experimental settings
@@ -1782,7 +2087,7 @@ def _bind_results_by_shared_condition_values(
     if not condition_units:
         return units
 
-    bound: list[ExtractedEvidenceDraft] = []
+    bound: list[SourceObservation] = []
     for unit in units:
         if (
             unit.selection_status == "failed"
@@ -1798,7 +2103,7 @@ def _bind_results_by_shared_condition_values(
         if len(result_conditions) < 2:
             bound.append(unit)
             continue
-        matches: list[ExtractedEvidenceDraft] = []
+        matches: list[SourceObservation] = []
         for condition in condition_units:
             if (condition.objective_id, condition.document_id) != (
                 unit.objective_id,
@@ -1855,7 +2160,7 @@ def _bind_results_by_shared_condition_values(
             " Bound to a unique same-paper condition row through shared "
             "source-grounded process values."
         )
-        bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+        bound.append(SourceObservation.from_mapping(payload))
     return tuple(bound)
 
 
@@ -1866,7 +2171,7 @@ def _objective_context_attribute_key(name: Any) -> str:
     )
 
 
-def _objective_context_has_group_identity(unit: ExtractedEvidenceDraft) -> bool:
+def _objective_context_has_group_identity(unit: SourceObservation) -> bool:
     """Return whether a context Source is explicitly tied to one group."""
 
     group_keys = {
@@ -1924,10 +2229,10 @@ def _objective_context_attribute_signatures(
 
 
 def _bind_objective_result_material_context(
-    units: tuple[ExtractedEvidenceDraft, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    units: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
     material_by_scope, conflicting_scopes = _objective_material_context_registry(units)
-    bound: list[ExtractedEvidenceDraft] = []
+    bound: list[SourceObservation] = []
     for unit in units:
         scope = (unit.objective_id, unit.document_id)
         material_context = material_by_scope.get(scope)
@@ -1959,17 +2264,17 @@ def _bind_objective_result_material_context(
             )
         )
         payload["confidence"] = min(unit.confidence, material_context.confidence)
-        bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+        bound.append(SourceObservation.from_mapping(payload))
     return tuple(bound)
 
 
 def _objective_material_context_registry(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
 ) -> tuple[
-    dict[tuple[str, str], ExtractedEvidenceDraft],
+    dict[tuple[str, str], SourceObservation],
     set[tuple[str, str]],
 ]:
-    registry: dict[tuple[str, str], ExtractedEvidenceDraft] = {}
+    registry: dict[tuple[str, str], SourceObservation] = {}
     conflicts: set[tuple[str, str]] = set()
     for unit in units:
         if (
@@ -2012,7 +2317,7 @@ def _objective_material_context_registry(
             _dedupe_objective_source_refs((existing.source_refs, unit.source_refs))
         )
         payload["confidence"] = min(existing.confidence, unit.confidence)
-        registry[scope] = ExtractedEvidenceDraft.from_mapping(payload)
+        registry[scope] = SourceObservation.from_mapping(payload)
     return registry, conflicts
 
 
@@ -2025,15 +2330,15 @@ def _objective_material_values_are_compatible(values: tuple[Any, ...]) -> bool:
 
 
 def _objective_condition_registry(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
     *,
     objectives: tuple[ResearchObjective, ...] = (),
 ) -> tuple[
-    dict[tuple[str, str, str], ExtractedEvidenceDraft],
+    dict[tuple[str, str, str], SourceObservation],
     set[tuple[str, str]],
     set[tuple[str, str, str]],
 ]:
-    registry: dict[tuple[str, str, str], ExtractedEvidenceDraft] = {}
+    registry: dict[tuple[str, str, str], SourceObservation] = {}
     scopes: set[tuple[str, str]] = set()
     conflicts: set[tuple[str, str, str]] = set()
     objectives_by_id = {
@@ -2074,8 +2379,8 @@ def _objective_condition_registry(
 
 
 def _bind_encoded_sample_condition_values(
-    units: tuple[ExtractedEvidenceDraft, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+    units: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
     """Bind slash-encoded sample labels to an explicit Methods schema.
 
     Result tables frequently identify a specimen as ``sample (power/speed)``
@@ -2148,7 +2453,7 @@ def _bind_encoded_sample_condition_values(
     if not schemas_by_scope:
         return units
 
-    bound: list[ExtractedEvidenceDraft] = []
+    bound: list[SourceObservation] = []
     bound_count = 0
     for unit in units:
         if unit.reported_result is None or unit.selection_status == "failed":
@@ -2235,7 +2540,7 @@ def _bind_encoded_sample_condition_values(
             "Methods condition schema; variable order, allowed values, and units "
             "are source-grounded."
         )
-        bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+        bound.append(SourceObservation.from_mapping(payload))
         bound_count += 1
 
     if bound_count:
@@ -2326,7 +2631,7 @@ def _objective_encoded_condition_axis_name(value: Any) -> str | None:
     return normalized or None
 
 
-def _objective_result_sample_label(unit: ExtractedEvidenceDraft) -> str:
+def _objective_result_sample_label(unit: SourceObservation) -> str:
     for attribute in unit.scientific_context.sample:
         if attribute.name == "sample_number":
             continue
@@ -2382,7 +2687,7 @@ def _objective_encoded_values_equal(left: Any, right: Any) -> bool:
 
 
 def _objective_encoded_condition_schema_source_refs(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     schema: tuple[tuple[str, tuple[tuple[int | float, str], ...]], ...],
 ) -> tuple[dict[str, Any], ...]:
     names = {
@@ -2404,11 +2709,11 @@ def _objective_encoded_condition_schema_source_refs(
 
 
 def _objective_merge_condition_context(
-    existing: ExtractedEvidenceDraft,
-    incoming: ExtractedEvidenceDraft,
+    existing: SourceObservation,
+    incoming: SourceObservation,
     *,
     objective: ResearchObjective | None = None,
-) -> ExtractedEvidenceDraft | None:
+) -> SourceObservation | None:
     context: dict[str, list[dict[str, Any]]] = {}
     added_context = False
     coalesced_objective_axis = False
@@ -2497,13 +2802,13 @@ def _objective_merge_condition_context(
     payload["scientific_context"] = context
     payload["source_refs"] = list(source_refs)
     payload["confidence"] = min(existing.confidence, incoming.confidence)
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _objective_group_process_attributes_share_axis(
     *,
-    existing: ExtractedEvidenceDraft,
-    incoming: ExtractedEvidenceDraft,
+    existing: SourceObservation,
+    incoming: SourceObservation,
     left: Mapping[str, Any],
     right: Mapping[str, Any],
     objective: ResearchObjective | None,
@@ -2542,7 +2847,7 @@ def _objective_group_process_attributes_share_axis(
         return False
 
     def matching_axes(
-        unit: ExtractedEvidenceDraft,
+        unit: SourceObservation,
         attribute: Mapping[str, Any],
     ) -> tuple[str, ...]:
         name = str(attribute.get("name") or "").strip()
@@ -2598,12 +2903,12 @@ def _objective_context_attribute_names_match(left: Any, right: Any) -> bool:
 
 
 def _objective_condition_aliases_match(
-    existing: ExtractedEvidenceDraft,
-    incoming: ExtractedEvidenceDraft,
+    existing: SourceObservation,
+    incoming: SourceObservation,
 ) -> bool:
     """Return whether both contexts carry the same explicit paper alias."""
 
-    def labels(unit: ExtractedEvidenceDraft) -> frozenset[str]:
+    def labels(unit: SourceObservation) -> frozenset[str]:
         identity_key = _objective_condition_label_key(
             _objective_explicit_sample_identity(unit)
         )
@@ -2623,13 +2928,13 @@ def _objective_condition_aliases_match(
 
 
 def _objective_results_with_registered_condition_comparisons(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
     process_context_by_sample: dict[
-        tuple[str, str, str], ExtractedEvidenceDraft
+        tuple[str, str, str], SourceObservation
     ],
     conflicting_samples: set[tuple[str, str, str]],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     if (
         unit.source_kind != "text_window"
         or unit.reported_result is None
@@ -2688,7 +2993,7 @@ def _objective_results_with_registered_condition_comparisons(
     ):
         return (unit,)
 
-    mentioned: list[tuple[int, int, str, ExtractedEvidenceDraft]] = []
+    mentioned: list[tuple[int, int, str, SourceObservation]] = []
     for key, condition in process_context_by_sample.items():
         if key[:2] != scope:
             continue
@@ -2739,7 +3044,7 @@ def _objective_results_with_registered_condition_comparisons(
         # last mentioned groups form an honest categorical comparison.
         pairs = ((mentioned[0], mentioned[-1]),)
 
-    generated: list[ExtractedEvidenceDraft] = []
+    generated: list[SourceObservation] = []
     for pair_index, (baseline_item, target_item) in enumerate(pairs):
         _baseline_start, _baseline_end, baseline_label, baseline = baseline_item
         _target_start, _target_end, target_label, target = target_item
@@ -2824,7 +3129,7 @@ def _objective_results_with_registered_condition_comparisons(
             "Result groups were bound to unambiguous same-document experimental "
             "conditions; process attribution awaits deterministic comparison."
         )
-        generated.append(ExtractedEvidenceDraft.from_mapping(payload))
+        generated.append(SourceObservation.from_mapping(payload))
     return tuple(generated)
 
 
@@ -2847,7 +3152,7 @@ def _objective_directional_result_claim_context(
 
 
 def _objective_explicit_sample_label(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
 ) -> str | None:
     identity = _objective_explicit_sample_identity(unit)
     if identity is None:
@@ -2895,7 +3200,7 @@ def _objective_exact_label_span(
 
 def _objective_result_series_measurements(
     source_text: str,
-    mentioned: list[tuple[int, int, str, ExtractedEvidenceDraft]],
+    mentioned: list[tuple[int, int, str, SourceObservation]],
     *,
     fallback_unit: str | None,
 ) -> tuple[tuple[int | float, str | None], ...] | None:
@@ -2923,7 +3228,7 @@ def _objective_result_series_measurements(
 
 
 def _objective_explicit_sample_identity(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
 ) -> str | None:
     sample_values = {
         item.name: item.value
@@ -3103,7 +3408,7 @@ def _objective_contrast_tokens(value: Any) -> frozenset[str]:
 
 
 def _objective_series_pair_ids(
-    measurements: list[ExtractedEvidenceDraft],
+    measurements: list[SourceObservation],
     *,
     objective: ResearchObjective | None,
 ) -> frozenset[tuple[str, str]]:
@@ -3261,8 +3566,8 @@ def _objective_series_pair_ids(
 
 
 def _objective_pairwise_fixed_conditions_match(
-    baseline: ExtractedEvidenceDraft,
-    target: ExtractedEvidenceDraft,
+    baseline: SourceObservation,
+    target: SourceObservation,
 ) -> bool:
     for context_name in ("material", "test"):
         baseline_attributes = {
@@ -3364,7 +3669,7 @@ def _objective_pair_changes_objective_axis(
 
 
 def _objective_series_fixed_signature(
-    measurement: ExtractedEvidenceDraft,
+    measurement: SourceObservation,
     *,
     varied_axis_key: str,
 ) -> tuple[Any, ...]:
@@ -3394,7 +3699,7 @@ def _objective_series_fixed_signature(
 
 
 def _objective_measurement_row_order(
-    measurement: ExtractedEvidenceDraft,
+    measurement: SourceObservation,
     fallback_index: int,
 ) -> float:
     for source_ref in measurement.source_refs:
@@ -3406,7 +3711,7 @@ def _objective_measurement_row_order(
 
 
 def _objective_measurement_level_order(
-    measurement: ExtractedEvidenceDraft,
+    measurement: SourceObservation,
     *,
     axis_key: str,
     fallback_index: int,
@@ -3427,14 +3732,14 @@ def _objective_measurement_level_order(
 
 
 def _build_objective_pairwise_comparison_units(
-    units: tuple[ExtractedEvidenceDraft, ...],
+    units: tuple[SourceObservation, ...],
     *,
     objectives: tuple[ResearchObjective, ...],
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     objectives_by_id = {objective.objective_id: objective for objective in objectives}
     results_by_scope: dict[
         tuple[str, str, str, str | None, str, str, str],
-        list[ExtractedEvidenceDraft],
+        list[SourceObservation],
     ] = {}
     for unit in units:
         result = unit.reported_result
@@ -3462,7 +3767,7 @@ def _build_objective_pairwise_comparison_units(
             [],
         ).append(unit)
 
-    generated: list[ExtractedEvidenceDraft] = []
+    generated: list[SourceObservation] = []
     generated_by_scope: dict[tuple[str, str], int] = {}
     budget_omitted_by_scope: dict[tuple[str, str], int] = {}
     for scope, measurements in results_by_scope.items():
@@ -3754,7 +4059,7 @@ def _build_objective_pairwise_comparison_units(
                     sort_keys=True,
                 )
                 generated.append(
-                    ExtractedEvidenceDraft.from_mapping(
+                    SourceObservation.from_mapping(
                         {
                             "evidence_id": (
                                 "oeu_cmp_"
@@ -3762,6 +4067,14 @@ def _build_objective_pairwise_comparison_units(
                             ),
                             "objective_id": target.objective_id,
                             "document_id": target.document_id,
+                            "collection_id": target.collection_id,
+                            "derived_from_observation_ids": [
+                                baseline.observation_id,
+                                target.observation_id,
+                            ],
+                            "status": "validated"
+                            if baseline.status == target.status == "validated"
+                            else "uncertain",
                             "source_kind": target.source_kind,
                             "source_ref": target.source_ref,
                             "evidence_role": "direct_result",
@@ -3781,9 +4094,7 @@ def _build_objective_pairwise_comparison_units(
                                 "target_label": target_label,
                                 "axis_names": list(axis_names),
                                 "comparable": comparable,
-                                "incomparability_reasons": (
-                                    incomparability_reasons
-                                ),
+                                "incomparability_reasons": (incomparability_reasons),
                             },
                             "reported_result": {
                                 "outcome": target_result.outcome,
@@ -3823,9 +4134,7 @@ def _build_objective_pairwise_comparison_units(
                                 )
                             ),
                             "resolution_status": "resolved",
-                            "confidence": min(
-                                baseline.confidence, target.confidence
-                            ),
+                            "confidence": min(baseline.confidence, target.confidence),
                         }
                     )
                 )
@@ -3850,7 +4159,7 @@ def _build_objective_pairwise_comparison_units(
     return tuple(generated)
 
 
-def _objective_has_concrete_row_locator(unit: ExtractedEvidenceDraft) -> bool:
+def _objective_has_concrete_row_locator(unit: SourceObservation) -> bool:
     return any(
         isinstance(ref, Mapping)
         and (
@@ -3904,8 +4213,8 @@ def _objective_pairwise_result_direction(
 
 
 def _objective_common_pairwise_context(
-    baseline: ExtractedEvidenceDraft,
-    target: ExtractedEvidenceDraft,
+    baseline: SourceObservation,
+    target: SourceObservation,
 ) -> dict[str, list[dict[str, Any]]]:
     context: dict[str, list[dict[str, Any]]] = {}
     for context_name in ("material", "sample", "process", "test"):
@@ -3945,10 +4254,10 @@ def _objective_common_pairwise_context(
 
 
 def _objective_context_with_bound_conditions(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
-    baseline_context: ExtractedEvidenceDraft,
-    target_context: ExtractedEvidenceDraft,
+    baseline_context: SourceObservation,
+    target_context: SourceObservation,
 ) -> dict[str, list[dict[str, Any]]]:
     scientific_context = unit.scientific_context.to_record()
     common_context = _objective_common_pairwise_context(
@@ -4048,7 +4357,7 @@ def _objective_sample_identity_key(
 
 
 def _objective_pairwise_condition_label(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
     changed_variables: list[dict[str, Any]],
     sample_values: dict[str, Any],
@@ -4151,8 +4460,8 @@ def _objective_sample_values_are_opaque_identifiers(*values: Any) -> bool:
 
 
 def _objective_sample_identity_is_bound_encoded_condition(
-    baseline: ExtractedEvidenceDraft,
-    target: ExtractedEvidenceDraft,
+    baseline: SourceObservation,
+    target: SourceObservation,
 ) -> bool:
     """Treat a sample label as a locator after its encoded process is bound."""
 

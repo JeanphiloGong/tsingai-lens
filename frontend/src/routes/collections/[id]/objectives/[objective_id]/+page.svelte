@@ -23,12 +23,14 @@
 		type ObjectiveAnalysis,
 		type ObjectiveEvidence,
 		type ObjectiveFinding,
-		type FindingAuthoringResult
+		type FindingAuthoringResult,
+		type FindingEvidenceReview
 	} from '../../../../_shared/researchView';
 
 	const POLL_DELAY_MS = 2500;
 	let analysis: ObjectiveAnalysis | null = null;
 	let findings: ObjectiveFinding[] = [];
+	let evidenceReviews: Record<string, FindingEvidenceReview> = {};
 	let evidence: ObjectiveEvidence[] = [];
 	let documentTitles: Record<string, string> = {};
 	let selectedFinding: ObjectiveFinding | null = null;
@@ -114,6 +116,7 @@
 		}
 		const analysisVersion = analysis.objective.published_analysis_version;
 		const loadedFindings: ObjectiveFinding[] = [];
+		const loadedReviews: Record<string, FindingEvidenceReview> = {};
 		while (true) {
 			const page = await fetchObjectiveFindings(
 				collectionId,
@@ -123,10 +126,12 @@
 				200
 			);
 			loadedFindings.push(...page.items);
+			Object.assign(loadedReviews, page.evidence_reviews);
 			if (loadedFindings.length >= page.total) break;
 			if (!page.items.length) throw new Error('Finding 分页结果不完整。');
 		}
 		findings = loadedFindings;
+		evidenceReviews = loadedReviews;
 		const nextId =
 			(preferredFindingId && findings.some((item) => item.finding_id === preferredFindingId)
 				? preferredFindingId
@@ -543,6 +548,11 @@
 									>
 										<span>{item.statement}</span>
 										<small>{findingOriginLabel(item.origin)}</small>
+										{#if evidenceReviews[item.finding_id]?.needs_review}
+											<small class="review-required"
+												>{$t('research.findingReview.basisUpdated')}</small
+											>
+										{/if}
 										<small
 											>{synthesisLabel(item.synthesis_status)} · {certaintyLabel(item.certainty)} · {directPaperCount(
 												item
@@ -735,6 +745,14 @@
 					{:else if selectedFinding}
 						<FindingWorkbench
 							finding={selectedFinding}
+							evidenceReview={evidenceReviews[selectedFinding.finding_id] ?? null}
+							derivedFindings={findings.filter(
+								(item) => item.parent_finding_id === selectedFinding?.finding_id
+							)}
+							parentFinding={findings.find(
+								(item) => item.finding_id === selectedFinding?.parent_finding_id
+							) ?? null}
+							onSelectFinding={(finding) => reviewFinding(finding.finding_id)}
 							{evidence}
 							{collectionId}
 							{documentTitles}

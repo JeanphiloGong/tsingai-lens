@@ -391,6 +391,7 @@ class ObjectiveEvidenceResponse(BaseModel):
     failure_reason: str | None = None
     confidence: float
     supports_finding: bool = False
+    eligible_for_finding_authoring: bool = False
     warnings: list[str] = Field(default_factory=list)
     origin: Literal[
         "system_generated", "human_authored", "human_revised", "agent_authored"
@@ -627,11 +628,17 @@ class ObjectiveAnalysisResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class FindingEvidenceReviewResponse(BaseModel):
+    needs_review: bool
+    evidence_replacements: dict[str, str | None] = Field(default_factory=dict)
+
+
 class FindingListResponse(BaseModel):
     collection_id: str
     objective_id: str
     analysis_version: int
     items: list[FindingResponse] = Field(default_factory=list)
+    evidence_reviews: dict[str, FindingEvidenceReviewResponse] = Field(default_factory=dict)
     offset: int
     limit: int
     total: int
@@ -673,6 +680,7 @@ class FindingDetailResponse(BaseModel):
     objective_id: str
     analysis_version: int
     finding: FindingResponse
+    evidence_review: FindingEvidenceReviewResponse
 
 
 class ObjectiveEvidenceListResponse(BaseModel):

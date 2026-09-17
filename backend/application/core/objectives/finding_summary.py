@@ -21,7 +21,7 @@ class FindingSummaryUnavailable(Exception):
     """Safe reason code for an optional summary that could not be produced."""
 
 
-class _Summary(BaseModel):
+class FindingSummaryModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     text: str = Field(min_length=1, max_length=2400)
     citation_ids: list[str] = Field(min_length=1, max_length=MAX_SUMMARY_EVIDENCE + 1)
@@ -141,21 +141,23 @@ def summarize_finding_evidence(
         if response_client is None:
             client.client = client.client.with_options(timeout=60.0, max_retries=0)
         prompt_tokens = client.estimate_prompt_tokens(
-            system_prompt=SYSTEM_PROMPT, user_prompt=prompt, response_model=_Summary
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=prompt,
+            response_model=FindingSummaryModelOutput,
         )
         if prompt_tokens > MAX_PROMPT_TOKENS:
             raise FindingSummaryUnavailable("summary_input_too_large")
         result = client.complete(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
-            response_model=_Summary,
+            response_model=FindingSummaryModelOutput,
             max_completion_tokens=2048,
             force_json_text=True,
             task_type="finding_evidence_summary",
             prompt_version=PROMPT_VERSION,
             fail_on_output_saturation=True,
         )
-        summary = _Summary.model_validate(result)
+        summary = FindingSummaryModelOutput.model_validate(result)
         cited = set(summary.citation_ids)
         if not cited.issubset(reference_ids):
             raise FindingSummaryUnavailable("summary_invalid_citations")

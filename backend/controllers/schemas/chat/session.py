@@ -33,6 +33,7 @@ class ChatBranchRequest(BaseModel):
     message_id: str = Field(min_length=1, max_length=128)
     request_id: UUID
     message: str | None = Field(default=None, min_length=1, max_length=12000)
+    mode: Literal["revise", "continue"] = "revise"
 
 
 class ChatBranchOptions(BaseModel):
@@ -214,3 +215,17 @@ class ChatMessageListResponse(BaseModel):
     branch_draft: ChatMessageResponse | None = None
     running: bool = False
     response: ChatResponseSnapshotResponse | None = None
+
+
+class ChatTreeNodeResponse(BaseModel):
+    message: ChatMessageResponse
+    parent_message_id: str | None
+    answer: str
+    status: Literal["completed", "running", "approval_required", "failed", "interrupted", "incomplete", "draft"]
+    can_branch: bool
+
+
+class ChatTreeResponse(BaseModel):
+    root_session_id: str
+    active_path: list[str]
+    nodes: list[ChatTreeNodeResponse]

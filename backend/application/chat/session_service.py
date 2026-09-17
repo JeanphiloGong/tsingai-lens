@@ -138,6 +138,9 @@ class ChatSessionService:
         selected_id = None
         while session.parent_session_id is not None and position <= session.fork_position:
             if position == session.fork_position:
+                anchor = await self.repository.read_message(session.fork_message_id)
+                if anchor is not None and anchor.role.value == "assistant":
+                    break
                 selected_id = session.session_id
             session = await self.get_session_for_user(session.parent_session_id, session.user_id)
         messages = await self.repository.read_messages(session.session_id)
@@ -145,7 +148,7 @@ class ChatSessionService:
 
     async def branch_message_for_user(
         self, session_id: str, message_id: str, user_id: str, *,
-        request_id: str, message: str | None = None,
+        request_id: str, message: str | None = None, mode: str = "revise",
     ) -> ChatSession:
         session = await self.get_session_for_user(session_id, user_id)
         async with self.repository.session_execution(session_id):
@@ -155,14 +158,30 @@ class ChatSessionService:
             if position is None:
                 raise ChatMessageNotFoundError("saved user message not found")
             original = messages[position]
+            if mode not in {"revise", "continue"} or (mode == "continue" and message is None):
+                raise ValueError("continuing from a checkpoint requires a new question")
             content = original.content if message is None else message.strip()
             if not content or len(content) > 12000:
                 raise ValueError("revised question must contain 1 to 12000 characters")
-            await self._canonical_source_contexts(session, original.source_contexts)
+            if mode == "revise":
+                await self._canonical_source_contexts(session, original.source_contexts)
             pending = await self.get_pending_approval_for_user(session_id, user_id)
             if pending is not None:
                 raise ChatApprovalPendingError(pending.tool_call_id)
-            origin, anchor, _ = await self._branch_origin(session, position)
+            if mode == "continue":
+                boundary = next((index for index in range(position + 1, len(messages))
+                                 if messages[index].role.value == "user"), len(messages))
+                answer = messages[boundary - 1]
+                if answer.role.value != "assistant" or answer.tool_calls or not answer.content.strip():
+                    raise ValueError("the selected turn has no completed answer")
+                snapshot = await self.repository.read_response_snapshot(session_id)
+                if boundary == len(messages) and snapshot is not None and snapshot.status != "completed":
+                    raise ValueError("the selected turn has not completed")
+                # Continuing retains the selected answer; revisions stop before the question.
+                origin, anchor, _ = await self._branch_origin(session, boundary - 1)
+                position = boundary
+            else:
+                origin, anchor, _ = await self._branch_origin(session, position)
             now = _now_iso()
             branch = ChatSession(
                 session_id="chat_branch_" + sha256(f"{user_id}:{request_id}".encode()).hexdigest()[:40],
@@ -210,7 +229,11 @@ class ChatSessionService:
         if session.fork_position is not None and len(messages) == session.fork_position:
             original = await self.repository.read_message(session.fork_message_id)
             if original is not None:
-                draft = replace(original, content=session.fork_content)
+                draft = ChatMessage.user(
+                    message_id=f"draft_{session.session_id}", session_id=session.session_id,
+                    content=session.fork_content, created_at=session.created_at,
+                    source_contexts=original.source_contexts,
+                )
         pending = None
         for message in reversed(messages):
             for request in message.tool_calls:
@@ -223,6 +246,64 @@ class ChatSessionService:
         return {"messages": messages, "branches": branches, "branch_draft": draft,
                 "running": running, "pending_approval": pending, "response": response,
                 "feedback": await self.repository.read_feedback(session_id, user_id)}
+
+    async def get_tree_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
+        session = await self.get_session_for_user(session_id, user_id)
+        family = await self.repository.read_session_family(session)
+        sessions = {item.session_id: item for item in family}
+        trajectories = {item.session_id: await self.get_trajectory_for_user(item.session_id, user_id)
+                        for item in family}
+
+        def original_id(owner_id: str, position: int) -> str:
+            owner = sessions[owner_id]
+            while owner.parent_session_id is not None and position < owner.fork_position:
+                owner = sessions[owner.parent_session_id]
+            return trajectories[owner.session_id]["messages"][position].message_id
+
+        nodes = []
+        for owner in family:
+            trajectory = trajectories[owner.session_id]
+            messages = trajectory["messages"]
+            positions = [index for index, item in enumerate(messages) if item.role.value == "user"]
+            previous_id = None
+            finished_calls = {item.tool_result.tool_call_id for item in messages
+                              if item.tool_result is not None and item.tool_result.status != "queued"}
+            unresolved = any(request.tool_call_id not in finished_calls
+                             for item in messages for request in item.tool_calls)
+            busy = trajectory["running"] or trajectory["pending_approval"] is not None or unresolved
+            for turn_index, position in enumerate(positions):
+                message = messages[position]
+                node_id = original_id(owner.session_id, position)
+                if node_id != message.message_id:
+                    previous_id = node_id
+                    continue
+                end = positions[turn_index + 1] if turn_index + 1 < len(positions) else len(messages)
+                answer = next((item.content for item in reversed(messages[position + 1:end])
+                               if item.role.value == "assistant" and not item.tool_calls and item.content.strip()), "")
+                status = "completed" if answer else "incomplete"
+                if end == len(messages):
+                    response = trajectory["response"]
+                    if trajectory["running"]:
+                        status = "running"
+                    elif trajectory["pending_approval"] is not None:
+                        status = "approval_required"
+                    elif response is not None:
+                        status = response.status if response.status != "completed" or answer else "incomplete"
+                    if response is not None and response.content:
+                        answer = response.content
+                nodes.append({"message": message, "parent_message_id": previous_id,
+                              "answer": answer, "status": status, "can_branch": not busy})
+                previous_id = node_id
+            if trajectory["branch_draft"] is not None:
+                nodes.append({"message": trajectory["branch_draft"], "parent_message_id": previous_id,
+                              "answer": "", "status": "draft", "can_branch": False})
+        active = trajectories[session_id]
+        active_path = [original_id(session_id, index) for index, item in enumerate(active["messages"])
+                       if item.role.value == "user"]
+        if active["branch_draft"] is not None:
+            active_path.append(active["branch_draft"].message_id)
+        return {"root_session_id": session.root_session_id or session_id,
+                "active_path": active_path, "nodes": nodes}
 
     async def stream_updates_for_user(
         self, session_id: str, user_id: str, *, response_id: str,

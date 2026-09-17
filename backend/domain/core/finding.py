@@ -360,6 +360,36 @@ class Finding:
             if item.supporting_evidence_ids
         )
 
+    def evidence_replacements(
+        self, evidence_by_id: Mapping[str, ObjectiveEvidence]
+    ) -> dict[str, str | None]:
+        """Locate updated inputs without changing this historical judgment.
+
+        A missing or cyclic replacement remains unresolved, never current.
+        Roles must be reassessed by the researcher, not inherited by replacement.
+        """
+        replacements: dict[str, str | None] = {}
+        linked_ids = dict.fromkeys((
+            *self.supporting_evidence_ids,
+            *self.contradicting_evidence_ids,
+            *self.context_evidence_ids,
+            *self.condition_boundary_evidence_ids,
+        ))
+        for evidence_id in linked_ids:
+            current = evidence_by_id.get(evidence_id)
+            if current is not None and current.superseded_by_evidence_id is None:
+                continue
+            visited = {evidence_id}
+            while current is not None and current.superseded_by_evidence_id:
+                next_id = current.superseded_by_evidence_id
+                if next_id in visited:
+                    current = None
+                    break
+                visited.add(next_id)
+                current = evidence_by_id.get(next_id)
+            replacements[evidence_id] = current.evidence_id if current else None
+        return replacements
+
     @property
     def contributing_document_ids(self) -> tuple[str, ...]:
         return tuple(

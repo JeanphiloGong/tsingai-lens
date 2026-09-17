@@ -7,7 +7,7 @@
 	import MessageFeedback from './MessageFeedback.svelte';
 	import ResearchProgress from './ResearchProgress.svelte';
 	import MessageContent from './MessageContent.svelte';
-	import { formatTime } from './conversationPresentation';
+	import { formatTime, type CurrentReading } from './conversationPresentation';
 	export let message: ChatMessage;
 	export let disabled = false;
 	export let onRegenerate: (() => void) | undefined = undefined;
@@ -19,6 +19,7 @@
 	export let streamingText = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
+	export let readings: CurrentReading[] = [];
 </script>
 
 <article
@@ -30,7 +31,7 @@
 	<div class="assistant-mark" aria-hidden="true">AI</div>
 	<div class="assistant-content">
 		{#if (streaming || recovering) && progress}
-			<ResearchProgress {progress} {progressHistory} />
+			<ResearchProgress {progress} {progressHistory} {readings} />
 		{/if}
 		{#if !recovering}
 			<time>{formatTime(message.created_at)}</time>

@@ -151,11 +151,13 @@ class CreateEvidenceDraftCapability:
     spec = ToolSpec(
         name="create_evidence_draft",
         description=(
-            "Record one transient Evidence draft after inspecting an exact complete "
-            "paper Source. Lens verifies collection ownership, the canonical Source "
+            "Prepare a Source-grounded Evidence draft, including correction of facts "
+            "underlying a disputed Finding. Lens verifies collection ownership, the canonical Source "
             "digest, and the verbatim excerpt, but does not publish Evidence or change "
             "an Objective analysis. Use the separate approved Evidence write only "
-            "after the researcher reviews this draft."
+            "after the researcher reviews this draft. Use this draft first when "
+            "review of a Finding exposes an incorrect Evidence extraction; identify "
+            "the old Evidence with supersedes_evidence_id and retain its Source."
         ),
         risk=ToolRisk.DRAFT,
         input_model=CreateEvidenceDraftArguments,
@@ -347,6 +349,8 @@ class CreateEvidenceVersionCapability:
                 "analysis": result.analysis.to_record(),
                 "evidence": evidence.to_record(),
                 "supports_finding": evidence.supports_finding,
+                "eligible_for_finding_authoring": evidence.eligible_for_finding_authoring,
+                "affected_finding_ids": list(result.affected_finding_ids),
             },
             resource_refs=refs,
             warnings=tuple(evidence.warnings),

@@ -7,7 +7,7 @@ import pytest
 
 from application.core.document_profiles.service import DocumentProfileService
 from application.core.document_profiles.extraction import DocumentProfileExtractionError
-from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.pipeline import PipelineRunService
 from application.source.document_preparation_service import DocumentPreparationService
 from domain.source import Document, SourceDocument
@@ -165,7 +165,7 @@ async def test_classification_retry_reuses_source_not_failed_profile(
             self.calls += 1
             if self.calls == 1:
                 raise DocumentProfileExtractionError("temporary provider failure")
-            return StructuredDocumentProfile(
+            return DocumentProfileModelOutput(
                 doc_type="experimental", confidence=0.9, profile_warnings=[]
             )
 

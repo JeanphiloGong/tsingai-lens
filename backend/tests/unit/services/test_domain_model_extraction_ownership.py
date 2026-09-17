@@ -1,27 +1,48 @@
+import json
 from pathlib import Path
 
+import pytest
+
+from application.chat import model as chat_model
 from application.core.document_profiles.extraction import DocumentProfileExtractor
-from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelections,
-)
+from application.core.objectives import finding_summary
+from application.core.objectives.analysis import finding_synthesis
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredEvidenceExtractions,
+    DirectEvidenceExtractionModelOutput,
+    DirectEvidenceExtractionsModelOutput,
+    DirectEvidenceResultModelOutput,
+    EvidenceAttributeModelOutput,
+    EvidenceComparisonModelOutput,
+    EvidenceContextModelOutput,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
+    EvidenceResultModelOutput,
+    EvidenceVariableModelOutput,
+    ObjectiveSourceExtractor,
+    RequestedContextFactModelOutput,
+    RequestedContextFactsModelOutput,
 )
 from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
+    PaperFrameBatchModelOutput,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
+from application.core.objectives.discovery import axis_equivalence
+from application.core.objectives.discovery.paper_understanding import paper_map_outputs
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
+    StructuredPaperResearchMap,
 )
-from application.core.objectives.discovery.study_window import StructuredPaperResearchMap
 from application.core.objectives.llm.structured_response import StructuredResponseClient
-from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.core.paper_facts.extraction import (
+    PaperFactsExtractor,
+    TableMatrixRepairItemModelOutput,
+    TableMatrixRepairModelOutput,
+)
 
 
 def test_model_clients_are_owned_by_their_domains() -> None:
@@ -36,21 +57,15 @@ def test_model_clients_are_owned_by_their_domains() -> None:
 
 def test_objective_judgments_own_their_response_contracts() -> None:
     expected_owners = {
-        StructuredPaperResearchMap: "application.core.objectives.discovery.study_window",
-        StructuredPaperSignalReconciliation: (
-            "application.core.objectives.discovery.signal_reconciliation"
-        ),
-        StructuredAxisCanonicalizationPlan: (
+        StructuredPaperResearchMap: "application.core.objectives.discovery.paper_understanding.paper_map_results",
+        AxisCanonicalizationPlanModelOutput: (
             "application.core.objectives.discovery.axis_equivalence"
         ),
-        StructuredPaperFrameBatch: (
+        PaperFrameBatchModelOutput: (
             "application.core.objectives.analysis.source_screening"
         ),
-        StructuredEvidenceSelections: (
-            "application.core.objectives.analysis.evidence_routing"
-        ),
-        StructuredEvidenceExtractions: (
-            "application.core.objectives.analysis.source_extraction"
+        PaperFrameBatchResult: (
+            "application.core.objectives.analysis.source_screening"
         ),
         StructuredFindingSynthesis: (
             "application.core.objectives.analysis.finding_synthesis"
@@ -61,6 +76,63 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         response_model.__module__ == owner
         for response_model, owner in expected_owners.items()
     )
+
+
+@pytest.mark.parametrize(
+    ("module", "model_name"),
+    [
+        (paper_map_outputs, "ExperimentalPaperMapModelOutput"),
+        (paper_map_outputs, "ReviewPaperMapModelOutput"),
+        (axis_equivalence, "AxisCanonicalizationPlanModelOutput"),
+        (finding_synthesis, "FindingSynthesisModelOutput"),
+        (finding_summary, "FindingSummaryModelOutput"),
+        (chat_model, "ResearchWorkingCheckModelOutput"),
+        (chat_model, "ResearchWorkingNotesModelOutput"),
+    ],
+)
+def test_model_outputs_keep_nested_output_names(module, model_name):
+    output_model = getattr(module, model_name)
+    schema = output_model.model_json_schema()
+
+    assert output_model.__module__ == module.__name__
+    assert schema["title"] == model_name
+    assert all(name.endswith("ModelOutput") for name in schema.get("$defs", {}))
+
+
+def test_compaction_prompt_uses_the_working_notes_output_schema():
+    schema = json.loads(
+        chat_model.RESEARCH_COMPACTION_SYSTEM_PROMPT.split("\nOUTPUT_SCHEMA\n", 1)[1]
+    )
+
+    assert schema == chat_model.ResearchWorkingNotesModelOutput.model_json_schema()
+
+
+@pytest.mark.parametrize(
+    "output_model",
+    [
+        EvidenceAttributeModelOutput,
+        EvidenceVariableModelOutput,
+        EvidenceComparisonModelOutput,
+        EvidenceResultModelOutput,
+        EvidenceContextModelOutput,
+        EvidenceExtractionModelOutput,
+        EvidenceExtractionsModelOutput,
+        DirectEvidenceResultModelOutput,
+        DirectEvidenceExtractionModelOutput,
+        DirectEvidenceExtractionsModelOutput,
+        RequestedContextFactModelOutput,
+        RequestedContextFactsModelOutput,
+    ],
+)
+def test_source_extraction_owns_its_model_outputs(output_model: type) -> None:
+    assert output_model.__module__ == ObjectiveSourceExtractor.__module__
+
+
+def test_paper_facts_retains_only_the_active_table_repair_contract() -> None:
+    assert TableMatrixRepairModelOutput.__module__ == PaperFactsExtractor.__module__
+    assert TableMatrixRepairItemModelOutput.__module__ == PaperFactsExtractor.__module__
+    assert not hasattr(PaperFactsExtractor, "extract_text_window_mentions")
+    assert not hasattr(PaperFactsExtractor, "extract_table_batch_mentions")
 
 
 def test_shared_structured_extraction_package_only_owns_json_support() -> None:
@@ -74,11 +146,9 @@ def test_shared_structured_extraction_package_only_owns_json_support() -> None:
     assert "openai" not in (shared_path / "json_support.py").read_text().lower()
 
     for domain in ("document_profiles", "paper_facts"):
-        assert {
-            "extraction.py",
-            "prompts.py",
-            "schemas.py",
-        } <= {path.name for path in (core_path / domain).glob("*.py")}
+        files = {path.name for path in (core_path / domain).glob("*.py")}
+        assert "extraction.py" in files
+        assert not {"prompts.py", "schemas.py"} & files
 
     objectives_path = core_path / "objectives"
     assert not {

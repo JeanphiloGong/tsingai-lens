@@ -9,8 +9,9 @@ from hashlib import sha1, sha256
 from typing import Any
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis.diagnostics import record_analysis_diagnostic
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
-from domain.core import ResearchObjective
+from domain.core import ResearchObjective, SourceObservation
 
 # Source validation now distinguishes cited background from an unresolved
 # current-paper result; invalidate checkpoints from the prior contract.
@@ -169,11 +170,11 @@ def _source_validation_failure_record(
     route: EvidenceCandidate,
     errors: tuple[str, ...],
 ) -> dict[str, Any]:
-    """Keep a rejected model draft visible without treating it as science.
+    """Keep a rejected source observation visible without treating it as science.
 
-    A grounding rejection is a technical extraction failure, not evidence that
-    the paper has no result.  Persist a stable, source-linked failed draft so
-    the contribution warning and Evidence Map can distinguish the two cases.
+    A grounding rejection is an extraction failure, not evidence that the paper
+    has no result. The caller converts this marker to a SourceReadAudit so
+    contribution warnings and retry accounting retain the unsuccessful read.
     """
 
     identity = "|".join(
@@ -321,6 +322,7 @@ def validate_source_fact(
     candidate_variables: tuple[str, ...] = (),
     grounding_sources: tuple[Mapping[str, Any], ...] = (),
     grounding_source_refs: tuple[Mapping[str, Any], ...] = (),
+    collection_id: str | None = None,
 ) -> tuple[dict[str, Any], ...]:
     # A result is often split across Results and Methods in the same paper.
     # The result Source remains authoritative for measured values and wording;
@@ -343,6 +345,13 @@ def validate_source_fact(
         record,
         source=grounding_source,
     )
+    record["status"] = (
+        "validated"
+        if record.get("selection_status", "extracted") == "extracted"
+        else "uncertain"
+    )
+    if collection_id:
+        record["collection_id"] = collection_id
     record = _objective_normalize_explicit_no_change_direction(record)
     reported_result = record.get("reported_result")
     if isinstance(reported_result, Mapping):
@@ -629,7 +638,71 @@ def validate_source_fact(
         record["source_refs"] = source_refs
     if record.get("confidence") is None:
         record["confidence"] = route.confidence
+    if collection_id:
+        _record_source_observation_boundary(
+            collection_id=collection_id,
+            route=route,
+            source=source,
+            record=record,
+        )
     return (record,)
+
+
+def _record_source_observation_boundary(
+    *,
+    collection_id: str,
+    route: EvidenceCandidate,
+    source: Mapping[str, Any],
+    record: Mapping[str, Any],
+) -> None:
+    """Validate the application record against the SourceObservation domain boundary.
+
+    The application still returns its established extraction mapping.  This
+    domain construction makes the scientific handoff explicit while allowing
+    older callers to keep their existing transport shape during migration.
+    """
+
+    source_refs = record.get("source_refs")
+    primary_ref = (
+        source_refs[0]
+        if isinstance(source_refs, (list, tuple))
+        and source_refs
+        and isinstance(source_refs[0], Mapping)
+        else {}
+    )
+    try:
+        SourceObservation.from_mapping(
+            {
+                "observation_id": record.get("evidence_id"),
+                "collection_id": collection_id,
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "source_kind": route.source_kind,
+                "source_ref": route.source_ref,
+                "observation_role": record.get("evidence_role") or route.role,
+                "source_excerpt": (
+                    primary_ref.get("source_excerpt")
+                    or _objective_source_grounding_text(source)
+                ),
+                "changed_variables": record.get("changed_variables"),
+                "comparison": record.get("comparison"),
+                "reported_result": record.get("reported_result"),
+                "scientific_context": record.get("scientific_context"),
+                "confidence": record.get("confidence"),
+                "evidence_anchor_ids": record.get("evidence_anchor_ids") or (),
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        record_analysis_diagnostic(
+            {
+                "trace_type": "source_observation_boundary_mismatch",
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "source_kind": route.source_kind,
+                "source_ref": route.source_ref,
+                "error_type": exc.__class__.__name__,
+            }
+        )
 
 
 def _objective_source_with_grounding_sources(
@@ -2431,9 +2504,19 @@ def _objective_route_source_refs(
                 _objective_source_excerpt_sha256(source_excerpt)
             )
         ref["table_matrix_repair_attestation"] = attestation
-    return (
-        {key: value for key, value in ref.items() if value not in (None, "", [], {})},
-    )
+    refs = [{key: value for key, value in ref.items() if value not in (None, "", [], {})}]
+    continuation = source.get("table_label_continuation")
+    if isinstance(repair_attestation, Mapping) and isinstance(continuation, Mapping) and (
+        row_index is None or row_index == continuation.get("target_row_index")
+    ):
+        refs.append({
+            "source_kind": "table", "source_ref": continuation["source_ref"],
+            "role": "condition_context", "page": continuation["page"],
+            "row_index": continuation["row_index"], "col_index": 0,
+            "source_excerpt": continuation["row"][0],
+            "supports": ["scientific_context.sample"],
+        })
+    return tuple(refs)
 
 
 def _objective_source_matrix_sha256(value: Any) -> str:

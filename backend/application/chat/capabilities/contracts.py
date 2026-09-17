@@ -23,6 +23,7 @@ class CapabilityExecutionContext:
     user_id: str
     collection_id: str
     tool_call_id: str
+    max_result_tokens: int = 12_000
 
     @classmethod
     def for_call(

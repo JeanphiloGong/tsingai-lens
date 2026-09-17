@@ -1,10 +1,13 @@
 # Core LLM Prompt Hardening And Extraction Mode Plan
 
-> Status: implemented and superseded. The mode experiment remains relevant,
-> but provider calls, prompts, response schemas, limits, retries, and tracing
-> now belong to the domain extractors in `document_profiles/`, `paper_facts/`,
-> and `objectives/`. `structured_extraction/` retains only pure JSON/content
-> normalization.
+> Status: historical, superseded. The text-window/table-batch contracts and
+> `text_window_probe.py` described below have been removed; their commands and
+> file lists are historical evidence, not current operational instructions.
+> Objective facts are extracted in `objectives/analysis/source_extraction.py`.
+> `paper_facts/extraction.py` retains only model-assisted table repair, with
+> its prompt and output models beside the call. `structured_extraction/`
+> retains pure JSON/content normalization. For active probes, see
+> [Benchmark Scripts](../../../../../scripts/benchmarks/README.md).
 
 ## Summary
 
@@ -34,7 +37,7 @@ The new benchmark surface made one production problem explicit:
 the current provider is reachable and fast enough for single-call work, but the
 production prompt and response contract still allow too many schema-invalid
 outputs to reach local `model_validate_json(...)` validation on the text-window
-`StructuredTextWindowMentions` contract or the table-row mention contract.
+`TextWindowMentionsModelOutput` contract or the table-row mention contract.
 
 The benchmark evidence collected on April 24, 2026 showed:
 

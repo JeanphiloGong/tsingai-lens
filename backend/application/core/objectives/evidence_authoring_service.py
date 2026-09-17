@@ -27,6 +27,7 @@ from application.repositories.objective_repository import ObjectiveRepository
 class EvidenceAuthoringResult:
     analysis: ObjectiveAnalysis
     evidence: ObjectiveEvidence
+    affected_finding_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -326,7 +327,15 @@ class EvidenceAuthoringService:
                 findings=findings,
             )
         )
-        return EvidenceAuthoringResult(analysis=published, evidence=authored)
+        evidence_by_id = {item.evidence_id: item for item in evidence_records}
+        return EvidenceAuthoringResult(
+            analysis=published,
+            evidence=authored,
+            affected_finding_ids=tuple(
+                item.finding_id for item in findings
+                if authored.evidence_id in item.evidence_replacements(evidence_by_id).values()
+            ),
+        )
 
     async def _all_evidence(
         self, collection_id: str, objective_id: str, analysis_version: int

@@ -140,6 +140,7 @@ class QueryPublishedFindingsCapability:
                     "finding_total": int(findings.get("total") or 0),
                     "evidence_total": int(evidence.get("total") or 0),
                     "findings": finding_items,
+                    "evidence_reviews": findings.get("evidence_reviews", {}),
                     "evidence": evidence_items,
                 }
             )
@@ -195,6 +196,7 @@ class QueryPublishedFindingsCapability:
         contributions = item.get("paper_contributions") or ()
         return {
             "finding_id": str(item.get("finding_id") or ""),
+            "parent_finding_id": item.get("parent_finding_id"),
             "statement": str(item.get("statement") or "")[:1_000],
             "factors": [str(value)[:160] for value in item.get("factors") or ()][:6],
             "outcome": str(item.get("outcome") or "")[:160],
@@ -226,6 +228,9 @@ class QueryPublishedFindingsCapability:
             "resolution_status": item.get("resolution_status"),
             "confidence": item.get("confidence"),
             "supports_finding": item.get("supports_finding") is True,
+            "eligible_for_finding_authoring": item.get("eligible_for_finding_authoring") is True,
+            "supersedes_evidence_id": item.get("supersedes_evidence_id"),
+            "superseded_by_evidence_id": item.get("superseded_by_evidence_id"),
         }
 
     @staticmethod
@@ -274,8 +279,10 @@ class InspectPublishedFindingCapability:
         name="inspect_published_finding",
         description=(
             "Read one exact complete published Finding and a bounded page of its "
-            "Source-linked Evidence. Use this before proposing feedback, curation, or a "
-            "new Finding derived from this parent. The complete Finding object is the "
+            "Source-linked Evidence, saved feedback and associated human curations. "
+            "Use this to recall saved corrections or before proposing feedback, curation, or a "
+            "new Finding derived from this parent. Includes updated Evidence for "
+            "reassessing replaced inputs. The complete Finding object is the "
             "only valid basis for a curation or parent-derived authoring write; do not "
             "reconstruct omitted fields from a summary."
         ),
@@ -283,9 +290,11 @@ class InspectPublishedFindingCapability:
         input_model=InspectPublishedFindingArguments,
     )
 
-    def __init__(self, *, collection_service: Any, objective_analysis_service: Any) -> None:
+    def __init__(self, *, collection_service: Any, objective_analysis_service: Any,
+                 finding_feedback_service: Any) -> None:
         self.collection_service = collection_service
         self.objective_analysis_service = objective_analysis_service
+        self.finding_feedback_service = finding_feedback_service
 
     async def execute(
         self,
@@ -303,6 +312,10 @@ class InspectPublishedFindingCapability:
             analysis_version=arguments.analysis_version,
         )
         version = int(detail["analysis_version"])
+        review_key = dict(collection_id=context.collection_id, objective_id=arguments.objective_id,
+                          analysis_version=version, finding_id=arguments.finding_id)
+        feedback = await self.finding_feedback_service.list_feedback(**review_key)
+        curations = await self.finding_feedback_service.list_curations(**review_key)
         evidence = await self.objective_analysis_service.list_evidence(
             context.collection_id,
             arguments.objective_id,
@@ -312,11 +325,32 @@ class InspectPublishedFindingCapability:
             limit=arguments.evidence_limit,
         )
         evidence_items = [
-            QueryPublishedFindingsCapability._evidence_summary(item)
+            dict(item)
             for item in evidence.get("items", ())
             if isinstance(item, Mapping)
         ]
         evidence_total = int(evidence.get("total") or 0)
+        review = detail.get("evidence_review", {})
+        replacements = review.get("evidence_replacements", {})
+        pending_ids = {
+            replacements[item["evidence_id"]] for item in evidence_items
+            if replacements.get(item["evidence_id"])
+        }
+        replacement_evidence = []
+        offset = 0
+        while pending_ids:
+            candidates = await self.objective_analysis_service.list_evidence(
+                context.collection_id, arguments.objective_id,
+                analysis_version=version, offset=offset, limit=100,
+            )
+            items = candidates.get("items", ())
+            for item in items:
+                if item["evidence_id"] in pending_ids:
+                    replacement_evidence.append(dict(item))
+                    pending_ids.remove(item["evidence_id"])
+            offset += len(items)
+            if not items or offset >= candidates["total"]:
+                break
         next_offset = arguments.evidence_offset + len(evidence_items)
         if next_offset >= evidence_total:
             next_offset = None
@@ -339,6 +373,10 @@ class InspectPublishedFindingCapability:
                 "objective_id": arguments.objective_id,
                 "analysis_version": version,
                 "finding": dict(detail["finding"]),
+                "feedback_records": [item.to_record() for item in feedback],
+                "curation_records": [item.to_record() for item in curations],
+                "evidence_review": review,
+                "replacement_evidence": replacement_evidence,
                 "finding_is_published": True,
                 "evidence": evidence_items,
                 "evidence_total": evidence_total,
@@ -355,7 +393,7 @@ class InspectPublishedFindingCapability:
                         item["document_id"],
                         item["evidence_id"],
                     )
-                    for item in evidence_items
+                    for item in (*evidence_items, *replacement_evidence)
                 ),
             ),
             warnings=warnings,

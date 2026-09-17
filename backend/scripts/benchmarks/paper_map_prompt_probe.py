@@ -26,12 +26,19 @@ from _common import (
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ensure_backend_root_on_path(_BACKEND_ROOT)
 
-_study_window = importlib.import_module(
-    "application.core.objectives.discovery.study_window"
+_paper_understanding_workflow = importlib.import_module(
+    "application.core.objectives.discovery.paper_understanding.workflow"
 )
-StructuredExperimentalPaperMap = _study_window.StructuredExperimentalPaperMap
-_paper_map_model_payload = _study_window._paper_map_model_payload
-build_paper_research_map_prompt = _study_window.build_paper_research_map_prompt
+_paper_understanding_outputs = importlib.import_module(
+    "application.core.objectives.discovery.paper_understanding.paper_map_outputs"
+)
+ExperimentalPaperMapModelOutput = (
+    _paper_understanding_outputs.ExperimentalPaperMapModelOutput
+)
+_paper_map_model_payload = _paper_understanding_workflow._paper_map_model_payload
+build_paper_research_map_prompt = (
+    _paper_understanding_workflow.build_paper_research_map_prompt
+)
 
 
 VariantRequestMode = Literal["json_object", "provider_parse"]
@@ -380,7 +387,7 @@ def audit_prompt_variants(
 
 def evaluate_scenario_output(
     scenario: ProbeScenario,
-    parsed: StructuredExperimentalPaperMap,
+    parsed: ExperimentalPaperMapModelOutput,
 ) -> dict[str, Any]:
     def relationship_factor_labels(relationship: Any) -> tuple[str, ...]:
         return tuple(
@@ -587,7 +594,7 @@ def _run_live_case(
 
     started_at = perf_counter()
     raw_text = ""
-    parsed: StructuredExperimentalPaperMap | None = None
+    parsed: ExperimentalPaperMapModelOutput | None = None
     finish_reason: str | None = None
     usage: dict[str, int | None] = {}
     error: Exception | None = None
@@ -595,7 +602,7 @@ def _run_live_case(
         if variant.request_mode == "provider_parse":
             response = client.beta.chat.completions.parse(
                 **request_kwargs,
-                response_format=StructuredExperimentalPaperMap,
+                response_format=ExperimentalPaperMapModelOutput,
             )
         else:
             response = client.chat.completions.create(
@@ -617,7 +624,7 @@ def _run_live_case(
         else:
             if not raw_text:
                 raise RuntimeError("JSON-object request returned no content")
-            parsed = StructuredExperimentalPaperMap.model_validate_json(
+            parsed = ExperimentalPaperMapModelOutput.model_validate_json(
                 extract_json_object(raw_text)
             )
     # Provider compatibility, transport, decoding, and validation failures are all
@@ -889,7 +896,7 @@ def _messages(variant: PromptVariant) -> list[dict[str, str]]:
 
 def _response_schema_json() -> str:
     return json.dumps(
-        StructuredExperimentalPaperMap.model_json_schema(),
+        ExperimentalPaperMapModelOutput.model_json_schema(),
         ensure_ascii=False,
         separators=(",", ":"),
     )

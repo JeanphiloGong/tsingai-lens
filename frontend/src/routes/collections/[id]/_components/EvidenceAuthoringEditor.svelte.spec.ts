@@ -16,7 +16,8 @@ beforeEach(() => {
 					evidence_id: 'evidence-manual-1',
 					analysis_version: 2,
 					origin: 'human_authored',
-					supports_finding: true
+					supports_finding: true,
+					eligible_for_finding_authoring: true
 				}
 			}),
 			{ status: 201, headers: { 'Content-Type': 'application/json' } }
@@ -64,7 +65,8 @@ const sourceEvidence = {
 	resolution_status: 'resolved',
 	failure_reason: null,
 	confidence: 0.9,
-	supports_finding: true
+	supports_finding: true,
+	eligible_for_finding_authoring: true
 };
 
 describe('Evidence authoring editor', () => {

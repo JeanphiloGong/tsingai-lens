@@ -5,51 +5,30 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
-)
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
 )
 from application.core.objectives.analysis.source_extraction import (
-	StructuredDirectEvidenceExtractions,
-	StructuredEvidenceExtraction,
-	StructuredEvidenceExtractions,
-	StructuredRequestedContextFacts,
-	StructuredRequestedContextFact,
+	DirectEvidenceExtractionsModelOutput,
+	EvidenceExtractionModelOutput,
+	EvidenceExtractionsModelOutput,
+	RequestedContextFactsModelOutput,
+	RequestedContextFactModelOutput,
 )
 from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
+    PaperFrameBatchModelOutput,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
+from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
+    ExperimentalPaperMapModelOutput,
+    ReviewPaperMapModelOutput,
 )
-from application.core.objectives.discovery.study_window import (
-    StructuredExperimentalPaperMap,
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
-    StructuredReviewPaperMap,
-)
-from application.core.paper_facts.schemas import (
-    MeasurementValuePayload,
-    StructuredTableBatchMentions,
-    StructuredTableBatchRowMentions,
-    StructuredTableRowMentions,
-    StructuredTextWindowMentions,
-    TableRowBaselineMentionPayload,
-    TableRowFactMentionPayload,
-    TableRowResultClaimPayload,
-    TableRowSubjectMentionPayload,
-    TextWindowBaselineMentionPayload,
-    TextWindowConditionMentionPayload,
-    TextWindowMaterialMentionPayload,
-    TextWindowMethodMentionPayload,
-    TextWindowResultClaimPayload,
-    TextWindowVariantMentionPayload,
 )
 from tests.support.objective_extractor import paper_research_map_scope_outputs
 
@@ -65,7 +44,6 @@ _PROPERTY_HINTS = (
     ("elongation", "elongation"),
     ("strength", "strength"),
 )
-_PROPERTY_UNIT_PATTERN = re.compile(r"\(([^)]+)\)")
 _FLOAT_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
 _TEMP_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(?:c|°c)\b", re.IGNORECASE)
 _TIME_PATTERN = re.compile(
@@ -73,7 +51,6 @@ _TIME_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _ATM_PATTERN = re.compile(r"\b(?:under|in)\s+(air|argon|ar|nitrogen|n2|vacuum)\b", re.IGNORECASE)
-_METHODS = ("XRD", "SEM", "TEM", "XPS", "Raman", "FTIR", "DSC", "TGA", "DMA")
 
 
 def _input_payload(user_prompt: str) -> dict[str, Any]:
@@ -135,7 +112,7 @@ def _source_extraction_payload(user_prompt: str) -> dict[str, Any]:
 
 
 class FakeDomainModelExtractor:
-    """Deterministic test double for the three domain extraction contracts."""
+    """Deterministic test double for document triage and Objective analysis."""
 
     def estimate_prompt_tokens(
         self,
@@ -153,34 +130,55 @@ class FakeDomainModelExtractor:
         system_prompt: str,
         user_prompt: str,
         response_model: type[Any],
-        parsed_validator: Callable[[Any], Any | None] | None = None,
+        postprocess_response: Callable[[Any], Any | None] | None = None,
         **_options: Any,
     ) -> Any:
         del system_prompt
+        if _options.get("before_request") is not None:
+            _options["before_request"]()
         payload = _input_payload(user_prompt)
-        if response_model is StructuredExperimentalPaperMap:
+        if response_model is ExperimentalPaperMapModelOutput:
             skim = self.extract(payload)
-            response = StructuredExperimentalPaperMap.model_validate(
+            response = ExperimentalPaperMapModelOutput.model_validate(
                 skim.model_dump(exclude={"review_synthesis"})
             )
-        elif response_model is StructuredReviewPaperMap:
-            response = StructuredReviewPaperMap(
+        elif response_model is ReviewPaperMapModelOutput:
+            response = ReviewPaperMapModelOutput(
                 evidence_density="low",
                 confidence=0.72,
             )
         elif response_model is StructuredPaperResearchMap:
             response = self.extract(payload)
-        elif response_model is StructuredPaperSignalReconciliation:
-            response = self.reconcile(payload)
-        elif response_model is StructuredAxisCanonicalizationPlan:
+        elif response_model is AxisCanonicalizationPlanModelOutput:
             response = self.classify(payload)
-        elif response_model is StructuredPaperFrameBatch:
-            response = self.screen_batch(payload)
-        elif response_model is StructuredEvidenceSelections:
-            response = self.route_source(payload)
-        elif response_model is StructuredEvidenceExtractions:
+        elif response_model is PaperFrameBatchModelOutput:
+            frame = self.screen_batch(payload)
+            source_labels = {
+                str(unit.get("source_unit_id") or ""): f"S{index}"
+                for index, unit in enumerate(payload.get("source_units") or (), start=1)
+                if isinstance(unit, dict) and str(unit.get("source_unit_id") or "")
+            }
+            response = PaperFrameBatchModelOutput(
+                **frame.model_dump(
+                    exclude={
+                        "relevant_source_unit_ids",
+                        "excluded_source_unit_ids",
+                    }
+                ),
+                relevant_source_labels=[
+                    source_labels[source_unit_id]
+                    for source_unit_id in frame.relevant_source_unit_ids
+                    if source_unit_id in source_labels
+                ],
+                excluded_source_labels=[
+                    source_labels[source_unit_id]
+                    for source_unit_id in frame.excluded_source_unit_ids
+                    if source_unit_id in source_labels
+                ],
+            )
+        elif response_model is EvidenceExtractionsModelOutput:
             response = self.extract_source(_source_extraction_payload(user_prompt))
-        elif response_model is StructuredRequestedContextFacts:
+        elif response_model is RequestedContextFactsModelOutput:
             source_payload = _source_extraction_payload(user_prompt)
             extracted = self.extract_source(source_payload)
             route = source_payload.get("evidence_route")
@@ -191,7 +189,7 @@ class FakeDomainModelExtractor:
                 "composition_or_background": "material",
             }.get(role, "process")
             facts = [
-                StructuredRequestedContextFact(
+                RequestedContextFactModelOutput(
                     name=str(attribute.get("name") or "source_statement"),
                     value=attribute.get("value")
                     if attribute.get("value") is not None
@@ -209,10 +207,10 @@ class FakeDomainModelExtractor:
                 if isinstance(attribute, dict)
                 and str(attribute.get("name") or "").strip()
             ]
-            response = StructuredRequestedContextFacts(facts=facts)
-        elif response_model is StructuredDirectEvidenceExtractions:
+            response = RequestedContextFactsModelOutput(facts=facts)
+        elif response_model is DirectEvidenceExtractionsModelOutput:
             extracted = self.extract_source(_source_extraction_payload(user_prompt))
-            response = StructuredDirectEvidenceExtractions.model_validate(
+            response = DirectEvidenceExtractionsModelOutput.model_validate(
                 {
                     "extractions": [
                         item.model_dump()
@@ -227,13 +225,13 @@ class FakeDomainModelExtractor:
             raise TypeError(
                 f"unsupported fake structured response: {response_model.__name__}"
             )
-        if parsed_validator is not None:
-            validated = parsed_validator(response)
+        if postprocess_response is not None:
+            validated = postprocess_response(response)
             if validated is not None:
                 response = validated
         return response
 
-    def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
+    def extract_document_profile(self, payload: dict[str, Any]) -> DocumentProfileModelOutput:
         title = str(payload.get("title") or "").strip()
         source_filename = str(payload.get("source_filename") or "").strip()
         lead_text = str(payload.get("abstract_or_lead_text") or "")
@@ -314,13 +312,15 @@ class FakeDomainModelExtractor:
             doc_type = "uncertain"
             warnings.append("classification_uncertain")
 
-        return StructuredDocumentProfile(
+        return DocumentProfileModelOutput(
             doc_type=doc_type,
             profile_warnings=sorted(set(warnings)),
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         title = str(payload.get("title") or "").strip()
         profile_hint = (
             payload.get("profile_hint")
@@ -421,17 +421,12 @@ class FakeDomainModelExtractor:
             warnings=[] if studies else ["objective_uncertain"],
         )
 
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        return StructuredPaperSignalReconciliation()
 
     def classify(
         self,
         payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
-        return StructuredAxisCanonicalizationPlan(
+    ) -> AxisCanonicalizationPlanModelOutput:
+        return AxisCanonicalizationPlanModelOutput(
             decisions=[
                 {
                     "pair_id": str(pair["pair_id"]),
@@ -446,7 +441,7 @@ class FakeDomainModelExtractor:
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
         paper_prior = payload.get("paper_prior") if isinstance(payload.get("paper_prior"), dict) else {}
         document = payload.get("document") if isinstance(payload.get("document"), dict) else {}
@@ -467,7 +462,7 @@ class FakeDomainModelExtractor:
             if str(value).strip()
         }
         if document_id in excluded_document_ids or paper_prior.get("doc_role") == "review":
-            return StructuredPaperFrameBatch(
+            return PaperFrameBatchResult(
                 relevance="irrelevant",
                 paper_role="review",
                 screening_note="Paper does not directly support the objective.",
@@ -505,7 +500,7 @@ class FakeDomainModelExtractor:
             elif source_unit_id:
                 excluded_source_unit_ids.append(source_unit_id)
 
-        return StructuredPaperFrameBatch(
+        return PaperFrameBatchResult(
             relevance="high" if paper_prior else "uncertain",
             paper_role="primary_experiment",
             screening_note="Paper directly supports the objective.",
@@ -521,90 +516,14 @@ class FakeDomainModelExtractor:
             excluded_source_unit_ids=excluded_source_unit_ids,
         )
 
-    def route_source(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
-        objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
-        outcomes = [
-            str(value).lower()
-            for value in objective.get("outcomes", [])
-            if str(value).strip()
-        ]
-        if not isinstance(payload.get("current_source"), dict):
-            raise ValueError("objective evidence routing requires current_source")
-        candidates = [payload["current_source"]]
-        routes: list[StructuredEvidenceSelection] = []
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            source_kind = str(candidate.get("source_kind") or "text_window")
-            source_ref = str(candidate.get("source_ref") or "")
-            if not source_ref:
-                continue
-            if candidate.get("frame_status") == "excluded":
-                routes.append(
-                    StructuredEvidenceSelection(
-                        role="low_value_or_irrelevant",
-                        extractable=False,
-                        confidence=0.7,
-                    )
-                )
-                continue
-            if source_kind == "table":
-                table_schema = (
-                    candidate.get("table_schema")
-                    if isinstance(candidate.get("table_schema"), dict)
-                    else {}
-                )
-                column_headers = (
-                    table_schema.get("column_headers")
-                    if isinstance(table_schema.get("column_headers"), list)
-                    else candidate.get("column_headers")
-                    if isinstance(candidate.get("column_headers"), list)
-                    else []
-                )
-                table_text = " ".join(
-                    str(value or "")
-                    for value in (
-                        candidate.get("caption_text"),
-                        candidate.get("heading_path"),
-                        " ".join(
-                            str(item)
-                            for item in column_headers
-                        ),
-                    )
-                ).lower()
-                role = (
-                    "current_experimental_evidence"
-                    if any(axis in table_text for axis in outcomes)
-                    else "process_or_treatment"
-                )
-                routes.append(
-                    StructuredEvidenceSelection(
-                        role=role,
-                        extractable=True,
-                        confidence=0.82,
-                    )
-                )
-                continue
-            routes.append(
-                StructuredEvidenceSelection(
-                    role="process_or_treatment",
-                    extractable=True,
-                    confidence=0.72,
-                )
-            )
-        return StructuredEvidenceSelections(selections=routes)
-
     def extract_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceExtractions:
+    ) -> EvidenceExtractionsModelOutput:
         route = payload.get("evidence_route")
         source = payload.get("source")
         if not isinstance(route, dict) or not isinstance(source, dict):
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
         if route.get("source_kind") == "table":
             headers = [
                 str(value)
@@ -637,9 +556,9 @@ class FakeDomainModelExtractor:
                 if not sample_label or not value_text:
                     continue
                 numeric_match = _FLOAT_PATTERN.search(value_text.replace(",", ""))
-                return StructuredEvidenceExtractions(
+                return EvidenceExtractionsModelOutput(
                     extractions=[
-                        StructuredEvidenceExtraction(
+                        EvidenceExtractionModelOutput(
                             evidence_role="direct_result",
                             reported_result={
                                 "outcome": property_header,
@@ -665,11 +584,11 @@ class FakeDomainModelExtractor:
                         )
                     ]
                 )
-            return StructuredEvidenceExtractions()
+            return EvidenceExtractionsModelOutput()
         if route.get("source_kind") == "text_window" and source.get("text"):
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="not_attributable",
                         scientific_context={
@@ -685,351 +604,7 @@ class FakeDomainModelExtractor:
                     )
                 ]
             )
-        return StructuredEvidenceExtractions()
-
-    def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
-        document_title = str(payload.get("document_title") or "")
-        document_profile = payload.get("document_profile") or {}
-        text_window = payload.get("text_window") or {}
-        text = str(text_window.get("text") or "")
-        heading_path = str(text_window.get("heading_path") or "")
-        window_role = self._classify_text_window_role(heading_path, text)
-
-        if (
-            str(document_profile.get("doc_type") or "") == "review"
-            and "experimental section" not in text.lower()
-            and window_role != "methods"
-        ):
-            return StructuredTextWindowMentions()
-
-        material_system = self._infer_material_system(document_title, text)
-        process_context = self._extract_process_context(text)
-        methods = self._extract_methods(text)
-        baseline_label = self._extract_baseline_label(text)
-        first_statement = self._first_statement(text)
-
-        method_mentions: list[TextWindowMethodMentionPayload] = []
-        material_mentions: list[TextWindowMaterialMentionPayload] = []
-        variant_mentions: list[TextWindowVariantMentionPayload] = []
-        condition_mentions: list[TextWindowConditionMentionPayload] = []
-        baseline_mentions: list[TextWindowBaselineMentionPayload] = []
-        result_claims: list[TextWindowResultClaimPayload] = []
-
-        if window_role == "methods":
-            if first_statement:
-                method_mentions.append(
-                    TextWindowMethodMentionPayload(
-                        method_role="process",
-                        method_name="sample preparation",
-                        details=first_statement,
-                        evidence_quote=first_statement,
-                        confidence=0.82,
-                    )
-                )
-
-        if window_role == "characterization" and methods:
-            for index, method_name in enumerate(methods, start=1):
-                evidence_quote = first_statement or text[:160]
-                if evidence_quote:
-                    method_mentions.append(
-                        TextWindowMethodMentionPayload(
-                        method_role="characterization",
-                        method_name=method_name,
-                        details=text[:400],
-                        evidence_quote=evidence_quote,
-                        confidence=0.78,
-                    )
-                )
-
-        property_sentences = [
-            sentence
-            for sentence in self._split_statements(text)
-            if "|" not in sentence
-            and not sentence.lower().startswith("table ")
-            and self._infer_property(sentence) is not None
-        ]
-        if property_sentences:
-            evidence_quote = property_sentences[0]
-            material_label = self._default_variant_label(
-                material_system.get("family"),
-                document_title,
-            )
-            if material_system.get("family") and material_system.get("family") != "unspecified material system":
-                material_mentions.append(
-                    TextWindowMaterialMentionPayload(
-                        material_label=material_label,
-                        family=material_system.get("family"),
-                        composition=material_system.get("composition"),
-                        evidence_quote=evidence_quote,
-                        confidence=0.72,
-                    )
-                )
-
-        if first_statement:
-            for temperature in process_context.get("temperatures_c") or []:
-                condition_mentions.append(
-                    TextWindowConditionMentionPayload(
-                        condition_type="temperature",
-                        condition_text=first_statement,
-                        normalized_value=temperature,
-                        unit="C",
-                        evidence_quote=first_statement,
-                        confidence=0.8,
-                    )
-                )
-            for duration in process_context.get("durations") or []:
-                condition_mentions.append(
-                    TextWindowConditionMentionPayload(
-                        condition_type="duration",
-                        condition_text=duration,
-                        normalized_value=None,
-                        unit=None,
-                        evidence_quote=first_statement,
-                        confidence=0.8,
-                    )
-                )
-            if process_context.get("atmosphere"):
-                condition_mentions.append(
-                    TextWindowConditionMentionPayload(
-                        condition_type="atmosphere",
-                        condition_text=first_statement,
-                        normalized_value=process_context.get("atmosphere"),
-                        unit=None,
-                        evidence_quote=first_statement,
-                        confidence=0.8,
-                    )
-                )
-
-        if property_sentences and baseline_label:
-            baseline_mentions.append(
-                TextWindowBaselineMentionPayload(
-                    baseline_label=baseline_label,
-                    baseline_type="as-built" if baseline_label == "as-built" else "untreated" if "untreated" in baseline_label.lower() else "reference",
-                    evidence_quote=property_sentences[0],
-                    confidence=0.8,
-                )
-            )
-
-        for index, sentence in enumerate(property_sentences, start=1):
-            parsed = self._parse_result_sentence(sentence)
-            property_name = self._infer_property(sentence) or "qualitative"
-            claim_scope = self._classify_claim_scope(sentence)
-            if parsed is None:
-                result_type = "trend"
-                unit = None
-                value_text = None
-            else:
-                result_type, value_payload, unit = parsed
-                value_text = sentence if value_payload.model_dump(exclude_none=True) else None
-            result_claims.append(
-                TextWindowResultClaimPayload(
-                    claim_text=sentence,
-                    property_normalized=property_name,
-                    result_type=result_type,
-                    value_text=value_text,
-                    unit=unit,
-                    claim_scope=claim_scope,
-                    eligible_for_measurement_result=(claim_scope == "current_work"),
-                    evidence_quote=sentence,
-                    confidence=0.84,
-                )
-            )
-
-        return StructuredTextWindowMentions(
-            method_mentions=method_mentions,
-            material_mentions=material_mentions,
-            variant_mentions=variant_mentions,
-            condition_mentions=condition_mentions,
-            baseline_mentions=baseline_mentions,
-            result_claims=result_claims,
-        )
-
-    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> StructuredTableBatchMentions:
-        document_title = str(payload.get("document_title") or "")
-        document_profile = payload.get("document_profile") or {}
-        supporting_windows = (
-            payload.get("supporting_text_windows")
-            if isinstance(payload.get("supporting_text_windows"), list)
-            else []
-        )
-        target_rows = (
-            payload.get("target_rows")
-            if isinstance(payload.get("target_rows"), list)
-            else []
-        )
-        if str(document_profile.get("doc_type") or "") == "review":
-            return StructuredTableBatchMentions()
-
-        row_results: list[StructuredTableBatchRowMentions] = []
-        for row in target_rows:
-            if not isinstance(row, dict):
-                continue
-            row_index = int(row.get("row_index") or 0)
-            mentions = self._extract_table_row_mentions(
-                document_title=document_title,
-                row=row,
-                supporting_windows=supporting_windows,
-            )
-            row_results.append(
-                StructuredTableBatchRowMentions(
-                    row_index=row_index,
-                    **mentions.model_dump(),
-                )
-            )
-        return StructuredTableBatchMentions(row_results=row_results)
-
-    def _extract_table_row_mentions(
-        self,
-        *,
-        document_title: str,
-        row: dict[str, Any],
-        supporting_windows: list[Any],
-    ) -> StructuredTableRowMentions:
-        row_summary = str(row.get("row_summary") or "")
-        cells = row.get("cells") if isinstance(row.get("cells"), list) else []
-        support_text = "\n\n".join(
-            str(window.get("text") or "").strip()
-            for window in supporting_windows
-            if isinstance(window, dict) and str(window.get("text") or "").strip()
-        )
-
-        material_system = self._infer_material_system(document_title, support_text or row_summary)
-        process_context = self._extract_process_context(support_text)
-        methods = self._extract_methods(support_text)
-
-        sample_label = None
-        variable_axis_type = None
-        variable_value: str | int | float | None = None
-        baseline_label = None
-        property_cells: list[tuple[str, str, str | None]] = []
-
-        for cell in cells:
-            header = str(cell.get("header_path") or "")
-            value = str(cell.get("cell_text") or "").strip()
-            unit_hint = str(cell.get("unit_hint") or "").strip() or None
-            if not value:
-                continue
-            lowered_header = header.lower()
-            if any(token in lowered_header for token in ("sample", "group", "variant")):
-                sample_label = value
-                continue
-            if "baseline" in lowered_header or "control" in lowered_header or "reference" in lowered_header:
-                baseline_label = value
-                continue
-            property_name = self._infer_property(f"{header} {document_title}")
-            if property_name is not None:
-                property_cells.append((property_name, value, unit_hint or self._extract_unit(header)))
-                continue
-            if variable_axis_type is None:
-                variable_axis_type = self._normalize_axis(header)
-                variable_value = self._normalize_numeric_or_text(value)
-
-        if not property_cells:
-            return StructuredTableRowMentions()
-
-        variant_label = sample_label or self._default_variant_label(
-            material_system.get("family"),
-            document_title,
-        )
-        row_subjects = [
-            TableRowSubjectMentionPayload(
-                variant_label=variant_label,
-                family=material_system.get("family"),
-                composition=material_system.get("composition"),
-                variable_axis_type=variable_axis_type,
-                variable_value=variable_value,
-                quote=variant_label,
-            )
-        ]
-
-        process_mentions: list[TableRowFactMentionPayload] = []
-        for temperature in process_context.get("temperatures_c") or []:
-            process_mentions.append(
-                TableRowFactMentionPayload(
-                    name="temperature_c",
-                    value_text=temperature,
-                    unit="C",
-                    quote=f"{temperature:g} C",
-                )
-            )
-        for duration in process_context.get("durations") or []:
-            process_mentions.append(
-                TableRowFactMentionPayload(
-                    name="duration",
-                    value_text=duration,
-                    unit=None,
-                    quote=duration,
-                )
-            )
-        if process_context.get("atmosphere"):
-            process_mentions.append(
-                TableRowFactMentionPayload(
-                    name="atmosphere",
-                    value_text=process_context.get("atmosphere"),
-                    unit=None,
-                    quote=str(process_context.get("atmosphere")),
-                )
-            )
-
-        test_condition_mentions = [
-            TableRowFactMentionPayload(
-                name="method",
-                value_text=method,
-                unit=None,
-                quote=method,
-            )
-            for method in methods
-        ]
-
-        baseline_mentions = [
-            TableRowBaselineMentionPayload(
-                baseline_label=baseline_label,
-                quote=baseline_label,
-            )
-        ] if baseline_label else []
-
-        result_claims: list[TableRowResultClaimPayload] = []
-        for index, (property_name, value, unit) in enumerate(property_cells, start=1):
-            parsed_value = self._normalize_numeric_or_text(value)
-            if property_name == "retention":
-                result_type = "retention"
-                unit = unit or "%"
-            else:
-                result_type = "scalar"
-            result_claims.append(
-                TableRowResultClaimPayload(
-                    claim_text=f"{variant_label} reported {property_name} of {parsed_value} {unit or ''}".strip(),
-                    property_normalized=property_name,
-                    result_type=result_type,
-                    value_text=value,
-                    unit=unit,
-                    variant_label=variant_label,
-                    baseline_label=baseline_label if baseline_mentions else None,
-                    claim_scope="current_work",
-                    quote=row_summary,
-                )
-            )
-
-        return StructuredTableRowMentions(
-            row_subjects=row_subjects,
-            process_mentions=process_mentions,
-            test_condition_mentions=test_condition_mentions,
-            baseline_mentions=baseline_mentions,
-            result_claims=result_claims,
-        )
-
-    def _classify_text_window_role(self, heading_path: str, text: str) -> str | None:
-        lowered_heading = heading_path.lower()
-        lowered_text = text.lower()
-        if any(token in lowered_heading for token in ("experimental", "method", "methods", "materials and methods")):
-            return "methods"
-        if any(token in lowered_heading for token in ("characterization", "analysis")):
-            return "characterization"
-        if any(token in lowered_text for token in ("mixed", "annealed", "stirred", "dried", "sintered")):
-            return "methods"
-        if self._extract_methods(text) and "character" in lowered_text:
-            return "characterization"
-        return None
+        return EvidenceExtractionsModelOutput()
 
     def _infer_material_system(self, title: str, text: str):
         lowered = f"{title}\n{text}".lower()
@@ -1049,11 +624,6 @@ class FakeDomainModelExtractor:
             family = "unspecified material system"
         return {"family": family, "composition": None}
 
-    def _default_variant_label(self, family: str | None, title: str) -> str:
-        if family and family != "unspecified material system":
-            return family
-        return title.strip() or "document sample"
-
     def _extract_process_context(self, text: str):
         temperatures = [float(match.group(1)) for match in _TEMP_PATTERN.finditer(text)]
         durations = [match.group(0) for match in _TIME_PATTERN.finditer(text)]
@@ -1063,23 +633,6 @@ class FakeDomainModelExtractor:
             "durations": durations,
             "atmosphere": atmosphere_match.group(1) if atmosphere_match else None,
         }
-
-    def _extract_methods(self, text: str) -> list[str]:
-        lowered = text.lower()
-        return [method for method in _METHODS if method.lower() in lowered]
-
-    def _extract_baseline_label(self, text: str) -> str | None:
-        lowered = text.lower()
-        if "as-built" in lowered:
-            return "as-built"
-        if "as-prepared" in lowered:
-            return "as-prepared"
-        if "untreated baseline" in lowered:
-            return "untreated baseline"
-        match = re.search(r"relative to the ([^.]+)", text, re.IGNORECASE)
-        if match:
-            return match.group(1).strip(" .")
-        return None
 
     def _infer_property(self, text: str) -> str | None:
         lowered = str(text or "").lower()
@@ -1095,75 +648,3 @@ class FakeDomainModelExtractor:
             if token in lowered:
                 return normalized
         return None
-
-    def _classify_claim_scope(self, text: str) -> str:
-        lowered = str(text or "").lower()
-        if "previous work" in lowered:
-            return "prior_work"
-        if "review" in lowered or "survey" in lowered:
-            return "review_summary"
-        if "literature" in lowered or "reported in prior studies" in lowered:
-            return "literature_summary"
-        return "current_work"
-
-    def _parse_result_sentence(
-        self,
-        sentence: str,
-    ) -> tuple[str, MeasurementValuePayload, str | None] | None:
-        property_name = self._infer_property(sentence)
-        if property_name is None:
-            return None
-        unit = self._extract_unit(sentence)
-        numbers = [float(match.group(0)) for match in _FLOAT_PATTERN.finditer(sentence)]
-        if not numbers:
-            return None
-        numeric_value = numbers[-1]
-        if property_name == "retention":
-            return (
-                "retention",
-                MeasurementValuePayload(
-                    retention_percent=numeric_value,
-                    statement=sentence,
-                ),
-                unit or "%",
-            )
-        return (
-            "scalar",
-            MeasurementValuePayload(
-                value=numeric_value,
-                statement=sentence,
-            ),
-            unit,
-        )
-
-    def _extract_unit(self, text: str) -> str | None:
-        match = _PROPERTY_UNIT_PATTERN.search(text)
-        if match:
-            return match.group(1).strip()
-        explicit = re.search(r"\b(MPa|GPa|Pa|%|S/cm|mS/cm|W/mK)\b", text, re.IGNORECASE)
-        if explicit:
-            return explicit.group(1)
-        return None
-
-    def _split_statements(self, text: str) -> list[str]:
-        parts = re.split(r"[\n。]+|(?<=[.?!])\s+", text)
-        return [part.strip() for part in parts if part.strip()]
-
-    def _first_statement(self, text: str) -> str | None:
-        statements = self._split_statements(text)
-        return statements[0] if statements else None
-
-    def _normalize_axis(self, header: str) -> str | None:
-        lowered = header.lower()
-        if "current" in lowered:
-            return "induction_current"
-        normalized = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
-        return normalized or None
-
-    def _normalize_numeric_or_text(self, value: Any) -> str | int | float:
-        text = str(value).strip()
-        if re.fullmatch(r"[-+]?\d+", text):
-            return int(text)
-        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text):
-            return float(text)
-        return text

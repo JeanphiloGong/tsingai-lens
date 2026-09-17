@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
+import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import replace
 from hashlib import sha256
-import json
-import re
 from typing import Any
 
 from application.core.objectives import property_matching
@@ -17,20 +17,22 @@ from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.analysis.source_extraction import (
-    ExtractedEvidenceDraft,
+    SourceReadAudit,
     _objective_missing_context_fields,
 )
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis.source_validation import (
     _objective_source_explicitly_links_variable_to_result,
 )
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
+    PaperExperiment,
     PaperResearchMap,
     PaperSourceUnitCoverageStatus,
     ResearchObjective,
+    SourceObservation,
 )
 from domain.source import SourceDocumentTree
 
@@ -69,7 +71,7 @@ def materialize_evidence(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    drafts: tuple[ExtractedEvidenceDraft, ...],
+    observations: tuple[SourceObservation, ...],
     paper_maps: tuple[PaperResearchMap, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
@@ -77,17 +79,26 @@ def materialize_evidence(
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
+    experiments: tuple[PaperExperiment, ...] = (),
+    technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> tuple[tuple[ObjectiveEvidence, ...], tuple[PaperContribution, ...]]:
-    inspection_source_refs = _inspection_source_refs_by_document(drafts)
-    selected_drafts = _objective_detail_evidence(
-        drafts,
+    if experiments:
+        observations = _merge_domain_experiment_inputs(
+            experiments=experiments,
+            observations=observations,
+        )
+    inspection_source_refs = _inspection_source_refs_by_document(
+        technical_audits=technical_audits,
+    )
+    selected_observations = _objective_detail_evidence(
+        observations,
         objective_context=objective,
     )
     evidence_records = _analysis_evidence_records(
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
-        drafts=selected_drafts,
+        drafts=selected_observations,
         blocks_by_document_id=blocks_by_document_id,
         tables_by_document_id=tables_by_document_id,
         figures_by_document_id=figures_by_document_id,
@@ -107,6 +118,7 @@ def materialize_evidence(
         routes=routes,
         evidence_records=evidence_records,
         inspection_source_refs=inspection_source_refs,
+        technical_audits=technical_audits,
         document_trees_by_document_id=document_trees_by_document_id or {},
     )
     # Framing owns the complete candidate Source partition.  Emit the final
@@ -122,19 +134,44 @@ def materialize_evidence(
             routes=routes,
             evidence_records=evidence_records,
             inspection_source_refs=inspection_source_refs,
+            technical_audits=technical_audits,
             document_trees_by_document_id=document_trees_by_document_id or {},
             emit_parity_snapshot=True,
         )
     target_axes = property_matching.objective_outcomes(objective)
+    comparison_assessments = tuple(
+        experiment.assess_comparison(
+            objective, *observation.derived_from_observation_ids
+        )
+        for experiment in experiments
+        for observation in experiment.source_observations
+        if len(observation.derived_from_observation_ids) == 2
+    )
     record_analysis_diagnostic(
         {
             "trace_type": "objective_evidence_materialization",
             "collection_id": collection_id,
             "objective_id": objective.objective_id,
             "analysis_version": analysis.analysis_version,
-            "draft_count": len(drafts),
+            "experiment_count": len(experiments),
+            "bound_experiment_count": sum(
+                experiment.has_bound_measurements for experiment in experiments
+            ),
+            "measurement_count": sum(
+                len(experiment.measurements) for experiment in experiments
+            ),
+            "comparison_assessment_counts": dict(
+                Counter(item.status for item in comparison_assessments)
+            ),
+            "grounding_rejection_count": sum(
+                audit.disposition == "grounding_rejected" for audit in technical_audits
+            ),
+            "draft_count": len(observations),
             "failed_draft_count": sum(
-                draft.selection_status == "failed" for draft in drafts
+                draft.selection_status == "failed" for draft in observations
+            )
+            + sum(
+                audit.failed for audit in technical_audits
             ),
             "target_outcome_match_count": sum(
                 draft.selection_status != "failed"
@@ -143,9 +180,9 @@ def materialize_evidence(
                     draft,
                     target_axes=target_axes,
                 )
-                for draft in drafts
+                for draft in observations
             ),
-            "selected_draft_count": len(selected_drafts),
+            "selected_draft_count": len(selected_observations),
             "evidence_record_count": len(evidence_records),
             "paper_disposition_counts": dict(
                 sorted(
@@ -160,30 +197,39 @@ def materialize_evidence(
     return evidence_records, contributions
 
 
-def _inspection_source_refs_by_document(
-    drafts: tuple[ExtractedEvidenceDraft, ...],
-) -> dict[str, set[tuple[str, str]]]:
-    """Return source locators for reads that yielded no scientific fact.
+def _merge_domain_experiment_inputs(
+    *,
+    experiments: tuple[PaperExperiment, ...],
+    observations: tuple[SourceObservation, ...],
+) -> tuple[SourceObservation, ...]:
+    """Read assembled facts directly without losing validation or derivation metadata."""
 
-    These transient rejected markers are deliberately excluded from durable
-    Evidence, but the coverage ledger still needs to distinguish an inspected
-    Source with no fact from a Source that was never read.
-    """
+    domain_drafts = {
+        item.observation_id: item
+        for experiment in experiments
+        for item in experiment.source_observations
+    }
+    original_ids = {item.observation_id for item in observations}
+    return (
+        *(domain_drafts.get(item.observation_id, item) for item in observations),
+        *(
+            item
+            for identifier, item in domain_drafts.items()
+            if identifier not in original_ids
+        ),
+    )
+
+
+def _inspection_source_refs_by_document(
+    *,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
+) -> dict[str, set[tuple[str, str]]]:
+    """Count attempted reads separately from scientific observations."""
 
     inspected: dict[str, set[tuple[str, str]]] = {}
-    for draft in drafts:
-        if (
-            draft.selection_status != "rejected"
-            or draft.evidence_role != "irrelevant"
-            or draft.reported_result is not None
-            or draft.changed_variables
-            or draft.comparison is not None
-            or draft.scientific_context.has_content
-            or not draft.source_ref
-        ):
-            continue
-        inspected.setdefault(draft.document_id, set()).add(
-            _source_identity(draft.source_kind, draft.source_ref)
+    for audit in technical_audits:
+        inspected.setdefault(audit.document_id, set()).add(
+            _source_identity(audit.source_kind, audit.source_ref)
         )
     return inspected
 
@@ -339,6 +385,7 @@ def _record_source_coverage_ledger(
     routes: tuple[EvidenceCandidate, ...],
     evidence_records: tuple[ObjectiveEvidence, ...],
     inspection_source_refs: Mapping[str, set[tuple[str, str]]] | None = None,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
     emit_parity_snapshot: bool = False,
 ) -> None:
@@ -357,6 +404,10 @@ def _record_source_coverage_ledger(
 
     document_trees_by_document_id = document_trees_by_document_id or {}
     inspection_source_refs = inspection_source_refs or {}
+    technical_audits_by_document: dict[str, tuple[SourceReadAudit, ...]] = {}
+    for audit in technical_audits:
+        technical_audits_by_document.setdefault(audit.document_id, ())
+        technical_audits_by_document[audit.document_id] += (audit,)
     ledger_records: list[dict[str, Any]] = []
     for frame in frames:
         document_evidence = tuple(evidence_by_document.get(frame.document_id, ()))
@@ -407,6 +458,11 @@ def _record_source_coverage_ledger(
             for evidence in document_evidence
             if evidence.selection_status == "failed"
         )
+        technical_failures = tuple(
+            audit
+            for audit in technical_audits_by_document.get(frame.document_id, ())
+            if audit.failed
+        )
         missing_by_result = {
             evidence.evidence_id: _objective_result_missing_field_families(
                 objective=objective,
@@ -433,12 +489,19 @@ def _record_source_coverage_ledger(
             if evidence.evidence_role in {"direct_result", "contradictory_result"}
         )
         closure_complete = bool(result_evidence) and not (
-            missing_fields or uninspected_sources or critical_failed_evidence
+            missing_fields
+            or uninspected_sources
+            or critical_failed_evidence
+            or technical_failures
         )
         failed_source_refs = {
             _source_identity(item.source_kind, item.source_ref)
             for item in failed_evidence
         }
+        failed_source_refs.update(
+            _source_identity(item.source_kind, item.source_ref)
+            for item in technical_failures
+        )
         ledger = {
             "trace_type": "objective_source_coverage_ledger",
             "collection_id": collection_id,
@@ -462,7 +525,7 @@ def _record_source_coverage_ledger(
                     for item in context_evidence
                 }
             ),
-            "technical_failure_count": len(failed_evidence),
+            "technical_failure_count": len(failed_evidence) + len(technical_failures),
             "uninspected_source_count": len(uninspected_sources),
             "result_count": len(result_evidence),
             "source_grounded_result_count": source_grounded_result_count,
@@ -498,6 +561,14 @@ def _record_source_coverage_ledger(
                     "reason": item.failure_reason,
                 }
                 for item in failed_evidence
+            ]
+            + [
+                {
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "reason": item.reason,
+                }
+                for item in technical_failures
             ],
             **_researcher_decision_packet_audit(document_evidence),
         }
@@ -700,10 +771,10 @@ def _record_material_scope_exclusions(
 
 
 def _objective_detail_evidence(
-    evidence_items: tuple[ExtractedEvidenceDraft, ...],
+    evidence_items: tuple[SourceObservation, ...],
     *,
     objective_context: ResearchObjective | None,
-) -> tuple[ExtractedEvidenceDraft, ...]:
+) -> tuple[SourceObservation, ...]:
     if (
         objective_context is None
         or not objective_context.outcomes
@@ -725,7 +796,7 @@ def _objective_detail_evidence(
         "comparison_context",
         "background_context",
     }
-    retained: list[ExtractedEvidenceDraft] = []
+    retained: list[SourceObservation] = []
     seen_ids: set[str] = set()
     for unit in evidence_items:
         if unit.evidence_id in seen_ids:
@@ -748,7 +819,7 @@ def _objective_detail_evidence(
                     "outside the confirmed Objective outcome scope; excluded from "
                     "Finding comparison."
                 )
-                unit = ExtractedEvidenceDraft.from_mapping(payload)
+                unit = SourceObservation.from_mapping(payload)
         if not keep and unit.reported_result is None:
             # Context is useful even when it has not yet completed a result.
             # It must carry a Source and a context role (or an explicit
@@ -765,7 +836,7 @@ def _objective_detail_evidence(
 
 
 def _objective_evidence_matches_target_property(
-    unit: ExtractedEvidenceDraft,
+    unit: SourceObservation,
     *,
     target_axes: tuple[str, ...],
 ) -> bool:
@@ -830,7 +901,7 @@ def rebind_persisted_evidence(
             )
         payload["source_refs"] = source_refs
         payload["evidence_anchor_ids"] = list(evidence.anchor_ids)
-        draft = ExtractedEvidenceDraft.from_mapping(payload)
+        draft = SourceObservation.from_mapping(payload)
         source_excerpts_by_locator = _source_excerpts_by_locator(
             draft,
             blocks_by_document_id=blocks_by_document_id,
@@ -1034,6 +1105,7 @@ def _analysis_contributions(
     routes: tuple[EvidenceCandidate, ...],
     evidence_records: tuple[ObjectiveEvidence, ...],
     inspection_source_refs: Mapping[str, set[tuple[str, str]]] | None = None,
+    technical_audits: tuple[SourceReadAudit, ...] = (),
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
 ) -> tuple[PaperContribution, ...]:
     paper_maps_by_document_id = {
@@ -1055,6 +1127,10 @@ def _analysis_contributions(
 
     document_trees_by_document_id = document_trees_by_document_id or {}
     inspection_source_refs = inspection_source_refs or {}
+    technical_audits_by_document: dict[str, tuple[SourceReadAudit, ...]] = {}
+    for audit in technical_audits:
+        technical_audits_by_document.setdefault(audit.document_id, ())
+        technical_audits_by_document[audit.document_id] += (audit,)
     contributions: list[PaperContribution] = []
     for frame in frames:
         document_evidence = tuple(evidence_by_document.get(frame.document_id, ()))
@@ -1091,6 +1167,11 @@ def _analysis_contributions(
             for evidence in document_evidence
             if evidence.selection_status == "failed"
         }
+        failed_sources.update(
+            (audit.source_kind, audit.source_ref)
+            for audit in technical_audits_by_document.get(frame.document_id, ())
+            if audit.failed
+        )
         comparable_evidence_count = sum(
             FindingSynthesisService.is_synthesizable_result_evidence(
                 objective,
@@ -1315,7 +1396,7 @@ def _analysis_evidence_records(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    drafts: tuple[ExtractedEvidenceDraft, ...],
+    drafts: tuple[SourceObservation, ...],
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
@@ -1351,7 +1432,7 @@ def _analysis_evidence_records(
                     "confidence": 0.0,
                 }
             )
-            draft = ExtractedEvidenceDraft.from_mapping(payload)
+            draft = SourceObservation.from_mapping(payload)
         source = _canonical_evidence_source(
             draft,
             blocks_by_document_id=blocks_by_document_id,
@@ -1396,6 +1477,18 @@ def _analysis_evidence_records(
         selection_status = draft.selection_status
         selection_reason = draft.selection_reason
         resolution_status = draft.resolution_status
+        if (
+            draft.status in {"uncertain", "rejected"}
+            and selection_status == "extracted"
+        ):
+            selection_status = (
+                "candidate" if draft.status == "uncertain" else "rejected"
+            )
+            resolution_status = "partial"
+            selection_reason = (
+                f"Source validation remains {draft.status}; not accepted for synthesis. "
+                f"{selection_reason or ''}"
+            ).strip()
         if (
             selection_status == "extracted"
             and draft.reported_result is None
@@ -1641,13 +1734,13 @@ def _merge_duplicate_evidence(
 
 
 def _recover_source_explicit_objective_factors(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     objective: ResearchObjective,
     source_excerpt: str,
     source_kind: str,
     source_ref: str,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     """Recover omitted factor names from the exact Source being materialized.
 
     Some result responses contain a valid reported outcome and direction but
@@ -1743,15 +1836,15 @@ def _recover_source_explicit_objective_factors(
             )
         )
     payload["source_refs"] = source_refs
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _canonical_objective_evidence_axes(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     objective: ResearchObjective,
     source_excerpts_by_locator: Mapping[tuple[str, str], str] | None = None,
-) -> ExtractedEvidenceDraft:
+) -> SourceObservation:
     if draft.selection_status == "failed":
         return draft
 
@@ -1860,11 +1953,11 @@ def _canonical_objective_evidence_axes(
         and len(canonical_variables) == 1
     ):
         payload["attribution_scope"] = "isolated_effect"
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    return SourceObservation.from_mapping(payload)
 
 
 def _resolve_source_defined_objective_axis(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     source_label: Any,
     objective_axes: tuple[str, ...],
@@ -1975,7 +2068,7 @@ def _resolve_source_defined_objective_axis(
 
 
 def _source_excerpts_by_locator(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
@@ -2046,7 +2139,7 @@ def _source_text_mentions_value(text: str, value: Any) -> bool:
 
 
 def _canonical_evidence_source(
-    draft: ExtractedEvidenceDraft,
+    draft: SourceObservation,
     *,
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
@@ -2257,7 +2350,7 @@ def _source_excerpt_for_locator(
     return None
 
 
-def _canonical_evidence_role(draft: ExtractedEvidenceDraft) -> str:
+def _canonical_evidence_role(draft: SourceObservation) -> str:
     role = _text(draft.evidence_role)
     if role in {
         "direct_result",

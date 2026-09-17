@@ -1,15 +1,22 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
+	import IconButton from '../../../_shared/IconButton.svelte';
+	import { GitBranch } from '@lucide/svelte';
 
 	export let collectionId = '';
 	export let objectiveId = '';
 	export let title = '';
+	export let disabled = false;
+	export let onOpenTree: () => void = () => {};
 </script>
 
 <header class="conversation-header">
 	<div class="conversation-header-inner">
 		{#if title}<h2 {title}>{title}</h2>{/if}
+		<IconButton label={$t('researchAgent.tree.title')} {disabled} onClick={onOpenTree}>
+			<GitBranch size={17} />
+		</IconButton>
 		{#if objectiveId}
 			<a
 				class="objective-link"
@@ -30,7 +37,7 @@
 		flex: 0 0 auto;
 		align-items: center;
 		min-height: 44px;
-		padding: 8px 32px;
+		padding: 6px 32px;
 		box-sizing: border-box;
 	}
 

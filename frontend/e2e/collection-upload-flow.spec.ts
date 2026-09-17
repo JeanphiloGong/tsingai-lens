@@ -203,7 +203,10 @@ test('ready papers remain usable while other papers process or fail', async ({ p
 	await expect(uploadButton).toBeEnabled();
 	await expect(page.getByText('Parsing this paper.')).toBeVisible();
 	await page.getByText('1 paper(s) need attention', { exact: true }).click();
-	await expect(page.getByText('The PDF could not be parsed.')).toBeVisible();
+	await expect(
+		page.getByText('Paper preparation failed. Retry this paper when ready.')
+	).toBeVisible();
+	await expect(page.getByText('The PDF could not be parsed.')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Retry' }).click();
 	await expect(page.getByText('1 paper preparation run(s) queued.')).toBeVisible();
 	expect(requests.preparationRequests).toEqual([

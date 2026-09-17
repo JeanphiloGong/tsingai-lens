@@ -14,20 +14,23 @@ from threading import Lock
 from time import monotonic
 from typing import Any
 
+from openai import APIConnectionError, APIStatusError
+
 from application.core.objectives import property_matching
-from application.core.objectives.discovery.study_window import (
-    PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT,
-    PaperResearchMapExtractor,
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
     StructuredPaperResearchRelationship,
     StructuredPaperResearchScope,
     StructuredReviewSynthesisMap,
+)
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT,
+    PaperResearchMapExtractor,
     _review_synthesis_only,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
 )
-from application.core.objectives.paper_map_aggregation import PaperMapSignalInput
 from application.core.objectives.paper_map_sources import PaperMapSourceSelector
 from domain.core import (
     PaperResearchMap,
@@ -40,14 +43,7 @@ from domain.core import (
 
 logger = logging.getLogger(__name__)
 
-_PAPER_MAP_RECOVERY_FRAGMENT_MIN_CHAR_LIMIT = 800
-_PAPER_MAP_RECOVERY_SPLIT_DEPTH_LIMIT = 2
-_PAPER_MAP_COMPACT_ATTEMPT_LIMIT = 2
-_PAPER_MAP_TRANSIENT_STRUCTURED_FAILURE_KINDS = {
-    "empty_response",
-    "malformed_json",
-    "no_json_object",
-}
+_PAPER_MAP_FRAGMENT_MIN_CHAR_LIMIT = 800
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS = 300
 _MIN_DOCUMENT_RECOVERY_CALLS = 4
@@ -105,7 +101,7 @@ class PaperMapExtractionService:
         paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: PaperMapExtractionBudget,
     ) -> tuple[
-        tuple[tuple[PaperResearchMap, ...], tuple[PaperMapSignalInput, ...]],
+        tuple[tuple[PaperResearchMap, ...], tuple[PaperResearchSignal, ...]],
         ...,
     ]:
         if len(payloads) <= 1 or self._max_extraction_concurrency() == 1:
@@ -229,433 +225,68 @@ class PaperMapExtractionService:
         payload: Mapping[str, Any],
         paper_map_extractor: PaperResearchMapExtractor,
         extraction_budget: PaperMapExtractionBudget,
-        attempt: int = 1,
-        content_split_depth: int = 0,
-    ) -> tuple[tuple[PaperResearchMap, ...], tuple[PaperMapSignalInput, ...]]:
-        if not extraction_budget.reserve(recovery=attempt > 1):
-            failure_kind = extraction_budget.failure_kind or "recovery_budget_exhausted"
-            logger.warning(
-                "Paper map document budget exhausted; preserving partial coverage "
-                "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                "source_unit_count=%s failure_kind=%s recovery_calls=%s "
-                "max_recovery_calls=%s",
-                collection_id,
-                document_id,
-                payload.get("window_id"),
-                attempt,
-                len(payload.get("source_units") or ()),
-                failure_kind,
-                extraction_budget.recovery_calls,
-                extraction_budget.max_recovery_calls,
-            )
-            return (
-                (
-                    self._failed_source_unit_map(
-                        document_id=document_id,
-                        payload=payload,
-                        failure_kind=failure_kind,
-                    ),
-                ),
-                (),
-            )
-        try:
-            parsed = paper_map_extractor.extract(dict(payload))
-            window_map, window_signals = self._resolve_window_result(
-                document_id=document_id,
-                payload=payload,
-                parsed=parsed,
-            )
-            return (window_map,), window_signals
-        except Exception as exc:  # noqa: BLE001
-            source_units = tuple(
-                unit
-                for unit in payload.get("source_units") or ()
-                if isinstance(unit, Mapping)
-            )
-            failure_kind = self._single_source_recovery_kind(exc)
-            if (
-                len(source_units) > 1
-                and failure_kind is not None
-                and callable(
-                    getattr(paper_map_extractor, "extract_source_signals", None)
-                )
-            ):
-                return self._recover_source_units_through_compact_signals(
-                    collection_id=collection_id,
-                    document_id=document_id,
-                    payload=payload,
-                    source_units=source_units,
-                    paper_map_extractor=paper_map_extractor,
-                    extraction_budget=extraction_budget,
-                    attempt=attempt,
-                    full_failure_kind=failure_kind,
-                )
-            # Splitting is useful only when the provider returned a known
-            # density-shaped structured failure.  A programming or semantic
-            # error must not fan out into repeated calls for every Source.
-            if len(source_units) > 1 and failure_kind is not None:
-                logger.warning(
-                    "Paper map batch failed; splitting retry "
-                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                    "source_unit_count=%s error=%s",
-                    collection_id,
-                    document_id,
-                    payload.get("window_id"),
-                    attempt,
-                    len(source_units),
-                    exc,
-                )
-                midpoint = len(source_units) // 2
-                child_maps: list[PaperResearchMap] = []
-                child_signals: list[PaperMapSignalInput] = []
-                for branch, child_units in (
-                    ("left", source_units[:midpoint]),
-                    ("right", source_units[midpoint:]),
-                ):
-                    retry_maps, retry_signals = self._extract_window_batch(
-                        collection_id=collection_id,
-                        document_id=document_id,
-                        payload=self._payload_with_source_units(
-                            payload,
-                            source_units=child_units,
-                            suffix=f"retry-{branch}",
-                        ),
-                        paper_map_extractor=paper_map_extractor,
-                        extraction_budget=extraction_budget,
-                        attempt=attempt + 1,
-                    )
-                    child_maps.extend(retry_maps)
-                    child_signals.extend(retry_signals)
-                return tuple(child_maps), tuple(child_signals)
+    ) -> tuple[tuple[PaperResearchMap, ...], tuple[PaperResearchSignal, ...]]:
+        request_count = 0
+        budget_failure_kind = None
 
-            final_error = exc
-            final_failure_kind = failure_kind
-            if (
-                len(source_units) == 1
-                and failure_kind is not None
-                and content_split_depth == 0
-            ):
-                compact_result = self._recover_single_source_through_compact_signals(
-                    collection_id=collection_id,
-                    document_id=document_id,
-                    payload=payload,
-                    paper_map_extractor=paper_map_extractor,
-                    extraction_budget=extraction_budget,
-                    attempt=attempt,
-                    full_failure_kind=failure_kind,
-                )
-                if compact_result is not None:
-                    return compact_result
-            if (
-                len(source_units) == 1
-                and failure_kind is not None
-            ):
-                fragment_result = self._recover_single_source_through_fragments(
-                    collection_id=collection_id,
-                    document_id=document_id,
-                    payload=payload,
-                    source_unit=source_units[0],
-                    paper_map_extractor=paper_map_extractor,
-                    extraction_budget=extraction_budget,
-                    attempt=attempt,
-                    content_split_depth=content_split_depth,
-                    failure_kind=failure_kind,
-                )
-                if fragment_result is not None:
-                    return fragment_result
+        def before_request() -> float:
+            nonlocal request_count, budget_failure_kind
+            if not extraction_budget.reserve(recovery=request_count > 0):
+                budget_failure_kind = extraction_budget.failure_kind
+                raise RuntimeError(budget_failure_kind)
+            request_count += 1
+            return max(0.001, extraction_budget.deadline - monotonic())
 
-            logger.warning(
-                "Paper map Source-unit extraction failed permanently "
-                "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                "source_unit_count=%s error=%s failure_kind=%s",
-                collection_id,
-                document_id,
-                payload.get("window_id"),
-                attempt,
-                len(source_units),
-                final_error,
-                final_failure_kind or "non_recoverable",
-            )
-            return (
-                (
-                    self._failed_source_unit_map(
-                        document_id=document_id,
-                        payload=payload,
-                        failure_kind=final_failure_kind,
-                    ),
-                ),
-                (),
-            )
-
-    def _recover_source_units_through_compact_signals(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        payload: Mapping[str, Any],
-        source_units: tuple[Mapping[str, Any], ...],
-        paper_map_extractor: PaperResearchMapExtractor,
-        extraction_budget: PaperMapExtractionBudget,
-        attempt: int,
-        full_failure_kind: str,
-    ) -> tuple[tuple[PaperResearchMap, ...], tuple[PaperMapSignalInput, ...]]:
-        recovered_maps: list[PaperResearchMap] = []
-        recovered_signals: list[PaperMapSignalInput] = []
-        for position, source_unit in enumerate(source_units, start=1):
-            singleton_payload = self._payload_with_source_units(
-                payload,
-                source_units=(source_unit,),
-                suffix=f"compact-{position:02d}",
-            )
-            recovered = self._recover_single_source_through_compact_signals(
-                collection_id=collection_id,
-                document_id=document_id,
-                payload=singleton_payload,
-                paper_map_extractor=paper_map_extractor,
-                extraction_budget=extraction_budget,
-                attempt=attempt + 1,
-                full_failure_kind=full_failure_kind,
-            )
-            if recovered is None:
-                recovered = self._recover_single_source_through_fragments(
-                    collection_id=collection_id,
-                    document_id=document_id,
-                    payload=singleton_payload,
-                    source_unit=source_unit,
-                    paper_map_extractor=paper_map_extractor,
-                    extraction_budget=extraction_budget,
-                    attempt=attempt + 1,
-                    content_split_depth=0,
-                    failure_kind=f"compact_{full_failure_kind}",
-                )
-                if recovered is None:
-                    recovered = (
-                        (
-                            self._failed_source_unit_map(
-                                document_id=document_id,
-                                payload=singleton_payload,
-                                failure_kind="compact_unavailable",
-                            ),
-                        ),
-                        (),
-                    )
-            maps, signals = recovered
-            recovered_maps.extend(maps)
-            recovered_signals.extend(signals)
-        logger.warning(
-            "Paper map batch recovered through source-local signals "
-            "collection_id=%s document_id=%s window_id=%s source_unit_count=%s "
-            "full_failure_kind=%s",
-            collection_id,
-            document_id,
-            payload.get("window_id"),
-            len(source_units),
-            full_failure_kind,
-        )
-        return tuple(recovered_maps), tuple(recovered_signals)
-
-    def _recover_single_source_through_compact_signals(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        payload: Mapping[str, Any],
-        paper_map_extractor: PaperResearchMapExtractor,
-        extraction_budget: PaperMapExtractionBudget,
-        attempt: int,
-        full_failure_kind: str,
-    ) -> (
-        tuple[tuple[PaperResearchMap, ...], tuple[PaperMapSignalInput, ...]] | None
-    ):
-        extract_source_signals = getattr(
-            paper_map_extractor,
-            "extract_source_signals",
-            None,
-        )
-        if not callable(extract_source_signals):
-            return None
-
-        final_error: Exception = RuntimeError(full_failure_kind)
-        final_failure_kind = f"compact_{full_failure_kind}"
-        final_compact_failure_kind: str | None = None
-        for compact_attempt in range(
-            1,
-            _PAPER_MAP_COMPACT_ATTEMPT_LIMIT + 1,
-        ):
-            if not extraction_budget.reserve(recovery=True):
-                final_failure_kind = (
-                    extraction_budget.failure_kind or "recovery_budget_exhausted"
-                )
-                final_error = RuntimeError(final_failure_kind)
-                final_compact_failure_kind = None
-                break
+        failure_kind = None
+        for attempt in range(2):
             try:
-                compact = extract_source_signals(dict(payload))
-                fallback_warning = (
-                    "Paper-scope mapping could not produce valid structured output "
-                    "for one Source; retained explicit source-local signals for paper "
-                    "reconciliation."
-                )
-                compact = compact.model_copy(
-                    update={
-                        "warnings": [fallback_warning, *compact.warnings][:2],
-                    }
+                parsed = paper_map_extractor.extract(
+                    dict(payload), before_request=before_request,
                 )
                 window_map, window_signals = self._resolve_window_result(
-                    document_id=document_id,
-                    payload=payload,
-                    parsed=compact,
+                    document_id=document_id, payload=payload, parsed=parsed,
                 )
-                logger.warning(
-                    "Paper map Source recovered through source-local signals "
-                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                    "compact_attempt=%s source_unit_count=1 full_failure_kind=%s "
-                    "signal_count=%s",
-                    collection_id,
-                    document_id,
-                    payload.get("window_id"),
-                    attempt,
-                    compact_attempt,
-                    full_failure_kind,
-                    len(compact.unresolved_signals),
+                logger.info(
+                    "Paper map reading finished collection_id=%s document_id=%s "
+                    "window_id=%s reading_round=%s source_unit_ids=%s requests=%s",
+                    collection_id, document_id, payload.get("window_id"),
+                    payload.get("reading_round", 1),
+                    [unit.get("source_unit_id") for unit in payload.get("source_units") or ()],
+                    request_count,
                 )
                 return (window_map,), window_signals
-            except Exception as compact_exc:  # noqa: BLE001
-                compact_failure_kind = self._single_source_recovery_kind(compact_exc)
-                final_error = compact_exc
-                final_compact_failure_kind = compact_failure_kind
-                final_failure_kind = (
-                    f"compact_{compact_failure_kind}"
-                    if compact_failure_kind
-                    else "compact_non_recoverable"
+            except Exception as exc:
+                failure_kind = (
+                    budget_failure_kind
+                    or self._extraction_failure_kind(exc)
+                    or type(exc).__name__
                 )
-                will_retry = (
-                    compact_attempt < _PAPER_MAP_COMPACT_ATTEMPT_LIMIT
-                    and compact_failure_kind
-                    in _PAPER_MAP_TRANSIENT_STRUCTURED_FAILURE_KINDS
-                )
-                logger.warning(
-                    "Paper map compact Source recovery failed "
-                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                    "compact_attempt=%s compact_attempt_limit=%s failure_kind=%s "
-                    "will_retry=%s error=%s",
-                    collection_id,
-                    document_id,
-                    payload.get("window_id"),
-                    attempt,
-                    compact_attempt,
-                    _PAPER_MAP_COMPACT_ATTEMPT_LIMIT,
-                    compact_failure_kind or "non_recoverable",
-                    will_retry,
-                    compact_exc,
-                )
-                if will_retry:
+                if attempt == 0 and failure_kind == "provider_unavailable":
                     continue
+                logger.warning(
+                    "Paper map reading incomplete collection_id=%s document_id=%s "
+                    "window_id=%s reading_round=%s source_unit_ids=%s "
+                    "requests=%s failure_kind=%s",
+                    collection_id, document_id, payload.get("window_id"),
+                    payload.get("reading_round", 1),
+                    [unit.get("source_unit_id") for unit in payload.get("source_units") or ()],
+                    request_count, failure_kind,
+                    exc_info=True,
+                )
                 break
-
-        source_units = tuple(
-            unit
-            for unit in payload.get("source_units") or ()
-            if isinstance(unit, Mapping)
-        )
-        if (
-            final_compact_failure_kind is not None
-            and len(source_units) == 1
-            and self._split_single_source_unit_for_retry(source_units[0])
-        ):
-            logger.warning(
-                "Paper map compact Source recovery remains technically unreadable; "
-                "allowing bounded content fragmentation collection_id=%s "
-                "document_id=%s window_id=%s attempt=%s failure_kind=%s error=%s",
-                collection_id,
-                document_id,
-                payload.get("window_id"),
-                attempt,
-                final_compact_failure_kind,
-                final_error,
-            )
-            return None
-
-        logger.warning(
-            "Paper map Source-unit compact recovery failed permanently "
-            "collection_id=%s document_id=%s window_id=%s attempt=%s "
-            "source_unit_count=1 error=%s failure_kind=%s",
-            collection_id,
-            document_id,
-            payload.get("window_id"),
-            attempt,
-            final_error,
-            final_failure_kind,
-        )
         return (
-            (
-                self._failed_source_unit_map(
-                    document_id=document_id,
-                    payload=payload,
-                    failure_kind=final_failure_kind,
-                ),
-            ),
+            (self._failed_source_unit_map(
+                document_id=document_id, payload=payload, failure_kind=failure_kind,
+            ),),
             (),
         )
 
-    def _recover_single_source_through_fragments(
-        self,
-        *,
-        collection_id: str,
-        document_id: str,
-        payload: Mapping[str, Any],
-        source_unit: Mapping[str, Any],
-        paper_map_extractor: PaperResearchMapExtractor,
-        extraction_budget: PaperMapExtractionBudget,
-        attempt: int,
-        content_split_depth: int,
-        failure_kind: str,
-    ) -> tuple[tuple[PaperResearchMap, ...], tuple[PaperMapSignalInput, ...]] | None:
-        if content_split_depth >= _PAPER_MAP_RECOVERY_SPLIT_DEPTH_LIMIT:
-            return None
-        fragments = self._split_single_source_unit_for_retry(source_unit)
-        if not fragments:
-            return None
-
-        logger.warning(
-            "Paper map singleton failed; splitting Source content "
-            "collection_id=%s document_id=%s window_id=%s attempt=%s "
-            "content_split_depth=%s failure_kind=%s",
-            collection_id,
-            document_id,
-            payload.get("window_id"),
-            attempt,
-            content_split_depth,
-            failure_kind,
-        )
-        fragment_maps: list[PaperResearchMap] = []
-        fragment_signals: list[PaperMapSignalInput] = []
-        for branch, fragment in zip(("left", "right"), fragments, strict=True):
-            retry_maps, retry_signals = self._extract_window_batch(
-                collection_id=collection_id,
-                document_id=document_id,
-                payload=self._payload_with_source_units(
-                    payload,
-                    source_units=(fragment,),
-                    suffix=f"content-{branch}",
-                ),
-                paper_map_extractor=paper_map_extractor,
-                extraction_budget=extraction_budget,
-                attempt=attempt + 1,
-                content_split_depth=content_split_depth + 1,
-            )
-            fragment_maps.extend(retry_maps)
-            fragment_signals.extend(retry_signals)
-        return (
-            self._collapse_single_source_fragment_coverage(
-                payload=payload,
-                maps=tuple(fragment_maps),
-            ),
-            tuple(fragment_signals),
-        )
-
     @staticmethod
-    def _single_source_recovery_kind(error: Exception) -> str | None:
+    def _extraction_failure_kind(error: Exception) -> str | None:
+        if isinstance(error, (APIConnectionError, TimeoutError)):
+            return "provider_unavailable"
+        if isinstance(error, APIStatusError):
+            return "provider_unavailable" if error.status_code >= 500 or error.status_code == 429 else None
         if isinstance(error, StructuredOutputSaturatedError):
             return "output_saturated"
         if isinstance(error, json.JSONDecodeError):
@@ -672,7 +303,7 @@ class PaperMapExtractionService:
         return None
 
     @classmethod
-    def _split_single_source_unit_for_retry(
+    def _split_oversized_source_unit(
         cls,
         source_unit: Mapping[str, Any],
     ) -> tuple[dict[str, Any], ...]:
@@ -692,7 +323,7 @@ class PaperMapExtractionService:
         else:
             return ()
 
-        minimum = _PAPER_MAP_RECOVERY_FRAGMENT_MIN_CHAR_LIMIT
+        minimum = _PAPER_MAP_FRAGMENT_MIN_CHAR_LIMIT
         if len(text) < minimum * 2:
             return ()
         midpoint = len(text) // 2
@@ -759,74 +390,6 @@ class PaperMapExtractionService:
         raise ValueError("paper map structured Source path cannot be replaced")
 
     @staticmethod
-    def _collapse_single_source_fragment_coverage(
-        *,
-        payload: Mapping[str, Any],
-        maps: tuple[PaperResearchMap, ...],
-    ) -> tuple[PaperResearchMap, ...]:
-        source_units = [
-            unit
-            for unit in payload.get("source_units") or ()
-            if isinstance(unit, Mapping)
-        ]
-        if len(source_units) != 1:
-            raise ValueError("content-fragment recovery requires one Source unit")
-        source_unit = source_units[0]
-        source_unit_id = str(source_unit.get("source_unit_id") or "")
-        coverage = tuple(
-            item for paper_map in maps for item in paper_map.source_unit_coverage
-        )
-        if not coverage or any(
-            item.source_unit_id != source_unit_id for item in coverage
-        ):
-            raise ValueError(
-                "content-fragment recovery produced invalid Source coverage"
-            )
-
-        statuses = {item.status for item in coverage}
-        if PaperSourceUnitCoverageStatus.EXTRACTION_FAILED in statuses:
-            status = PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
-            reason = next(
-                (
-                    item.reason
-                    for item in coverage
-                    if item.status is status and item.reason
-                ),
-                "Paper map Source-unit extraction remained incomplete after "
-                "bounded content splitting.",
-            )
-        elif PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED in statuses:
-            status = PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED
-            reason = None
-        elif PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED in statuses:
-            status = PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED
-            reason = None
-        else:
-            status = PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
-            reason = (
-                "No study relationship or unresolved signal was emitted for this "
-                "Source unit."
-            )
-
-        parent_coverage = PaperSourceUnitCoverage.from_mapping(
-            {
-                "source_unit_id": source_unit_id,
-                "window_id": payload.get("window_id"),
-                "source_kind": source_unit.get("source_kind"),
-                "source_ref": source_unit.get("source_ref"),
-                "status": status.value,
-                "reason": reason,
-            }
-        )
-        return tuple(
-            replace(
-                paper_map,
-                source_unit_coverage=(parent_coverage,) if position == 0 else (),
-            )
-            for position, paper_map in enumerate(maps)
-        )
-
-    @staticmethod
     def _payload_with_source_units(
         payload: Mapping[str, Any],
         *,
@@ -862,11 +425,23 @@ class PaperMapExtractionService:
             if isinstance(unit, Mapping)
         )
         if len(source_units) <= 1:
-            raise ValueError(
-                "one PaperResearchMap Source unit exceeds the complete prompt-token limit: "
-                f"window_id={candidate.get('window_id')} "
-                f"prompt_tokens={prompt_tokens} "
-                f"limit={PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT}"
+            fragments = (
+                self._split_oversized_source_unit(source_units[0])
+                if source_units else ()
+            )
+            if not fragments:
+                raise ValueError(
+                    "one PaperResearchMap Source unit exceeds the complete prompt-token limit: "
+                    f"window_id={candidate.get('window_id')} "
+                    f"prompt_tokens={prompt_tokens} "
+                    f"limit={PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT}"
+                )
+            source_units = tuple(
+                {
+                    **fragment,
+                    "source_unit_id": f"{fragment['source_unit_id']}-fragment-{position:02d}",
+                }
+                for position, fragment in enumerate(fragments, start=1)
             )
 
         logger.info(
@@ -901,17 +476,13 @@ class PaperMapExtractionService:
         document_id: str,
         payload: Mapping[str, Any],
         parsed: StructuredPaperResearchMap,
-    ) -> tuple[PaperResearchMap, tuple[PaperMapSignalInput, ...]]:
+    ) -> tuple[PaperResearchMap, tuple[PaperResearchSignal, ...]]:
         document_profile = payload.get("document_profile")
         is_review = isinstance(document_profile, Mapping) and (
             str(document_profile.get("doc_type") or "").strip() == "review"
         )
         if is_review:
             parsed = _review_synthesis_only(parsed)
-        if parsed.output_saturated:
-            raise StructuredOutputSaturatedError(
-                "PaperResearchMap model reported that the bounded output omitted visible facts"
-            )
         source_units = {
             str(unit.get("source_unit_id") or ""): unit
             for unit in payload.get("source_units") or ()
@@ -980,6 +551,15 @@ class PaperMapExtractionService:
             relationship_source_unit_ids=relationship_source_unit_ids,
             signal_source_unit_ids=signal_source_unit_ids,
         )
+        if parsed.output_saturated:
+            source_unit_coverage = tuple(
+                replace(
+                    item,
+                    status=PaperSourceUnitCoverageStatus.EXTRACTION_FAILED,
+                    reason="Bounded Paper Map output omitted visible scope; retained supported relationships.",
+                )
+                for item in source_unit_coverage
+            )
         review_synthesis = (
             self._review_synthesis_from_window_result(
                 parsed.review_synthesis,
@@ -994,6 +574,7 @@ class PaperMapExtractionService:
                     "document_id": document_id,
                     "doc_role": parsed.doc_role,
                     "studies": [item.to_record() for item in studies],
+                    "unresolved_signals": [item.to_record() for item in signals],
                     "evidence_density": parsed.evidence_density,
                     "confidence": parsed.confidence,
                     "warnings": parsed.warnings,
@@ -1232,7 +813,7 @@ class PaperMapExtractionService:
         *,
         document_id: str,
         source_units: Mapping[str, Mapping[str, Any]],
-    ) -> PaperMapSignalInput:
+    ) -> PaperResearchSignal:
         source_unit_ids = signal.get("source_unit_ids")
         if not isinstance(source_unit_ids, list):
             raise ValueError("paper research signal requires Source-unit ids")
@@ -1244,25 +825,12 @@ class PaperMapExtractionService:
             raise ValueError(
                 "paper research signal contains an unknown Source-unit id"
             )
-        domain_signal = PaperResearchSignal.from_mapping(
+        return PaperResearchSignal.from_mapping(
             {
                 **dict(signal),
                 "document_id": document_id,
                 "source_refs": cls._source_refs_from_units(resolved),
             }
-        )
-        return PaperMapSignalInput(
-            signal=domain_signal,
-            source_contexts=tuple(
-                {
-                    "source_unit_id": str(unit.get("source_unit_id") or ""),
-                    "source_kind": str(unit.get("source_kind") or ""),
-                    "source_ref": str(unit.get("source_ref") or ""),
-                    "section_path": str(unit.get("section_path") or ""),
-                    "excerpt": cls._source_excerpt(unit.get("content")),
-                }
-                for unit in resolved
-            ),
         )
 
     @staticmethod
@@ -1280,10 +848,6 @@ class PaperMapExtractionService:
             seen.add(key)
             refs.append({"source_kind": source_kind, "source_ref": source_ref})
         return refs
-
-    @staticmethod
-    def _source_excerpt(content: Any) -> str:
-        return PaperMapExtractionService._source_content_text(content)[:800]
 
     @staticmethod
     def _source_content_text(content: Any) -> str:
@@ -1336,5 +900,4 @@ class PaperMapExtractionService:
 __all__ = [
     "PaperMapExtractionBudget",
     "PaperMapExtractionService",
-    "PaperMapSignalInput",
 ]

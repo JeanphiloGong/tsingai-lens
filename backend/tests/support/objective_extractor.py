@@ -2,29 +2,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.analysis.evidence_routing import (
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
-)
+from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
 )
 from application.core.objectives.analysis.source_extraction import (
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+    EvidenceExtractionModelOutput,
+    EvidenceExtractionsModelOutput,
 )
 from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
+    PaperFrameBatchResult,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    StructuredAxisCanonicalizationPlan,
+    AxisCanonicalizationPlanModelOutput,
 )
-from application.core.objectives.discovery.signal_reconciliation import (
-    StructuredPaperSignalReconciliation,
+from application.core.objectives.discovery.paper_understanding.paper_map_results import (
+    StructuredPaperResearchMap,
 )
-from application.core.objectives.discovery.study_window import StructuredPaperResearchMap
 
 
 def source_unit_ids_from_payload(payload: dict[str, Any]) -> list[str]:
@@ -69,7 +64,6 @@ class FakeObjectiveExtractor:
         self.skim_payloads: list[dict[str, Any]] = []
         self.canonicalization_payloads: list[dict[str, Any]] = []
         self.frame_payloads: list[dict[str, Any]] = []
-        self.route_payloads: list[dict[str, Any]] = []
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
 
@@ -83,15 +77,17 @@ class FakeObjectiveExtractor:
     def extract_document_profile(
         self,
         payload: dict[str, Any],
-    ) -> StructuredDocumentProfile:
+    ) -> DocumentProfileModelOutput:
         title = str(payload.get("title") or "")
-        return StructuredDocumentProfile(
+        return DocumentProfileModelOutput(
             doc_type="review" if "Review" in title else "experimental",
             profile_warnings=[],
             confidence=0.9,
         )
 
-    def extract(self, payload: dict[str, Any]) -> StructuredPaperResearchMap:
+    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        if before_request is not None:
+            before_request()
         self.skim_payloads.append(payload)
         title = str(payload.get("title") or "")
         if "Review" in title:
@@ -132,18 +128,13 @@ class FakeObjectiveExtractor:
             warnings=[],
         )
 
-    def reconcile(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        return StructuredPaperSignalReconciliation()
 
     def classify(
         self,
         payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
+    ) -> AxisCanonicalizationPlanModelOutput:
         self.canonicalization_payloads.append(payload)
-        return StructuredAxisCanonicalizationPlan(
+        return AxisCanonicalizationPlanModelOutput(
             decisions=[
                 {
                     "pair_id": pair["pair_id"],
@@ -157,7 +148,7 @@ class FakeObjectiveExtractor:
     def screen_batch(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
+    ) -> PaperFrameBatchResult:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
@@ -169,7 +160,7 @@ class FakeObjectiveExtractor:
             if unit.get("source_unit_id")
         ]
         if document_id in objective.get("excluded_document_ids", ()):
-            return StructuredPaperFrameBatch(
+            return PaperFrameBatchResult(
                 relevance="irrelevant",
                 paper_role="review",
                 screening_note="Excluded by objective discovery.",
@@ -193,7 +184,7 @@ class FakeObjectiveExtractor:
             if unit.get("source_kind") == "section"
             and source_unit_id not in relevant_source_unit_ids
         )
-        return StructuredPaperFrameBatch(
+        return PaperFrameBatchResult(
             relevance="high",
             paper_role="primary_experiment",
             screening_note="Paper directly supports the active research objective.",
@@ -231,81 +222,17 @@ class FakeObjectiveExtractor:
                 source_unit_ids.append(str(unit["source_unit_id"]))
         return source_unit_ids
 
-    def route_source(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
-        self.route_payloads.append(payload)
-        objective = payload["objective"]
-        if not isinstance(payload.get("current_source"), dict):
-            raise ValueError("objective evidence routing requires current_source")
-        candidates = [payload["current_source"]]
-        routes: list[StructuredEvidenceSelection] = []
-        for candidate in candidates:
-            if candidate["frame_status"] == "excluded":
-                routes.append(
-                    StructuredEvidenceSelection(
-                        role="low_value_or_irrelevant",
-                        extractable=False,
-                        confidence=0.7,
-                    )
-                )
-                continue
-            if candidate["source_kind"] == "text_window":
-                routes.append(
-                    StructuredEvidenceSelection(
-                        role="process_or_treatment",
-                        extractable=True,
-                        confidence=0.72,
-                    )
-                )
-                continue
-            table_schema = candidate.get("table_schema") or {}
-            column_headers = (
-                table_schema.get("column_headers")
-                if isinstance(table_schema.get("column_headers"), list)
-                else candidate.get("column_headers")
-                if isinstance(candidate.get("column_headers"), list)
-                else []
-            )
-            text = " ".join(
-                str(value or "")
-                for value in (
-                    candidate.get("caption_text"),
-                    candidate.get("heading_path"),
-                    " ".join(column_headers),
-                )
-            ).lower()
-            outcomes = [
-                str(axis or "").lower()
-                for axis in objective.get("outcomes", ())
-                if str(axis or "").strip()
-            ]
-            role = (
-                "current_experimental_evidence"
-                if any(axis in text for axis in outcomes)
-                else "process_or_treatment"
-            )
-            routes.append(
-                StructuredEvidenceSelection(
-                    role=role,
-                    extractable=True,
-                    confidence=0.82,
-                )
-            )
-        return StructuredEvidenceSelections(selections=routes)
-
     def extract_source(
         self,
         payload: dict[str, Any],
-    ) -> StructuredEvidenceExtractions:
+    ) -> EvidenceExtractionsModelOutput:
         self.unit_payloads.append(payload)
         route = payload["evidence_route"]
         source = payload["source"]
         if route["source_kind"] == "table":
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="direct_result",
                         changed_variables=[
                             {
@@ -350,9 +277,9 @@ class FakeObjectiveExtractor:
                 ]
             )
         if source.get("text"):
-            return StructuredEvidenceExtractions(
+            return EvidenceExtractionsModelOutput(
                 extractions=[
-                    StructuredEvidenceExtraction(
+                    EvidenceExtractionModelOutput(
                         evidence_role="condition_context",
                         attribution_scope="descriptive_only",
                         scientific_context={
@@ -381,7 +308,7 @@ class FakeObjectiveExtractor:
                     )
                 ]
             )
-        return StructuredEvidenceExtractions()
+        return EvidenceExtractionsModelOutput()
 
     def judge_result_set(
         self,

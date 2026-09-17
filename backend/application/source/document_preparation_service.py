@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, cast
 
 import pandas as pd
 
-from application.core.document_profiles.prompts import DOCUMENT_PROFILE_PROMPT_VERSION
+from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION
 from application.core.document_profiles.service import DocumentProfileService
 from application.pipeline import PipelineRunService
 from application.pipeline.pipeline_run_service import document_preparation_error_message

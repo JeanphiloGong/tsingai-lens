@@ -15,7 +15,7 @@ function jsonResponse(body: unknown) {
 
 beforeEach(() => {
 	fetchMock.mockReset();
-	fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
+	fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ items: [] })));
 	vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -120,7 +120,8 @@ const evidence = [
 		resolution_status: 'resolved',
 		failure_reason: null,
 		confidence: 0.9,
-		supports_finding: true
+		supports_finding: true,
+		eligible_for_finding_authoring: true
 	}
 ];
 
@@ -545,48 +546,50 @@ describe('single Finding workbench', () => {
 	});
 
 	it('restores the latest feedback and keeps the submitted decision visible', async () => {
-		fetchMock
-			.mockResolvedValueOnce(
-				jsonResponse({
-					items: [
-						{
-							feedback_id: 'feedback-old',
-							collection_id: 'col-1',
-							objective_id: 'obj-1',
-							analysis_version: 1,
-							finding_id: 'finding-1',
-							review_status: 'correct',
-							issue_type: 'none',
-							note: 'Earlier review',
-							created_at: '2026-08-01T00:00:00+00:00'
-						},
-						{
-							feedback_id: 'feedback-latest',
-							collection_id: 'col-1',
-							objective_id: 'obj-1',
-							analysis_version: 1,
-							finding_id: 'finding-1',
-							review_status: 'partial',
-							issue_type: 'wrong_context',
-							note: 'Check the test condition.',
-							created_at: '2026-08-02T00:00:00+00:00'
-						}
-					]
-				})
-			)
-			.mockResolvedValueOnce(
-				jsonResponse({
-					feedback_id: 'feedback-new',
+		const saved = {
+			items: [
+				{
+					feedback_id: 'feedback-old',
 					collection_id: 'col-1',
 					objective_id: 'obj-1',
 					analysis_version: 1,
 					finding_id: 'finding-1',
-					review_status: 'incorrect',
-					issue_type: 'wrong_attribution',
-					note: 'Variables changed together.',
-					created_at: '2026-08-02T01:00:00+00:00'
-				})
-			);
+					review_status: 'correct',
+					issue_type: 'none',
+					note: 'Earlier review',
+					created_at: '2026-08-01T00:00:00+00:00'
+				},
+				{
+					feedback_id: 'feedback-latest',
+					collection_id: 'col-1',
+					objective_id: 'obj-1',
+					analysis_version: 1,
+					finding_id: 'finding-1',
+					review_status: 'partial',
+					issue_type: 'wrong_context',
+					note: 'Check the test condition.',
+					created_at: '2026-08-02T00:00:00+00:00'
+				}
+			]
+		};
+		fetchMock.mockImplementation((url: string, options?: RequestInit) => {
+			if (url.includes('/curation')) return Promise.resolve(jsonResponse({ items: [] }));
+			if (options?.method === 'POST')
+				return Promise.resolve(
+					jsonResponse({
+						feedback_id: 'feedback-new',
+						collection_id: 'col-1',
+						objective_id: 'obj-1',
+						analysis_version: 1,
+						finding_id: 'finding-1',
+						review_status: 'incorrect',
+						issue_type: 'wrong_attribution',
+						note: 'Variables changed together.',
+						created_at: '2026-08-02T01:00:00+00:00'
+					})
+				);
+			return Promise.resolve(jsonResponse(saved));
+		});
 		render(Workbench, { finding, evidence, collectionId: 'col-1' });
 
 		await browserPage.getByRole('button', { name: '反馈' }).click();
@@ -606,5 +609,101 @@ describe('single Finding workbench', () => {
 		await expect.element(status).toHaveValue('incorrect');
 		await expect.element(issue).toHaveValue('wrong_attribution');
 		await expect.element(note).toHaveValue('Variables changed together.');
+	});
+
+	it('reads the saved revision after remount while preserving the published conclusion', async () => {
+		const statement =
+			'Higher temperature increased strength only in the inspected alloy condition.';
+		fetchMock.mockImplementation((url: string) =>
+			Promise.resolve(
+				jsonResponse({
+					items: url.includes('/curation')
+						? [
+								{
+									curation_id: 'curation-1',
+									collection_id: 'col-1',
+									objective_id: 'obj-1',
+									analysis_version: 1,
+									finding_id: 'finding-1',
+									curated_status: 'limited',
+									curated_finding: { ...finding, statement },
+									reviewer: 'Researcher Chen',
+									note: 'Only the tested condition is supported.',
+									updated_at: '2026-09-10T08:00:00Z'
+								}
+							]
+						: []
+				})
+			)
+		);
+		const view = render(Workbench, { finding, evidence, collectionId: 'col-1' });
+		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(finding.statement, { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Reviewer: Researcher Chen', { exact: false }))
+			.toBeInTheDocument();
+		await view.unmount();
+		render(Workbench, { finding, evidence, collectionId: 'col-1' });
+		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
+		await browserPage.getByText('Revised scope and evidence', { exact: true }).click();
+		await expect
+			.element(browserPage.getByRole('region', { name: 'Saved review' }).getByRole('link').first())
+			.toHaveAttribute('href', expect.stringContaining('/documents/paper-1'));
+	});
+
+	it('shows a failed review read and permits a retry', async () => {
+		let unavailable = true;
+		fetchMock.mockImplementation((url: string) => {
+			if (url.includes('/curation') && unavailable) return Promise.reject(new Error('offline'));
+			return Promise.resolve(jsonResponse({ items: [] }));
+		});
+		render(Workbench, { finding, evidence, collectionId: 'col-1' });
+		await expect
+			.element(browserPage.getByRole('alert'))
+			.toHaveTextContent('Saved review could not be loaded');
+		unavailable = false;
+		await browserPage.getByRole('button', { name: 'Retry', exact: true }).click();
+		await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('No saved review', { exact: true }))
+			.toBeInTheDocument();
+	});
+
+	it('ignores a late saved review response after switching the analysis version', async () => {
+		let finishOldCuration!: (response: Response) => void;
+		fetchMock.mockImplementation((url: string) => {
+			if (url.includes('/curation') && url.includes('analysis_version=1')) {
+				return new Promise<Response>((resolve) => {
+					finishOldCuration = resolve;
+				});
+			}
+			return Promise.resolve(jsonResponse({ items: [] }));
+		});
+		const view = render(Workbench, { finding, evidence, collectionId: 'col-1' });
+		await expect.poll(() => finishOldCuration).toBeDefined();
+		await view.rerender({ finding: { ...finding, analysis_version: 2 } });
+		await expect
+			.element(browserPage.getByText('No saved review', { exact: true }))
+			.toBeInTheDocument();
+		finishOldCuration(
+			jsonResponse({
+				items: [
+					{
+						curation_id: 'old-curation',
+						curated_status: 'limited',
+						curated_finding: { ...finding, statement: 'Stale correction from version one' },
+						updated_at: '2026-09-10T08:00:00Z'
+					}
+				]
+			})
+		);
+		await expect
+			.element(browserPage.getByText('Stale correction from version one'))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('No saved review', { exact: true }))
+			.toBeInTheDocument();
 	});
 });

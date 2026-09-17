@@ -764,6 +764,121 @@ test.describe('page interaction audit', () => {
 		});
 	}
 
+	for (const width of [320, 768, 1440]) {
+		test(`previews the conversation tree and continues from a saved checkpoint at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const state = await mockMessageBranches(page, { checkpoint: true });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const open = page.getByRole('button', { name: 'Conversation branches', exact: true });
+			await open.click();
+			const dialog = page.getByRole('dialog', { name: 'Conversation branches' });
+			await expect(dialog).toBeVisible();
+			await dialog.locator('[data-node-id="question"]').click();
+			await expect(dialog.locator('.node-preview')).toContainText('Original comparison');
+			expect(state.sent).toHaveLength(0);
+			expect(state.requestIds).toHaveLength(0);
+			await expectNoHorizontalOverflow(page);
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `conversation-tree-preview-${width}.png`)
+				});
+			await dialog.press('Escape');
+			await expect(open).toBeFocused();
+			await open.click();
+			await dialog.locator('[data-node-id="question"]').click();
+			await dialog.getByRole('button', { name: 'Switch to this point' }).click();
+			await expect(page.getByText('Historical checkpoint', { exact: true })).toBeVisible();
+			await expect(page.getByTestId('assistant-message')).toHaveCount(1);
+			await expect(page.getByText('Check specimen orientation separately.')).toHaveCount(0);
+			await page.reload();
+			await expect(page.getByText('Historical checkpoint', { exact: true })).toBeVisible();
+			await sendAgentMessage(page, 'Compare only specimens with matched heat treatment.');
+			await expect(page.getByTestId('assistant-message').last()).toContainText(
+				'Revised comparison 1'
+			);
+			await expect(page.getByText('Historical checkpoint', { exact: true })).toHaveCount(0);
+			expect(state.sent).toHaveLength(1);
+			expect(state.branchModes).toEqual(['continue']);
+			await open.click();
+			await expect(dialog.locator('.tree-node')).toHaveCount(3);
+			const rootBox = await dialog.locator('[data-node-id="question"]').boundingBox();
+			const firstBranchBox = await dialog.locator('[data-node-id="later"]').boundingBox();
+			const secondBranchBox = await dialog
+				.locator('[data-node-id="branch_1-question"]')
+				.boundingBox();
+			expect(rootBox).not.toBeNull();
+			expect(firstBranchBox).not.toBeNull();
+			expect(secondBranchBox).not.toBeNull();
+			expect(rootBox!.y + rootBox!.height).toBeLessThan(firstBranchBox!.y);
+			expect(Math.abs(firstBranchBox!.y - secondBranchBox!.y)).toBeLessThan(3);
+			await dialog.getByRole('button', { name: 'Fit tree', exact: true }).click();
+			const zoom = dialog.getByLabel('Tree zoom', { exact: true });
+			await expect(zoom).toHaveText(/^\d+%$/);
+			const fittedZoom = Number((await zoom.textContent())!.replace('%', ''));
+			expect(fittedZoom).toBeGreaterThan(0);
+			const viewportBox = (await dialog.locator('.tree-viewport').boundingBox())!;
+			for (const node of await dialog.locator('.tree-node').all()) {
+				const box = (await node.boundingBox())!;
+				expect(box.x).toBeGreaterThanOrEqual(viewportBox.x - 1);
+				expect(box.x + box.width).toBeLessThanOrEqual(viewportBox.x + viewportBox.width + 1);
+				expect(box.y + box.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1);
+			}
+			await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
+			expect(Number((await zoom.textContent())!.replace('%', ''))).toBeGreaterThan(fittedZoom);
+			await dialog.getByRole('button', { name: 'Zoom out', exact: true }).click();
+			await expect(zoom).toHaveText(`${fittedZoom}%`);
+			await dialog.getByRole('button', { name: 'Fit tree', exact: true }).click();
+			await page.mouse.move(0, 0);
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `conversation-tree-branched-${width}.png`)
+				});
+			await dialog.locator('[data-node-id="later"]').click();
+			await dialog.getByRole('button', { name: 'Switch to this point' }).click();
+			await page.getByRole('button', { name: 'Return to latest' }).click();
+			await expect(page.getByText('Check specimen orientation separately.')).toBeVisible();
+			expect(errors).toEqual([]);
+		});
+	}
+
+	test('edits a tree node into a branch and retries tree loading without losing a draft', async ({
+		page
+	}) => {
+		const state = await mockMessageBranches(page, { failCreateOnce: true });
+		await page.goto(`/collections/${collectionId}/assistant`);
+		const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+		await composer.fill('Keep this separate question');
+		let fail = true;
+		await page.route('**/chat-sessions/*/tree', (route) =>
+			fail ? route.abort('failed') : route.fallback()
+		);
+		await page.getByRole('button', { name: 'Conversation branches', exact: true }).click();
+		const dialog = page.getByRole('dialog', { name: 'Conversation branches' });
+		await expect(dialog.getByRole('alert')).toBeVisible();
+		fail = false;
+		await dialog.getByRole('button', { name: 'Refresh branches' }).click();
+		await dialog.locator('[data-node-id="question"]').click();
+		await dialog.getByRole('button', { name: 'Edit and branch', exact: true }).click();
+		await dialog
+			.getByRole('textbox', { name: 'Edit message', exact: true })
+			.fill('Compare only tests performed at 293 K.');
+		await dialog.getByRole('button', { name: 'Create branch and send' }).click();
+		await expect(dialog.getByRole('alert')).toBeVisible();
+		await expect(dialog.getByRole('textbox', { name: 'Edit message', exact: true })).toHaveValue(
+			'Compare only tests performed at 293 K.'
+		);
+		await dialog.getByRole('button', { name: 'Create branch and send' }).click();
+		await expect(page.getByTestId('assistant-message')).toContainText('Revised comparison 1');
+		await expect(composer).toHaveValue('Keep this separate question');
+		expect(state.branchModes).toEqual(['revise', 'revise']);
+		expect(state.requestIds[0]).toBe(state.requestIds[1]);
+		expect(state.sent[0].source_contexts).toEqual([state.source]);
+	});
+
 	test('recovers a failed branch request and retries a question without an answer', async ({
 		page
 	}) => {
@@ -801,8 +916,36 @@ test.describe('page interaction audit', () => {
 			await expect(
 				page.getByRole('button', { name: 'Regenerate response', exact: true })
 			).toBeDisabled();
+			await page.getByRole('button', { name: 'Conversation branches', exact: true }).click();
+			const dialog = page.getByRole('dialog', { name: 'Conversation branches' });
+			await expect(dialog.getByRole('button', { name: 'Edit and branch' })).toBeDisabled();
+			await expect(dialog.locator('.node-preview')).toContainText(
+				condition === 'running' ? 'Working' : 'Awaiting approval'
+			);
 		});
 	}
+
+	test('opens the same conversation tree inside the document split workspace', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await mockMessageBranches(page, { checkpoint: true });
+		await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+		await page
+			.locator('.reader-header')
+			.getByRole('button', { name: /Ask research assistant/ })
+			.click();
+		await page
+			.locator('.agent-pane')
+			.getByRole('button', { name: 'Conversation branches' })
+			.click();
+		const dialog = page.getByRole('dialog', { name: 'Conversation branches' });
+		await expect(dialog.locator('.tree-node')).toHaveCount(2);
+		await dialog.locator('[data-node-id="question"]').click();
+		await dialog.getByRole('button', { name: 'Switch to this point' }).click();
+		await expect(
+			page.locator('.agent-pane').getByText('Historical checkpoint', { exact: true })
+		).toBeVisible();
+		await expect(page.locator('.document-reader-root')).toBeVisible();
+	});
 
 	for (const width of [320, 768, 1024, 1440]) {
 		test(`asks across selected papers in a persistent split workspace at ${width}px`, async ({
@@ -2574,6 +2717,7 @@ async function mockMessageBranches(
 		unanswered?: boolean;
 		failCreateOnce?: boolean;
 		condition?: 'running' | 'approval';
+		checkpoint?: boolean;
 	} = {}
 ) {
 	const question = 'Compare the tensile strengths reported for these LPBF specimens.';
@@ -2595,7 +2739,13 @@ async function mockMessageBranches(
 	};
 	const original = [
 		agentMessage('question', 'user', question, { source_contexts: [source] }),
-		...(options.unanswered ? [] : [agentMessage('answer', 'assistant', 'Original comparison')])
+		...(options.unanswered ? [] : [agentMessage('answer', 'assistant', 'Original comparison')]),
+		...(options.checkpoint
+			? [
+					agentMessage('later', 'user', 'What about specimen orientation?'),
+					agentMessage('later-answer', 'assistant', 'Check specimen orientation separately.')
+				]
+			: [])
 	];
 	const base = {
 		session_id: sessionId,
@@ -2607,38 +2757,81 @@ async function mockMessageBranches(
 	const sessions = new Map<string, Record<string, unknown>>([[sessionId, base]]);
 	const trajectories = new Map<string, ReturnType<typeof agentMessage>[]>([[sessionId, original]]);
 	const requestIds: string[] = [];
+	const branchModes: string[] = [];
+	const branchParents = new Map<string, string | null>();
 	const requests = new Map<string, string>();
 	const sent: Record<string, unknown>[] = [];
-	await page.addInitScript(() =>
+	await page.addInitScript(() => {
+		localStorage.setItem('lens.chatSession.user_1:col_123:documents', 'chat_1');
 		localStorage.setItem(
 			'lens.chatSession.user_1:col_123',
 			localStorage.getItem('lens.chatSession.user_1:col_123') || 'chat_1'
-		)
-	);
+		);
+	});
 	await page.route('**/api/v1/chat-sessions**', async (route) => {
 		const path = new URL(route.request().url()).pathname;
 		const method = route.request().method();
 		const parts = path.split('/');
 		const id = parts[4] || sessionId;
+		if (parts[5] === 'tree') {
+			const nodes = [...trajectories.entries()].flatMap(([owner, items]) => {
+				const start = owner === sessionId ? 0 : Number(sessions.get(owner)!.fork_position);
+				return items.flatMap((message, index) =>
+					message.role !== 'user' || index < start
+						? []
+						: [
+								{
+									message: { ...message, session_id: owner },
+									parent_message_id:
+										index > start
+											? items[index - 2].message_id
+											: (branchParents.get(owner) ?? null),
+									answer: items[index + 1]?.content ?? '',
+									status:
+										options.condition === 'running'
+											? 'running'
+											: options.condition === 'approval'
+												? 'approval_required'
+												: 'completed',
+									can_branch: !options.condition
+								}
+							]
+				);
+			});
+			return route.fulfill(
+				json({
+					root_session_id: sessionId,
+					active_path: trajectories
+						.get(id)!
+						.filter((item) => item.role === 'user')
+						.map((item) => item.message_id),
+					nodes
+				})
+			);
+		}
 		if (parts[5] === 'branches') {
 			const body = route.request().postDataJSON();
 			requestIds.push(body.request_id);
+			branchModes.push(body.mode ?? 'revise');
 			let branchId = requests.get(body.request_id);
 			if (!branchId) {
 				branchId = `branch_${requests.size + 1}`;
 				const originalMessage = trajectories
 					.get(id)!
 					.find((message) => message.message_id === body.message_id)!;
+				const forkPosition =
+					body.mode === 'continue' ? trajectories.get(id)!.indexOf(originalMessage) + 2 : 0;
+				branchParents.set(branchId, body.mode === 'continue' ? originalMessage.message_id : null);
 				sessions.set(branchId, {
 					...base,
 					session_id: branchId,
 					root_session_id: sessionId,
 					parent_session_id: sessionId,
 					fork_message_id: 'question',
-					fork_position: 0,
+					fork_position: forkPosition,
 					fork_content: body.message ?? originalMessage.content
 				});
-				trajectories.set(branchId, []);
+				trajectories.set(branchId, trajectories.get(id)!.slice(0, forkPosition));
 				requests.set(body.request_id, branchId);
 			}
 			if (options.failCreateOnce && requestIds.length === 1) return route.abort('failed');
@@ -2649,6 +2842,7 @@ async function mockMessageBranches(
 				const body = route.request().postDataJSON();
 				sent.push(body);
 				const messages = [
+					...trajectories.get(id)!,
 					agentMessage(`${id}-question`, 'user', body.message, {
 						session_id: id,
 						source_contexts: body.source_contexts ?? []
@@ -2701,15 +2895,20 @@ async function mockMessageBranches(
 								]
 							: [],
 					branch_draft:
-						!messages.length && id !== sessionId
-							? { ...original[0], content: sessions.get(id)!.fork_content }
+						messages.length === sessions.get(id)!.fork_position && id !== sessionId
+							? {
+									...original[0],
+									session_id: id,
+									source_contexts: branchParents.get(id) ? [] : [source],
+									content: sessions.get(id)!.fork_content
+								}
 							: null
 				})
 			);
 		}
 		return route.fulfill(json(sessions.get(id) ?? base));
 	});
-	return { question, original, source, sent, requestIds };
+	return { question, original, source, sent, requestIds, branchModes };
 }
 
 async function mockApis(page: Page) {
@@ -2797,6 +2996,14 @@ async function mockApis(page: Page) {
 					finding: objectiveFinding()
 				})
 			);
+		}
+		if (
+			path ===
+				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
+			path ===
+				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/curation`
+		) {
+			return route.fulfill(json({ items: [] }));
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(

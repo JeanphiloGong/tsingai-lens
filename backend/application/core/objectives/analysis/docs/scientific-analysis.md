@@ -11,17 +11,37 @@ Read the analysis responsibilities in real research order:
    inspection queue consumed by Source-local fact extraction. A route is an
    instruction to inspect a Source, not a scientific finding.
 3. `source_extraction.py` exposes `extract_and_validate_source_facts`, which
-   inspects routed Sources one at a time and produces transient, source-local
-   `ExtractedEvidenceDraft` records. It owns text and complete Markdown table
+   inspects routed Sources one at a time and produces domain `SourceObservation`
+   objects. The extraction layer owns text and complete Markdown table
    payload construction, deterministic table interpretation, model extraction,
    and route-scoped technical failures. It calls `table_repair.repair_table_source`
    for bounded continuous-row structural recovery before interpreting the table.
+   A timeout affects that table's read only; it does not suppress repair of
+   later tables in the paper. Each selected table retains its bounded attempt,
+   and a provider error does not trigger wider scientific reading.
+   The repair request includes up to two text blocks on each side of the
+   caption, stopping at a heading or another caption, plus nearby paragraphs
+   explicitly referencing the printed table number. These candidates stay in
+   the same paper and within one page of the table. At most six text blocks
+   and one explicitly numbered adjacent continuation are supplied, within an
+   8,000-character context budget. Oversized blocks are omitted whole and
+   recorded in the repair trace. This reading context explains existing
+   labels and notes; it cannot contribute measurement cells to the current
+   table. Context Source identities and omissions remain in the trace without
+   making every inspected paragraph an Evidence reference.
    A PDF table Source carries both the Docling logical grid and an
    optional clipped page-layout view. The grid preserves cell identity and
    numeric tokens; the layout view preserves the continuous row wrapping a
    researcher sees in the PDF. Repair may use the latter to resolve a split
    label or uncertainty, but it must conserve the supplied tokens and numeric
-   column sequence. Oversized repair inputs repeat the caption and flattened
+   column sequence. The clipped view is extracted automatically from Docling's
+   table region using PDF text blocks, keeping wrapped cell lines together.
+   If the grid omitted label digits, recovery requires every complete specimen
+   label to occur literally, in order, in that view; non-label cells must still
+   conserve grid tokens and numeric sequences. Older Sources without this
+   optional view may remain unresolved until reparsed from the original PDF.
+   Analysis does not rewrite those stored Sources or fabricate a missing view.
+   Oversized repair inputs repeat the caption and flattened
    header on every slice, then merge in Source row order. A final row
    containing only carried label and uncertainty fragments may merge into the
    preceding logical row. Mean-plus-uncertainty result columns are rebound from
@@ -38,14 +58,20 @@ Read the analysis responsibilities in real research order:
    and excerpt hash. The expert audit recomputes those values from the
    persisted Source artifact; unattested or stale repaired rows cannot satisfy
    Source-grounding checks.
-4. `source_validation.py` immediately checks each model-authored draft against
+   For an explicit adjacent continuation with matching headers, a label-only
+   first data row may complete the primary table's final numeric row. The
+   labels must share the same numeric suffix; ambiguous matches are rejected.
+   The original primary matrix hash stays unchanged, and the affected Evidence
+   row additionally cites the continuation's original row and label cell.
+   Other continuation measurements remain in their own Source.
+4. `source_validation.py` immediately checks each model-authored observation against
    the exact Source being inspected. Extraction and validation therefore
    alternate per Source; they are not two collection-wide passes. Validation
    may retain a material only when extraction explicitly bound its source label
    to the current specimen or experiment; an Objective value or an unrelated
    material mention cannot fill it. Unsupported results abstain, while supported results with incomplete variable or
-   comparison support become `association_only` or descriptive drafts before
-   they can enter the next Source prompt's document state. Association drafts
+   comparison support become `association_only` or descriptive observations before
+   they can enter the next Source prompt's document state. Association observations
    may name the confirmed Objective variable while leaving baseline and target
    endpoints empty; they support an observed relationship, not an isolated
    causal effect.
@@ -58,8 +84,17 @@ Read the analysis responsibilities in real research order:
    reference. Raw document text and Objective hints never create this context;
    conflicting materials remain unresolved. It never reads preliminary map
    scope as experiment context.
-6. `evidence_materialization.py` turns reconstructed drafts into durable
-   `ObjectiveEvidence`, deduplicates replayed scientific claims by stable
+   `assemble_paper_experiments` then records separate Source/outcome/context
+   series rather than assuming a document is one experiment. Each measurement
+   links only to its own supported sample and outcome-applicable test facts.
+   Unknown study identity remains `None`; these conservative series are not a
+   claim to have reconstructed every experiment in the paper.
+6. `evidence_materialization.py` consumes the `PaperExperiment` Source
+   observations as the primary scientific input and turns them into durable
+   `ObjectiveEvidence`. Technical read failures are supplied separately as
+   application `SourceReadAudit` records. Derived comparisons are observations
+   with explicit `derived_from_observation_ids`, not additional raw
+   measurements. It deduplicates replayed scientific claims by stable
    Evidence identity, and derives each paper's `PaperContribution` from that
    final Evidence set. Table row and column locators are part of a result's
    Source-local identity, so equal scalar values in different specimen rows do
@@ -102,11 +137,12 @@ aggregation preserves that role; a local Source judgment cannot promote one
 cited experiment into a primary experiment paper.
 
 `evidence_routing.py` owns transient route records, Source-tree candidate
-ordering, selection hints, the bounded routing prompt and response schema, the
-one-Source model call, deterministic fallback, and the document round-robin
-extraction queue. The model decides only whether and how to inspect the current
-Source; the backend preserves its identity, so a route cannot redirect work to
-another paper or Source or become durable Evidence. A review frame remains a
+ordering, selection hints, deterministic role classification, and the document
+round-robin extraction queue. Semantic relevance belongs to
+`source_screening.py`; routing no longer makes a second per-Source model call.
+The route is an instruction to inspect a Source, not a scientific finding. The
+backend preserves its identity, so a route cannot redirect work to another
+paper or Source or become durable Evidence. A review frame remains a
 secondary synthesis or citation-lead source and does not enter the primary
 Evidence extraction queue. Review synthesis produced during discovery remains
 available upstream; a cited experiment must be inspected in its primary paper
@@ -120,11 +156,12 @@ irrelevant but the concrete Source tree contains a direct Objective signal,
 routing records a recall override and inspects that Source. Only papers with no
 source-local Objective signal remain skipped. This keeps model false negatives
 from removing facts that a researcher would have found by reading the paper.
-Before any Source-routing model call, the selected Sources must collectively
-establish at least one confirmed Objective variable and one confirmed Objective
-outcome. They may occur in different Sources, as they commonly do across Methods
-and Results. A paper that reports the broad outcome but studies a different
-variable is recorded in the internal trace and does not enter deep extraction.
+Before extraction, the selected Sources are expected to establish at least one
+confirmed Objective variable and one confirmed Objective outcome. They may occur
+in different Sources, as they commonly do across Methods and Results. A paper
+that reports the broad outcome but studies a different variable is retained for
+Source-local inspection and recorded as a scope gap; grounding, not a duplicate
+paper-level gate, decides whether its facts can support the Objective.
 An exact Paper Map relationship lineage preserves an abbreviated Source for
 inspection, but the lineage is still only a recall reason: Source-local
 extraction and grounding must establish every fact before it can become
@@ -137,9 +174,18 @@ background context and is inspected source-locally.
 `source_extraction.py` owns the inspection of one exact Source at a time. It
 owns that judgment's prompt, response schema, scientific validation, bounded
 repair instructions, completion budget, and direct model call. It passes every
-schema-valid model draft directly to `source_validation.py` before updating the
+schema-valid model observation directly to `source_validation.py` before updating the
 accepted state supplied to the next Source prompt. Provider or irrecoverable
-structured-output failures remain technical failed drafts. Shared provider
+structured-output failures become `SourceReadAudit(technical_failure)` records,
+not rejected scientific observations. A successfully inspected Source with no
+fact is `inspected_without_fact`; a rejected extraction is `grounding_rejected`.
+Both count as inspected but neither proves that the paper reports no effect.
+Provider/format failures and grounding rejections both remain unsuccessful
+reads for failed-source counts, warnings, and retry eligibility. A rejected
+generated answer must not become a successful scientific absence.
+Previously inspected Methods Sources remain available to subsequent reading
+through their audit locators and roles, without entering the accepted fact list.
+Shared provider
 invocation, JSON parsing, usage accounting, and trace capture stay outside this
 scientific responsibility. A model-authored context role carrying a non-null
 `reported_result` is normalized to `direct_result` without changing any
@@ -331,7 +377,7 @@ becoming an unsupported causal or joint-effect claim.
 `PaperResearchMap` is not an input to this reconstruction. Analysis may use the
 map earlier to prioritize Source inspection and later to report preliminary
 coverage gaps, but a map material, process, variable, or outcome label cannot
-fill, overwrite, or validate an `ExtractedEvidenceDraft`.
+fill, overwrite, or validate a `SourceObservation`.
 
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,
@@ -341,7 +387,7 @@ figure caption, or cited rows from the primary table; a table with no row-level
 excerpt falls back to its complete Source. Methods, other condition tables,
 figures, and row bindings used to reconstruct the experiment remain separate
 `related_source_refs` and are never concatenated into text that no single
-Source actually contains. Replayed model drafts that canonicalize to the same complete
+Source actually contains. Replayed model observations that canonicalize to the same complete
 source-grounded scientific record are deduplicated even when a provider attempt
 assigned a different `evidence_id`. Distinct claims from one Source remain
 separate because a table, figure, or paragraph can support several measurements
@@ -349,9 +395,9 @@ or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
 from that complete claim set, and its contribution summary is assembled only
 from grounded result text in the final Evidence records. Contribution warnings
-count only final framing fallback, deterministic evidence-routing fallback,
-`PaperResearchMap` coverage gaps, and failed Evidence Sources; successful repair
-is not a warning. It does not persist artifacts or synthesize a cross-paper
+count only final framing fallback, `PaperResearchMap` coverage gaps, and failed
+Evidence Sources; normal deterministic task organization and successful repair
+are not warnings. It does not persist artifacts or synthesize a cross-paper
 claim. Its private materialization trace records only bounded counts and paper
 dispositions, so an empty result can be distinguished from filtering and
 technical extraction failure without storing Source content in diagnostics.
@@ -492,3 +538,44 @@ conditions, or an incomplete comparison.
 Technical JSON parsing, provider retries, usage accounting, and trace capture
 live in `llm/structured_response.py`; they support this process but do not
 define its scientific order.
+
+## Internal Research State
+
+The acceptance scenario is a researcher asking how platform preheating affects
+316L elongation. P002 reports NP/P150 definitions in Methods, test conditions on
+another page, and 72%/82% in Table 2. These remain separately traceable facts.
+Binding records which sample and test produced each result. A computed contrast
+references those two observations; it is not a third measurement. In P004,
+as-SLM, HT-SLM, and HIP-SLM states remain separate, and the table's 35.0% and
+the prose's 32.8% remain distinct observations rather than being silently
+reconciled. A researcher can inspect the original disagreement before deciding
+what to compare.
+
+`SourceObservation.status` describes Source support, not pipeline execution.
+Assembly preserves `unvalidated`, `validated`, `uncertain`, and `rejected`
+without promoting a fact merely because extraction returned it. Source
+validation sets the acceptance state. An explicitly uncertain or rejected
+observation retains its reported fields at materialization but cannot become
+accepted Evidence just because its extraction status said `extracted`.
+
+`PaperExperiment.status=bound` means that its measurements have validated
+observations and actual links to sample and applicable test records. It does
+not mean all Methods fields are reported, nor that the whole paper is
+comparable. Missing bindings retain the measurements and explicit uncertainty;
+test context is not labeled complete by list presence alone.
+
+`PaperExperiment.assess_comparison` returns an internal `ExperimentComparison`
+for two measurement IDs and their owning Objective. Missing context differs
+from conflicting reported material or test conditions. A positive assessment
+also requires the existing reconstruction's validated contrast and changed
+factors. It does not implement a second axis-normalization or causal-inference
+engine. Materialization records bounded assessment counts in its private trace;
+this internal check does not add a new public synthesis approval gate. The
+existing Evidence and Finding rules still own published scientific eligibility.
+
+These domain bindings and comparison assessments are per-execution state, not
+new persisted Evidence/Finding fields. Reused document checkpoints therefore
+have no newly reconstructed `PaperExperiment` aggregates. This change does not
+rewrite historical results, change HTTP schemas or enum values, or require
+frontend interaction changes. Expanding Finding beyond its current atomic
+claim contract remains separate work.

@@ -8,27 +8,22 @@ import json
 from typing import Any, Callable
 
 from application.core.objectives import property_matching
-from application.core.objectives.discovery.study_window import (
-    PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT,
+from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
-from application.core.objectives.paper_map_aggregation import PaperMapSignalInput
-from domain.core import PaperResearchMap
+from domain.core import PaperResearchMap, PaperResearchSignal
 from domain.source import SourceDocumentTree
 
 _PAPER_MAP_INITIAL_SOURCE_LIMIT = 16
 _PAPER_MAP_VISUAL_SOURCE_LIMIT = 4
 _PAPER_MAP_EXPANSION_SOURCE_LIMIT = 8
 _PAPER_MAP_FALLBACK_SOURCE_LIMIT_PER_EDGE = 4
-_PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT = 4000
 _PAPER_MAP_SECTION_PATH_LIMIT = 16
 _PAPER_MAP_TABLE_CAPTION_CHAR_LIMIT = 1600
 _PAPER_MAP_FIGURE_CAPTION_CHAR_LIMIT = 3500
 _PAPER_MAP_HEADING_PATH_CHAR_LIMIT = 240
 _PAPER_MAP_COLUMN_HEADER_LIMIT = 12
 _PAPER_MAP_COLUMN_HEADER_CHAR_LIMIT = 120
-_PAPER_MAP_EXPANSION_SOURCE_BUDGET = 24
-_PAPER_MAP_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
 _PAPER_MAP_ROLE_BY_SEMANTIC_ROLE = {
     "abstract": "overview",
     "introduction": "overview",
@@ -48,19 +43,12 @@ class _PaperMapSourceItem:
     section_path: str
     source_unit_id: str = ""
 
-    @property
-    def size(self) -> int:
-        if isinstance(self.content, str):
-            return len(self.content)
-        return len(json.dumps(self.content, ensure_ascii=False, separators=(",", ":")))
-
 
 class PaperMapSourceSelector:
     """Select readable paper Sources and build bounded model windows."""
 
-    def __init__(self, fit_payload: Callable[..., list[dict[str, Any]]]) -> None:
+    def __init__(self, fit_payload: Callable[..., tuple[dict[str, Any], ...]]) -> None:
         self._fit_payload = fit_payload
-
 
     def build_payloads(
         self,
@@ -107,74 +95,71 @@ class PaperMapSourceSelector:
                 limit=expansion_source_limit,
             )
         )
-        bounded_items: list[_PaperMapSourceItem] = []
-        for item in selected_items:
-            fragments = self._split_oversized_source_item(item)
-            bounded_items.extend(
-                replace(
-                    fragment,
-                    source_unit_id=(
-                        item.source_unit_id
-                        if len(fragments) == 1
-                        else f"{item.source_unit_id}-fragment-{position:02d}"
-                    ),
-                )
-                for position, fragment in enumerate(fragments, start=1)
-            )
-        items = (
-            self._select_paper_map_items(bounded_items)
-            if selection_focus is None
-            else self._select_paper_map_expansion_items(
-                bounded_items,
-                focus=selection_focus,
-                search_terms=expansion_search_terms,
-                limit=expansion_source_limit,
-            )
-        )
-        payloads: list[dict[str, Any]] = []
-        role_window_positions = {role: 0 for role in _PAPER_MAP_WINDOW_ROLES}
-        for role_items in self._paper_map_item_groups(items):
-            role = role_items[0].role
-            for window_items in self._pack_source_items(list(role_items)):
-                role_window_positions[role] += 1
-                payload = self._build_window_payload(
-                    collection_id=collection_id,
-                    document=document,
-                    profile=profile,
-                    role=role,
-                    role_window_position=role_window_positions[role],
-                    items=window_items,
-                )
-                if selection_focus is not None:
-                    payload["reading_round"] = reading_round
-                    payload["expansion_focus"] = selection_focus
-                    payload["window_id"] = (
-                        f"round-{reading_round}.{payload['window_id']}"
-                    )
-                payloads.extend(
-                    self._fit_payload(
-                        payload,
-                        paper_map_extractor=paper_map_extractor,
-                    )
-                )
-        if payloads:
-            return payloads
-        if selection_focus is not None:
+        if not selected_items and selection_focus is not None:
             return []
-        empty_payload = self._build_window_payload(
+        roles = {item.role for item in selected_items}
+        payload = self._build_window_payload(
             collection_id=collection_id,
             document=document,
             profile=profile,
-            role="unknown",
+            role=next(iter(roles)) if len(roles) == 1 else "overview",
             role_window_position=1,
-            items=(),
+            items=tuple(selected_items),
         )
+        if selection_focus is not None:
+            payload["reading_round"] = reading_round
+            payload["expansion_focus"] = selection_focus
+            payload["window_id"] = f"round-{reading_round}.{payload['window_id']}"
         return list(
             self._fit_payload(
-                empty_payload,
+                payload,
                 paper_map_extractor=paper_map_extractor,
             )
         )
+
+    def build_context_reading_payloads(
+        self,
+        *,
+        previous_payloads: list[dict[str, Any]],
+        new_payloads: list[dict[str, Any]],
+        unresolved_signals: tuple[PaperResearchSignal, ...],
+        paper_map_extractor: PaperResearchMapExtractor,
+        reading_round: int,
+    ) -> list[dict[str, Any]]:
+        """Read missing passages alongside the original unresolved context."""
+
+        if not previous_payloads or not unresolved_signals:
+            return new_payloads
+        context_keys = {
+            (source.source_kind, source.source_ref)
+            for signal in unresolved_signals
+            for source in signal.source_refs
+        }
+        context_units = {
+            unit["source_unit_id"]: unit
+            for payload in previous_payloads
+            for unit in payload.get("source_units") or ()
+            if not context_keys or (unit["source_kind"], unit["source_ref"]) in context_keys
+        }
+        units = {
+            **context_units,
+            **{
+                unit["source_unit_id"]: unit
+                for payload in new_payloads
+                for unit in payload.get("source_units") or ()
+            },
+        }
+        payload = dict((new_payloads or previous_payloads)[0])
+        payload.update(
+            window_id=f"context-round-{reading_round}",
+            window_role="overview",
+            reading_round=reading_round,
+            source_units=list(units.values()),
+            section_paths=list(dict.fromkeys(
+                unit.get("section_path", "") for unit in units.values()
+            )),
+        )
+        return list(self._fit_payload(payload, paper_map_extractor=paper_map_extractor))
 
     @classmethod
     def _select_paper_map_items(
@@ -365,12 +350,12 @@ class PaperMapSourceSelector:
     @staticmethod
     def expansion_search_terms(
         paper_map: PaperResearchMap,
-        signals: Iterable[PaperMapSignalInput],
+        signals: Iterable[PaperResearchSignal],
     ) -> tuple[str, ...]:
         terms: list[str] = []
         seen: set[str] = set()
         visible_signals = (
-            *(item.signal for item in signals),
+            *signals,
             *paper_map.unresolved_signals,
         )
         for signal in visible_signals:
@@ -439,15 +424,6 @@ class PaperMapSourceSelector:
                 for value in content.get("column_headers") or ()
             ][:_PAPER_MAP_COLUMN_HEADER_LIMIT]
         return replace(item, content=content)
-
-    @staticmethod
-    def _paper_map_item_groups(
-        items: list[_PaperMapSourceItem],
-    ) -> tuple[tuple[_PaperMapSourceItem, ...], ...]:
-        groups: dict[str, list[_PaperMapSourceItem]] = {}
-        for item in items:
-            groups.setdefault(item.role, []).append(item)
-        return tuple(tuple(group) for group in groups.values())
 
     def _build_source_items(
         self,
@@ -646,133 +622,6 @@ class PaperMapSourceSelector:
             )
         return items
 
-    @staticmethod
-    def _pack_source_items(
-        items: list[_PaperMapSourceItem],
-    ) -> list[tuple[_PaperMapSourceItem, ...]]:
-        windows: list[tuple[_PaperMapSourceItem, ...]] = []
-        current: list[_PaperMapSourceItem] = []
-        for item in items:
-            if current and len(current) >= PAPER_MAP_WINDOW_SOURCE_UNIT_LIMIT:
-                windows.append(tuple(current))
-                current = []
-            current.append(item)
-        if current:
-            windows.append(tuple(current))
-        return windows
-
-    @staticmethod
-    def _split_oversized_source_item(
-        item: _PaperMapSourceItem,
-    ) -> tuple[_PaperMapSourceItem, ...]:
-        if item.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
-            return (item,)
-        if isinstance(item.content, Mapping):
-            if "row_text" in item.content:
-                return PaperMapSourceSelector._split_table_row_source_item(item)
-            return PaperMapSourceSelector._split_structured_source_item(item)
-        if not isinstance(item.content, str):
-            raise ValueError(
-                "paper map Source item cannot fit in a bounded window"
-            )
-        text = str(item.content)
-        chunks: list[str] = []
-        start = 0
-        while len(text) - start > _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
-            hard_end = start + _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT
-            split_at = PaperMapSourceSelector.natural_text_split(text, start, hard_end)
-            chunks.append(text[start:split_at])
-            start = split_at
-        chunks.append(text[start:])
-        return tuple(
-            _PaperMapSourceItem(
-                role=item.role,
-                order=item.order + position,
-                source_kind=item.source_kind,
-                source_ref=item.source_ref,
-                content=chunk,
-                section_path=item.section_path,
-            )
-            for position, chunk in enumerate(chunks)
-        )
-
-    @staticmethod
-    def _split_table_row_source_item(
-        item: _PaperMapSourceItem,
-    ) -> tuple[_PaperMapSourceItem, ...]:
-        content = dict(item.content)
-        row_text = str(content.pop("row_text", ""))
-        chunks: list[_PaperMapSourceItem] = []
-        start = 0
-        while start < len(row_text):
-            low = start + 1
-            high = len(row_text)
-            end = start
-            while low <= high:
-                candidate_end = (low + high) // 2
-                candidate = replace(
-                    item,
-                    content={
-                        **content,
-                        "structured_path": ["row_text"],
-                        "fragment_start": start,
-                        "fragment": row_text[start:candidate_end],
-                    },
-                )
-                if candidate.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
-                    end = candidate_end
-                    low = candidate_end + 1
-                else:
-                    high = candidate_end - 1
-            if end == start:
-                raise ValueError(
-                    "paper map table context cannot fit in a bounded window"
-                )
-            if end < len(row_text):
-                end = PaperMapSourceSelector.natural_text_split(row_text, start, end)
-            chunks.append(
-                replace(
-                    item,
-                    content={
-                        **content,
-                        "structured_path": ["row_text"],
-                        "fragment_start": start,
-                        "fragment": row_text[start:end],
-                    },
-                )
-            )
-            start = end
-        return tuple(chunks)
-
-    @staticmethod
-    def _split_structured_source_item(
-        item: _PaperMapSourceItem,
-    ) -> tuple[_PaperMapSourceItem, ...]:
-        chunks: list[_PaperMapSourceItem] = []
-        for path, value in PaperMapSourceSelector.structured_source_leaves(item.content):
-            if isinstance(value, str):
-                chunks.extend(
-                    PaperMapSourceSelector._split_structured_text_value(
-                        item,
-                        path=path,
-                        value=value,
-                    )
-                )
-                continue
-            chunk = replace(
-                item,
-                content={
-                    "structured_path": list(path),
-                    "value": value,
-                },
-            )
-            if chunk.size > _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
-                raise ValueError(
-                    "paper map structured Source value cannot fit in a bounded "
-                    "window"
-                )
-            chunks.append(chunk)
-        return tuple(chunks)
 
     @staticmethod
     def structured_source_leaves(
@@ -803,65 +652,6 @@ class PaperMapSourceSelector:
             )
         return ((path, value),)
 
-    @staticmethod
-    def _split_structured_text_value(
-        item: _PaperMapSourceItem,
-        *,
-        path: tuple[str | int, ...],
-        value: str,
-    ) -> tuple[_PaperMapSourceItem, ...]:
-        if not value:
-            return (
-                replace(
-                    item,
-                    content={
-                        "structured_path": list(path),
-                        "fragment_start": 0,
-                        "fragment": "",
-                    },
-                ),
-            )
-
-        chunks: list[_PaperMapSourceItem] = []
-        start = 0
-        while start < len(value):
-            low = start + 1
-            high = len(value)
-            end = start
-            while low <= high:
-                candidate_end = (low + high) // 2
-                candidate = replace(
-                    item,
-                    content={
-                        "structured_path": list(path),
-                        "fragment_start": start,
-                        "fragment": value[start:candidate_end],
-                    },
-                )
-                if candidate.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
-                    end = candidate_end
-                    low = candidate_end + 1
-                else:
-                    high = candidate_end - 1
-            if end == start:
-                raise ValueError(
-                    "paper map structured Source path cannot fit in a bounded "
-                    "window"
-                )
-            if end < len(value):
-                end = PaperMapSourceSelector.natural_text_split(value, start, end)
-            chunks.append(
-                replace(
-                    item,
-                    content={
-                        "structured_path": list(path),
-                        "fragment_start": start,
-                        "fragment": value[start:end],
-                    },
-                )
-            )
-            start = end
-        return tuple(chunks)
 
     @staticmethod
     def natural_text_split(text: str, start: int, hard_end: int) -> int:

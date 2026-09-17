@@ -68,6 +68,27 @@ export type ChatBranchOptions = {
 	active_session_id: string;
 };
 
+export type ChatTreeNode = {
+	message: ChatMessage;
+	parent_message_id: string | null;
+	answer: string;
+	status:
+		| 'completed'
+		| 'running'
+		| 'approval_required'
+		| 'failed'
+		| 'interrupted'
+		| 'incomplete'
+		| 'draft';
+	can_branch: boolean;
+};
+
+export type ChatTree = {
+	root_session_id: string;
+	active_path: string[];
+	nodes: ChatTreeNode[];
+};
+
 export type ChatToolCall = {
 	tool_call_id: string;
 	session_id: string;
@@ -166,6 +187,9 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
+	research_plan?: {
+		steps: Array<{ id: string; status: 'pending' | 'in_progress' | 'completed' | 'blocked' }>;
+	};
 };
 
 export function formatChatElapsed(elapsedMs?: number) {
@@ -225,13 +249,21 @@ export async function branchChatMessage(
 	messageId: string,
 	requestId: string,
 	message?: string,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	mode: 'revise' | 'continue' = 'revise'
 ) {
 	return (await requestJson(`${chatSessionPath(sessionId)}/branches`, {
 		signal,
 		method: 'POST',
-		body: JSON.stringify({ message_id: messageId, request_id: requestId, message })
+		body: JSON.stringify({ message_id: messageId, request_id: requestId, message, mode })
 	})) as ChatSession;
+}
+
+export async function fetchChatTree(sessionId: string, signal?: AbortSignal): Promise<ChatTree> {
+	return (await requestJson(`${chatSessionPath(sessionId)}/tree`, {
+		signal,
+		method: 'GET'
+	})) as ChatTree;
 }
 
 export async function fetchChatTrajectory(sessionId: string, signal?: AbortSignal) {

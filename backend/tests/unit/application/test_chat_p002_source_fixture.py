@@ -401,12 +401,14 @@ async def test_p002_evidence_write_stays_approval_gated() -> None:
                     evidence_id="evidence-p002-authored",
                     page_numbers=(8,),
                     supports_finding=True,
+                    eligible_for_finding_authoring=True,
                     warnings=(),
                     to_record=lambda: {
                         "evidence_id": "evidence-p002-authored",
                         "source_ref": "tbl_doc_ef59d1f3a006_2_table_2",
                     },
                 ),
+                affected_finding_ids=(),
             )
 
     document = _p002_document()

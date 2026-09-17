@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import { errorMessage } from '../../../_shared/api';
+	import { t } from '../../../_shared/i18n';
 	import {
 		createFindingVersion,
 		type FindingAbstentionReason,
@@ -35,8 +36,16 @@
 
 	$: editorKey = `${analysisVersion}:${parentFinding?.finding_id ?? 'blank'}`;
 	$: if (editorKey !== initializedKey) initializeDraft();
-	$: eligibleEvidence = evidence.filter((item) => item.supports_finding);
-	$: supportingCount = Object.values(roleByEvidence).filter((role) => role === 'supporting').length;
+	$: eligibleEvidence = evidence.filter((item) => item.eligible_for_finding_authoring);
+	$: supportingCount = eligibleEvidence.filter(
+		(item) => roleByEvidence[item.evidence_id] === 'supporting'
+	).length;
+	$: hasReplacedSelection = evidence.some(
+		(item) =>
+			item.superseded_by_evidence_id &&
+			roleByEvidence[item.evidence_id] &&
+			roleByEvidence[item.evidence_id] !== 'unused'
+	);
 
 	function initializeDraft() {
 		initializedKey = editorKey;
@@ -161,7 +170,17 @@
 				supporting_evidence_ids: mode === 'finding' ? idsFor('supporting') : [],
 				contradicting_evidence_ids: mode === 'finding' ? idsFor('contradicting') : [],
 				context_evidence_ids: mode === 'finding' ? idsFor('context') : [],
-				condition_boundary_evidence_ids: mode === 'finding' ? [...boundaryEvidenceIds] : [],
+				condition_boundary_evidence_ids:
+					mode === 'finding'
+						? eligibleEvidence
+								.filter(
+									(item) =>
+										boundaryEvidenceIds.has(item.evidence_id) &&
+										roleByEvidence[item.evidence_id] &&
+										roleByEvidence[item.evidence_id] !== 'unused'
+								)
+								.map((item) => item.evidence_id)
+						: [],
 				limitations: cleanedLimitations,
 				parent_finding_id: mode === 'finding' ? (parentFinding?.finding_id ?? null) : null,
 				abstention_reason: mode === 'abstention' ? abstentionReason : null
@@ -215,6 +234,9 @@
 		</div>
 
 		<section class="evidence-selection" aria-labelledby="finding-evidence-title">
+			{#if hasReplacedSelection}<p role="status">
+					{$t('research.findingReview.replacedSelection')}
+				</p>{/if}
 			<div class="section-heading">
 				<div>
 					<h3 id="finding-evidence-title">选择原文证据</h3>

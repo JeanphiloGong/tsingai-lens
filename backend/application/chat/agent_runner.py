@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from asyncio import Semaphore, gather, wait_for
+from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -11,6 +11,7 @@ from hashlib import sha256
 import json
 import logging
 from math import isfinite
+from random import uniform
 from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
@@ -24,8 +25,14 @@ from application.chat.capabilities import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
-from application.chat import capability_policy
-from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage, ResearchClaimReview
+from application.chat import capability_policy, intent_policy
+from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
+from application.chat.model import (
+    RESEARCH_AGENT_SYSTEM_PROMPT,
+    RESEARCH_COMPACTION_SYSTEM_PROMPT,
+    ResearchWorkingCheckModelOutput,
+    ResearchWorkingNotesModelOutput,
+)
 from application.core.structured_extraction.json_support import extract_json_object
 from domain.chat import (
     ChatMessage,
@@ -50,16 +57,50 @@ _TrajectoryCheckpoint = Callable[
     Awaitable[None],
 ]
 
-_MODEL_RESPONSE_RETRY_LIMIT = 1
+_MODEL_RESPONSE_RETRY_LIMIT = 5
 _REQUIRED_ACTION_RETRY_LIMIT = 1
-_RESEARCH_DRAFT_TOOLS = frozenset({
-    "propose_objective_drafts", "preview_research_scope", "propose_research_plan",
-})
-_RESEARCH_OBSERVATION_TOOLS = frozenset({
-    "read_source", "inspect_table", "inspect_document_sources",
-    "inspect_published_finding", "inspect_objective_evidence", "inspect_research_plans",
-    *_RESEARCH_DRAFT_TOOLS,
-})
+_MAX_TOOL_CALLS_PER_RESPONSE = 32
+
+
+def _provider_failure_details(exc: BaseException) -> dict[str, Any]:
+    """Classify SDK/transport failures without retaining provider messages or bodies."""
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and all(current is not item for item in chain):
+        chain.append(current)
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+    status = None
+    codes: set[str] = set()
+    names = {base.__name__ for item in chain for base in type(item).__mro__}
+    for item in chain:
+        value = getattr(item, "status_code", None)
+        if value is None:
+            value = getattr(getattr(item, "response", None), "status_code", None)
+        if status is None and type(value) is int and 100 <= value <= 599:
+            status = value
+        body = getattr(item, "body", None)
+        error = body.get("error", body) if isinstance(body, Mapping) else {}
+        if isinstance(error, Mapping):
+            codes.update(value for key in ("code", "type")
+                         if isinstance(value := error.get(key), str))
+    timeout = bool(names.intersection({"TimeoutError", "TimeoutException", "APITimeoutError"}))
+    transport = timeout or bool(names.intersection({
+        "ConnectionError", "TransportError", "APIConnectionError",
+    }))
+    if codes.intersection({"insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"}):
+        retryable, reason = False, "quota_exhausted"
+    elif status is not None:
+        retryable = status in {408, 429} or status >= 500
+        reason = "provider_timeout" if status == 408 else "http_status"
+    elif transport:
+        retryable, reason = True, "provider_timeout" if timeout else "transport_error"
+    elif codes.intersection({"rate_limit_exceeded", "server_error", "internal_server_error",
+                             "overloaded_error", "temporarily_unavailable"}):
+        retryable, reason = True, "transient_provider_error"
+    else:
+        retryable, reason = False, "unclassified_provider_error"
+    return {"exception_type": type(exc).__name__, "http_status": status,
+            "retryable": retryable, "reason": reason}
 _FINAL_ANSWER_INSTRUCTION = (
     "The bounded research-reading budget is now exhausted. Give the researcher "
     "the best useful final answer supported by the completed trajectory. State "
@@ -93,11 +134,13 @@ class AgentCompletionReason(StrEnum):
 
 @dataclass(frozen=True)
 class AgentRunLimits:
-    max_elapsed_seconds: float = 600.0
-    max_tool_calls: int = 24
-    max_model_tokens: int = 240_000
+    max_elapsed_seconds: float | None = None
+    max_tool_calls: int | None = None
+    max_model_tokens: int | None = None
     max_consecutive_no_progress: int = 2
-    emergency_max_model_cycles: int = 64
+    emergency_max_model_cycles: int | None = None
+    max_request_seconds: float = 180.0
+    max_context_tokens: int = 65_536
     max_parallel_reads: int = 4
     max_model_output_tokens: int = 16_384
     max_finalization_seconds: float = 300.0
@@ -105,6 +148,10 @@ class AgentRunLimits:
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
+            if value is None and name in {
+                "max_elapsed_seconds", "max_tool_calls", "max_model_tokens", "emergency_max_model_cycles",
+            }:
+                continue
             if isinstance(value, bool) or not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
             if not name.endswith("_seconds") and not isinstance(value, int):
@@ -128,6 +175,55 @@ class _RunProgress:
     seen_observations: set[str] = field(default_factory=set)
     consecutive_no_progress: int = 0
     resource_refs: set[tuple[str, str]] = field(default_factory=set)
+    working_summary: str = ""
+    compacted_message_ids: set[str] = field(default_factory=set)
+    read_batch_tokens: int = 12_000
+    compaction_attempts: int = 0
+    complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
+    research_plan: list[dict[str, str]] = field(default_factory=list)
+
+    def initialize_research_plan(self, request: str) -> None:
+        """Create a visible plan only for multi-step Finding review requests."""
+        normalized = request.casefold()
+        review_terms = ("finding", "结论", "证据")
+        draft_terms = ("修订草案", "结论草案", "draft finding", "finding draft")
+        if not any(term in normalized for term in review_terms) or not any(
+            term in normalized for term in draft_terms
+        ):
+            return
+        self.research_plan = [
+            {"id": "inspect_finding", "status": "in_progress"},
+            {"id": "inspect_sources", "status": "pending"},
+            {"id": "validate_claim", "status": "pending"},
+            {"id": "draft_finding", "status": "pending"},
+            {"id": "approval", "status": "pending"},
+        ]
+
+    def update_research_plan(self, tool_name: str, status: ToolResultStatus) -> None:
+        if not self.research_plan or status is not ToolResultStatus.SUCCEEDED:
+            return
+        transitions = {
+            "inspect_published_finding": ("inspect_finding", "inspect_sources"),
+            "create_finding_draft": ("validate_claim", "approval"),
+            "create_evidence_draft": ("validate_claim", "approval"),
+        }
+        transition = transitions.get(tool_name)
+        if transition is None:
+            return
+        current, next_step = transition
+        if tool_name in {"create_finding_draft", "create_evidence_draft"}:
+            for item in self.research_plan:
+                if item["id"] in {"inspect_sources", "validate_claim"} or (
+                    item["id"] == "draft_finding" and tool_name == "create_finding_draft"
+                ):
+                    item["status"] = "completed"
+            next_step = "approval"
+        current_item = next((item for item in self.research_plan if item["id"] == current), None)
+        if current_item is not None:
+            current_item["status"] = "completed"
+        next_item = next((item for item in self.research_plan if item["id"] == next_step), None)
+        if next_item is not None and next_item["status"] == "pending":
+            next_item["status"] = "in_progress"
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -136,14 +232,28 @@ class _RunProgress:
             self.response_started_callback(self.response_message_id, self.response_created_at)
 
     def remaining_seconds(self) -> float:
-        return max(0.0, self.limits.max_elapsed_seconds - (monotonic() - self.started_at))
+        if self.limits.max_elapsed_seconds is None:
+            return self.limits.max_request_seconds
+        return min(self.limits.max_request_seconds, max(
+            0.0, self.limits.max_elapsed_seconds - (monotonic() - self.started_at),
+        ))
+
+    def model_allowance_exhausted(self) -> bool:
+        return (
+            self.limits.max_model_tokens is not None and self.model_tokens >= self.limits.max_model_tokens
+        ) or (
+            self.limits.emergency_max_model_cycles is not None
+            and self.model_cycles >= self.limits.emergency_max_model_cycles
+        )
 
     def stop_before_model(self) -> AgentCompletionReason | None:
-        if self.model_cycles >= self.limits.emergency_max_model_cycles:
+        if (self.limits.emergency_max_model_cycles is not None
+                and self.model_cycles >= self.limits.emergency_max_model_cycles):
             return AgentCompletionReason.EMERGENCY_CEILING
         if (self.remaining_seconds() <= 0
-                or self.model_tokens >= self.limits.max_model_tokens
-                or self.executed_tool_calls >= self.limits.max_tool_calls):
+                or self.model_allowance_exhausted()
+                or (self.limits.max_tool_calls is not None
+                    and self.executed_tool_calls >= self.limits.max_tool_calls)):
             return AgentCompletionReason.RESOURCE_BUDGET
         if self.consecutive_no_progress >= self.limits.max_consecutive_no_progress:
             return AgentCompletionReason.NO_PROGRESS
@@ -157,15 +267,33 @@ class _RunProgress:
         else:
             self.unreported_model_calls += 1
 
-    def observe(self, call: ChatToolCall, result: ChatToolResult) -> None:
+    def observe(self, call: ChatToolCall, result: ChatToolResult) -> bool:
         data = dict(result.data)
         has_source_observation = (
             result.status is ToolResultStatus.SUCCEEDED
             and any(ref.resource_type == "source" for ref in result.resource_refs)
         )
+        previous_resource_refs = set(self.resource_refs)
         # Source navigation echoes the query; changing its wording is not new content.
         if has_source_observation and call.name in {"search_sources", "inspect_document_sources", "inspect_table"}:
             data.pop("query", None)
+        if has_source_observation and call.name == "inspect_document_sources":
+            # Pagination and the context-dependent token budget describe the
+            # request, not new Source content in the returned batch.
+            for key in ("offset", "page", "limit", "next_offset", "batch_token_budget"):
+                data.pop(key, None)
+        normalized_paper_list = call.name == "browse_collection_papers" and (
+            data.get("papers") or data.get("paper_total")
+        )
+        if normalized_paper_list:
+            # A paper list is progress only when its returned identities or
+            # metadata change. Search wording and pagination controls alone do
+            # not justify another model cycle over the same list.
+            for key in ("query", "offset", "page", "limit", "next_offset"):
+                data.pop(key, None)
+        # Coverage is runtime metadata added after this observation and must not
+        # make an otherwise identical batch look like new source content.
+        data.pop("source_coverage", None)
         payload = {
             "tool": call.name,
             "status": result.status.value, "data": data,
@@ -176,16 +304,53 @@ class _RunProgress:
             "error_code": result.error_code,
             "warnings": result.warnings,
         }
-        if not has_source_observation:
+        if not has_source_observation and not normalized_paper_list:
             # Distinct failed or empty searches must keep their requested scope.
             payload["arguments"] = dict(call.arguments)
         digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        previous = len(self.seen_observations)
         self.seen_observations.add(digest)
         self.resource_refs.update((ref.resource_type, ref.resource_id) for ref in result.resource_refs)
+        completed = capability_policy.complete_source_reads({call.name: [result.data]})
+        new_sources = completed - self.complete_source_identities
+        self.complete_source_identities.update(completed)
+        new_resource_refs = self.resource_refs - previous_resource_refs
+        observation_changed = len(self.seen_observations) > previous
+        if not has_source_observation:
+            if normalized_paper_list:
+                return bool(new_resource_refs)
+            return observation_changed
+        # A canonical Source can be incomplete while its current page still
+        # contributes new evidence. The normalized observation digest handles
+        # page and table-row progress, while complete identities suppress
+        # repeated full reads.
+        has_canonical_identity = bool(completed) or any(
+            isinstance(item, Mapping)
+            and all(str(item.get(key) or "").strip() for key in
+                    ("document_id", "source_kind", "source_ref", "source_digest"))
+            for item in (result.data, *(result.data.get("sources") or ()))
+            if isinstance(result.data, Mapping)
+        )
+        if has_canonical_identity:
+            return bool(new_sources) or observation_changed
+        # Older/custom read capabilities may expose only a resource reference.
+        # Preserve their progress semantics without weakening canonical dedupe.
+        return bool(new_resource_refs) or observation_changed
+
+    def source_coverage(self, call: ChatToolCall, result: ChatToolResult) -> dict[str, int]:
+        completed = capability_policy.complete_source_reads({call.name: [result.data]})
+        new_sources = completed - self.complete_source_identities
+        return {
+            "complete_source_count": len(completed),
+            "new_complete_source_count": len(new_sources),
+            "already_complete_source_count": len(completed & self.complete_source_identities),
+        }
 
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
               requested_count: int = 0, new_resources: int = 0,
-              termination_reason: str | None = None, final_answer: bool = False) -> None:
+              termination_reason: str | None = None, final_answer: bool = False,
+              retry_attempt: int | None = None, retry_reason: str | None = None,
+              http_status: int | None = None, retry_delay_ms: int | None = None) -> None:
         payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
@@ -195,9 +360,14 @@ class _RunProgress:
             "new_resource_reference_count": new_resources,
             "observation_digest_changed": self.consecutive_no_progress == 0,
             "elapsed_ms": round((monotonic() - self.started_at) * 1000),
-            "remaining_tool_budget": max(0, self.limits.max_tool_calls - self.executed_tool_calls),
-            "remaining_token_budget": max(0, self.limits.max_model_tokens - self.model_tokens),
+            "remaining_tool_budget": (max(0, self.limits.max_tool_calls - self.executed_tool_calls)
+                                      if self.limits.max_tool_calls is not None else None),
+            "remaining_token_budget": (max(0, self.limits.max_model_tokens - self.model_tokens)
+                                       if self.limits.max_model_tokens is not None else None),
+            "research_plan": [dict(item) for item in self.research_plan] if self.research_plan else None,
             "termination_reason": termination_reason, "final_answer_present": final_answer,
+            "retry_attempt": retry_attempt, "retry_reason": retry_reason,
+            "http_status": http_status, "retry_delay_ms": retry_delay_ms,
         }
         logger.info("Research Agent cycle %s", json.dumps(payload, separators=(",", ":")))
         if self.progress_callback is not None:
@@ -260,6 +430,7 @@ class ResearchAgentRunner:
                 source_contexts=source_contexts,
             ),
         ]
+        progress.initialize_research_plan(user_message)
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
         await self._checkpoint(checkpoint, messages, calls, results)
@@ -289,6 +460,7 @@ class ResearchAgentRunner:
                                 response_started_callback=response_started_callback)
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
+        progress.initialize_research_plan(self._active_user_request(messages))
         inherited_completed_writes = capability_policy.completed_write_names(messages)
         calls = [claimed_call]
         results: list[ChatToolResult] = []
@@ -319,6 +491,26 @@ class ResearchAgentRunner:
         results.append(result)
         messages.append(self._result_message(context, result))
         await self._checkpoint(checkpoint, messages, calls, results)
+        if result.status is ToolResultStatus.SUCCEEDED and call.name in {"record_finding_feedback", "curate_finding"}:
+            # These writes finish an exact approved review. Report the persisted
+            # result directly; a model continuation cannot redefine its status.
+            progress.start_response()
+            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
+            if call.name == "record_finding_feedback":
+                content = "此结论的反馈已保存。" if chinese else "Feedback for this conclusion has been saved."
+            else:
+                content = ("此结论的人工修订已保存，原发布结论保持不变。" if chinese
+                           else "The human revision has been saved. The published conclusion is preserved.")
+                content += "\n\n" + str(result.data.get("curated_finding", {}).get("statement", ""))
+            if result.data.get("note"):
+                content += "\n\n" + ("记录原因：" if chinese else "Recorded reason: ") + str(result.data["note"])
+            messages.append(self._assistant(context, content, progress))
+            await self._checkpoint(checkpoint, messages, calls, results)
+            if text_delta_callback is not None:
+                text_delta_callback(content)
+            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
+            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
+                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
         return await self._continue(
             context,
             messages,
@@ -373,6 +565,22 @@ class ResearchAgentRunner:
                         latest_call = next((call for call in reversed(calls)
                                             if call.tool_call_id == latest.tool_call_id), None)
                         if (
+                            latest_call is not None and latest_call.name == "create_finding_draft"
+                            and latest.status is ToolResultStatus.SUCCEEDED
+                            and isinstance(latest.data.get("draft"), Mapping)
+                            and latest.data.get("persistence") == "transient_chat_result"
+                        ):
+                            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
+                            content = ("结论草案已生成，尚未保存或发布。" if chinese else
+                                       "The Finding draft is ready and has not been saved or published.")
+                            messages.append(self._assistant(context, content, progress))
+                            await self._checkpoint(checkpoint, messages, calls, results)
+                            if text_delta_callback is not None:
+                                text_delta_callback(content)
+                            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
+                            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
+                                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
+                        if (
                             latest_call is not None and latest_call.name == "propose_research_plan"
                             and latest.status is ToolResultStatus.SUCCEEDED
                             and latest.data.get("draft_status") in {"ready_for_researcher_review", "needs_finding_review"}
@@ -403,7 +611,7 @@ class ResearchAgentRunner:
                         for spec in tool_specs
                     )
                     logger.info(
-                        "Research Agent capabilities selected step=%d max_steps=%d "
+                        "Research Agent capabilities selected step=%d max_steps=%s "
                         "tool_count=%d schema_chars=%d tools=%s",
                         progress.model_cycles + 1,
                         self.limits.emergency_max_model_cycles,
@@ -450,14 +658,15 @@ class ResearchAgentRunner:
                         )
                     turn = await self._respond(
                         replace(
-                            self.context_builder.for_model(
-                                decision_messages, active_user_message_id=next(
+                            await self._prepare_model_context(
+                                decision_messages, tool_specs, progress, active_user_message_id=next(
                                     message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                                 ),
                             ),
                             require_tool_call=capability_policy.required_tool_before_answer(
                                 tool_names,
                                 successful_results=capability_policy.active_successful_results_by_name(messages),
+                                calls=calls,
                             ) is not None,
                         ),
                         tool_specs, progress, text_delta_callback,
@@ -465,6 +674,11 @@ class ResearchAgentRunner:
                     progress.trace(context, phase="model", capability_names=tool_names,
                                    requested_count=len(turn.tool_calls))
                 except ModelResponseError as exc:
+                    if exc.reason == "model_allowance_exhausted":
+                        return await self._finalize_with_current_evidence(
+                            AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
+                            checkpoint=checkpoint, text_delta_callback=text_delta_callback,
+                        )
                     model_name = str(
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
@@ -483,6 +697,12 @@ class ResearchAgentRunner:
                         and response_retries < _MODEL_RESPONSE_RETRY_LIMIT
                     ):
                         response_retries += 1
+                        progress.trace(
+                            context,
+                            phase="model_retry",
+                            retry_attempt=response_retries,
+                            retry_reason=exc.reason,
+                        )
                         logger.info(
                             "Retrying Research Agent model response model=%s "
                             "attempt=%d",
@@ -493,7 +713,7 @@ class ResearchAgentRunner:
                     messages.append(
                         self._assistant(
                             context,
-                            self._failure_answer(messages, calls, results, review_reason=exc.reason),
+                            self._failure_answer(messages, calls, results),
                             progress,
                         )
                     )
@@ -511,13 +731,35 @@ class ResearchAgentRunner:
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
                     )
+                    failure = _provider_failure_details(exc)
                     logger.warning(
-                        "Research Agent model call failed model=%s "
-                        "exception_type=%s",
-                        model_name,
-                        type(exc).__name__,
+                        "Research Agent model call failed model=%s details=%s",
+                        model_name, json.dumps(failure, separators=(",", ":")),
                     )
-                    provider_timeout = "timeout" in type(exc).__name__.lower()
+                    if (
+                        failure["retryable"]
+                        and response_retries < _MODEL_RESPONSE_RETRY_LIMIT
+                        and progress.remaining_seconds() > 0
+                    ):
+                        response_retries += 1
+                        delay = min(0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1),
+                                    progress.remaining_seconds())
+                        progress.trace(
+                            context,
+                            phase="model_retry",
+                            retry_attempt=response_retries,
+                            retry_reason=failure["reason"], http_status=failure["http_status"],
+                            retry_delay_ms=round(delay * 1000),
+                        )
+                        logger.info(
+                            "Retrying Research Agent provider response model=%s "
+                            "attempt=%d",
+                            model_name,
+                            response_retries + 1,
+                        )
+                        await sleep(delay)
+                        continue
+                    provider_timeout = failure["reason"] == "provider_timeout"
                     messages.append(
                         self._assistant(
                             context,
@@ -532,6 +774,7 @@ class ResearchAgentRunner:
                         termination_reason=(
                             "provider_timeout" if provider_timeout else "model_unavailable"
                         ),
+                        retry_reason=failure["reason"], http_status=failure["http_status"],
                     )
                     return self._result(
                         AgentRunStatus.FAILED,
@@ -543,6 +786,7 @@ class ResearchAgentRunner:
                 required_tool = capability_policy.required_tool_before_answer(
                     tool_names,
                     successful_results=capability_policy.active_successful_results_by_name(messages),
+                    calls=calls,
                 )
                 if (
                     not turn.tool_calls
@@ -607,7 +851,8 @@ class ResearchAgentRunner:
             calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
             stop_reason = progress.stop_before_model()
-            if progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls:
+            if (self.limits.max_tool_calls is not None
+                    and progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls):
                 stop_reason = AgentCompletionReason.RESOURCE_BUDGET
             if stop_reason:
                 error = ("resource_budget", "These Sources or actions remain uninspected or unexecuted in this turn.")
@@ -637,16 +882,24 @@ class ResearchAgentRunner:
                     progress,
                     validated_arguments=validated_arguments,
                 )
-            old_observation_count = len(progress.seen_observations)
             old_resource_count = len(progress.resource_refs)
             prior_no_progress = progress.consecutive_no_progress
+            progress_increased = False
             for index, (call, capability_result) in enumerate(completed):
                 calls[batch_start + index] = call
+                if capability_result.status is ToolResultStatus.SUCCEEDED and call.name in {
+                    "read_source", "inspect_table", "inspect_document_sources",
+                }:
+                    coverage = progress.source_coverage(call, capability_result)
+                    capability_result = replace(capability_result, data={
+                        **dict(capability_result.data), "source_coverage": coverage,
+                    })
+                progress.update_research_plan(call.name, capability_result.status)
                 results.append(capability_result)
                 messages.append(self._result_message(context, capability_result))
-                progress.observe(call, capability_result)
+                progress_increased = progress.observe(call, capability_result) or progress_increased
             progress.consecutive_no_progress = (
-                prior_no_progress + 1 if len(progress.seen_observations) == old_observation_count else 0
+                prior_no_progress + 1 if not progress_increased else 0
             )
             await self._checkpoint(checkpoint, messages, calls, results)
             progress.trace(context, phase="tools", capability_names=tool_names, requested_count=len(requested),
@@ -666,43 +919,44 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None,
         *,
         finalizing: bool = False,
-        check_research: bool = True,
     ) -> ModelTurn:
         timeout = progress.remaining_seconds()
-        output_limit = min(
-            self.limits.max_model_output_tokens,
-            self.limits.max_model_tokens - progress.model_tokens,
-        )
+        output_limit = self.limits.max_model_output_tokens
+        if self.limits.max_model_tokens is not None:
+            output_limit = min(output_limit, self.limits.max_model_tokens - progress.model_tokens)
         if finalizing:
             timeout = min(timeout, self.limits.max_finalization_seconds)
             output_limit = self.limits.max_finalization_output_tokens
+        if output_limit <= 0:
+            raise ModelResponseError("The configured model allowance is exhausted.",
+                                     reason="model_allowance_exhausted", retryable=False)
+        if model_context.compacting:
+            output_limit = min(output_limit, 8192)
         if timeout <= 0:
             raise TimeoutError("research turn deadline reached")
+        model_context = replace(model_context, max_context_tokens=self.limits.max_context_tokens)
+        prompt = RESEARCH_COMPACTION_SYSTEM_PROMPT if model_context.compacting else RESEARCH_AGENT_SYSTEM_PROMPT
+        request_tokens = self.context_builder.estimate_tokens({
+            "messages": model_context.provider_messages(prompt),
+            "tools": [spec.model_schema() for spec in tool_specs],
+        })
+        if request_tokens + output_limit + 1024 > self.limits.max_context_tokens:
+            raise ModelResponseError("Model request exceeds its context window.",
+                                     reason="context_window_exceeded", retryable=False)
+        if not model_context.compacting:
+            progress.read_batch_tokens = max(1024, min(16_000,
+                self.limits.max_context_tokens - request_tokens - output_limit - 4096))
         arguments: dict[str, Any] = {
             "context": model_context,
             "tool_specs": tool_specs,
             "timeout_seconds": timeout,
             "max_output_tokens": output_limit,
         }
-        names_by_id = {
-            call.tool_call_id: call.name
-            for message in model_context.messages for call in message.tool_calls
-        }
-        research_context = any(
-            message.source_contexts or (
-                message.tool_result is not None
-                and names_by_id.get(message.tool_call_id) in _RESEARCH_OBSERVATION_TOOLS
-            )
-            for message in model_context.messages
-        )
-        buffer_answer = model_context.require_tool_call or (check_research and (
-            research_context or any(spec.name in _RESEARCH_DRAFT_TOOLS for spec in tool_specs)
-        ))
         if text_delta_callback is not None:
             # A response rejected for skipping a required read must not appear
             # in the browser as a completed research answer.
             arguments["text_delta_callback"] = (
-                (lambda _delta: None) if buffer_answer else text_delta_callback
+                (lambda _delta: None) if model_context.require_tool_call else text_delta_callback
             )
         progress.model_cycles += 1
         try:
@@ -715,183 +969,230 @@ class ResearchAgentRunner:
             progress.record_model_usage(None)
             raise
         progress.record_model_usage(turn.usage)
-        if check_research and (
-            (not turn.tool_calls and research_context and not model_context.require_tool_call)
-            or any(call.name in _RESEARCH_DRAFT_TOOLS for call in turn.tool_calls)
-        ):
-            finish_only = finalizing or (not turn.tool_calls and progress.stop_before_model() is not None)
-            turn = await self._review_research_turn(
-                turn, model_context, () if finish_only else tool_specs, progress, text_delta_callback,
-                finalizing=finish_only,
-            )
-        if buffer_answer and turn.tool_calls:
-            # Tool activity has its own UI; unreviewed scientific narration must
-            # not enter the conversation through a read-call preamble.
+        if model_context.require_tool_call and turn.tool_calls:
             turn = replace(turn, content="")
-        if buffer_answer and not model_context.require_tool_call and text_delta_callback and turn.content:
-            text_delta_callback(turn.content)
         return turn
 
-    async def _review_research_turn(
-        self,
-        turn: ModelTurn,
-        model_context: ChatModelContext,
-        tool_specs: tuple[ToolSpec, ...],
-        progress: _RunProgress,
-        text_delta_callback: Callable[[str], None] | None,
-        *,
-        finalizing: bool = False,
-    ) -> ModelTurn:
-        """Check observable scientific claims and allow one bounded correction."""
-        active = next((message for message in model_context.messages
-                       if message.message_id == model_context.active_user_message_id), None)
-        if active is None:
-            active = next(message for message in reversed(model_context.messages)
-                          if message.role is ChatMessageRole.USER)
-        names = {call.tool_call_id: call.name for message in model_context.messages for call in message.tool_calls}
-        coverage = (
-            "Only the supplied user constraints and observations are available. "
-            "These are selected collection records and passages, not a systematic external "
-            "literature search. Omitted, unread, unreported and failed are different states. "
-            "Historical references without their text cannot establish a new paper claim."
+    async def _prepare_model_context(
+        self, messages: tuple[ChatMessage, ...], tool_specs: tuple[ToolSpec, ...],
+        progress: _RunProgress, *, active_user_message_id: str,
+    ) -> ChatModelContext:
+        """Compact old operations into provisional notes; the durable trajectory stays intact."""
+        overhead = self.context_builder.estimate_tokens({
+            "messages": ChatModelContext(()).provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
+            "tools": [spec.model_schema() for spec in tool_specs],
+        })
+        input_budget = self.limits.max_context_tokens - self.limits.max_model_output_tokens - overhead - 2048
+        if tool_specs:
+            input_budget -= min(16_000, max(0, input_budget // 3))
+        prior_reading = self._prior_source_reading(
+            messages, active_user_message_id=active_user_message_id,
+            max_tokens=min(4500, max(256, input_budget // 8)),
         )
-        observations: dict[str, dict[str, Any]] = {
-            "request": {"kind": "user_request", "data": active.content},
-            "coverage": {"kind": "coverage", "data": coverage},
-        }
-        for message in model_context.messages:
-            if message.role is ChatMessageRole.USER:
-                if message.message_id == active.message_id:
+        if prior_reading:
+            input_budget -= self.context_builder.estimate_tokens(prior_reading) + 200
+        available = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
+        view = self.context_builder.for_model(
+            available, active_user_message_id=active_user_message_id,
+            max_input_tokens=input_budget, working_summary=progress.working_summary,
+        )
+        view = replace(view, prior_reading_summary=prior_reading)
+        kept = {message.message_id for message in view.messages}
+        omitted = tuple(message for message in available if message.message_id not in kept)
+        active = next(message for message in messages if message.message_id == active_user_message_id)
+        units = list(self.context_builder._protocol_units(omitted))
+        while units:
+            if progress.compaction_attempts >= 3:
+                if progress.working_summary:
+                    logger.warning(
+                        "Research context compaction degraded to recent context after retries"
+                    )
+                    return replace(view, max_context_tokens=self.limits.max_context_tokens)
+                raise ModelResponseError("Research context could not be compacted without repeated retries.",
+                                         reason="context_compaction_unavailable", retryable=False)
+            batch: list[ChatMessage] = []
+            for unit in units:
+                candidate = ChatModelContext((active, *batch, *unit), compacting=True,
+                                             working_summary=progress.working_summary,
+                                             active_user_message_id=active_user_message_id)
+                tokens = self.context_builder.estimate_tokens(candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT))
+                if tokens + 8192 + 2048 > self.limits.max_context_tokens:
                     break
-                observations[message.message_id] = {"kind": "earlier_user_request", "data": message.content}
-        for message in model_context.messages:
-            if message.tool_result is not None:
-                observations[message.tool_call_id] = {
-                    "kind": names.get(message.tool_call_id, "unknown_tool"),
-                    "status": message.tool_result.status.value,
-                    "data": dict(message.tool_result.data),
-                }
-            for source in message.source_contexts:
-                observations[f"{message.message_id}:{source.source_ref}"] = {
-                    "kind": "user_selected_source", "data": source.to_record(),
-                }
-        for attempt in range(2):
-            candidate = {"content": turn.content, "tool_calls": [
-                {"name": call.name, "arguments": dict(call.arguments)} for call in turn.tool_calls
-            ]}
-            candidate_fields = self._review_candidate_fields(candidate)
-            observations["candidate"] = {"kind": "unexecuted_proposal", "data": candidate}
-            try:
-                if not finalizing and (progress.model_tokens >= self.limits.max_model_tokens
-                                       or progress.model_cycles >= self.limits.emergency_max_model_cycles):
-                    raise ValueError("research review allowance exhausted")
-                reviewed = await self._respond(
-                    ChatModelContext((), research_review={
-                        "request": active.content, "coverage": coverage,
-                        "observations": self._review_observations_for_model(observations),
-                        "candidate": candidate, "candidate_fields": candidate_fields,
-                    }),
-                    (), progress, (lambda _delta: None) if text_delta_callback else None,
-                    finalizing=finalizing, check_research=False,
-                )
-                if reviewed.tool_calls:
-                    raise ValueError("research review returned executable calls")
-                report = ResearchClaimReview.model_validate_json(extract_json_object(reviewed.content))
-                self._validate_research_review(report, candidate_fields, observations)
-                issues = [check for check in report.checks if check.verdict in {"revise", "unverified"}]
-                logger.info("Research claim review attempt=%d checks=%d issues=%d", attempt + 1, len(report.checks), len(issues))
-            except Exception as exc:
-                logger.warning("Research claim review unavailable exception_type=%s", type(exc).__name__)
-                raise ModelResponseError("Research claim review could not be completed.",
-                                         reason="research_review_unavailable", retryable=False) from None
-            if not issues:
-                return turn
-            if attempt == 1:
-                raise ModelResponseError("Research claims still need correction.",
-                                         reason="research_claim_unresolved", retryable=False)
-            correction = ChatMessage.user(
-                message_id=self._message_id(), session_id=active.session_id, created_at=_now_iso(),
-                content=(
-                    "The proposed answer or draft has not been accepted or executed. Correct the "
-                    "specific research checks below using the original request and observations. "
-                    "Preserve the requested deliverable and return the complete corrected answer "
-                    "or tool arguments. Do not narrate this internal review. Uncertain claims can "
-                    "remain explicitly unresolved; do not invent evidence to make the check pass.\n"
-                    + json.dumps({"candidate": candidate, "checks": [
-                        {**check.model_dump(), "claim": candidate_fields[check.candidate_path], "basis": [
-                            {**basis.model_dump(), "quote": self._review_candidate_fields(
-                                observations[basis.reference]["data"],
-                            )[basis.field_path]}
-                            for basis in check.basis
-                        ]}
-                        for check in issues
-                    ]}, ensure_ascii=False)
-                ),
+                batch.extend(unit)
+            if not batch:
+                raise ModelResponseError("One research observation exceeds the context window.",
+                                         reason="context_window_exceeded", retryable=False)
+            progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
+            compaction_messages = (active, *batch)
+            progress.compaction_attempts += 1
+            for attempt in range(2):
+                try:
+                    compacted = await self._respond(
+                        ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
+                                         active_user_message_id=active_user_message_id),
+                        (), progress, None,
+                    )
+                    if compacted.tool_calls:
+                        raise ValueError("compaction cannot request tools")
+                    notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
+                    allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
+                    if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
+                        raise ValueError("working note cites an unobserved message")
+                    summary = self._bounded_working_notes(
+                        notes, max_tokens=min(6000, input_budget // 3),
+                    ).model_dump_json()
+                    break
+                except ValueError:
+                    if attempt:
+                        if progress.working_summary:
+                            logger.warning(
+                                "Research context compaction returned invalid notes; keeping prior notes"
+                            )
+                            return replace(view, max_context_tokens=self.limits.max_context_tokens)
+                        raise ModelResponseError("Research working notes could not be preserved.",
+                                                 reason="context_compaction_unavailable", retryable=False) from None
+                    compaction_messages = (*compaction_messages, ChatMessage.user(
+                        message_id=self._message_id(), session_id=active.session_id, created_at=_now_iso(),
+                        content="Return concise JSON matching OUTPUT_SCHEMA exactly: scope is a string; "
+                        "next_actions is an array of strings, not objects. All basis_message_ids must "
+                        "come from the supplied records or prior notes. Preserve scientific uncertainty; "
+                        "format repair does not verify a claim. Use at most 3000 tokens.",
+                    ))
+                except ModelResponseError:
+                    if progress.working_summary:
+                        logger.warning(
+                            "Research context compaction request failed; keeping prior notes"
+                        )
+                        return replace(view, max_context_tokens=self.limits.max_context_tokens)
+                    raise
+            else:
+                raise ModelResponseError("Research working notes could not be preserved.",
+                                         reason="context_compaction_unavailable", retryable=False)
+            # A successful compaction closes this failure streak. The counter
+            # guards consecutive failed attempts, not the lifetime of a long
+            # investigation; otherwise later evidence would be forced into a
+            # stale recent-only view after three successful compactions.
+            progress.compaction_attempts = 0
+            progress.working_summary = summary
+            progress.compacted_message_ids.update(message.message_id for message in batch)
+            units = [unit for unit in units if unit[0].message_id not in progress.compacted_message_ids]
+        view = self.context_builder.for_model(
+            tuple(message for message in messages if message.message_id not in progress.compacted_message_ids),
+            active_user_message_id=active_user_message_id, max_input_tokens=input_budget,
+            working_summary=progress.working_summary,
+        )
+        # Lineage is derived from the complete archived history, not model notes.
+        retained = {message.message_id for message in view.messages}
+        remaining = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
+        if any(unit[0].message_id not in retained for unit in self.context_builder._protocol_units(remaining)):
+            return await self._prepare_model_context(messages, tool_specs, progress,
+                                                     active_user_message_id=active_user_message_id)
+        return replace(view, max_context_tokens=self.limits.max_context_tokens, prior_reading_summary=prior_reading)
+
+    def _prior_source_reading(
+        self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
+        active_user_message_id: str, max_tokens: int,
+    ) -> str:
+        """Retain bounded reading facts across turns without granting current write authority."""
+        active_index = next(index for index, message in enumerate(messages)
+                            if message.message_id == active_user_message_id)
+        prior = messages[:active_index]
+        names = {call.tool_call_id: call.name for message in prior for call in message.tool_calls}
+        results: dict[str, list[Mapping[str, Any]]] = {}
+        sources = []
+        for message in prior:
+            result = message.tool_result
+            name = names.get(message.tool_call_id)
+            if (result is None or result.status is not ToolResultStatus.SUCCEEDED
+                    or name not in {"read_source", "inspect_table", "inspect_document_sources"}):
+                continue
+            results.setdefault(name, []).append(result.data)
+            if name == "inspect_document_sources":
+                document_id = str(result.data.get("document", {}).get("document_id") or "")
+                sources.extend({**source, "document_id": document_id} for source in result.data.get("sources", ())
+                               if isinstance(source, Mapping))
+            elif name == "inspect_table":
+                sources.append({**result.data, "source_kind": "table", "source_ref": result.data.get("table_ref")})
+            else:
+                sources.append(result.data)
+        completed = capability_policy.complete_source_reads(results)
+        if not completed:
+            return ""
+        documents: dict[str, dict[tuple[str, ...], dict[str, Any]]] = {}
+        for source in reversed(sources):
+            identity = tuple(str(source.get(key) or "") for key in
+                             ("document_id", "source_kind", "source_ref", "source_digest"))
+            if identity not in completed:
+                continue
+            record = {key: source[key] for key in ("source_kind", "source_ref", "source_digest", "page", "heading_path", "content_offset")
+                      if isinstance(source.get(key), (str, int))}
+            content = source.get("content")
+            if isinstance(content, str) and content:
+                record.update(excerpt=content[:1600], excerpt_truncated=len(content) > 1600)
+            documents.setdefault(identity[0], {}).setdefault(identity, record)
+        payload: dict[str, Any] = {"papers": [], "omitted_paper_count": len(documents)}
+
+        def fits() -> bool:
+            return self.context_builder.estimate_tokens(payload) <= max_tokens
+
+        queues = []
+        for document_id, records in documents.items():
+            paper = {"document_id": document_id, "complete_source_count": len(records),
+                     "sources": [], "omitted_source_count": len(records)}
+            payload["papers"].append(paper)
+            payload["omitted_paper_count"] -= 1
+            if not fits():
+                payload["papers"].pop()
+                payload["omitted_paper_count"] += 1
+                break
+            # Recent metadata tails must not displace the longer passages already read.
+            queues.append((paper, sorted(records.values(),
+                                        key=lambda record: len(record.get("excerpt", "")), reverse=True)))
+        # Allocate excerpts across papers before adding more passages from one paper.
+        for index in range(max((len(records) for _, records in queues), default=0)):
+            for paper, records in queues:
+                if index >= len(records):
+                    continue
+                record = dict(records[index])
+                paper["sources"].append(record)
+                paper["omitted_source_count"] -= 1
+                if not fits():
+                    record.pop("excerpt", None)
+                    record.pop("excerpt_truncated", None)
+                if not fits():
+                    paper["sources"].pop()
+                    paper["omitted_source_count"] += 1
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    def _bounded_working_notes(
+        self, notes: ResearchWorkingNotesModelOutput, *, max_tokens: int,
+    ) -> ResearchWorkingNotesModelOutput:
+        """Keep validated navigation notes within their reserved context space."""
+        checks = [ResearchWorkingCheckModelOutput(
+            statement=check.statement[:600],
+            conditions=check.conditions[:400],
+            basis_message_ids=check.basis_message_ids[:8],
+            unresolved=check.unresolved[:400],
+        ) for check in notes.checks]
+        next_actions = [str(action)[:400] for action in notes.next_actions[:8]]
+        candidate = ResearchWorkingNotesModelOutput(
+            scope=notes.scope[:1000], checks=checks, next_actions=next_actions,
+        )
+        while checks and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
+            checks.pop()
+            candidate = ResearchWorkingNotesModelOutput(
+                scope=candidate.scope, checks=checks, next_actions=next_actions,
             )
-            try:
-                if not finalizing and (progress.model_cycles >= self.limits.emergency_max_model_cycles
-                                       or progress.model_tokens >= self.limits.max_model_tokens):
-                    raise ValueError("research correction allowance exhausted")
-                repair_context = self.context_builder.for_model(
-                    (*model_context.messages, correction), active_user_message_id=active.message_id,
-                )
-                expected_drafts = {call.name for call in turn.tool_calls if call.name in _RESEARCH_DRAFT_TOOLS}
-                turn = await self._respond(
-                    replace(repair_context, require_tool_call=model_context.require_tool_call or bool(expected_drafts)),
-                    tool_specs, progress, (lambda _delta: None) if text_delta_callback else None,
-                    finalizing=finalizing, check_research=False,
-                )
-                if expected_drafts and {call.name for call in turn.tool_calls} != expected_drafts:
-                    raise ValueError("research correction must retain the requested draft action")
-            except Exception as exc:
-                logger.warning("Research claim correction unavailable exception_type=%s", type(exc).__name__)
-                raise ModelResponseError("Research claim correction could not be completed.",
-                                         reason="research_review_unavailable", retryable=False) from None
-        raise AssertionError("research review loop did not terminate")
-
-    @staticmethod
-    def _validate_research_review(
-        report: ResearchClaimReview,
-        candidate_fields: Mapping[str, str],
-        observations: Mapping[str, Mapping[str, Any]],
-    ) -> None:
-        for check in report.checks:
-            if check.verdict != "not_applicable" and check.candidate_path not in candidate_fields:
-                raise ValueError("review target is not in the candidate")
-            if check.verdict != "not_applicable" and not any(
-                basis.reference in observations
-                and observations[basis.reference]["kind"] != "unexecuted_proposal"
-                for basis in check.basis
-            ):
-                raise ValueError("research candidate cannot support itself")
-            for basis in check.basis:
-                observed = observations.get(basis.reference)
-                if observed is None or basis.field_path not in ResearchAgentRunner._review_candidate_fields(observed["data"]):
-                    raise ValueError("research review basis is not an observed field")
-
-    @staticmethod
-    def _review_observations_for_model(observations: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-        return [
-            {"reference": ref, "kind": observed["kind"], "status": observed.get("status"),
-             "fields": ResearchAgentRunner._review_candidate_fields(observed["data"])}
-            for ref, observed in observations.items()
-        ]
-
-    @staticmethod
-    def _review_candidate_fields(value: Any, path: str = "") -> dict[str, str]:
-        if isinstance(value, str):
-            return {path: value}
-        if value is None or isinstance(value, (bool, int, float)):
-            return {path: json.dumps(value)}
-        if isinstance(value, (Mapping, list, tuple)) and not value:
-            return {path: json.dumps(value)}
-        children = value.items() if isinstance(value, Mapping) else enumerate(value) if isinstance(value, (list, tuple)) else ()
-        return {
-            ref: text for key, child in children
-            for ref, text in ResearchAgentRunner._review_candidate_fields(
-                child, f"{path}/{str(key).replace('~', '~0').replace('/', '~1')}",
-            ).items()
-        }
+        while next_actions and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
+            next_actions.pop()
+            candidate = ResearchWorkingNotesModelOutput(
+                scope=candidate.scope, checks=checks, next_actions=next_actions,
+            )
+        if self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
+            candidate = ResearchWorkingNotesModelOutput(
+                scope=candidate.scope[:400], checks=[], next_actions=[],
+            )
+        return candidate
 
     async def _finalize_with_current_evidence(
         self,
@@ -912,7 +1213,10 @@ class ResearchAgentRunner:
             messages,
             calls,
             results,
-            budget_exhausted=True,
+            budget_exhausted=reason in {
+                AgentCompletionReason.RESOURCE_BUDGET,
+                AgentCompletionReason.EMERGENCY_CEILING,
+            },
         )
         logger.info(
             "Research Agent final answer reason=%s tools=none", reason.value,
@@ -920,8 +1224,8 @@ class ResearchAgentRunner:
         progress.start_response()
         try:
             turn = await self._respond(
-                self.context_builder.for_model(
-                    (*messages, instruction), active_user_message_id=next(
+                await self._prepare_model_context(
+                    (*messages, instruction), (), progress, active_user_message_id=next(
                         message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                     ),
                 ),
@@ -935,7 +1239,7 @@ class ResearchAgentRunner:
                 type(exc).__name__,
             )
             messages.append(self._assistant(context, self._failure_answer(
-                messages, calls, results, review_reason=exc.reason if isinstance(exc, ModelResponseError) else "",
+                messages, calls, results,
             ), progress))
             progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -960,23 +1264,8 @@ class ResearchAgentRunner:
     ) -> ChatMessage:
         active_request = self._active_user_request(messages)
         last_user = max((index for index, message in enumerate(messages) if message.role is ChatMessageRole.USER), default=0)
-        prior_messages = messages[:last_user]
-        prior_names = {
-            request.tool_call_id: request.name
-            for message in prior_messages for request in message.tool_calls
-        }
-        prior_reads = capability_policy.complete_source_reads({
-            name: [
-                message.tool_result.data for message in prior_messages
-                if message.tool_result is not None
-                and message.tool_result.status is ToolResultStatus.SUCCEEDED
-                and prior_names.get(message.tool_call_id) == name
-            ]
-            for name in ("read_source", "inspect_table", "inspect_document_sources")
-        })
-        prior_reading = "\n".join(
-            f"- document_id={document_id}, kind={kind}, source_ref={ref}, digest={digest}"
-            for document_id, kind, ref, digest in sorted(prior_reads)[:30]
+        prior_reading = self._prior_source_reading(
+            messages, active_user_message_id=messages[last_user].message_id, max_tokens=1500,
         ) or "No complete Source read is recorded in earlier requests."
         structured_deliverable = self._latest_structured_deliverable(results)
         deliverable_section = (
@@ -993,6 +1282,11 @@ class ResearchAgentRunner:
                 "The requested structured research action is complete. Give the "
                 "researcher the useful final answer from the completed trajectory. "
                 "Do not request another tool and do not restart onboarding."
+            ) if structured_deliverable is not None else (
+                "Reading stopped because repeated operations made no new progress. "
+                "The requested research work remains incomplete. Report completed "
+                "observations and unfinished checks without claiming the deliverable "
+                "is complete or a resource budget was exhausted. Do not request another tool."
             )
         )
         if next((result.data.get("draft_status") for result in reversed(results) if result.data.get("draft_status")), None) == "abstained":
@@ -1033,12 +1327,47 @@ class ResearchAgentRunner:
     ) -> tuple[tuple[ChatToolCall, Any], ...]:
         assistant_message_id = progress.response_message_id
         requested = []
-        for position, model_call in enumerate(turn.tool_calls):
+        seen_requests: set[tuple[str, str]] = set()
+        for model_call in turn.tool_calls:
+            arguments = dict(model_call.arguments)
+            if model_call.name == "curate_finding":
+                arguments = self._complete_curation_shape(arguments, messages)
+            if model_call.name == "create_finding_draft":
+                # Drafts are transient and researcher-reviewed. Models often omit
+                # this conservative classification even though the schema marks it
+                # conditional (abstentions must omit it). Normalize that one safe
+                # omission before validation; published Finding writes remain strict.
+                if (
+                    arguments.get("statement")
+                    and not arguments.get("abstention_reason")
+                    and not arguments.get("assertion_strength")
+                ):
+                    arguments["assertion_strength"] = "descriptive"
+                for field_name in (
+                    "supporting_evidence_ids", "contradicting_evidence_ids",
+                    "context_evidence_ids", "condition_boundary_evidence_ids",
+                ):
+                    values = arguments.get(field_name)
+                    if isinstance(values, list) and all(isinstance(value, str) for value in values):
+                        arguments[field_name] = list(dict.fromkeys(values))
+            request_key = (
+                model_call.name,
+                json.dumps(arguments, sort_keys=True, separators=(",", ":")),
+            )
+            if request_key in seen_requests:
+                continue
+            if len(requested) >= _MAX_TOOL_CALLS_PER_RESPONSE:
+                logger.warning(
+                    "Research Agent tool batch truncated requested=%d retained=%d limit=%d",
+                    len(turn.tool_calls), len(requested), _MAX_TOOL_CALLS_PER_RESPONSE,
+                )
+                break
+            seen_requests.add(request_key)
             registered = self.capabilities.get(model_call.name)
             call = ChatToolCall.requested(
                 tool_call_id=self._tool_call_id(), session_id=context.session_id,
-                assistant_message_id=assistant_message_id, position=position,
-                name=model_call.name, arguments=model_call.arguments,
+                assistant_message_id=assistant_message_id, position=len(requested),
+                name=model_call.name, arguments=arguments,
                 risk=registered.spec.risk if registered else ToolRisk.UNKNOWN,
             )
             requested.append((call, registered if model_call.name in allowed_names else None))
@@ -1052,6 +1381,47 @@ class ResearchAgentRunner:
             )
         )
         return tuple(requested)
+
+    @staticmethod
+    def _complete_curation_shape(
+        arguments: dict[str, Any], messages: list[ChatMessage],
+    ) -> dict[str, Any]:
+        """Preserve the canonical Finding envelope after it was read.
+
+        Curation may revise the researcher's requested statement and limitations,
+        but identity, lineage, evidence bindings, and context serialization come
+        from the exact Finding inspection. This prevents a model from losing
+        provenance while still leaving scientific text subject to normal
+        validation and approval.
+        """
+        # Curation commonly follows a separate feedback/approval turn. Keep the
+        # exact Finding inspection from the full trajectory available; active
+        # turn scoping would discard it before the second approval.
+        inspected = capability_policy._successful_results_by_name(messages).get(
+            "inspect_published_finding", ()
+        )
+        canonical = next(
+            (result.get("finding") for result in reversed(inspected)
+             if isinstance(result.get("finding"), Mapping)
+             and str(result["finding"].get("objective_id") or "") == str(arguments.get("objective_id") or "")
+             and str(result["finding"].get("finding_id") or "") == str(arguments.get("finding_id") or "")
+             and str(result["finding"].get("analysis_version") or "") == str(arguments.get("analysis_version") or "")),
+            None,
+        )
+        candidate = dict(arguments.get("curated_finding") or {})
+        if not canonical or not candidate:
+            return arguments
+        # A common model typo is singular ``limitation``. It is a structural
+        # alias only; no scientific value is synthesized.
+        if "limitations" not in candidate and "limitation" in candidate:
+            candidate["limitations"] = candidate.pop("limitation")
+        editable = {"statement", "limitations", "certainty", "direction",
+                    "assertion_strength", "attribution_scope", "synthesis_status",
+                    "factors", "outcome"}
+        for key, value in canonical.items():
+            if key not in editable or key not in candidate:
+                candidate[key] = value
+        return {**arguments, "curated_finding": candidate}
 
 
     async def _execute_read_batch(
@@ -1073,6 +1443,7 @@ class ResearchAgentRunner:
                             call,
                             handler,
                             arguments=validated_arguments.get(call.tool_call_id),
+                            max_result_tokens=max(512, progress.read_batch_tokens // len(requested)),
                         ),
                         timeout=progress.remaining_seconds(),
                     )
@@ -1100,8 +1471,6 @@ class ResearchAgentRunner:
         messages: list[ChatMessage],
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
-        *,
-        review_reason: str = "",
     ) -> str:
         chinese = any("\u4e00" <= char <= "\u9fff" for char in ResearchAgentRunner._active_user_request(messages))
         lead = (
@@ -1110,14 +1479,6 @@ class ResearchAgentRunner:
             "This turn could not be completed. Obtained results were preserved; the technical "
             "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
         )
-        if review_reason in {"research_claim_unresolved", "research_review_unavailable"}:
-            lead = (
-                "本轮内容尚未通过来源范围与测量指标核对，暂不返回未经确认的结论或新草案。已取得的阅读结果已保留；这不代表论文没有相关证据。"
-                if chinese else
-                "The proposed content has not passed the source-scope and measurement checks, "
-                "so no unchecked conclusion or new draft is returned. Obtained reading results "
-                "were preserved; this does not establish an absence of evidence."
-            )
         if not any(call.name in {"browse_collection_papers", "read_source", "inspect_table", "inspect_document_sources", "search_sources"} for call in calls):
             return lead
         ledger = ResearchAgentRunner._reading_ledger(calls, results, chinese=chinese)
@@ -1237,6 +1598,7 @@ class ResearchAgentRunner:
         handler: Any,
         *,
         arguments: BaseModel | None = None,
+        max_result_tokens: int = 12_000,
     ) -> tuple[ChatToolCall, ChatToolResult]:
         if arguments is None:
             try:
@@ -1248,10 +1610,8 @@ class ResearchAgentRunner:
                     "The research capability arguments are invalid.",
                 )
         try:
-            execution_context = CapabilityExecutionContext.for_call(
-                context,
-                call.tool_call_id,
-            )
+            execution_context = replace(CapabilityExecutionContext.for_call(context, call.tool_call_id),
+                                        max_result_tokens=max_result_tokens)
             result = (await handler.execute(execution_context, arguments)).for_call(
                 call.tool_call_id
             )

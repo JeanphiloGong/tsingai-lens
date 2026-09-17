@@ -15,6 +15,11 @@ from application.chat.capabilities import (
     CapabilityRegistry,
     ConfirmObjectiveCapability,
     CreateFindingVersionCapability,
+    CreateFindingDraftCapability,
+    CreateEvidenceVersionCapability,
+    CreateEvidenceDraftCapability,
+    InspectPublishedFindingCapability,
+    ReadSourceCapability,
     CreateObjectiveCandidateCapability,
     CreateResearchPlanCapability,
     DeriveObjectiveCapability,
@@ -31,6 +36,7 @@ from application.core.objectives.analysis_service import ObjectiveAnalysisServic
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
+from application.core.objectives.evidence_authoring_service import EvidenceAuthoringService
 from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
@@ -78,6 +84,20 @@ class _QueuedModel(_Model):
 
     def __init__(self) -> None:
         super().__init__()
+
+    async def respond(self, **kwargs):
+        context = kwargs["context"]
+        if context.compacting:
+            return ModelTurn(content=json.dumps({
+                "scope": "Continue the approved P002 preheating comparison and research plan.",
+                "checks": [{
+                    "statement": "Earlier collection records are retained in the full trajectory.",
+                    "conditions": "P002 preheated and non-preheated samples; maintain their testing context.",
+                    "basis_message_ids": [context.messages[0].message_id],
+                    "unresolved": "Re-read exact Sources for any new scientific claim.",
+                }], "next_actions": ["Complete the currently requested action using its exact records."],
+            }))
+        return await super().respond(**kwargs)
 
     def queue_tool(self, name: str, arguments: dict[str, Any]) -> None:
         # A completed draft may finish from its tool result without consuming
@@ -1102,3 +1122,133 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
         call.decision_arguments_digest == call.arguments_digest for call in write_calls
     )
     assert model.turns == deque()
+
+    # The researcher notices the corrected table reports 83%, not the old 82%.
+    # Repair the fact first; the conclusion remains historical until separately approved.
+    evidence_author = EvidenceAuthoringService(
+        collection_service=collection_service, objective_repository=objective_repository,
+        source_artifact_repository=source_repository,
+    )
+    revision_model = _QueuedModel()
+    revision_chat = ChatSessionService(
+        collection_service=collection_service, source_artifact_repository=source_repository,
+        repository=chat_repository,
+        runner=ResearchAgentRunner(model=revision_model, capabilities=CapabilityRegistry((
+            ReadSourceCapability(
+                collection_service=collection_service, source_artifact_repository=source_repository,
+            ),
+            InspectPublishedFindingCapability(
+                collection_service=collection_service, objective_analysis_service=objective_analysis_service,
+                finding_feedback_service=finding_feedback_service,
+            ),
+            CreateEvidenceDraftCapability(
+                collection_service=collection_service, source_artifact_repository=source_repository,
+            ),
+            CreateEvidenceVersionCapability(evidence_authoring_service=evidence_author),
+            CreateFindingDraftCapability(),
+            CreateFindingVersionCapability(finding_authoring_service=FindingAuthoringService(
+                collection_service=collection_service, objective_repository=objective_repository,
+            )),
+        ))),
+    )
+    revision_session = await revision_chat.create_session(collection_id=COLLECTION_ID, user_id=_USER_ID)
+    revision_session_id = revision_session.session_id
+    source_read = await _run_tool(
+        revision_chat, revision_model, session_id=revision_session_id,
+        name="read_source",
+        arguments={"document_id": "doc_a", "source_kind": "table", "source_ref": changed_table.table_id},
+        user_message="Check the complete P002 table: its elongation value is now 83%, not 82%.",
+    )
+    revised_source = source_read.data
+    evidence_arguments = {
+        key: value for key, value in analysis_arguments["evidence_drafts"][1].items()
+        if key not in {"draft_id", "confidence"}
+    }
+    evidence_arguments.update(
+        objective_id=objective_id, source_analysis_version=2,
+        source_digest=revised_source["source_digest"], source_excerpt=revised_source["content"],
+        supersedes_evidence_id=result_evidence["evidence_id"],
+        reported_result={
+            **evidence_arguments["reported_result"], "value": 83, "target_value": 83,
+            "result_text": "Elongation increased from 72% to 83% in the corrected table.",
+        },
+        authoring_note="Correct the elongation transcription against the full table.",
+    )
+    source_call = ModelToolCall(name="read_source", arguments={
+        "document_id": "doc_a", "source_kind": "table", "source_ref": changed_table.table_id,
+    })
+    revision_model.queue_tool("create_evidence_draft", {**evidence_arguments, "draft_id": "corrected-elongation"})
+    revision_model.turns.appendleft(ModelTurn(tool_calls=(source_call,)))
+    drafted = await revision_chat.post_message_for_user(
+        revision_session_id, _USER_ID, message="Read the complete table and prepare a corrected Evidence draft.",
+    )
+    assert drafted["status"] == "completed"
+    assert any(
+        message.tool_result and message.tool_result.data.get("draft", {}).get("draft_id") == "corrected-elongation"
+        for message in drafted["messages"]
+    )
+    revision_model.queue_tool("create_evidence_version", evidence_arguments)
+    revision_model.turns.appendleft(ModelTurn(tool_calls=(source_call,)))
+    proposed = await revision_chat.post_message_for_user(
+        revision_session_id, _USER_ID, message="Check the complete table and save the corrected Evidence as a new version.",
+    )
+    pending_evidence = proposed["pending_approval"]
+    assert pending_evidence is not None and pending_evidence.name == "create_evidence_version"
+    assert (await fresh_objectives.read_objective(COLLECTION_ID, objective_id)).published_analysis_version == 2
+    corrected = await _approve_write(revision_chat, session_id=revision_session_id, pending=pending_evidence)
+    assert corrected.data["affected_finding_ids"] == [finding_id]
+    replacement_id = corrected.data["evidence"]["evidence_id"]
+    inspected = await _run_tool(
+        revision_chat, revision_model, session_id=revision_session_id,
+        name="inspect_published_finding",
+        arguments={"objective_id": objective_id, "finding_id": finding_id, "analysis_version": 3},
+        user_message="Recheck whether the Finding still holds after the Evidence correction.",
+    )
+    assert inspected.data["evidence_review"]["needs_review"] is True
+    old_result = next(item for item in inspected.data["evidence"] if item["evidence_id"] == result_evidence["evidence_id"])
+    assert old_result["reported_result"]["target_value"] == 82
+    assert old_result["eligible_for_finding_authoring"] is False
+    assert inspected.data["replacement_evidence"][0]["reported_result"]["target_value"] == 83
+    revised_finding_args = {
+        **finding_arguments, "source_analysis_version": 3, "parent_finding_id": finding_id,
+        "supporting_evidence_ids": [replacement_id],
+        "statement": "In P002, the corrected table reports elongation increasing from 72% to 83% with preheating.",
+        "limitations": ["The association remains supported within P002; the other inspected paper supplies no elongation result."],
+    }
+    await _run_tool(
+        revision_chat, revision_model, session_id=revision_session_id,
+        name="create_finding_draft", arguments={**revised_finding_args, "draft_id": "revised-elongation-finding"},
+        user_message="Prepare the revised finding draft using the corrected Evidence and original parent.",
+    )
+    pending_revision = await _request_write(
+        revision_chat, revision_model, session_id=revision_session_id,
+        name="create_finding_version", arguments=revised_finding_args,
+        user_message="Save this new Finding version.",
+    )
+    declined = await revision_chat.decide_tool_call_for_user(
+        revision_session_id, pending_revision.tool_call_id, _USER_ID,
+        arguments_digest=pending_revision.arguments_digest, decision="rejected",
+    )
+    assert declined["pending_approval"] is None
+    assert (await fresh_objectives.read_objective(COLLECTION_ID, objective_id)).published_analysis_version == 3
+    assert (await fresh_objectives.list_findings(COLLECTION_ID, objective_id, 3))[1] == 1
+    pending_revision = await _request_write(
+        revision_chat, revision_model, session_id=revision_session_id,
+        name="create_finding_version", arguments=revised_finding_args,
+        user_message="Save this reviewed Finding as a new version now.",
+    )
+    saved = await _approve_write(revision_chat, session_id=revision_session_id, pending=pending_revision)
+    new_finding_id = saved.data["finding"]["finding_id"]
+    assert saved.data["finding"]["parent_finding_id"] == finding_id
+    assert saved.data["analysis"]["analysis_version"] == 4
+    assert pending_evidence.tool_call_id != pending_revision.tool_call_id
+    assert (await fresh_objectives.read_finding(COLLECTION_ID, objective_id, 2, finding_id)).statement == finding["statement"]
+    reopened_session = await revision_chat.create_session(collection_id=COLLECTION_ID, user_id=_USER_ID)
+    reopened = await _run_tool(
+        revision_chat, revision_model, session_id=reopened_session.session_id,
+        name="inspect_published_finding",
+        arguments={"objective_id": objective_id, "finding_id": new_finding_id, "analysis_version": 4},
+        user_message="Read the saved Finding and its current Evidence in this new conversation.",
+    )
+    assert reopened.data["evidence_review"]["needs_review"] is False
+    assert reopened.data["finding"]["parent_finding_id"] == finding_id

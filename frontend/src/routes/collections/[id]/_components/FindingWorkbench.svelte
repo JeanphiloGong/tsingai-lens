@@ -1205,6 +1205,7 @@
 	}
 	.saved-review p {
 		margin: 6px 0;
+		overflow-wrap: anywhere;
 	}
 	.saved-review .curated-statement {
 		font-size: 16px;

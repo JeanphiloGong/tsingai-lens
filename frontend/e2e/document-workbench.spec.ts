@@ -18,6 +18,14 @@ async function mockPaperReaderApis(
 	sourceReady = true,
 	onChatMessage: (payload: Record<string, unknown>) => void = () => {}
 ) {
+	const session = {
+		session_id: 'chat_source',
+		user_id: 'user_1',
+		collection_id: collectionId,
+		created_at: '2026-08-31T00:00:00+00:00',
+		updated_at: '2026-08-31T00:00:00+00:00'
+	};
+	let messages: Record<string, unknown>[] = [];
 	await page.route('**/*', async (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (!path.startsWith('/api/v1/')) return route.continue();
@@ -41,18 +49,16 @@ async function mockPaperReaderApis(
 			);
 		}
 		if (path === '/api/v1/chat-sessions' && route.request().method() === 'POST') {
-			return route.fulfill(
-				json(
-					{
-						session_id: 'chat_source',
-						user_id: 'user_1',
-						collection_id: collectionId,
-						created_at: '2026-08-31T00:00:00+00:00',
-						updated_at: '2026-08-31T00:00:00+00:00'
-					},
-					201
-				)
-			);
+			return route.fulfill(json(session, 201));
+		}
+		if (path === '/api/v1/chat-sessions/chat_source' && route.request().method() === 'GET') {
+			return route.fulfill(json(session));
+		}
+		if (
+			path === '/api/v1/chat-sessions/chat_source/messages' &&
+			route.request().method() === 'GET'
+		) {
+			return route.fulfill(json({ items: messages, feedback: [], pending_approval: null }));
 		}
 		if (
 			path === '/api/v1/chat-sessions/chat_source/messages' &&
@@ -90,6 +96,7 @@ async function mockPaperReaderApis(
 				pending_approval: null,
 				error_code: null
 			};
+			messages = turn.messages;
 			return route.fulfill({
 				status: 200,
 				contentType: 'text/event-stream',
@@ -213,7 +220,7 @@ test('paper reader reports when neither Source projection is available', async (
 	await expect(page.getByRole('heading', { name: 'Source view is unavailable' })).toBeVisible();
 });
 
-test('a selected document Source reaches the same Collection Agent without a Core write', async ({
+test('a selected document Source reaches the embedded Collection Agent without a Core write', async ({
 	page
 }) => {
 	let postedMessage: Record<string, unknown> | null = null;
@@ -244,10 +251,16 @@ test('a selected document Source reaches the same Collection Agent without a Cor
 		});
 	}
 	await askAction.click();
-	await page.waitForURL(`/collections/${collectionId}/assistant`);
+	await expect(page).toHaveURL(
+		`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`
+	);
+	await expect(page.locator('.agent-pane')).toBeVisible();
 
+	const attachments = page.getByTestId('pending-source-attachments');
+	await expect(attachments).toContainText('Paper A');
 	const pendingContext = page.getByTestId('pending-source-context');
-	await expect(pendingContext).toContainText('Paper A');
+	await expect(pendingContext).not.toBeVisible();
+	await attachments.locator('summary').click();
 	await expect(pendingContext).toContainText('Results');
 	await expect(pendingContext).toContainText('Page 3');
 	await expect(pendingContext).toContainText('Conductivity improved to 12 mS/cm under EIS.');
@@ -276,7 +289,7 @@ test('a selected document Source reaches the same Collection Agent without a Cor
 	).toBeVisible();
 
 	expect(postedMessage).toMatchObject({
-		message: 'What does this result support?',
+		message: expect.stringContaining('What does this result support?'),
 		source_contexts: [
 			{
 				collection_id: collectionId,
@@ -288,5 +301,8 @@ test('a selected document Source reaches the same Collection Agent without a Cor
 			}
 		]
 	});
+	expect(postedMessage!.message).toContain(
+		'Also inspect other relevant sections, tables and figure captions'
+	);
 	expect(consoleErrors, `failed responses: ${failedResponses.join(', ')}`).toEqual([]);
 });

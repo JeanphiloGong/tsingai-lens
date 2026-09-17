@@ -2997,6 +2997,14 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
+		if (
+			path ===
+				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
+			path ===
+				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/curation`
+		) {
+			return route.fulfill(json({ items: [] }));
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
 				json({

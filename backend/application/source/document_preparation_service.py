@@ -38,7 +38,9 @@ logger = logging.getLogger(__name__)
 
 SOURCE_PARSER_VERSION = "source-runtime.v1"
 DOCUMENT_ANALYSIS_VERSION = DOCUMENT_PROFILE_PROMPT_VERSION
-_DEFAULT_PREPARATION_CONCURRENCY = 10
+# Keep database-backed preparation below the default PostgreSQL pool capacity.
+# Status polling and run finalization need connections while workers parse papers.
+_DEFAULT_PREPARATION_CONCURRENCY = 3
 
 SourceArtifactBuilder = Callable[..., Awaitable[list[Any]]]
 

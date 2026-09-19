@@ -22,6 +22,29 @@ database. The backend constructs it with SQLAlchemy `create_async_engine`,
 which selects psycopg's async implementation for this URL. Keep credentials in
 `backend/.env` or the shell; never commit them.
 
+Connection pool settings are optional:
+
+```bash
+export LENS_DATABASE_POOL_SIZE=10
+export LENS_DATABASE_MAX_OVERFLOW=10
+export LENS_DATABASE_POOL_TIMEOUT=30
+```
+
+These defaults allow up to 20 connections per backend process: 10 retained
+connections and 10 temporary overflow connections. Connections open on demand;
+the pool is not preallocated. The timeout is the number of seconds a request
+waits for a pool slot, not a SQL query timeout. Pool size must be positive,
+overflow must be nonnegative, and timeout must be finite and positive. Invalid
+settings fail startup rather than enabling an unbounded pool.
+
+Budget connections across all backend processes and replicas, including overlap
+during deployment: `process_count * (pool_size + max_overflow)`, plus migrations,
+other database clients, and PostgreSQL reserved connections, must fit the
+server's `max_connections`. Check `SHOW max_connections` before increasing
+production settings. A larger pool does not replace bounded preparation and
+polling concurrency or fix slow queries. Apply changes by restarting the
+backend after deployment; existing processes retain their engine configuration.
+
 Set backend LLM runtime variables before local runs that invoke model-backed
 features:
 
@@ -31,7 +54,7 @@ export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
 export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
-export DOCUMENT_PREPARATION_MAX_CONCURRENCY=10
+export DOCUMENT_PREPARATION_MAX_CONCURRENCY=3
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
 export LENS_AGENT_MAX_TURN_SECONDS=0
 export LENS_AGENT_MAX_TOOL_CALLS=0
@@ -50,9 +73,11 @@ export LLM_MAX_RETRIES=2
 
 `CORE_EXTRACTION_MAX_CONCURRENCY` is optional. When unset, Core extraction uses
 `4`.
-`DOCUMENT_PREPARATION_MAX_CONCURRENCY` is optional. When unset, up to `10`
-different Documents prepare concurrently in one backend process. The database
-still admits only one active preparation Pipeline Run for the same Document.
+`DOCUMENT_PREPARATION_MAX_CONCURRENCY` is optional. When unset, up to `3`
+different Documents prepare concurrently in one backend process. This leaves
+database connections available for run finalization and status polling. The
+database still admits only one active preparation Pipeline Run for the same
+Document.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
 `LLM_REASONING_EFFORT` is optional and applies to both Core extraction and Chat,

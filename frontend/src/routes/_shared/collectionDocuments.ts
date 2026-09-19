@@ -71,12 +71,17 @@ export async function listCollectionDocuments(
 		method: 'GET'
 	});
 
-	const items =
-		data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).items)
-			? ((data as Record<string, unknown>).items as unknown[])
-					.map((item) => normalizeCollectionDocument(item))
-					.filter((item): item is CollectionDocument => item !== null)
-			: [];
+	if (
+		!data ||
+		typeof data !== 'object' ||
+		!Array.isArray((data as Record<string, unknown>).items)
+	) {
+		throw new Error('Collection documents response is missing items.');
+	}
+
+	const items = ((data as Record<string, unknown>).items as unknown[])
+		.map((item) => normalizeCollectionDocument(item))
+		.filter((item): item is CollectionDocument => item !== null);
 
 	return { count: items.length, items };
 }

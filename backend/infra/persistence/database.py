@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -25,6 +25,9 @@ class DatabaseSettings(BaseSettings):
     )
 
     database_url: SecretStr
+    database_pool_size: int = Field(default=10, ge=1)
+    database_max_overflow: int = Field(default=10, ge=0)
+    database_pool_timeout: float = Field(default=30, gt=0, allow_inf_nan=False)
 
 
 def build_database_engine(settings: DatabaseSettings) -> AsyncEngine:
@@ -36,7 +39,12 @@ def build_database_engine(settings: DatabaseSettings) -> AsyncEngine:
         raise ValueError("LENS_DATABASE_URL must use postgresql+psycopg.")
     if not database_url.database:
         raise ValueError("LENS_DATABASE_URL must include a database name.")
-    return create_async_engine(database_url)
+    return create_async_engine(
+        database_url,
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        pool_timeout=settings.database_pool_timeout,
+    )
 
 
 def build_session_factory(

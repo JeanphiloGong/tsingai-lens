@@ -27,8 +27,6 @@ class ArtifactStatusRecord:
     documents_ready: bool
     document_profiles_generated: bool
     document_profiles_ready: bool
-    method_facts_generated: bool
-    method_facts_ready: bool
     evidence_cards_generated: bool
     evidence_cards_ready: bool
     test_conditions_generated: bool
@@ -83,8 +81,6 @@ class ArtifactStatusRecord:
         documents_ready: bool = False,
         document_profiles_generated: bool = False,
         document_profiles_ready: bool = False,
-        method_facts_generated: bool = False,
-        method_facts_ready: bool = False,
         evidence_cards_generated: bool = False,
         evidence_cards_ready: bool = False,
         test_conditions_generated: bool = False,
@@ -155,8 +151,6 @@ class ArtifactStatusRecord:
             documents_ready=bool(documents_ready),
             document_profiles_generated=bool(document_profiles_generated),
             document_profiles_ready=bool(document_profiles_ready),
-            method_facts_generated=bool(method_facts_generated),
-            method_facts_ready=bool(method_facts_ready),
             evidence_cards_generated=bool(evidence_cards_generated),
             evidence_cards_ready=bool(evidence_cards_ready),
             test_conditions_generated=bool(test_conditions_generated),
@@ -205,8 +199,6 @@ class ArtifactStatusRecord:
                 source.get("document_profiles_generated")
             ),
             document_profiles_ready=_normalize_bool(source.get("document_profiles_ready")),
-            method_facts_generated=_normalize_bool(source.get("method_facts_generated")),
-            method_facts_ready=_normalize_bool(source.get("method_facts_ready")),
             evidence_cards_generated=_normalize_bool(source.get("evidence_cards_generated")),
             evidence_cards_ready=_normalize_bool(source.get("evidence_cards_ready")),
             test_conditions_generated=_normalize_bool(source.get("test_conditions_generated")),
@@ -256,8 +248,6 @@ class ArtifactStatusRecord:
             "documents_ready": self.documents_ready,
             "document_profiles_generated": self.document_profiles_generated,
             "document_profiles_ready": self.document_profiles_ready,
-            "method_facts_generated": self.method_facts_generated,
-            "method_facts_ready": self.method_facts_ready,
             "evidence_cards_generated": self.evidence_cards_generated,
             "evidence_cards_ready": self.evidence_cards_ready,
             "test_conditions_generated": self.test_conditions_generated,

@@ -150,6 +150,18 @@ def test_paper_experiment_round_trips_its_scientific_boundary() -> None:
                     "baseline_label": "as-built",
                 }
             ],
+            "methods": [
+                {
+                    "method_id": "legacy-method-1",
+                    "document_id": "doc-1",
+                    "collection_id": "col-1",
+                    "method_role": "test",
+                    "method_name": "tensile testing",
+                    "method_payload": {"standard": "ASTM E8"},
+                    "confidence": 0.9,
+                    "epistemic_status": "normalized_from_evidence",
+                }
+            ],
             "uncertainties": ["The paper does not report repetitions."],
         }
     )
@@ -157,4 +169,5 @@ def test_paper_experiment_round_trips_its_scientific_boundary() -> None:
     payload = experiment.to_record()
     assert payload["status"] == "incomplete"
     assert "baselines" not in payload
+    assert "methods" not in payload
     assert experiment.uncertainties == ("The paper does not report repetitions.",)

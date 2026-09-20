@@ -564,14 +564,16 @@ not mean all Methods fields are reported, nor that the whole paper is
 comparable. Missing bindings retain the measurements and explicit uncertainty;
 test context is not labeled complete by list presence alone.
 
-`PaperExperiment.assess_comparison` returns an internal `ExperimentComparison`
-for two measurement IDs and their owning Objective. Missing context differs
-from conflicting reported material or test conditions. A positive assessment
-also requires the existing reconstruction's validated contrast and changed
-factors. It does not implement a second axis-normalization or causal-inference
-engine. Materialization records bounded assessment counts in its private trace;
-this internal check does not add a new public synthesis approval gate. The
-existing Evidence and Finding rules still own published scientific eligibility.
+`PaperExperiment.comparison_status()` checks two measurement IDs for their
+owning Objective and returns only `comparable`, `non_comparable`, or
+`insufficient_context`. Missing context differs from conflicting reported
+material or test conditions. A positive assessment also requires the existing
+reconstruction's validated contrast and changed factors. It does not implement
+a second axis-normalization or causal-inference engine. Materialization records
+bounded status counts in its private trace; this internal check is not another
+persisted scientific object and does not add a public synthesis approval gate.
+The existing Evidence and Finding rules still own published scientific
+eligibility.
 
 These domain bindings and comparison assessments are per-execution state, not
 new persisted Evidence/Finding fields. Reused document checkpoints therefore

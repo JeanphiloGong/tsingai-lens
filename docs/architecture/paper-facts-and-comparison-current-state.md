@@ -2,312 +2,179 @@
 
 ## Purpose
 
-This document records the current shared design tension between the paper-facts
-layer that Lens needs for trustworthy reading of one paper and the
-comparison-first backbone that Lens uses as its primary collection-facing
-surface.
-
-It exists to support discussion before further backend or frontend changes make
-the object-model split harder to repair.
-
-This is a current-state architecture note, not a final decision record.
-
-## Scope
-
-This document covers:
-
-- the shared product need for both single-paper facts and cross-paper
-  comparison
-- the current object-model split visible in shared docs and backend runtime
-- the main conflicts this split introduces for artifact design and UI design
-- the questions that need explicit design review
-
-This document does not define:
-
-- the final replacement schema
-- the final route payloads
-- the implementation sequence for the next cutover wave
-
-## Shared Product Need
-
-Lens v1 is correctly defined as a collection comparison product rather than a
-single-paper summary product. The primary job remains evidence-backed,
-traceable, cross-paper comparison.
-
-That product goal still requires a strong paper-facts layer.
-
-In practical terms, Lens needs both of the following:
-
-1. a single-paper facts surface that lets a user see what one paper says about
-   material or sample, method, property, condition, baseline, and supporting
-   evidence
-2. a collection comparison surface that lets a user inspect which results can
-   be compared, why they can be compared, and where the evidence or missing
-   context sits
-
-The second surface depends on the first. If the system cannot represent one
-paper's material, methods, properties, results, and conditions clearly, the
-comparison workspace cannot remain trustworthy.
-
-## Current Shared Definitions
-
-The repository currently preserves two different backbone interpretations.
-
-### Shared Lens V1 Contract Path
-
-The shared v1 product definition and shared artifact contracts still describe a
-main business flow centered on:
-
-- `document_profiles`
-- `evidence_cards`
-- `comparison_rows`
-
-In that model:
-
-- `document_profiles` is the gating layer
-- `evidence_cards` is the core research object layer
-- `comparison_rows` is the primary collection-facing view
-
-This keeps Lens explicitly evidence-first and comparison-first, but it remains
-claim-centered in its main shared artifact language.
-
-### Materials Comparison Path
-
-The materials comparison direction has already shifted toward a more explicit
-research-object model:
-
-- `sample_variants`
-- `characterization_observations`
-- `structure_features`
-- `test_conditions`
-- `baseline_references`
-- `measurement_results`
-
-That direction also states that materials comparison is not only a
-`sample -> result` problem but a
-`sample -> structure/characterization -> condition -> result -> baseline ->
-comparability support` problem.
-
-This is a stronger fit for the actual materials workflow, but it does not yet
-fully replace the older claim-centered shared contracts.
-
-## Current Runtime Shape
-
-The backend runtime currently behaves like a hybrid of the two models.
-
-1. Source prepares `documents`, `text_units`, `blocks`, `table_rows`, and
-   `table_cells`.
-2. `document_profile_service` uses LLM structured output for coarse document
-   typing and protocol suitability from block-grounded inputs.
-3. `paper_facts_service` uses LLM structured extraction over block-derived text
-   windows and table rows for a mixed bundle of:
-   - `method_facts`
-   - `sample_variants`
-   - `test_conditions`
-   - `baseline_references`
-   - `measurement_results`
-4. `paper_facts_service` then materializes those bundle outputs into fact
-   tables, records `evidence_anchors` for traceback, and derives
-   property-flavored `evidence_cards` as a reader-facing evidence view.
-5. `characterization_observations` are derived from first-pass facts, while
-   `structure_features` remain a downstream enrichment step.
-6. `comparison_service` no longer performs LLM extraction. It deterministically
-   assembles `comparison_rows` from:
-   - `sample_variants`
-   - `measurement_results`
-   - `test_conditions`
-   - `baseline_references`
-   - `characterization_observations`
-   - `structure_features`
-   - `evidence_anchors`
-
-This means the current runtime is already largely paper-facts-backed while some
-shared contract language and retained view surfaces still reference
-`evidence_cards`.
-
-## Main Conflicts
-
-### Two Competing Primary Object Models
-
-The repository currently has two different candidates for "primary research
-object":
-
-- claim-centered `evidence_cards`
-- sample/result-centered material comparison objects
-
-Those two models are related, but they are not interchangeable. The current
-system often behaves as if both are primary at the same time.
-
-### Single-Paper Facts Are Required But Not Explicitly First-Class
-
-The product needs a paper-facts layer to support both reading and comparison,
-but the current shared backbone does not cleanly expose a first-class
-single-paper facts model.
-
-Instead, paper-level facts are partially spread across:
-
-- `evidence_cards`
-- `sample_variants`
-- `test_conditions`
-- `measurement_results`
-- traceback anchors
-
-That makes it harder to build a clean paper-facts surface from one coherent
-object family.
-
-### `evidence_cards` Is Overloaded
-
-`evidence_cards` currently acts like several things at once:
-
-- a core claim-centered research object
-- a paper-review artifact
-- a traceback entry point
-- comparison support evidence
-- a secondary projection regenerated from `measurement_results`
-
-That overload makes it unclear whether a card is supposed to be a durable
-domain object or a reader-facing evidence view.
-
-### `document_profiles` Has Contract Drift Risk
-
-The shared contract expects `document_profiles` to remain a strict coarse
-gating layer with explicit enum-like states.
-
-The current runtime path allows free-form model output to leak into fields that
-downstream logic expects to behave more like controlled values. That creates a
-risk that the profile stage drifts from routing and warning semantics into
-open-ended summary semantics.
-
-### Source Is Not Fully Neutral
-
-The newer materials comparison direction assumes Core owns research-fact
-semantics, but Source still pre-shapes the handoff through heuristic section
-types such as `methods` and `characterization`.
-
-That is useful operationally, but it means the system does not yet have a clean
-boundary between:
-
-- Source as neutral structured handoff
-- Core as the owner of research-fact meaning
-
-### `comparison_rows` Depends On New Objects More Than The Shared Contracts Admit
-
-The current backend comparison flow is already closer to the new materials
-comparison model than to the older claim-card projection model.
-
-`comparison_rows` now depends primarily on extracted result and context objects,
-not only on a direct projection from `evidence_cards`.
-
-This creates a split where:
-
-- shared contracts still explain comparison in evidence-card terms
-- runtime comparison assembly already behaves in sample/result terms
-
-## Why This Matters
-
-This split is not just a naming problem.
-
-It affects three product-critical questions:
-
-1. What should a user see on a single-paper facts page?
-2. What should a user compare across papers?
-3. Which objects are durable enough to support traceback, warnings, and future
-   derived views without constant remapping?
-
-If these questions keep different answers in different parts of the repository,
-the system risks:
-
-- paper facts that are hard to inspect directly
-- comparison rows that are difficult to trust or explain
-- repeated backend remapping between cards, results, and condition objects
-- frontend surfaces that cannot tell whether they should present cards,
-  material facts, or result rows as the real unit of meaning
-
-## Design Review Questions
-
-The next design discussion should answer these questions explicitly.
-
-### 1. What Is The Primary Paper-Facts Layer?
-
-Should the single-paper facts surface be modeled directly around:
-
-- sample or material
-- method
-- property or result
-- condition
-- baseline
-- evidence anchor
-
-If yes, those objects need a clearer first-class status in shared architecture,
-not only in backend-local plans.
-
-### 2. What Is The Primary Comparison Backbone?
-
-Should comparison remain conceptually derived from:
-
-- claim-centered evidence cards
-
-or should it be explicitly derived from:
-
-- sample variants
-- measurement results
-- test conditions
-- baselines
-- related structure or characterization context
-
-### 3. What Is `evidence_cards` After The Materials Shift?
-
-One explicit answer is needed:
-
-- keep `evidence_cards` as the primary domain object
-- downgrade `evidence_cards` into a reader-facing evidence or traceback view
-- retain `evidence_cards` only for narrow claim-centered inspection while the
-  sample/result objects become primary for comparison
-
-### 4. What Should Source Hand Off To Core?
-
-Should Source hand off:
-
-- neutral chunks, spans, and table rows
-
-or:
-
-- partially semantic sections such as `methods` and `characterization`
-
-The answer changes where ownership of semantic errors and parser complexity
-should live.
-
-### 5. Is `structure_features` Phase-1 Backbone Or Phase-2 Enrichment?
-
-`structure_features` is useful for materials comparison, but it is not obvious
-that it should sit on the critical path ahead of a stable sample/result model.
-
-The team should decide whether it is:
-
-- required phase-1 comparison context
-- optional enrichment once the paper-facts and comparison backbone is stable
-
-## Near-Term Guardrails
-
-Until the design is reconciled, changes should preserve these guardrails:
-
-- do not treat single-paper facts and cross-paper comparison as competing
-  product goals; the comparison surface depends on a trustworthy paper-facts
-  layer
-- do not silently let `document_profiles` drift from coarse routing and warning
-  semantics into open-ended summary output
-- do not add more permanent surfaces that assume `evidence_cards` is
-  unambiguously the only core research object until the object-model question
-  is settled
-- do not let comparison implementation regress back into a direct
-  evidence-card-only projection when the runtime already depends on result and
-  condition objects
+This note explains the current model hierarchy behind Objective analysis. It
+prevents every dataclass from being mistaken for an equally important domain
+entity and records where paper facts, comparison decisions, persisted Evidence,
+and execution checkpoints belong.
+
+Lens v1 remains a traceable cross-paper comparison product. The implementation
+must reconstruct enough of each paper to compare it honestly, but it does not
+need a permanent top-level entity for every extracted field.
+
+## Current Research Chain
+
+For a researcher asking whether platform preheating changes 316L elongation,
+the current chain is:
+
+```text
+confirmed Objective + prepared papers
+  -> inspect exact Sources
+  -> SourceObservation[]
+  -> PaperExperiment
+       - SampleVariant[]
+       - TestCondition[]
+       - MeasurementResult[]
+  -> ObjectiveEvidence[] + PaperContribution[]
+  -> Finding[]
+```
+
+The Sources may be distributed across Methods, a result table, and prose. Each
+fact retains its own Source support. `PaperExperiment` binds facts only within
+one paper. Cross-paper synthesis begins only after formal Evidence exists.
+
+## Model Hierarchy
+
+### Core Research Records
+
+These objects carry the main analysis meaning:
+
+| Object | Responsibility | Persistence |
+| --- | --- | --- |
+| `ObjectiveAnalysis` | Owns one versioned analysis run and its scientific or technical outcome | Stored in the Objective analysis payload |
+| `PaperContribution` | Accounts for one selected paper, including coverage, exclusion, failure, and Evidence disposition | Stored with the analysis |
+| `ObjectiveEvidence` | Formal Source-grounded evidence used by Finding and review workflows | Stored with the analysis |
+| `SourceObservation` | Holds one exact Source-local fact before formal Evidence materialization | Per-execution reconstruction state |
+| `PaperExperiment` | Binds same-paper observations, samples, conditions, and measurements | Per-execution reconstruction state |
+
+`SourceObservation` and `PaperExperiment` are scientifically meaningful even
+though they are not separate database tables. Persistence alone does not decide
+whether a model is a domain object.
+
+### Component Values
+
+These types are parts of a larger record, not separate product concepts:
+
+- `SampleVariant`, `TestCondition`, and `MeasurementResult` belong to a
+  `PaperExperiment`.
+- `ObjectiveEvidenceAttribute`, `ObjectiveEvidenceVariable`,
+  `ObjectiveEvidenceComparison`, `ObjectiveEvidenceResult`, and
+  `ObjectiveEvidenceContext` describe parts of one `ObjectiveEvidence`.
+- `InspectedObjectiveSourceRef` records which canonical Sources were inspected
+  while accounting for one `PaperContribution`.
+
+They remain typed because their invariants matter, but the UI, API, and design
+language should not present them as independent workflow stages.
+
+### Execution Checkpoints
+
+`ObjectiveDocumentEvidence` is a reusable single-paper execution checkpoint. It
+stores an input fingerprint, status, contribution, Evidence records, and
+technical failure details so an analysis can resume safely. It is not an
+additional scientific conclusion or a sixth core research object.
+
+### Specialized Paper-Map Values
+
+`ReviewKnowledgeItem` and `ReviewSynthesisMap` apply to review-paper mapping
+before Objective analysis. They preserve review-author synthesis, disputes,
+gaps, and citation leads without pretending that each cited study has been
+reconstructed. They are not part of the experimental Evidence backbone.
+
+## Comparison Semantics
+
+A baseline is a role inside a particular Source-supported comparison, not a
+standalone paper entity.
+
+- `SourceObservation.comparison` retains baseline and target labels plus the
+  Source-supported comparability statement.
+- `SourceObservation.changed_variables` retains the corresponding variable
+  levels.
+- `MeasurementResult` retains each measured outcome without declaring that it
+  is permanently a baseline or target.
+- `PaperExperiment.comparison_status()` checks two measurement identities and
+  returns `comparable`, `non_comparable`, or `insufficient_context` for internal
+  diagnostics.
+- `ObjectiveEvidenceComparison` carries the formal comparison content that can
+  enter downstream Evidence and Finding decisions.
+
+The internal status check is deliberately not another persisted
+`ExperimentComparison` object. Source lineage already lives on observations,
+and formal comparison content already lives on Evidence.
+
+## Methods And Context
+
+Methods information remains necessary, but the current runtime does not need an
+independent `MethodFact` family. A Methods Source first enters as a
+`SourceObservation`. Its supported details then bind to the scientific object
+that consumes them:
+
+- sample preparation and process state -> `SampleVariant` or Evidence process
+  context;
+- test setup and environment -> `TestCondition` or Evidence test context;
+- characterization context -> Source-grounded Evidence context;
+- unresolved narrative -> retained observation or explicit uncertainty.
+
+This avoids maintaining an unused parallel method record while preserving the
+actual paper content and provenance. A dedicated method entity should return
+only if a real workflow needs independent method identity, lifecycle, or
+cross-result reuse.
+
+## Runtime And Persistence Boundaries
+
+The runtime sequence is:
+
+1. document preparation exposes stable text, table, figure, block, and section
+   Sources;
+2. screening and routing select Sources relevant to the confirmed Objective;
+3. extraction creates `SourceObservation` records and validation immediately
+   checks each observation against its exact Source;
+4. reconstruction binds accepted same-paper facts into `PaperExperiment`;
+5. materialization creates `ObjectiveEvidence` and `PaperContribution`;
+6. a per-document `ObjectiveDocumentEvidence` checkpoint supports safe reuse;
+7. Finding synthesis consumes published Evidence and contribution accounting.
+
+`ObjectiveAnalysis`, checkpoints, contributions, Evidence, and Findings share
+the versioned Objective analysis payload. This does not make them the same kind
+of model and does not require every intermediate object to have a table.
+
+## Invariants
+
+- A relevant Source is not automatically Evidence.
+- A measurement is not comparable merely because it has a number.
+- Facts from different papers cannot be bound into one `PaperExperiment`.
+- Missing Methods or test context remains missing; it is not inferred from a
+  result table.
+- Baseline and target roles require a Source-supported comparison.
+- Technical failure is not scientific absence.
+- A paper with no accepted Evidence still needs an explicit contribution or
+  failure disposition.
+- Finding synthesis consumes formal Evidence, not raw model output.
+
+## Removed Redundant Models
+
+- `BaselineReference` was removed because it duplicated a role already carried
+  by Source-supported comparison data.
+- `MethodFact` was removed because the active chain never produced or consumed
+  it; Methods information remains Source-grounded and binds to the actual sample,
+  condition, result, or Evidence context.
+- `ExperimentComparison` was removed because its object fields were consumed
+  only to count an internal status. `PaperExperiment.comparison_status()` keeps
+  the judgment without introducing another public or persisted research object.
+
+Legacy JSON fields are ignored at the domain read boundary and are not emitted
+again. Historical migrations remain migration history and do not define the
+current runtime contract.
+
+## Open Boundary
+
+The current `PaperExperiment` is an execution-time reconstruction rather than a
+durable user-editable experiment record. Promote more of it into persistence
+only when a concrete researcher workflow needs to inspect, correct, or reuse
+that structure independently of formal Evidence. Do not add a new domain family
+only because an extraction prompt can return another JSON section.
 
 ## Related Docs
 
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)
 - [Lens Core Artifact Contracts](../contracts/lens-core-artifact-contracts.md)
-- [Lens V1 Architecture Boundary](lens-v1-architecture-boundary.md)
-- [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](../decisions/rfc-paper-facts-primary-domain-model.md)
-- [Lens Mission and Positioning](../overview/lens-mission-positioning.md)
-- [Backend Core Comparison Current State](../../backend/docs/architecture/core-comparison/current-state.md)
+- [Objective Scientific Analysis](../../backend/application/core/objectives/analysis/docs/scientific-analysis.md)
+- [RFC Paper-Facts Primary Domain Model](../decisions/rfc-paper-facts-primary-domain-model.md)

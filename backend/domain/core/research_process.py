@@ -14,7 +14,6 @@ from typing import Any, Final, Mapping
 
 from domain.core.evidence_backbone import (
     MeasurementResult,
-    MethodFact,
     SampleVariant,
     TestCondition,
 )
@@ -247,41 +246,6 @@ class SourceObservation:
 
 
 @dataclass(frozen=True)
-class ExperimentComparison:
-    """Assessment of two recorded measurements for one research question."""
-
-    objective_id: str
-    baseline_result_id: str
-    target_result_id: str
-    status: str
-    reasons: tuple[str, ...]
-    source_observation_ids: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        if not all(
-            str(item).strip()
-            for item in (
-                self.objective_id,
-                self.baseline_result_id,
-                self.target_result_id,
-            )
-        ):
-            raise ValueError("comparison requires objective and measurement identities")
-        if self.baseline_result_id == self.target_result_id:
-            raise ValueError("comparison requires different measurements")
-        if self.status not in {"comparable", "non_comparable", "insufficient_context"}:
-            raise ValueError("invalid experiment comparison status")
-        if self.status != "comparable" and not self.reasons:
-            raise ValueError("limited comparison requires reasons")
-        if self.status == "comparable" and self.reasons:
-            raise ValueError("comparable assessment cannot have unresolved reasons")
-        object.__setattr__(self, "reasons", tuple(self.reasons))
-        object.__setattr__(
-            self, "source_observation_ids", tuple(self.source_observation_ids)
-        )
-
-
-@dataclass(frozen=True)
 class PaperExperiment:
     """One paper-owned experiment assembled from independently sourced facts."""
 
@@ -291,7 +255,6 @@ class PaperExperiment:
     study_id: str | None
     source_observations: tuple[SourceObservation, ...] = ()
     sample_variants: tuple[SampleVariant, ...] = ()
-    methods: tuple[MethodFact, ...] = ()
     test_conditions: tuple[TestCondition, ...] = ()
     measurements: tuple[MeasurementResult, ...] = ()
     source_observation_ids: tuple[str, ...] = ()
@@ -307,7 +270,6 @@ class PaperExperiment:
         records = (
             *self.source_observations,
             *self.sample_variants,
-            *self.methods,
             *self.test_conditions,
             *self.measurements,
         )
@@ -372,11 +334,6 @@ class PaperExperiment:
                 for item in payload.get("sample_variants") or ()
                 if isinstance(item, Mapping)
             ),
-            methods=tuple(
-                MethodFact.from_mapping(item)
-                for item in payload.get("methods") or ()
-                if isinstance(item, Mapping)
-            ),
             test_conditions=tuple(
                 TestCondition.from_mapping(item)
                 for item in payload.get("test_conditions") or ()
@@ -410,7 +367,6 @@ class PaperExperiment:
                 item.to_record() for item in self.source_observations
             ],
             "sample_variants": [item.to_record() for item in self.sample_variants],
-            "methods": [item.to_record() for item in self.methods],
             "test_conditions": [item.to_record() for item in self.test_conditions],
             "measurements": [item.to_record() for item in self.measurements],
             "source_observation_ids": list(self.source_observation_ids),
@@ -433,12 +389,12 @@ class PaperExperiment:
             for item in self.measurements
         )
 
-    def assess_comparison(
+    def comparison_status(
         self,
         objective: ResearchObjective,
         baseline_result_id: str,
         target_result_id: str,
-    ) -> ExperimentComparison:
+    ) -> str:
         """Missing reporting limits a comparison; it never invalidates the observation."""
         measurements = {item.result_id: item for item in self.measurements}
         observations = {item.observation_id: item for item in self.source_observations}
@@ -526,25 +482,18 @@ class PaperExperiment:
                     missing.append("The contrast does not establish changed factors.")
                 # Axis normalization and scientific attribution belong to the
                 # existing Source-grounded reconstruction, not a second matcher.
-        reasons = tuple(dict.fromkeys((*differences, *missing)))
-        return ExperimentComparison(
-            objective_id=objective.objective_id,
-            baseline_result_id=baseline_result_id,
-            target_result_id=target_result_id,
-            status="non_comparable"
+        return (
+            "non_comparable"
             if differences
             else "insufficient_context"
             if missing
-            else "comparable",
-            reasons=reasons,
-            source_observation_ids=tuple(item for item in ids if item in observations),
+            else "comparable"
         )
 
 
 __all__ = [
     "PAPER_EXPERIMENT_STATUSES",
     "PaperExperiment",
-    "ExperimentComparison",
     "SOURCE_OBSERVATION_STATUSES",
     "SourceObservation",
 ]

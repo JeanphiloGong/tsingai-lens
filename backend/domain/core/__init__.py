@@ -12,7 +12,6 @@ from domain.core.document_profile import (
 from domain.core.evidence_backbone import (
     CORE_NEUTRAL_DOMAIN_PROFILE,
     MeasurementResult,
-    MethodFact,
     SampleVariant,
     TestCondition,
 )
@@ -77,7 +76,6 @@ from domain.core.research_objective import (
 from domain.core.research_process import (
     PAPER_EXPERIMENT_STATUSES,
     SOURCE_OBSERVATION_STATUSES,
-    ExperimentComparison,
     PaperExperiment,
     SourceObservation,
 )
@@ -107,7 +105,6 @@ __all__ = [
     "PAPER_EXPERIMENT_STATUSES",
     "SOURCE_OBSERVATION_STATUSES",
     "PaperExperiment",
-    "ExperimentComparison",
     "SourceObservation",
     "OBJECTIVE_ANALYSIS_STATUSES",
     "OBJECTIVE_ANALYSIS_ABSTENTION_REASONS",
@@ -118,7 +115,6 @@ __all__ = [
     "OBJECTIVE_EVIDENCE_STATES",
     "OBJECTIVE_EVIDENCE_STATE_TRANSITIONS",
     "MeasurementResult",
-    "MethodFact",
     "ObjectiveAnalysis",
     "ObjectiveDocumentEvidence",
     "ObjectiveEvidence",

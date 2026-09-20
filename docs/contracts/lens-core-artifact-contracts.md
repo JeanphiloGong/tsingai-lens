@@ -160,15 +160,17 @@ It should preserve what one paper says about:
 The minimum shared family members are:
 
 - `sample_variants`
-- `method_facts`
 - `test_conditions`
 - `measurement_results`
 
 `SourceObservation` preserves the Source-local statement and its provenance;
 `PaperExperiment` binds accepted observations to the facts from the same paper;
-and `ExperimentComparison` records whether two identified measurements can be
-compared for one Objective. Baseline and target are roles in that relationship,
-not standalone paper-fact entities.
+and `PaperExperiment.comparison_status()` checks whether two identified
+measurements can be compared for one Objective. Baseline and target remain
+roles in the Source-supported comparison, not standalone paper-fact entities.
+Methods information remains in the exact Source observation and its scientific
+context until a concrete sample, process, test condition, or result consumes
+it; Lens does not maintain an otherwise unused parallel `MethodFact` family.
 
 ### Common Contract Rules
 
@@ -192,8 +194,6 @@ the paper, it should also preserve an explicit epistemic or derivation status.
 
 - `sample_variants`
   Identifies the sample or experimental variant that later facts belong to.
-- `method_facts`
-  Preserves process, characterization, and test methods as first-class facts.
 - `test_conditions`
   Preserves structured condition payloads rather than flattening them into one
   opaque summary string.
@@ -204,9 +204,10 @@ the paper, it should also preserve an explicit epistemic or derivation status.
   Preserves what one exact text, table, figure, block, or section supports,
   including comparison labels, reported results, scientific context, and
   validation state.
-- `ExperimentComparison`
-  Preserves the baseline-result and target-result identities plus a comparable,
-  non-comparable, or insufficient-context decision for one Objective.
+- `PaperExperiment.comparison_status()`
+  Returns the bounded comparable, non-comparable, or insufficient-context
+  assessment consumed by internal diagnostics. It is not another persisted
+  scientific object; formal comparison content remains in Evidence.
 
 ### Family Dependency Rule
 

@@ -26,6 +26,8 @@ def test_artifact_status_empty_defaults_all_flags_to_false() -> None:
     assert payload["graph_stale"] is False
     assert payload["figures_generated"] is False
     assert payload["figures_ready"] is False
+    assert "method_facts_generated" not in payload
+    assert "method_facts_ready" not in payload
     assert "baseline_references_generated" not in payload
     assert "baseline_references_ready" not in payload
     assert "graphml_ready" not in payload
@@ -65,6 +67,8 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
             "collection_comparable_results_ready": False,
             "document_profiles_ready": False,
             "evidence_cards_ready": False,
+            "method_facts_generated": True,
+            "method_facts_ready": True,
             "baseline_references_generated": True,
             "baseline_references_ready": True,
             "graph_generated": False,
@@ -82,6 +86,8 @@ def test_artifact_status_normalizes_legacy_payload_and_recomputes_graph_flags() 
     assert "graphml_generated" not in payload
     assert payload["documents_generated"] is False
     assert payload["figures_generated"] is False
+    assert "method_facts_generated" not in payload
+    assert "method_facts_ready" not in payload
     assert "baseline_references_generated" not in payload
     assert "baseline_references_ready" not in payload
 

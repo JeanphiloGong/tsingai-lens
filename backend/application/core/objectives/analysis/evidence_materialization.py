@@ -139,8 +139,8 @@ def materialize_evidence(
             emit_parity_snapshot=True,
         )
     target_axes = property_matching.objective_outcomes(objective)
-    comparison_assessments = tuple(
-        experiment.assess_comparison(
+    comparison_statuses = tuple(
+        experiment.comparison_status(
             objective, *observation.derived_from_observation_ids
         )
         for experiment in experiments
@@ -161,7 +161,7 @@ def materialize_evidence(
                 len(experiment.measurements) for experiment in experiments
             ),
             "comparison_assessment_counts": dict(
-                Counter(item.status for item in comparison_assessments)
+                Counter(comparison_statuses)
             ),
             "grounding_rejection_count": sum(
                 audit.disposition == "grounding_rejected" for audit in technical_audits

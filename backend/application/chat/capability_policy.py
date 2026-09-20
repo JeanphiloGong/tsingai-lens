@@ -140,6 +140,25 @@ def select_tool_specs(
     *,
     inherited_completed_writes: set[str] | None = None,
 ) -> tuple[Any, ...]:
+    """
+    Args:
+        capabilities(CapabilityRegistry): the registry of tools available to the current agent run
+            capabilities.specs: the complete registered tool definitions, each tool spec tells the model:
+                - the tool name
+                - what the tool does
+                - which parameters it accepts
+                - the parameter schema
+                - its risk category
+            capabilities.discovery: the configuration for deferred tool discovery
+                - tools: the catalog of tools that can be discovered
+                - discovery.spec: the definition of discover_research_tools itself
+        messages(list[ChatMessage]): conversation history, including user messages and tool results
+    Returns:
+        tuple[ToolSpec]: a tuple containing zero or more ToolSpec objects
+    """
+    # retrieve all available capabilities
+    # create a set containing only the names of the registered tools
+    # if
     if any(
         call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.FAILED
         and call.decision_user_id is not None

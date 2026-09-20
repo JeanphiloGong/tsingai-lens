@@ -139,6 +139,8 @@ def select_tool_specs(
     *,
     inherited_completed_writes: set[str] | None = None,
 ) -> tuple[Any, ...]:
+    """Select the registered tool definitions exposed on the next model turn."""
+
     if any(
         call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.FAILED
         and call.decision_user_id is not None
@@ -148,8 +150,6 @@ def select_tool_specs(
         return ()
     specs = capabilities.specs
     registered_names = {spec.name for spec in specs}
-    if not registered_names.intersection(intent_policy.KNOWN_CAPABILITIES):
-        return specs
 
     latest_user = next(
         (

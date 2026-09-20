@@ -23,6 +23,23 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
     assert "SearchSourcesArguments" not in str(specs[0].model_schema())
 
 
+def test_initial_catalog_defers_new_registered_read_capability():
+    registry = CapabilityRegistry(
+        (_Capability("inspect_alloy_metadata", ToolRisk.READ),)
+    )
+    message = ChatMessage.user(
+        message_id="u",
+        session_id="chat-1",
+        content="Check the alloy metadata before comparing these papers.",
+        created_at="2026-09-09T00:00:00Z",
+    )
+
+    specs = select_tool_specs(registry, [message], [])
+
+    assert [spec.name for spec in specs] == ["discover_research_tools"]
+    assert "inspect_alloy_metadata" in specs[0].description
+
+
 @pytest.mark.anyio
 async def test_discovered_paper_claim_requires_sources_after_survey_and_hides_premature_text():
     browse = _Capability("browse_collection_papers", ToolRisk.READ, result_data={

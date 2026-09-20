@@ -81,7 +81,9 @@ native ToolSearch API. Its short catalog comes from registered read/draft
 handlers. It loads up to six named schemas per call and performs no scientific
 read, write, or approval. Successful results retain selected names only for
 the active user request; definitions always come from the current registry.
-Removed names are ignored. Discovery grants no execution permission. Automatically selected
+The registry and each tool's risk are the authority for catalog membership;
+there is no parallel static list of known capabilities. Removed names are
+ignored. Discovery grants no execution permission. Automatically selected
 prerequisite readers remain available after execution in that request too.
 The next user request starts with a fresh catalog.
 

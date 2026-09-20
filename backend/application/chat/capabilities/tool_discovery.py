@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
-import json
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
@@ -35,9 +32,6 @@ class DiscoverResearchToolsArguments(BaseModel):
 class DiscoverResearchToolsCapability:
     def __init__(self, specs: tuple[ToolSpec, ...]) -> None:
         self.tools = {spec.name: spec for spec in specs if spec.risk in {ToolRisk.READ, ToolRisk.DRAFT}}
-        self.catalog_version = sha256(json.dumps(
-            [spec.model_schema() for spec in self.tools.values()], sort_keys=True,
-        ).encode()).hexdigest()
         catalog = "\n".join(
             f"- {spec.name} [{spec.risk.value}]: {spec.description.split('. ', 1)[0].rstrip('.')}."
             for spec in self.tools.values()
@@ -66,7 +60,6 @@ class DiscoverResearchToolsCapability:
         return ChatToolResult(
             tool_call_id=context.tool_call_id, status="succeeded",
             data={
-                "catalog_version": self.catalog_version,
                 "loaded_tool_names": names,
                 "source_inspection_required": arguments.source_inspection_required,
                 "tools": [

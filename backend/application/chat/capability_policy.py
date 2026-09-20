@@ -177,7 +177,6 @@ def select_tool_specs(
     loaded_names = {
         name
         for result in successful_results.get("discover_research_tools", ())
-        if result.get("catalog_version") == capabilities.discovery.catalog_version
         for name in result.get("loaded_tool_names", ())
         if isinstance(name, str) and name in capabilities.discovery.tools
     }
@@ -225,7 +224,6 @@ def select_tool_specs(
     )
     source_grounded_intent = any(
         result.get("source_inspection_required") is True
-        and result.get("catalog_version") == capabilities.discovery.catalog_version
         for result in successful_results.get("discover_research_tools", ())
     )
     # Reviewing an existing conclusion starts with that conclusion and its

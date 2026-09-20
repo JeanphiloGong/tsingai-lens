@@ -79,8 +79,9 @@ discovery. An explicit no-tools request exposes no capabilities.
 `discover_research_tools` is an ordinary typed function call, not a provider's
 native ToolSearch API. Its short catalog comes from registered read/draft
 handlers. It loads up to six named schemas per call and performs no scientific
-read, write, or approval. Successful results with the current catalog version
-load definitions only for the active user request. Automatically selected
+read, write, or approval. Successful results retain selected names only for
+the active user request; definitions always come from the current registry.
+Removed names are ignored. Discovery grants no execution permission. Automatically selected
 prerequisite readers remain available after execution in that request too.
 The next user request starts with a fresh catalog.
 
@@ -443,7 +444,7 @@ checks, certify a scientific stage, or automatically restart interrupted work.
   capability risk to automatic execution or exact user approval. The Runner
   consumes these decisions; it does not define a second permission path.
 - `capabilities/tool_discovery.py`: derives the short catalog from registered
-  read/draft handlers and validates selected names and catalog version.
+  read/draft handlers and validates selected names against that catalog.
 - `capabilities/`: contains the explicit typed capability registry and handlers
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.

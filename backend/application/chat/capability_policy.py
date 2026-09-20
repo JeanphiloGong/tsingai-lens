@@ -132,6 +132,7 @@ def validate_batch(
     return None, validated_arguments
 
 
+# define a method that decides which tool definitions to send to the model on its next turn
 def select_tool_specs(
     capabilities: CapabilityRegistry,
     messages: list[ChatMessage],
@@ -139,8 +140,6 @@ def select_tool_specs(
     *,
     inherited_completed_writes: set[str] | None = None,
 ) -> tuple[Any, ...]:
-    """Select the registered tool definitions exposed on the next model turn."""
-
     if any(
         call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.FAILED
         and call.decision_user_id is not None

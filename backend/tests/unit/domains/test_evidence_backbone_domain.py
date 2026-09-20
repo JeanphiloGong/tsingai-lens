@@ -59,7 +59,7 @@ def test_measurement_results_round_trip_records() -> None:
             "value_payload": {"value": 97.0, "statement": "97 MPa"},
             "unit": "MPa",
             "test_condition_id": "tc-1",
-            "baseline_id": "base-1",
+            "baseline_id": "legacy-base-1",
             "traceability_status": TRACEABILITY_STATUS_DIRECT,
             "result_source_type": "text",
             "epistemic_status": EPISTEMIC_NORMALIZED_FROM_EVIDENCE,
@@ -68,3 +68,4 @@ def test_measurement_results_round_trip_records() -> None:
 
     assert result.to_record()["value_payload"]["value"] == 97.0
     assert result.traceability_status == TRACEABILITY_STATUS_DIRECT
+    assert "baseline_id" not in result.to_record()

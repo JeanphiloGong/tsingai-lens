@@ -13,7 +13,6 @@ from hashlib import sha1
 from typing import Any, Final, Mapping
 
 from domain.core.evidence_backbone import (
-    BaselineReference,
     MeasurementResult,
     MethodFact,
     SampleVariant,
@@ -294,7 +293,6 @@ class PaperExperiment:
     sample_variants: tuple[SampleVariant, ...] = ()
     methods: tuple[MethodFact, ...] = ()
     test_conditions: tuple[TestCondition, ...] = ()
-    baselines: tuple[BaselineReference, ...] = ()
     measurements: tuple[MeasurementResult, ...] = ()
     source_observation_ids: tuple[str, ...] = ()
     uncertainties: tuple[str, ...] = ()
@@ -311,7 +309,6 @@ class PaperExperiment:
             *self.sample_variants,
             *self.methods,
             *self.test_conditions,
-            *self.baselines,
             *self.measurements,
         )
         if any(
@@ -334,12 +331,10 @@ class PaperExperiment:
             )
         variant_ids = set(ids)
         condition_ids = {item.test_condition_id for item in self.test_conditions}
-        baseline_ids = {item.baseline_id for item in self.baselines}
         for measurement in self.measurements:
             for reference, available in (
                 (measurement.variant_id, variant_ids),
                 (measurement.test_condition_id, condition_ids),
-                (measurement.baseline_id, baseline_ids),
             ):
                 if reference is not None and reference not in available:
                     raise ValueError(
@@ -387,11 +382,6 @@ class PaperExperiment:
                 for item in payload.get("test_conditions") or ()
                 if isinstance(item, Mapping)
             ),
-            baselines=tuple(
-                BaselineReference.from_mapping(item)
-                for item in payload.get("baselines") or ()
-                if isinstance(item, Mapping)
-            ),
             measurements=tuple(
                 MeasurementResult.from_mapping(item)
                 for item in payload.get("measurements") or ()
@@ -422,7 +412,6 @@ class PaperExperiment:
             "sample_variants": [item.to_record() for item in self.sample_variants],
             "methods": [item.to_record() for item in self.methods],
             "test_conditions": [item.to_record() for item in self.test_conditions],
-            "baselines": [item.to_record() for item in self.baselines],
             "measurements": [item.to_record() for item in self.measurements],
             "source_observation_ids": list(self.source_observation_ids),
             "uncertainties": list(self.uncertainties),

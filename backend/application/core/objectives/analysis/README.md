@@ -28,6 +28,8 @@ For example, a tensile table may contain elongation values while Methods
 identifies the preheated specimens. Inspect and validate both Sources before
 binding them. A review mentioning the same outcome is not a second primary
 measurement. Different sample states must not be pooled into one comparison.
+The control and treated specimens are baseline/target roles in that comparison;
+they are not promoted into standalone `BaselineReference` records.
 
 ## Responsibilities
 

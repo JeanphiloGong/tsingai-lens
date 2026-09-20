@@ -311,6 +311,8 @@ def test_supported_p002_contrast_has_explicit_parent_measurements() -> None:
         source_facts=(baseline, target, comparison),
     )
     assert len(experiment.measurements) == 2
+    assert all("baseline_id" not in item.to_record() for item in experiment.measurements)
+    assert "baselines" not in experiment.to_record()
     assessment = experiment.assess_comparison(_objective(), "np", "p150")
     assert assessment.status == "comparable"
     assert assessment.source_observation_ids == ("np", "p150")

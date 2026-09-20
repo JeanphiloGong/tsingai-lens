@@ -144,9 +144,17 @@ def test_paper_experiment_round_trips_its_scientific_boundary() -> None:
             "document_id": "doc-1",
             "study_id": "study-1",
             "status": "incomplete",
+            "baselines": [
+                {
+                    "baseline_id": "legacy-base-1",
+                    "baseline_label": "as-built",
+                }
+            ],
             "uncertainties": ["The paper does not report repetitions."],
         }
     )
 
-    assert experiment.to_record()["status"] == "incomplete"
+    payload = experiment.to_record()
+    assert payload["status"] == "incomplete"
+    assert "baselines" not in payload
     assert experiment.uncertainties == ("The paper does not report repetitions.",)

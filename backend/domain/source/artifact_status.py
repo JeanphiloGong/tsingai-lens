@@ -33,8 +33,6 @@ class ArtifactStatusRecord:
     evidence_cards_ready: bool
     test_conditions_generated: bool
     test_conditions_ready: bool
-    baseline_references_generated: bool
-    baseline_references_ready: bool
     sample_variants_generated: bool
     sample_variants_ready: bool
     measurement_results_generated: bool
@@ -91,8 +89,6 @@ class ArtifactStatusRecord:
         evidence_cards_ready: bool = False,
         test_conditions_generated: bool = False,
         test_conditions_ready: bool = False,
-        baseline_references_generated: bool = False,
-        baseline_references_ready: bool = False,
         sample_variants_generated: bool = False,
         sample_variants_ready: bool = False,
         measurement_results_generated: bool = False,
@@ -165,8 +161,6 @@ class ArtifactStatusRecord:
             evidence_cards_ready=bool(evidence_cards_ready),
             test_conditions_generated=bool(test_conditions_generated),
             test_conditions_ready=bool(test_conditions_ready),
-            baseline_references_generated=bool(baseline_references_generated),
-            baseline_references_ready=bool(baseline_references_ready),
             sample_variants_generated=bool(sample_variants_generated),
             sample_variants_ready=bool(sample_variants_ready),
             measurement_results_generated=bool(measurement_results_generated),
@@ -217,12 +211,6 @@ class ArtifactStatusRecord:
             evidence_cards_ready=_normalize_bool(source.get("evidence_cards_ready")),
             test_conditions_generated=_normalize_bool(source.get("test_conditions_generated")),
             test_conditions_ready=_normalize_bool(source.get("test_conditions_ready")),
-            baseline_references_generated=_normalize_bool(
-                source.get("baseline_references_generated")
-            ),
-            baseline_references_ready=_normalize_bool(
-                source.get("baseline_references_ready")
-            ),
             sample_variants_generated=_normalize_bool(source.get("sample_variants_generated")),
             sample_variants_ready=_normalize_bool(source.get("sample_variants_ready")),
             measurement_results_generated=_normalize_bool(
@@ -274,8 +262,6 @@ class ArtifactStatusRecord:
             "evidence_cards_ready": self.evidence_cards_ready,
             "test_conditions_generated": self.test_conditions_generated,
             "test_conditions_ready": self.test_conditions_ready,
-            "baseline_references_generated": self.baseline_references_generated,
-            "baseline_references_ready": self.baseline_references_ready,
             "sample_variants_generated": self.sample_variants_generated,
             "sample_variants_ready": self.sample_variants_ready,
             "measurement_results_generated": self.measurement_results_generated,

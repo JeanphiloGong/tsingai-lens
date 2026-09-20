@@ -98,49 +98,6 @@ class MethodFact:
 
 
 @dataclass(frozen=True)
-class BaselineReference:
-    baseline_id: str
-    document_id: str
-    collection_id: str
-    domain_profile: str
-    variant_id: str | None
-    baseline_type: str
-    baseline_label: str
-    baseline_scope: str
-    confidence: float
-    epistemic_status: str
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "BaselineReference":
-        return cls(
-            baseline_id=_normalize_text(payload.get("baseline_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            domain_profile=_normalize_text(payload.get("domain_profile")) or CORE_NEUTRAL_DOMAIN_PROFILE,
-            variant_id=_normalize_text(payload.get("variant_id")),
-            baseline_type=_normalize_text(payload.get("baseline_type")) or "",
-            baseline_label=_normalize_text(payload.get("baseline_label")) or "",
-            baseline_scope=_normalize_text(payload.get("baseline_scope")) or "",
-            confidence=_normalize_confidence(payload.get("confidence")),
-            epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "baseline_id": self.baseline_id,
-            "document_id": self.document_id,
-            "collection_id": self.collection_id,
-            "domain_profile": self.domain_profile,
-            "variant_id": self.variant_id,
-            "baseline_type": self.baseline_type,
-            "baseline_label": self.baseline_label,
-            "baseline_scope": self.baseline_scope,
-            "confidence": self.confidence,
-            "epistemic_status": self.epistemic_status,
-        }
-
-
-@dataclass(frozen=True)
 class SampleVariant:
     variant_id: str
     document_id: str
@@ -205,7 +162,6 @@ class MeasurementResult:
     value_payload: dict[str, Any]
     unit: str | None
     test_condition_id: str | None
-    baseline_id: str | None
     traceability_status: str
     result_source_type: str
     epistemic_status: str
@@ -224,7 +180,6 @@ class MeasurementResult:
             value_payload=_normalize_mapping(payload.get("value_payload")),
             unit=_normalize_text(payload.get("unit")),
             test_condition_id=_normalize_text(payload.get("test_condition_id")),
-            baseline_id=_normalize_text(payload.get("baseline_id")),
             traceability_status=_normalize_text(payload.get("traceability_status")) or "",
             result_source_type=_normalize_text(payload.get("result_source_type")) or "",
             epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
@@ -243,7 +198,6 @@ class MeasurementResult:
             "value_payload": dict(self.value_payload),
             "unit": self.unit,
             "test_condition_id": self.test_condition_id,
-            "baseline_id": self.baseline_id,
             "traceability_status": self.traceability_status,
             "result_source_type": self.result_source_type,
             "epistemic_status": self.epistemic_status,
@@ -311,7 +265,6 @@ def _normalize_scalar(value: Any) -> Any:
 
 
 __all__ = [
-    "BaselineReference",
     "CORE_NEUTRAL_DOMAIN_PROFILE",
     "MethodFact",
     "MeasurementResult",

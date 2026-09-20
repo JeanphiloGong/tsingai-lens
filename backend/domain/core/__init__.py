@@ -11,7 +11,6 @@ from domain.core.document_profile import (
 )
 from domain.core.evidence_backbone import (
     CORE_NEUTRAL_DOMAIN_PROFILE,
-    BaselineReference,
     MeasurementResult,
     MethodFact,
     SampleVariant,
@@ -84,7 +83,6 @@ from domain.core.research_process import (
 )
 
 __all__ = [
-    "BaselineReference",
     "CORE_NEUTRAL_DOMAIN_PROFILE",
     "DocumentProfile",
     "DocumentProfileSummary",

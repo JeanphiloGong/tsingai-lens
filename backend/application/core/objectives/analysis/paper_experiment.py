@@ -281,7 +281,6 @@ def assemble_paper_experiment(
                             "target_value": result.target_value,
                         },
                         "unit": result.unit,
-                        "evidence_anchor_ids": list(draft.evidence_anchor_ids),
                         "traceability_status": "direct"
                         if draft.status == "validated"
                         else "unresolved",
@@ -306,7 +305,6 @@ def assemble_paper_experiment(
                         "scope_level": "measurement",
                         "condition_payload": test_payload,
                         "condition_completeness": "partial",
-                        "evidence_anchor_ids": list(draft.evidence_anchor_ids),
                         "confidence": draft.confidence,
                         "epistemic_status": "normalized_from_evidence",
                     }
@@ -408,7 +406,6 @@ def _sample_variant_from_context(
                 item.name: item.value for item in draft.scientific_context.process
             },
             "profile_payload": sample_payload,
-            "source_anchor_ids": list(draft.evidence_anchor_ids),
             "confidence": draft.confidence,
             "epistemic_status": "normalized_from_evidence",
         }
@@ -430,7 +427,6 @@ def _baseline_from_comparison(
             "baseline_type": "objective_comparison",
             "baseline_label": draft.comparison.baseline_label,
             "baseline_scope": "reported_result",
-            "evidence_anchor_ids": list(draft.evidence_anchor_ids),
             "confidence": draft.confidence,
             "epistemic_status": "normalized_from_evidence",
         }

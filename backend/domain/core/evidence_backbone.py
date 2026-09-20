@@ -9,143 +9,6 @@ CORE_NEUTRAL_DOMAIN_PROFILE: Final[str] = "core_neutral"
 
 
 @dataclass(frozen=True)
-class EvidenceAnchor:
-    anchor_id: str
-    document_id: str
-    source_kind: str
-    source_ref: str
-    source_type: str
-    page: int | None
-    quote: str | None
-    deep_link: str | None
-
-    def __post_init__(self) -> None:
-        for field_name in ("anchor_id", "document_id", "source_kind", "source_ref"):
-            if not getattr(self, field_name).strip():
-                raise ValueError(f"{field_name} cannot be empty")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceAnchor":
-        return cls(
-            anchor_id=_normalize_text(payload.get("anchor_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            source_kind=_normalize_text(payload.get("source_kind")) or "",
-            source_ref=_normalize_text(payload.get("source_ref")) or "",
-            source_type=_normalize_text(payload.get("source_type")) or "text",
-            page=_normalize_optional_int(payload.get("page")),
-            quote=_normalize_text(payload.get("quote")),
-            deep_link=_normalize_text(payload.get("deep_link")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "anchor_id": self.anchor_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "source_type": self.source_type,
-            "page": self.page,
-            "quote": self.quote,
-            "deep_link": self.deep_link,
-        }
-
-
-@dataclass(frozen=True)
-class CharacterizationObservation:
-    observation_id: str
-    document_id: str
-    collection_id: str
-    variant_id: str | None
-    characterization_type: str
-    observation_text: str
-    observed_value: Any
-    observed_unit: str | None
-    condition_context: dict[str, Any]
-    evidence_anchor_ids: tuple[str, ...]
-    confidence: float
-    epistemic_status: str
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "CharacterizationObservation":
-        return cls(
-            observation_id=_normalize_text(payload.get("observation_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            variant_id=_normalize_text(payload.get("variant_id")),
-            characterization_type=_normalize_text(payload.get("characterization_type")) or "",
-            observation_text=_normalize_text(payload.get("observation_text")) or "",
-            observed_value=_normalize_scalar(payload.get("observed_value")),
-            observed_unit=_normalize_text(payload.get("observed_unit")),
-            condition_context=_normalize_mapping(payload.get("condition_context")),
-            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
-            confidence=_normalize_confidence(payload.get("confidence")),
-            epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "observation_id": self.observation_id,
-            "document_id": self.document_id,
-            "collection_id": self.collection_id,
-            "variant_id": self.variant_id,
-            "characterization_type": self.characterization_type,
-            "observation_text": self.observation_text,
-            "observed_value": self.observed_value,
-            "observed_unit": self.observed_unit,
-            "condition_context": dict(self.condition_context),
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
-            "confidence": self.confidence,
-            "epistemic_status": self.epistemic_status,
-        }
-
-
-@dataclass(frozen=True)
-class StructureFeature:
-    feature_id: str
-    document_id: str
-    collection_id: str
-    variant_id: str | None
-    feature_type: str
-    feature_value: Any
-    feature_unit: str | None
-    qualitative_descriptor: str | None
-    source_observation_ids: tuple[str, ...]
-    confidence: float
-    epistemic_status: str
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "StructureFeature":
-        return cls(
-            feature_id=_normalize_text(payload.get("feature_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            variant_id=_normalize_text(payload.get("variant_id")),
-            feature_type=_normalize_text(payload.get("feature_type")) or "",
-            feature_value=_normalize_scalar(payload.get("feature_value")),
-            feature_unit=_normalize_text(payload.get("feature_unit")),
-            qualitative_descriptor=_normalize_text(payload.get("qualitative_descriptor")),
-            source_observation_ids=_normalize_string_tuple(payload.get("source_observation_ids")),
-            confidence=_normalize_confidence(payload.get("confidence")),
-            epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "feature_id": self.feature_id,
-            "document_id": self.document_id,
-            "collection_id": self.collection_id,
-            "variant_id": self.variant_id,
-            "feature_type": self.feature_type,
-            "feature_value": self.feature_value,
-            "feature_unit": self.feature_unit,
-            "qualitative_descriptor": self.qualitative_descriptor,
-            "source_observation_ids": list(self.source_observation_ids),
-            "confidence": self.confidence,
-            "epistemic_status": self.epistemic_status,
-        }
-
-
-@dataclass(frozen=True)
 class TestCondition:
     test_condition_id: str
     document_id: str
@@ -157,7 +20,6 @@ class TestCondition:
     condition_payload: dict[str, Any]
     condition_completeness: str
     missing_fields: tuple[str, ...]
-    evidence_anchor_ids: tuple[str, ...]
     confidence: float
     epistemic_status: str
 
@@ -174,7 +36,6 @@ class TestCondition:
             condition_payload=_normalize_mapping(payload.get("condition_payload")),
             condition_completeness=_normalize_text(payload.get("condition_completeness")) or "unresolved",
             missing_fields=_normalize_string_tuple(payload.get("missing_fields")),
-            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
             confidence=_normalize_confidence(payload.get("confidence")),
             epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
         )
@@ -191,7 +52,6 @@ class TestCondition:
             "condition_payload": dict(self.condition_payload),
             "condition_completeness": self.condition_completeness,
             "missing_fields": list(self.missing_fields),
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "confidence": self.confidence,
             "epistemic_status": self.epistemic_status,
         }
@@ -206,7 +66,6 @@ class MethodFact:
     method_role: str
     method_name: str
     method_payload: dict[str, Any]
-    evidence_anchor_ids: tuple[str, ...]
     confidence: float
     epistemic_status: str
 
@@ -220,7 +79,6 @@ class MethodFact:
             method_role=_normalize_text(payload.get("method_role")) or "",
             method_name=_normalize_text(payload.get("method_name")) or "",
             method_payload=_normalize_mapping(payload.get("method_payload")),
-            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
             confidence=_normalize_confidence(payload.get("confidence")),
             epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
         )
@@ -234,7 +92,6 @@ class MethodFact:
             "method_role": self.method_role,
             "method_name": self.method_name,
             "method_payload": dict(self.method_payload),
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "confidence": self.confidence,
             "epistemic_status": self.epistemic_status,
         }
@@ -250,7 +107,6 @@ class BaselineReference:
     baseline_type: str
     baseline_label: str
     baseline_scope: str
-    evidence_anchor_ids: tuple[str, ...]
     confidence: float
     epistemic_status: str
 
@@ -265,7 +121,6 @@ class BaselineReference:
             baseline_type=_normalize_text(payload.get("baseline_type")) or "",
             baseline_label=_normalize_text(payload.get("baseline_label")) or "",
             baseline_scope=_normalize_text(payload.get("baseline_scope")) or "",
-            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
             confidence=_normalize_confidence(payload.get("confidence")),
             epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
         )
@@ -280,7 +135,6 @@ class BaselineReference:
             "baseline_type": self.baseline_type,
             "baseline_label": self.baseline_label,
             "baseline_scope": self.baseline_scope,
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "confidence": self.confidence,
             "epistemic_status": self.epistemic_status,
         }
@@ -299,8 +153,6 @@ class SampleVariant:
     variable_value: Any
     process_context: dict[str, Any]
     profile_payload: dict[str, Any]
-    structure_feature_ids: tuple[str, ...]
-    source_anchor_ids: tuple[str, ...]
     confidence: float
     epistemic_status: str
 
@@ -318,8 +170,6 @@ class SampleVariant:
             variable_value=_normalize_scalar(payload.get("variable_value")),
             process_context=_normalize_mapping(payload.get("process_context")),
             profile_payload=_normalize_mapping(payload.get("profile_payload")),
-            structure_feature_ids=_normalize_string_tuple(payload.get("structure_feature_ids")),
-            source_anchor_ids=_normalize_string_tuple(payload.get("source_anchor_ids")),
             confidence=_normalize_confidence(payload.get("confidence")),
             epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
         )
@@ -337,8 +187,6 @@ class SampleVariant:
             "variable_value": self.variable_value,
             "process_context": dict(self.process_context),
             "profile_payload": dict(self.profile_payload),
-            "structure_feature_ids": list(self.structure_feature_ids),
-            "source_anchor_ids": list(self.source_anchor_ids),
             "confidence": self.confidence,
             "epistemic_status": self.epistemic_status,
         }
@@ -358,9 +206,6 @@ class MeasurementResult:
     unit: str | None
     test_condition_id: str | None
     baseline_id: str | None
-    structure_feature_ids: tuple[str, ...]
-    characterization_observation_ids: tuple[str, ...]
-    evidence_anchor_ids: tuple[str, ...]
     traceability_status: str
     result_source_type: str
     epistemic_status: str
@@ -380,11 +225,6 @@ class MeasurementResult:
             unit=_normalize_text(payload.get("unit")),
             test_condition_id=_normalize_text(payload.get("test_condition_id")),
             baseline_id=_normalize_text(payload.get("baseline_id")),
-            structure_feature_ids=_normalize_string_tuple(payload.get("structure_feature_ids")),
-            characterization_observation_ids=_normalize_string_tuple(
-                payload.get("characterization_observation_ids")
-            ),
-            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
             traceability_status=_normalize_text(payload.get("traceability_status")) or "",
             result_source_type=_normalize_text(payload.get("result_source_type")) or "",
             epistemic_status=_normalize_text(payload.get("epistemic_status")) or "",
@@ -404,9 +244,6 @@ class MeasurementResult:
             "unit": self.unit,
             "test_condition_id": self.test_condition_id,
             "baseline_id": self.baseline_id,
-            "structure_feature_ids": list(self.structure_feature_ids),
-            "characterization_observation_ids": list(self.characterization_observation_ids),
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "traceability_status": self.traceability_status,
             "result_source_type": self.result_source_type,
             "epistemic_status": self.epistemic_status,
@@ -425,17 +262,6 @@ def _normalize_text(value: Any) -> str | None:
             pass
     text = str(value).strip()
     return text or None
-
-
-def _normalize_optional_int(value: Any) -> int | None:
-    try:
-        if value is None:
-            return None
-        if isinstance(value, float) and math.isnan(value):
-            return None
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _normalize_confidence(value: Any) -> float:
@@ -487,11 +313,8 @@ def _normalize_scalar(value: Any) -> Any:
 __all__ = [
     "BaselineReference",
     "CORE_NEUTRAL_DOMAIN_PROFILE",
-    "CharacterizationObservation",
-    "EvidenceAnchor",
     "MethodFact",
     "MeasurementResult",
     "SampleVariant",
-    "StructureFeature",
     "TestCondition",
 ]

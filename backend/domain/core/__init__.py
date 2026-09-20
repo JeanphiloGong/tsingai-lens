@@ -12,12 +12,9 @@ from domain.core.document_profile import (
 from domain.core.evidence_backbone import (
     CORE_NEUTRAL_DOMAIN_PROFILE,
     BaselineReference,
-    CharacterizationObservation,
-    EvidenceAnchor,
     MeasurementResult,
     MethodFact,
     SampleVariant,
-    StructureFeature,
     TestCondition,
 )
 from domain.core.finding import (
@@ -89,7 +86,6 @@ from domain.core.research_process import (
 __all__ = [
     "BaselineReference",
     "CORE_NEUTRAL_DOMAIN_PROFILE",
-    "CharacterizationObservation",
     "DocumentProfile",
     "DocumentProfileSummary",
     "PROFILE_EXTRACTION_FAILED_WARNING",
@@ -103,7 +99,6 @@ __all__ = [
     "EVIDENCE_RESOLUTION_STATUS_VALUES",
     "EVIDENCE_STATUS_VALUES",
     "OBJECTIVE_DERIVATION_BASIS_KINDS",
-    "EvidenceAnchor",
     "FINDING_ASSERTION_STRENGTHS",
     "FINDING_ORIGINS",
     "FINDING_SYNTHESIS_STATUSES",
@@ -155,7 +150,6 @@ __all__ = [
     "ReviewSynthesisMap",
     "SOURCE_KIND_VALUES",
     "SampleVariant",
-    "StructureFeature",
     "TestCondition",
     "build_research_objective_id",
     "is_question_shaped_objective",

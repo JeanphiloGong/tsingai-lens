@@ -2,6 +2,12 @@
 
 ## Summary
 
+> Historical plan: the active Objective analysis does not persist the proposed
+> `evidence_anchors` or characterization artifact family. It validates exact
+> Source facts as `SourceObservation`, binds them in `PaperExperiment`, and
+> materializes `ObjectiveEvidence`. The artifact names retained below describe
+> the original proposal rather than the current implementation contract.
+
 Core semantic extraction should move from broad prompt-driven extraction to a
 paper-reading flow that first classifies what a source unit is, then runs only
 the extractors that match that unit.

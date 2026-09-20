@@ -2,6 +2,13 @@
 
 ## Summary
 
+> Historical plan: the active Objective analysis no longer implements the
+> proposed `evidence_anchors`, `characterization_observations`, or
+> `structure_features` artifact families. Source-grounded facts now enter the
+> scientific flow through `SourceObservation`, are bound within
+> `PaperExperiment`, and materialize as `ObjectiveEvidence`. The names retained
+> below describe the original proposal, not current domain contracts.
+
 This document records the backend-owned child execution plan for hard-cutting
 the current Core parsing and evidence backbone away from heuristic extraction
 and onto LLM structured extraction.

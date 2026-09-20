@@ -22,7 +22,7 @@ Install the deploy bundle with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/deploy/install.sh \
-  | sh -s -- --version v0.12.23 --ref v0.12.23
+  | sh -s -- --version v0.12.24 --ref v0.12.24
 ```
 
 Use `--ref <git-ref>` when you want the deploy files themselves to come from a
@@ -155,7 +155,7 @@ Edit `.env` to set that generated value, the published image tag, and the host
 port:
 
 ```bash
-LENS_VERSION=v0.12.23
+LENS_VERSION=v0.12.24
 LENS_HTTP_PORT=8080
 POSTGRES_PASSWORD=<generated-64-character-hex-value>
 ```
@@ -233,7 +233,7 @@ http://localhost:8080
 ./scripts/lens logs
 ./scripts/lens ps
 ./scripts/lens pull
-./scripts/lens upgrade v0.12.23
+./scripts/lens upgrade v0.12.24
 ```
 
 Command mapping:

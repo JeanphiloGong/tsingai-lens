@@ -159,7 +159,6 @@ Recommended minimum field family:
   Allowed values should begin with `process | characterization | test`
 - `method_name`
 - `method_payload`
-- `evidence_anchor_ids`
 - `confidence`
 
 This object is necessary because users need to see what methods a paper used,

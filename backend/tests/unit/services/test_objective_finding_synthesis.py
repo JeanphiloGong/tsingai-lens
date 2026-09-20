@@ -184,7 +184,6 @@ def _evidence(
             "process": [{"name": "process", "value": "LPBF"}],
             "test": [{"name": "method", "value": "measurement"}],
         },
-        "anchor_ids": [f"anchor-{evidence_id}"],
         "resolution_status": "resolved",
         "confidence": confidence,
     }

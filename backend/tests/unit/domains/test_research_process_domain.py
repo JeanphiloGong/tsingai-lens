@@ -5,7 +5,7 @@ import pytest
 from domain.core import MeasurementResult, PaperExperiment, SourceObservation
 
 
-def test_source_observation_round_trips_source_grounded_fact() -> None:
+def test_source_observation_ignores_legacy_anchor_ids() -> None:
     observation = SourceObservation.from_mapping(
         {
             "observation_id": "obs-1",
@@ -32,7 +32,7 @@ def test_source_observation_round_trips_source_grounded_fact() -> None:
     assert observation.reported_result is not None
     assert observation.reported_result.value == 82
     assert observation.has_scientific_content
-    assert observation.to_record()["evidence_anchor_ids"] == ["anchor-1"]
+    assert "evidence_anchor_ids" not in observation.to_record()
 
 
 def test_source_observation_rejects_missing_provenance() -> None:

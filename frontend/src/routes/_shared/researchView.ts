@@ -331,7 +331,6 @@ export type ObjectiveEvidence = {
 	} | null;
 	attribution_scope: ObjectiveEvidenceAttributionScope;
 	scientific_context: ObjectiveScientificContext;
-	anchor_ids: string[];
 	resolution_status: string;
 	failure_reason: string | null;
 	confidence: number;

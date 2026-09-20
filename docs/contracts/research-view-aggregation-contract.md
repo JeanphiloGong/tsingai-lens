@@ -101,7 +101,6 @@ Minimum shape:
 EvidenceReference
 - evidence_ref_id
 - fact_ids
-- anchor_ids
 - source_kind
 - document_id
 - locator

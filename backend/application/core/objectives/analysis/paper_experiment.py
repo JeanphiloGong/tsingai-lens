@@ -1472,9 +1472,6 @@ def _objective_merge_duplicate_paper_observation(
     payload["source_refs"] = list(
         _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
     )
-    payload["evidence_anchor_ids"] = list(
-        dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
-    )
     payload["confidence"] = min(existing.confidence, incoming.confidence)
     return SourceObservation.from_mapping(payload)
 
@@ -1561,9 +1558,6 @@ def _objective_merge_duplicate_paper_fact(
     payload = existing.to_record()
     payload["source_refs"] = list(
         _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
-    )
-    payload["evidence_anchor_ids"] = list(
-        dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
     )
     payload["confidence"] = min(existing.confidence, incoming.confidence)
     return SourceObservation.from_mapping(payload)
@@ -4121,14 +4115,6 @@ def _build_objective_pairwise_comparison_units(
                                 )
                             ),
                             "source_refs": source_refs,
-                            "evidence_anchor_ids": list(
-                                dict.fromkeys(
-                                    (
-                                        *baseline.evidence_anchor_ids,
-                                        *target.evidence_anchor_ids,
-                                    )
-                                )
-                            ),
                             "resolution_status": "resolved",
                             "confidence": min(baseline.confidence, target.confidence),
                         }

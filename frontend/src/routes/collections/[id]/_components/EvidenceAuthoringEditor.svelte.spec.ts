@@ -61,7 +61,6 @@ const sourceEvidence = {
 	},
 	attribution_scope: 'association_only' as const,
 	scientific_context: { material: [], sample: [], process: [], test: [] },
-	anchor_ids: [],
 	resolution_status: 'resolved',
 	failure_reason: null,
 	confidence: 0.9,

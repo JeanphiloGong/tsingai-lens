@@ -689,7 +689,6 @@ def _record_source_observation_boundary(
                 "reported_result": record.get("reported_result"),
                 "scientific_context": record.get("scientific_context"),
                 "confidence": record.get("confidence"),
-                "evidence_anchor_ids": record.get("evidence_anchor_ids") or (),
             }
         )
     except (TypeError, ValueError) as exc:

@@ -63,7 +63,6 @@ class SourceObservation:
         default_factory=ObjectiveEvidenceContext
     )
     status: str = "unvalidated"
-    evidence_anchor_ids: tuple[str, ...] = ()
     source_refs: tuple[dict[str, Any], ...] = ()
     derived_from_observation_ids: tuple[str, ...] = ()
 
@@ -86,7 +85,6 @@ class SourceObservation:
         if not 0 <= self.confidence <= 1:
             raise ValueError("source observation confidence must be between 0 and 1")
         object.__setattr__(self, "changed_variables", tuple(self.changed_variables))
-        object.__setattr__(self, "evidence_anchor_ids", tuple(self.evidence_anchor_ids))
         parents = tuple(self.derived_from_observation_ids)
         if (
             any(not str(item).strip() for item in parents)
@@ -194,11 +192,6 @@ class SourceObservation:
                 else None
             ),
             status=status,
-            evidence_anchor_ids=tuple(
-                str(item).strip()
-                for item in payload.get("evidence_anchor_ids") or ()
-                if str(item).strip()
-            ),
             source_refs=source_refs,
             derived_from_observation_ids=tuple(
                 payload.get("derived_from_observation_ids") or ()
@@ -240,7 +233,6 @@ class SourceObservation:
             "resolution_status": self.resolution_status,
             "failure_reason": self.failure_reason,
             "status": self.status,
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "source_refs": [dict(item) for item in self.source_refs],
             "derived_from_observation_ids": list(self.derived_from_observation_ids),
         }

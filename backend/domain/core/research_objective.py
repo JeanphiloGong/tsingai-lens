@@ -2015,7 +2015,6 @@ class ObjectiveEvidence:
     reported_result: ObjectiveEvidenceResult | None
     attribution_scope: str
     scientific_context: ObjectiveEvidenceContext
-    anchor_ids: tuple[str, ...]
     resolution_status: str
     failure_reason: str | None
     confidence: float
@@ -2265,7 +2264,6 @@ class ObjectiveEvidence:
                 if isinstance(payload.get("scientific_context"), Mapping)
                 else ObjectiveEvidenceContext()
             ),
-            anchor_ids=normalize_objective_terms(payload.get("anchor_ids")),
             resolution_status=_choice(
                 payload.get("resolution_status"),
                 EVIDENCE_RESOLUTION_STATUS_VALUES,
@@ -2402,7 +2400,6 @@ class ObjectiveEvidence:
             ),
             "attribution_scope": self.attribution_scope,
             "scientific_context": self.scientific_context.to_record(),
-            "anchor_ids": list(self.anchor_ids),
             "resolution_status": self.resolution_status,
             "failure_reason": self.failure_reason,
             "confidence": self.confidence,

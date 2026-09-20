@@ -900,7 +900,6 @@ def rebind_persisted_evidence(
                 },
             )
         payload["source_refs"] = source_refs
-        payload["evidence_anchor_ids"] = list(evidence.anchor_ids)
         draft = SourceObservation.from_mapping(payload)
         source_excerpts_by_locator = _source_excerpts_by_locator(
             draft,
@@ -1524,7 +1523,6 @@ def _analysis_evidence_records(
             reported_result=draft.reported_result,
             attribution_scope=draft.attribution_scope,
             scientific_context=draft.scientific_context,
-            anchor_ids=draft.evidence_anchor_ids,
             resolution_status=(
                 resolution_status
                 if selection_status == "failed"
@@ -1727,9 +1725,6 @@ def _merge_duplicate_evidence(
     payload = preferred.to_record()
     payload["evidence_id"] = existing.evidence_id
     payload["related_source_refs"] = related_source_refs
-    payload["anchor_ids"] = list(
-        dict.fromkeys((*existing.anchor_ids, *candidate.anchor_ids))
-    )
     return ObjectiveEvidence.from_mapping(payload)
 
 

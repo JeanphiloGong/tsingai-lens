@@ -132,6 +132,7 @@ def validate_batch(
     return None, validated_arguments
 
 
+# define a method that decides which tool definitions to send to the model on its next turn
 def select_tool_specs(
     capabilities: CapabilityRegistry,
     messages: list[ChatMessage],
@@ -139,6 +140,25 @@ def select_tool_specs(
     *,
     inherited_completed_writes: set[str] | None = None,
 ) -> tuple[Any, ...]:
+    """
+    Args:
+        capabilities(CapabilityRegistry): the registry of tools available to the current agent run
+            capabilities.specs: the complete registered tool definitions, each tool spec tells the model:
+                - the tool name
+                - what the tool does
+                - which parameters it accepts
+                - the parameter schema
+                - its risk category
+            capabilities.discovery: the configuration for deferred tool discovery
+                - tools: the catalog of tools that can be discovered
+                - discovery.spec: the definition of discover_research_tools itself
+        messages(list[ChatMessage]): conversation history, including user messages and tool results
+    Returns:
+        tuple[ToolSpec]: a tuple containing zero or more ToolSpec objects
+    """
+    # retrieve all available capabilities
+    # create a set containing only the names of the registered tools
+    # if
     if any(
         call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.FAILED
         and call.decision_user_id is not None
@@ -148,8 +168,6 @@ def select_tool_specs(
         return ()
     specs = capabilities.specs
     registered_names = {spec.name for spec in specs}
-    if not registered_names.intersection(intent_policy.KNOWN_CAPABILITIES):
-        return specs
 
     latest_user = next(
         (
@@ -177,7 +195,6 @@ def select_tool_specs(
     loaded_names = {
         name
         for result in successful_results.get("discover_research_tools", ())
-        if result.get("catalog_version") == capabilities.discovery.catalog_version
         for name in result.get("loaded_tool_names", ())
         if isinstance(name, str) and name in capabilities.discovery.tools
     }
@@ -225,7 +242,6 @@ def select_tool_specs(
     )
     source_grounded_intent = any(
         result.get("source_inspection_required") is True
-        and result.get("catalog_version") == capabilities.discovery.catalog_version
         for result in successful_results.get("discover_research_tools", ())
     )
     # Reviewing an existing conclusion starts with that conclusion and its

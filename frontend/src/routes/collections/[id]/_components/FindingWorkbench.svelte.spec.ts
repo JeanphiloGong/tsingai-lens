@@ -116,7 +116,6 @@ const evidence = [
 			process: [],
 			test: []
 		},
-		anchor_ids: [],
 		resolution_status: 'resolved',
 		failure_reason: null,
 		confidence: 0.9,

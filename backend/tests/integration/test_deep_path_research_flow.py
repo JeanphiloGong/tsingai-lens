@@ -149,12 +149,19 @@ def _no_result_source() -> SourceDocument:
 
 
 def _tool_result(turn: dict[str, Any]) -> ChatToolResult:
+    discovery_call_ids = {
+        request.tool_call_id
+        for message in turn["messages"]
+        if isinstance(message, ChatMessage)
+        for request in message.tool_calls
+        if request.name == "discover_research_tools"
+    }
     results = [
         message.tool_result
         for message in turn["messages"]
         if isinstance(message, ChatMessage) and message.tool_result is not None
     ]
-    domain_results = [result for result in results if "catalog_version" not in result.data]
+    domain_results = [result for result in results if result.tool_call_id not in discovery_call_ids]
     assert len(domain_results) == 1
     return domain_results[0]
 

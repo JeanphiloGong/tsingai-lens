@@ -16,6 +16,7 @@ from application.chat import (
     AgentContext,
     AgentCompletionReason,
     AgentRunLimits,
+    AgentRunResult,
     ModelUsage,
     AgentRunStatus,
     CapabilityExecutionContext,
@@ -116,7 +117,11 @@ class _Model:
             tuple(call.name for call in next_turn.tool_calls)
             if isinstance(next_turn, ModelTurn) else ()
         )
-        missing = tuple(name for name in requested if name not in names and catalog and f"- {name} [" in catalog.description)
+        missing = tuple(dict.fromkeys(
+            name
+            for name in requested
+            if name not in names and catalog and f"- {name} [" in catalog.description
+        ))
         if missing:
             self.discover = ()
             self.discovery_decisions.append(missing)
@@ -191,6 +196,15 @@ def _context() -> AgentContext:
         user_id="user-1",
         collection_id="col-1",
     )
+
+
+def _calls_for(result: AgentRunResult, *names: str) -> tuple[ChatToolCall, ...]:
+    return tuple(call for call in result.tool_calls if call.name in names)
+
+
+def _results_for(result: AgentRunResult, *names: str) -> tuple[ChatToolResult, ...]:
+    call_ids = {call.tool_call_id for call in _calls_for(result, *names)}
+    return tuple(item for item in result.tool_results if item.tool_call_id in call_ids)
 
 
 async def test_greeting_completes_without_calling_a_tool() -> None:
@@ -496,7 +510,7 @@ async def test_query_rewording_without_new_observations_reaches_no_progress() ->
     )
 
     assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
-    assert len(result.tool_results) == 3
+    assert len(_results_for(result, read.spec.name)) == 3
     assert result.warnings
 
 
@@ -529,7 +543,7 @@ async def test_new_source_pages_and_revised_source_content_remain_progress() -> 
         context=_context(), previous_messages=(), user_message="Compare heat treatments.",
     )
     assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
-    assert len(result.tool_results) == 3
+    assert len(_results_for(result, read.spec.name)) == 3
 
 
 async def test_timed_out_model_is_cancelled_without_starting_finalization() -> None:
@@ -691,7 +705,7 @@ async def test_finalization_uses_remaining_time_and_its_own_output_limit(monkeyp
                   ModelTurn(content="Only inspected sources support this answer."))
     result = await ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_elapsed_seconds=60, max_tool_calls=1,
+        limits=AgentRunLimits(max_elapsed_seconds=60, max_tool_calls=2,
                              max_finalization_output_tokens=500),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
 
@@ -715,12 +729,12 @@ async def test_finalization_timeout_cancels_the_only_summary_request() -> None:
     model = Model(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)))
     result = await ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_tool_calls=1, max_finalization_seconds=0.02),
+        limits=AgentRunLimits(max_tool_calls=2, max_finalization_seconds=0.02),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
 
     assert result.error_code == "final_answer_unavailable"
     assert cancelled.is_set()
-    assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
+    assert _results_for(result, read.spec.name)[0].status is ToolResultStatus.SUCCEEDED
 
 
 async def test_read_deadline_preserves_successes_without_starting_a_summary() -> None:
@@ -747,8 +761,9 @@ async def test_read_deadline_preserves_successes_without_starting_a_summary() ->
     assert result.error_code == "final_answer_unavailable"
     assert cancelled.is_set()
     assert len(model.contexts) == 1
-    assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
-    assert result.tool_results[1].error_code == "capability_timeout"
+    read_results = _results_for(result, read.spec.name)
+    assert read_results[0].status is ToolResultStatus.SUCCEEDED
+    assert read_results[1].error_code == "capability_timeout"
 
 
 async def test_invalid_response_usage_reduces_the_retry_output_allowance() -> None:
@@ -799,11 +814,32 @@ async def test_read_batch_preserves_intent_order_and_partial_failure(
                                       limits=AgentRunLimits(max_parallel_reads=limit)).run_turn(
         context=_context(), previous_messages=(), user_message="Compare the two papers.", checkpoint=checkpoint)
     assert peak == expected_peak
-    assert [call.position for call in result.tool_calls] == [0, 1]
-    assert [item.status for item in result.tool_results] == [ToolResultStatus.SUCCEEDED, ToolResultStatus.FAILED]
-    assert tuple(request.tool_call_id for request in result.messages[1].tool_calls) == tuple(item.tool_call_id for item in result.tool_results)
-    assert any(len(calls) == 2 and all(call.status is ToolCallStatus.REQUESTED for call in calls) and not results
-               for _, calls, results in checkpoints)
+    read_calls = _calls_for(result, read.spec.name)
+    read_results = _results_for(result, read.spec.name)
+    assert [call.position for call in read_calls] == [0, 1]
+    assert [item.status for item in read_results] == [ToolResultStatus.SUCCEEDED, ToolResultStatus.FAILED]
+    read_request = next(
+        message for message in result.messages
+        if tuple(request.tool_call_id for request in message.tool_calls)
+        == tuple(call.tool_call_id for call in read_calls)
+    )
+    assert tuple(request.tool_call_id for request in read_request.tool_calls) == tuple(
+        item.tool_call_id for item in read_results
+    )
+    assert any(
+        len([call for call in calls if call.name == read.spec.name]) == 2
+        and all(
+            call.status is ToolCallStatus.REQUESTED
+            for call in calls if call.name == read.spec.name
+        )
+        and not [
+            item for item in results
+            if item.tool_call_id in {
+                call.tool_call_id for call in calls if call.name == read.spec.name
+            }
+        ]
+        for _, calls, results in checkpoints
+    )
 
 
 async def test_tool_response_deduplicates_and_bounds_one_model_batch() -> None:
@@ -820,26 +856,36 @@ async def test_tool_response_deduplicates_and_bounds_one_model_batch() -> None:
 
     assert result.status is AgentRunStatus.COMPLETED
     assert len(read.executed_arguments) == 32
-    assert len(result.tool_results) == 32
+    read_calls = _calls_for(result, read.spec.name)
+    read_results = _results_for(result, read.spec.name)
+    assert len(read_results) == 32
     assert len({item["question"] for item in read.executed_arguments}) == 32
-    assert [call.position for call in result.tool_calls] == list(range(32))
-    assert [call.tool_call_id for call in result.tool_calls] == [
-        item.tool_call_id for item in result.tool_results
+    assert [call.position for call in read_calls] == list(range(32))
+    assert [call.tool_call_id for call in read_calls] == [
+        item.tool_call_id for item in read_results
     ]
 
 
 @pytest.mark.parametrize("risk", [ToolRisk.DRAFT, ToolRisk.WRITE])
 async def test_mixed_batches_have_no_side_effects(risk: ToolRisk) -> None:
     read = _Capability("test_read", ToolRisk.READ)
-    action = _Capability("test_action", risk)
+    action = _Capability(
+        "create_evidence_version" if risk is ToolRisk.WRITE else "test_action",
+        risk,
+    )
     result = await ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name), ModelToolCall(name=action.spec.name))),
                      ModelTurn(content="The requested actions were not executed.")),
         capabilities=CapabilityRegistry((read, action)),
-    ).run_turn(context=_context(), previous_messages=(), user_message="Read and save.")
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Read the Source and save Evidence.",
+    )
     assert read.executed_arguments == action.executed_arguments == []
-    assert len(result.tool_results) == 2
-    assert all(item.error_code == "invalid_tool_batch" for item in result.tool_results)
+    action_results = _results_for(result, read.spec.name, action.spec.name)
+    assert len(action_results) == 2
+    assert all(item.error_code == "invalid_tool_batch" for item in action_results)
 
 
 async def test_insufficient_batch_budget_deduplicates_repeated_call() -> None:
@@ -847,10 +893,10 @@ async def test_insufficient_batch_budget_deduplicates_repeated_call() -> None:
     result = await ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),) * 2),
                      ModelTurn(content="Both papers remain unread.")),
-        capabilities=CapabilityRegistry((read,)), limits=AgentRunLimits(max_tool_calls=1),
+        capabilities=CapabilityRegistry((read,)), limits=AgentRunLimits(max_tool_calls=2),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare two papers.")
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
-    assert len(result.tool_results) == 1
+    assert len(_results_for(result, read.spec.name)) == 1
     assert read.executed_arguments == [{}]
 
 
@@ -863,8 +909,9 @@ async def test_unknown_batch_member_prevents_every_read_from_executing() -> None
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare two papers.")
 
     assert read.executed_arguments == []
-    assert len(result.tool_results) == 2
-    assert all(item.status is ToolResultStatus.FAILED for item in result.tool_results)
+    read_results = _results_for(result, read.spec.name, "not_registered")
+    assert len(read_results) == 2
+    assert all(item.status is ToolResultStatus.FAILED for item in read_results)
 
 
 async def test_general_science_discussion_receives_no_capabilities() -> None:

@@ -152,22 +152,25 @@ It should preserve what one paper says about:
 - samples or variants
 - methods
 - conditions
-- baselines
 - measurements or results
-- characterization findings
-- evidence anchors
-- optional structure-level enrichment
+- baseline and target roles inside a specific comparison
+- characterization or structure context when an inspected Source supports it
+- exact Source provenance for every accepted observation
 
 The minimum shared family members are:
 
 - `sample_variants`
-- `method_facts`
 - `test_conditions`
-- `baseline_references`
 - `measurement_results`
-- `characterization_observations`
-- `evidence_anchors`
-- `structure_features` as optional enrichment
+
+`SourceObservation` preserves the Source-local statement and its provenance;
+`PaperExperiment` binds accepted observations to the facts from the same paper;
+and `PaperExperiment.comparison_status()` checks whether two identified
+measurements can be compared for one Objective. Baseline and target remain
+roles in the Source-supported comparison, not standalone paper-fact entities.
+Methods information remains in the exact Source observation and its scientific
+context until a concrete sample, process, test condition, or result consumes
+it; Lens does not maintain an otherwise unused parallel `MethodFact` family.
 
 ### Common Contract Rules
 
@@ -176,8 +179,13 @@ Every primary fact object should preserve:
 - a stable object id
 - `document_id`
 - `collection_id`
-- traceability back to source anchors or source-locator fields
-- `confidence`
+- enough identity to bind it to its owning `PaperExperiment`
+
+Traceability is preserved by the accepted `SourceObservation` records and the
+experiment's `source_observation_ids`, rather than by duplicating one independent
+anchor object for every fact. Objects that represent extraction or
+normalization judgments should preserve confidence and epistemic status; a
+deterministically assembled relationship need not invent those fields.
 
 Whenever the object is normalized or inferred rather than directly copied from
 the paper, it should also preserve an explicit epistemic or derivation status.
@@ -186,23 +194,20 @@ the paper, it should also preserve an explicit epistemic or derivation status.
 
 - `sample_variants`
   Identifies the sample or experimental variant that later facts belong to.
-- `method_facts`
-  Preserves process, characterization, and test methods as first-class facts.
 - `test_conditions`
   Preserves structured condition payloads rather than flattening them into one
   opaque summary string.
-- `baseline_references`
-  Preserves explicit control or baseline semantics.
 - `measurement_results`
-  Acts as the main comparison input object and preserves links to sample,
-  condition, baseline, and evidence.
-- `characterization_observations`
-  Preserves characterization findings as first-class facts rather than
-  incidental prose.
-- `evidence_anchors`
-  Preserves the shared traceback surface across facts and derived views.
-- `structure_features`
-  Adds optional structure-level enrichment when the evidence is strong enough.
+  Acts as the main comparison input object and preserves links to the sample and
+  test condition that make the measurement interpretable.
+- `SourceObservation`
+  Preserves what one exact text, table, figure, block, or section supports,
+  including comparison labels, reported results, scientific context, and
+  validation state.
+- `PaperExperiment.comparison_status()`
+  Returns the bounded comparable, non-comparable, or insufficient-context
+  assessment consumed by internal diagnostics. It is not another persisted
+  scientific object; formal comparison content remains in Evidence.
 
 ### Family Dependency Rule
 

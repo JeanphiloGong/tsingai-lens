@@ -4,20 +4,29 @@
   <img src="assets/readme/lens_lockup.png" alt="Lens brand lockup">
 </p>
 
-Lens is an evidence-driven literature comparison workspace for research
-collections.
+Lens is an evidence-first research system in development.
+
+Its current product is a collection-bound workspace for reconstructing,
+grounding, and comparing scientific evidence. Its long-term direction is an
+autonomous research loop that can move from a research goal through evidence,
+hypotheses, experiments, and updated decisions.
 
 It helps researchers turn a set of papers into reviewable document profiles,
 evidence views, and comparison tables, so results stay connected to their
 original context instead of being flattened into unsupported summaries.
 
-Lens is built for workflows where the key question is not only:
+Today, Lens is built for workflows where the key question is not only:
 
 > "What does this paper say?"
 
 but also:
 
 > "Which results are actually comparable, under what conditions, and with what evidence?"
+
+The longer-term question is:
+
+> "What does the system know, what remains uncertain, and what action would
+> most reduce the uncertainty around the research goal?"
 
 <p align="center">
   <img src="assets/readme/lens_overview.png" alt="Lens overview workflow" width="960">
@@ -50,8 +59,11 @@ It focuses on:
 - helping users review whether results are comparable
 - preserving traceback from comparison views back to the original paper
 
-Lens is not meant to be a generic paper chatbot. Its goal is to support
-evidence-backed research comparison.
+Lens is not meant to be a generic paper chatbot, a science news feed, a broad
+scientific search portal, or a marketplace of domain tools. Its product center
+is the research state that connects source evidence to decisions. Search,
+external tools, simulations, and experiments are inputs or execution
+dependencies around that state.
 
 ## What Lens Helps Users Do
 
@@ -93,10 +105,10 @@ They are designed to show not only values, but also the material context,
 process conditions, test conditions, baselines, uncertainty, and warnings that
 affect comparability.
 
-## Current Scope
+## Current Scope And Long-Term Vision
 
-Lens v1 focuses on the foundation of an evidence-backed literature comparison
-workflow.
+Lens v1 is the evidence and comparison foundation for a future autonomous
+research loop. It is not yet an autonomous scientist.
 
 The current product direction includes:
 
@@ -108,11 +120,16 @@ The current product direction includes:
 - comparability warnings
 - user-reviewable comparison tables
 
-Lens v1 does not aim to be a fully autonomous research scientist, a universal
-knowledge graph, or a complete scientific database.
+The boundary is deliberate:
 
-Those may become downstream directions, but the current foundation is a
-reliable comparison workspace.
+- **Current product:** a collection-bound, reviewable workflow for Source,
+  Evidence, comparability, and Finding.
+- **Long-term vision:** a system that receives a research goal, constraints, and
+  available resources, then maintains research state and selects the next
+  useful action.
+- **Current limitation:** hypothesis generation, experiment selection, external
+  execution, and autonomous continuation remain future capabilities. Human
+  review and authorization remain required while those boundaries are built.
 
 ## Example Use Cases
 
@@ -208,22 +225,56 @@ Lens is designed with materials research in mind, but the broader pattern can
 apply to other experimental and technical research domains where evidence,
 conditions, baselines, and comparability matter.
 
-## Future Directions
+## Research System Direction
 
-Lens is being developed as a foundation for evidence-backed research
-automation.
+The roadmap is one research loop, not a list of unrelated product categories.
+Lens is being developed toward an autonomous research system, with the current
+Evidence and comparison layer serving as its first reliable state boundary.
 
 <p align="center">
   <img src="assets/readme/lens_roadmap.png" alt="Lens roadmap" width="960">
 </p>
 
-The following directions are not all part of the initial v1 scope, but they
-describe the longer-term system vision.
+```text
+Research goal + constraints + resources
+                |
+                v
+        Define the research question
+                |
+                v
+ Literature -> Source -> Evidence -> Scientific state
+                                      |
+                                      v
+                              Identify knowledge gaps
+                                      |
+                                      v
+                                  Hypothesis
+                                      |
+                                      v
+                         Select the next useful experiment
+                                      |
+                                      v
+              Simulation / software / laboratory / human execution
+                                      |
+                                      v
+                         Observation -> Evidence -> State update
+                                      |
+                                      +------> next action
+```
 
-### 1. Research Fact Database
+The long-term objective is not to produce a report and stop. It is to keep a
+research objective moving until the goal is resolved, the hypothesis space is
+exhausted, the evidence is sufficient, the budget is exhausted, or no useful
+next experiment remains. This is a future direction, not a claim about the
+current v1 implementation.
 
-A long-term goal is to build reusable, evidence-backed research fact databases
-from paper collections.
+The following directions describe the long-term system vision. They are not
+claims about current v1 capabilities.
+
+### 1. Reusable Research State
+
+The research loop needs reusable, evidence-backed state rather than a flat
+collection of summaries. Paper collections are the first source of that state.
 
 In materials science, this could support structured databases for:
 
@@ -259,12 +310,14 @@ domain-specific databases for areas such as:
 - two-dimensional materials
 - photovoltaic and optoelectronic materials
 
-The key requirement is that database entries remain evidence-backed and
-reviewable.
+The key requirement is that every state update remains evidence-backed,
+reviewable, and replaceable when new observations contradict it. This is an
+internal substrate for the research loop, not a general scientific data portal.
 
-### 2. Benchmark Construction
+### 2. Evaluation And Benchmark Assets
 
-Lens can support the construction of research benchmarks from literature.
+The research loop needs evaluation and benchmark assets for testing extraction,
+grounding, comparability, hypothesis, and decision behavior.
 
 Many scientific AI benchmarks suffer from unclear provenance, inconsistent
 labels, missing experimental context, or weak links to the original source.
@@ -282,7 +335,7 @@ Lens aims to help build benchmarks where each data point includes:
 - data quality flags
 - comparability status
 
-For materials AI, this could support benchmark datasets for tasks such as:
+For the materials proving vertical, this could support evaluation tasks such as:
 
 - property prediction
 - process-property modeling
@@ -296,15 +349,20 @@ The benchmark direction should be developed carefully.
 A benchmark is only useful if the labels are trustworthy, the conditions are
 explicit, and the evaluation task reflects a real research problem.
 
-Lens can help by making benchmark construction more transparent and auditable.
+These assets are evaluation infrastructure, not a separate benchmark marketplace.
+Their value comes from transparent provenance, explicit conditions, and a task
+that represents a real research decision.
 
-### 3. Automated Materials Experiment Validation
+### 3. Hypothesis And Experiment Loop
 
-In the longer term, Lens could connect literature-derived evidence with
-experimental validation workflows.
+In the longer term, Lens could connect literature-derived evidence with a
+hypothesis and experiment loop.
 
-The goal is not to let AI blindly run experiments, but to help researchers
-design validation plans based on what the literature already supports.
+The goal is to identify the knowledge gap blocking the research objective,
+generate hypotheses connected to existing Evidence, and select the next useful
+experiment under cost, time, risk, and resource constraints. External tools,
+simulations, laboratories, and human operators may execute that experiment;
+Lens owns the research state around it.
 
 A possible workflow is:
 
@@ -341,9 +399,10 @@ The system should remain human-supervised.
 Automated validation is valuable only when the proposed experiment is
 technically feasible, safe, measurable, and tied to a clear hypothesis.
 
-### 4. Experimental Plan Construction
+### 4. Experiment Candidate Generation
 
-Lens can also become a planning assistant for experimental materials research.
+An experiment candidate is an intermediate research object, not a generic
+protocol or a separate laboratory platform.
 
 That direction should mirror how experienced materials researchers work rather
 than falling back to generic protocol generation.
@@ -358,8 +417,8 @@ In practice, that means helping the user:
 - propose the next experiment matrix, control groups, characterization chain,
   and decision criteria
 
-Given a research goal and a literature collection, the system could help
-construct candidate experimental plans by combining:
+Given a research goal and a literature collection, the system could construct
+candidate experiments by combining:
 
 - prior literature evidence
 - known parameter ranges
@@ -395,24 +454,29 @@ For AI-assisted materials research, this is especially important because model
 recommendations are often not experimentally actionable unless they are
 translated into concrete, testable, and measurable plans.
 
-Lens can provide the literature-grounded context needed for that translation.
+Lens can provide the literature-grounded context and uncertainty record needed
+for that translation.
 
-### 5. Closed-Loop AI For Materials Research
+### 5. Autonomous Research Loop
 
-A longer-term direction is to connect literature extraction, benchmark
-construction, experiment planning, and validation into a semi-automated
-research loop.
+A longer-term direction is to connect literature extraction, evidence state,
+hypothesis generation, experiment selection, execution, and validation into an
+autonomous research loop.
 
 A possible loop is:
 
-1. Mine the literature for evidence-backed facts.
-2. Build or update a structured research database.
-3. Train or evaluate predictive models.
-4. Suggest candidate experiments.
-5. Run human-reviewed or automated experiments.
-6. Compare results with literature and model predictions.
-7. Update the database and model.
-8. Repeat.
+1. Receive a research goal, constraints, and available resources.
+2. Build or update the current world model from evidence-backed facts.
+3. Identify the knowledge gap blocking the objective.
+4. Generate hypotheses connected to existing Evidence.
+5. Select the experiment with the highest expected information value within the
+   available budget and safety constraints.
+6. Execute through simulation, scientific software, a laboratory, or a human
+   operator.
+7. Convert observations into source-grounded Evidence and update the state.
+8. Repeat until the objective is achieved, the hypothesis space is exhausted,
+   the evidence is sufficient, the budget is exhausted, or no useful next
+   experiment remains.
 
 This direction requires strong safeguards:
 
@@ -427,7 +491,20 @@ This direction requires strong safeguards:
 Lens should approach this direction incrementally.
 
 The foundation must be reliable evidence and comparison infrastructure before
-full closed-loop automation becomes credible.
+closed-loop autonomy becomes credible. Lens is not claiming that this loop is
+already complete.
+
+### Product Boundary
+
+Lens does not aim to be a general-purpose science portal, news feed, universal
+search engine, tool marketplace, or generic project-management workspace.
+Those systems may provide inputs or execution services around Lens. Lens owns
+the research state that connects evidence to hypotheses, experiments, and
+decisions.
+
+This boundary keeps the current product focused while leaving room to build
+toward an Autonomous Research OS without presenting a broad platform before
+the underlying research loop is reliable.
 
 ## Documentation
 

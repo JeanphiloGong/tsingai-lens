@@ -19,7 +19,6 @@ from application.core.objectives.analysis.source_extraction import (
     _objective_test_context_applies_to_outcome,
 )
 from domain.core import (
-    BaselineReference,
     MeasurementResult,
     PaperExperiment,
     ResearchObjective,
@@ -226,7 +225,6 @@ def assemble_paper_experiment(
     test_conditions: list[TestCondition] = []
     source_observations: list[SourceObservation] = []
     sample_variants: list[SampleVariant] = []
-    baselines: list[BaselineReference] = []
     source_observation_ids: list[str] = []
     uncertainties: list[str] = []
     for draft in source_facts:
@@ -269,9 +267,6 @@ def assemble_paper_experiment(
                         "test_condition_id": f"tc_{draft.evidence_id}"
                         if applicable_test
                         else None,
-                        "baseline_id": f"baseline_{draft.evidence_id}"
-                        if draft.comparison
-                        else None,
                         "property_normalized": result.outcome,
                         "result_type": result.result_kind,
                         "claim_scope": "current_work",
@@ -281,7 +276,6 @@ def assemble_paper_experiment(
                             "target_value": result.target_value,
                         },
                         "unit": result.unit,
-                        "evidence_anchor_ids": list(draft.evidence_anchor_ids),
                         "traceability_status": "direct"
                         if draft.status == "validated"
                         else "unresolved",
@@ -306,7 +300,6 @@ def assemble_paper_experiment(
                         "scope_level": "measurement",
                         "condition_payload": test_payload,
                         "condition_completeness": "partial",
-                        "evidence_anchor_ids": list(draft.evidence_anchor_ids),
                         "confidence": draft.confidence,
                         "epistemic_status": "normalized_from_evidence",
                     }
@@ -323,14 +316,6 @@ def assemble_paper_experiment(
                     collection_id=collection_id,
                     document_id=document_id,
                     sample_payload=sample_payload,
-                )
-            )
-        if draft.comparison and source_kind and source_ref:
-            baselines.append(
-                _baseline_from_comparison(
-                    draft=draft,
-                    collection_id=collection_id,
-                    document_id=document_id,
                 )
             )
     if not measurements:
@@ -351,7 +336,6 @@ def assemble_paper_experiment(
     unique_measurements = {item.result_id: item for item in measurements}
     unique_conditions = {item.test_condition_id: item for item in test_conditions}
     unique_variants = {item.variant_id: item for item in sample_variants}
-    unique_baselines = {item.baseline_id: item for item in baselines}
     status = (
         "bound"
         if unique_measurements
@@ -379,7 +363,6 @@ def assemble_paper_experiment(
         ),
         sample_variants=tuple(unique_variants.values()),
         test_conditions=tuple(unique_conditions.values()),
-        baselines=tuple(unique_baselines.values()),
         measurements=tuple(unique_measurements.values()),
         source_observation_ids=tuple(dict.fromkeys(source_observation_ids)),
         uncertainties=tuple(dict.fromkeys(uncertainties)),
@@ -408,29 +391,6 @@ def _sample_variant_from_context(
                 item.name: item.value for item in draft.scientific_context.process
             },
             "profile_payload": sample_payload,
-            "source_anchor_ids": list(draft.evidence_anchor_ids),
-            "confidence": draft.confidence,
-            "epistemic_status": "normalized_from_evidence",
-        }
-    )
-
-
-def _baseline_from_comparison(
-    *,
-    draft: SourceObservation,
-    collection_id: str,
-    document_id: str,
-) -> BaselineReference:
-    assert draft.comparison is not None
-    return BaselineReference.from_mapping(
-        {
-            "baseline_id": f"baseline_{draft.evidence_id}",
-            "document_id": document_id,
-            "collection_id": collection_id,
-            "baseline_type": "objective_comparison",
-            "baseline_label": draft.comparison.baseline_label,
-            "baseline_scope": "reported_result",
-            "evidence_anchor_ids": list(draft.evidence_anchor_ids),
             "confidence": draft.confidence,
             "epistemic_status": "normalized_from_evidence",
         }
@@ -1476,9 +1436,6 @@ def _objective_merge_duplicate_paper_observation(
     payload["source_refs"] = list(
         _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
     )
-    payload["evidence_anchor_ids"] = list(
-        dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
-    )
     payload["confidence"] = min(existing.confidence, incoming.confidence)
     return SourceObservation.from_mapping(payload)
 
@@ -1565,9 +1522,6 @@ def _objective_merge_duplicate_paper_fact(
     payload = existing.to_record()
     payload["source_refs"] = list(
         _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
-    )
-    payload["evidence_anchor_ids"] = list(
-        dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
     )
     payload["confidence"] = min(existing.confidence, incoming.confidence)
     return SourceObservation.from_mapping(payload)
@@ -4125,14 +4079,6 @@ def _build_objective_pairwise_comparison_units(
                                 )
                             ),
                             "source_refs": source_refs,
-                            "evidence_anchor_ids": list(
-                                dict.fromkeys(
-                                    (
-                                        *baseline.evidence_anchor_ids,
-                                        *target.evidence_anchor_ids,
-                                    )
-                                )
-                            ),
                             "resolution_status": "resolved",
                             "confidence": min(baseline.confidence, target.confidence),
                         }

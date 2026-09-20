@@ -386,7 +386,6 @@ class ObjectiveEvidenceResponse(BaseModel):
     reported_result: ObjectiveEvidenceResultResponse | None = None
     attribution_scope: EvidenceAttributionScope
     scientific_context: ObjectiveEvidenceContextResponse
-    anchor_ids: list[str] = Field(default_factory=list)
     resolution_status: str
     failure_reason: str | None = None
     confidence: float

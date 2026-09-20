@@ -85,4 +85,12 @@ describe('collection document API', () => {
 		expect(result.items.map((item) => item.original_filename)).toEqual(['first.pdf', 'last.pdf']);
 		expect(result.failures).toEqual([{ file: damaged, message: 'Upload failed.' }]);
 	});
+
+	it('rejects a malformed list response instead of treating it as an empty collection', async () => {
+		request.mockResolvedValue({ status: 'temporarily_unavailable' });
+
+		await expect(listCollectionDocuments('col_1')).rejects.toThrow(
+			'Collection documents response is missing items.'
+		);
+	});
 });

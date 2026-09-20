@@ -857,6 +857,7 @@ def test_evidence_api_returns_exact_source_excerpt_and_locator() -> None:
         "simulation"
     )
     assert evidence["created_by_tool_call_id"] is None
+    assert "anchor_ids" not in evidence
     assert "evidence_unit_id" not in evidence
 
 

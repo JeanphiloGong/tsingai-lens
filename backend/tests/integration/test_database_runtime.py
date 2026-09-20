@@ -19,6 +19,52 @@ from infra.persistence.database import (
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.anyio
+async def test_database_pool_settings_reach_engine(monkeypatch, configured) -> None:
+    values = {
+        "LENS_DATABASE_POOL_SIZE": "12",
+        "LENS_DATABASE_MAX_OVERFLOW": "0",
+        "LENS_DATABASE_POOL_TIMEOUT": "2.5",
+    }
+    for name, value in values.items():
+        monkeypatch.delenv(name, raising=False)
+        if configured:
+            monkeypatch.setenv(name, value)
+    settings = DatabaseSettings(
+        database_url="postgresql+psycopg://localhost/lens_test", _env_file=None
+    )
+    # Inspect the actual pool without connecting to any database.
+    engine = build_database_engine(settings)
+    try:
+        assert engine.pool.size() == (12 if configured else 10)
+        assert engine.pool.timeout() == (2.5 if configured else 30)
+        assert engine.pool._max_overflow == (0 if configured else 10)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("database_pool_size", 0),
+        ("database_pool_size", -1),
+        ("database_max_overflow", -1),
+        ("database_pool_timeout", 0),
+        ("database_pool_timeout", -1),
+        ("database_pool_timeout", float("inf")),
+        ("database_pool_timeout", float("nan")),
+    ],
+)
+def test_database_pool_rejects_unbounded_or_invalid_settings(field, value) -> None:
+    with pytest.raises(ValidationError, match=field):
+        DatabaseSettings(
+            database_url="postgresql+psycopg://localhost/lens_test",
+            _env_file=None,
+            **{field: value},
+        )
+
+
 def test_config_import_is_silent() -> None:
     completed = subprocess.run(
         [sys.executable, "-c", "import config"],

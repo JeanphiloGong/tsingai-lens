@@ -27,20 +27,10 @@ class ArtifactStatusRecord:
     documents_ready: bool
     document_profiles_generated: bool
     document_profiles_ready: bool
-    evidence_anchors_generated: bool
-    evidence_anchors_ready: bool
-    method_facts_generated: bool
-    method_facts_ready: bool
     evidence_cards_generated: bool
     evidence_cards_ready: bool
-    characterization_observations_generated: bool
-    characterization_observations_ready: bool
-    structure_features_generated: bool
-    structure_features_ready: bool
     test_conditions_generated: bool
     test_conditions_ready: bool
-    baseline_references_generated: bool
-    baseline_references_ready: bool
     sample_variants_generated: bool
     sample_variants_ready: bool
     measurement_results_generated: bool
@@ -91,20 +81,10 @@ class ArtifactStatusRecord:
         documents_ready: bool = False,
         document_profiles_generated: bool = False,
         document_profiles_ready: bool = False,
-        evidence_anchors_generated: bool = False,
-        evidence_anchors_ready: bool = False,
-        method_facts_generated: bool = False,
-        method_facts_ready: bool = False,
         evidence_cards_generated: bool = False,
         evidence_cards_ready: bool = False,
-        characterization_observations_generated: bool = False,
-        characterization_observations_ready: bool = False,
-        structure_features_generated: bool = False,
-        structure_features_ready: bool = False,
         test_conditions_generated: bool = False,
         test_conditions_ready: bool = False,
-        baseline_references_generated: bool = False,
-        baseline_references_ready: bool = False,
         sample_variants_generated: bool = False,
         sample_variants_ready: bool = False,
         measurement_results_generated: bool = False,
@@ -171,24 +151,10 @@ class ArtifactStatusRecord:
             documents_ready=bool(documents_ready),
             document_profiles_generated=bool(document_profiles_generated),
             document_profiles_ready=bool(document_profiles_ready),
-            evidence_anchors_generated=bool(evidence_anchors_generated),
-            evidence_anchors_ready=bool(evidence_anchors_ready),
-            method_facts_generated=bool(method_facts_generated),
-            method_facts_ready=bool(method_facts_ready),
             evidence_cards_generated=bool(evidence_cards_generated),
             evidence_cards_ready=bool(evidence_cards_ready),
-            characterization_observations_generated=bool(
-                characterization_observations_generated
-            ),
-            characterization_observations_ready=bool(
-                characterization_observations_ready
-            ),
-            structure_features_generated=bool(structure_features_generated),
-            structure_features_ready=bool(structure_features_ready),
             test_conditions_generated=bool(test_conditions_generated),
             test_conditions_ready=bool(test_conditions_ready),
-            baseline_references_generated=bool(baseline_references_generated),
-            baseline_references_ready=bool(baseline_references_ready),
             sample_variants_generated=bool(sample_variants_generated),
             sample_variants_ready=bool(sample_variants_ready),
             measurement_results_generated=bool(measurement_results_generated),
@@ -233,30 +199,10 @@ class ArtifactStatusRecord:
                 source.get("document_profiles_generated")
             ),
             document_profiles_ready=_normalize_bool(source.get("document_profiles_ready")),
-            evidence_anchors_generated=_normalize_bool(source.get("evidence_anchors_generated")),
-            evidence_anchors_ready=_normalize_bool(source.get("evidence_anchors_ready")),
-            method_facts_generated=_normalize_bool(source.get("method_facts_generated")),
-            method_facts_ready=_normalize_bool(source.get("method_facts_ready")),
             evidence_cards_generated=_normalize_bool(source.get("evidence_cards_generated")),
             evidence_cards_ready=_normalize_bool(source.get("evidence_cards_ready")),
-            characterization_observations_generated=_normalize_bool(
-                source.get("characterization_observations_generated")
-            ),
-            characterization_observations_ready=_normalize_bool(
-                source.get("characterization_observations_ready")
-            ),
-            structure_features_generated=_normalize_bool(
-                source.get("structure_features_generated")
-            ),
-            structure_features_ready=_normalize_bool(source.get("structure_features_ready")),
             test_conditions_generated=_normalize_bool(source.get("test_conditions_generated")),
             test_conditions_ready=_normalize_bool(source.get("test_conditions_ready")),
-            baseline_references_generated=_normalize_bool(
-                source.get("baseline_references_generated")
-            ),
-            baseline_references_ready=_normalize_bool(
-                source.get("baseline_references_ready")
-            ),
             sample_variants_generated=_normalize_bool(source.get("sample_variants_generated")),
             sample_variants_ready=_normalize_bool(source.get("sample_variants_ready")),
             measurement_results_generated=_normalize_bool(
@@ -302,20 +248,10 @@ class ArtifactStatusRecord:
             "documents_ready": self.documents_ready,
             "document_profiles_generated": self.document_profiles_generated,
             "document_profiles_ready": self.document_profiles_ready,
-            "evidence_anchors_generated": self.evidence_anchors_generated,
-            "evidence_anchors_ready": self.evidence_anchors_ready,
-            "method_facts_generated": self.method_facts_generated,
-            "method_facts_ready": self.method_facts_ready,
             "evidence_cards_generated": self.evidence_cards_generated,
             "evidence_cards_ready": self.evidence_cards_ready,
-            "characterization_observations_generated": self.characterization_observations_generated,
-            "characterization_observations_ready": self.characterization_observations_ready,
-            "structure_features_generated": self.structure_features_generated,
-            "structure_features_ready": self.structure_features_ready,
             "test_conditions_generated": self.test_conditions_generated,
             "test_conditions_ready": self.test_conditions_ready,
-            "baseline_references_generated": self.baseline_references_generated,
-            "baseline_references_ready": self.baseline_references_ready,
             "sample_variants_generated": self.sample_variants_generated,
             "sample_variants_ready": self.sample_variants_ready,
             "measurement_results_generated": self.measurement_results_generated,

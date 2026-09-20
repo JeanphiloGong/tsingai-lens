@@ -277,8 +277,10 @@ def test_a_bound_series_without_a_supported_contrast_is_not_yet_comparable() -> 
         document_id="doc-1",
         source_facts=(_p002_result("np", "NP", 72), _p002_result("p150", "P150", 82)),
     )
-    comparison = experiment.assess_comparison(_objective(), "np", "p150")
-    assert comparison.status == "insufficient_context"
+    assert (
+        experiment.comparison_status(_objective(), "np", "p150")
+        == "insufficient_context"
+    )
 
 
 def test_supported_p002_contrast_has_explicit_parent_measurements() -> None:
@@ -311,9 +313,15 @@ def test_supported_p002_contrast_has_explicit_parent_measurements() -> None:
         source_facts=(baseline, target, comparison),
     )
     assert len(experiment.measurements) == 2
-    assessment = experiment.assess_comparison(_objective(), "np", "p150")
-    assert assessment.status == "comparable"
-    assert assessment.source_observation_ids == ("np", "p150")
+    assert all("baseline_id" not in item.to_record() for item in experiment.measurements)
+    assert "baselines" not in experiment.to_record()
+    assert (
+        experiment.comparison_status(_objective(), "np", "p150") == "comparable"
+    )
+    contrast = next(
+        item for item in experiment.source_observations if item.observation_id == "contrast"
+    )
+    assert contrast.derived_from_observation_ids == ("np", "p150")
 
 
 def test_p004_treatment_states_and_source_disagreement_are_not_pooled() -> None:
@@ -435,7 +443,7 @@ def test_same_paper_different_tests_are_not_declared_comparable() -> None:
         collection_id="col-1", document_id="doc-1", source_facts=(left, right)
     )
     assert (
-        experiment.assess_comparison(_objective(), "a", "b").status == "non_comparable"
+        experiment.comparison_status(_objective(), "a", "b") == "non_comparable"
     )
 
 
@@ -456,8 +464,7 @@ def test_unreported_test_field_is_missing_context_not_a_conflicting_test() -> No
         collection_id="col-1", document_id="doc-1", source_facts=(left, right)
     )
     assert (
-        experiment.assess_comparison(_objective(), "a", "b").status
-        == "insufficient_context"
+        experiment.comparison_status(_objective(), "a", "b") == "insufficient_context"
     )
 
 
@@ -506,7 +513,7 @@ def test_different_research_question_cannot_reuse_comparison_assessment() -> Non
         source_facts=(_p002_result("a", "A", 72), _p002_result("b", "B", 82)),
     )
     with pytest.raises(ValueError, match="objective"):
-        experiment.assess_comparison(
+        experiment.comparison_status(
             replace(_objective(), objective_id="obj-other"), "a", "b"
         )
 

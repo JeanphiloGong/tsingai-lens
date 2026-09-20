@@ -3818,7 +3818,6 @@ function objectiveEvidence() {
 			process: [{ name: 'process', value: 'LPBF', unit: null }],
 			test: [{ name: 'method', value: 'tensile test', unit: null }]
 		},
-		anchor_ids: [],
 		resolution_status: 'resolved',
 		failure_reason: null,
 		confidence: 0.92

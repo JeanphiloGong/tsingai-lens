@@ -818,6 +818,12 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert "evidence_unit_id" not in extracted.to_record()
 
 
+def test_objective_evidence_ignores_legacy_anchor_ids() -> None:
+    evidence = _candidate_evidence(anchor_ids=["legacy-anchor-1"])
+
+    assert "anchor_ids" not in evidence.to_record()
+
+
 def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
     legacy = _candidate_evidence()
     explicit_empty = _candidate_evidence(related_source_refs=[])

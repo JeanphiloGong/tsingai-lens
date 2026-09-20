@@ -242,7 +242,6 @@ class EvidenceAuthoringService:
                 "reported_result": reported_result,
                 "attribution_scope": attribution_scope,
                 "scientific_context": scientific_context,
-                "anchor_ids": [],
                 "resolution_status": "resolved",
                 "failure_reason": None,
                 "confidence": 1.0,

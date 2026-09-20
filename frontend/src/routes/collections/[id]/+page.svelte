@@ -46,6 +46,7 @@
 	let findingExportDownloading = false;
 	let findingExportError = '';
 	let findingExportNotice = '';
+	const PREPARATION_REQUEST_CONCURRENCY = 3;
 
 	type PreparationProgressSummary = {
 		ready: number;
@@ -192,18 +193,38 @@
 		error = '';
 		notice = '';
 		try {
-			const queued = await Promise.all(
-				targets.map((document) => prepareCollectionDocument(collectionId, document.document_id))
+			const queued: PipelineRunSummary[] = [];
+			const failures: unknown[] = [];
+			let nextTarget = 0;
+			const worker = async () => {
+				while (nextTarget < targets.length) {
+					const target = targets[nextTarget++];
+					try {
+						queued.push(await prepareCollectionDocument(collectionId, target.document_id));
+					} catch (err) {
+						failures.push(err);
+					}
+				}
+			};
+			await Promise.all(
+				Array.from({ length: Math.min(PREPARATION_REQUEST_CONCURRENCY, targets.length) }, () =>
+					worker()
+				)
 			);
+			if (!queued.length && failures.length) throw failures[0];
 			const queuedIds = new Set(queued.map((run) => run.run_id));
 			runs = [...queued, ...runs.filter((run) => !queuedIds.has(run.run_id))];
 			await loadDocuments();
+			if (failures.length) {
+				error = errorMessage(failures[0]);
+			}
 			notice = $t('overview.currentModel.preparationQueued', { count: queued.length });
 			schedulePoll();
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
 			preparationLoading = false;
+			schedulePoll();
 		}
 	}
 
@@ -243,7 +264,7 @@
 					? $t('overview.currentModel.uploadPartial', {
 							uploaded: result.count,
 							failed: result.failures.length
-					  })
+						})
 					: $t('overview.currentModel.uploadFailed');
 			} else {
 				notice = $t('overview.currentModel.uploadComplete', { count: result.count });

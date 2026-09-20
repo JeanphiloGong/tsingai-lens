@@ -461,7 +461,6 @@ class AgentObjectiveAnalysisService:
                         "reported_result": draft.get("reported_result"),
                         "attribution_scope": draft.get("attribution_scope"),
                         "scientific_context": draft.get("scientific_context") or {},
-                        "anchor_ids": [],
                         "resolution_status": "resolved",
                         "confidence": draft.get("confidence"),
                         "origin": "agent_authored",

@@ -9,7 +9,11 @@ from application.core.document_profiles.extraction import DocumentProfileModelOu
 from application.core.objectives.objective_input_service import (
     ResearchObjectivesNotReadyError,
 )
-from application.source.document_preparation_service import DocumentPreparationService
+from application.source.document_preparation_service import (
+    DOCUMENT_ANALYSIS_VERSION,
+    DocumentPreparationService,
+    SOURCE_PARSER_VERSION,
+)
 from infra.source.runtime.build_source_artifacts import build_source_artifacts
 from tests.integration.test_app_layer_api import _create_collection, _upload
 
@@ -87,8 +91,17 @@ def test_upload_classification_retry_content_and_research_readiness(app_client):
     retry_run = app_client.get(f"/api/v1/pipeline-runs/{retry.json()['run_id']}").json()
     assert retry_run["status"] == "completed"
     assert retry_run["warnings"] == []
-    assert (
-        app_client.get(f"{document_path}/profile").json()["doc_type"] == "experimental"
+    current_profile = app_client.get(f"{document_path}/profile").json()
+    assert current_profile["doc_type"] == "experimental"
+    stored_profile = app_client.portal.call(
+        state.document_profile_service.read_document_profile,
+        collection_id,
+        document_id,
+    )
+    stored_source = app_client.portal.call(
+        state.document_profile_service.source_artifact_repository.read_document,
+        collection_id,
+        document_id,
     )
     assert (
         app_client.get(f"{document_path}/content").json()["content_text"]
@@ -99,6 +112,17 @@ def test_upload_classification_retry_content_and_research_readiness(app_client):
     )
     assert inputs[0].document_id == document_id
     assert inputs[0].preparation_fingerprint
+    assert stored_source.metadata["parser_version"] == SOURCE_PARSER_VERSION
+    assert (
+        stored_source.metadata["source_fingerprint"]
+        == stored_profile.source_fingerprint
+    )
+    assert stored_profile.profile_version == DOCUMENT_ANALYSIS_VERSION
+    assert (
+        stored_profile.profile_fingerprint
+        == inputs[0].preparation_fingerprint
+    )
+    assert stored_profile.generated_at
     assert len(parse_calls) == 1
     assert classifier.calls == 2
     assert (

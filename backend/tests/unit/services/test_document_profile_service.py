@@ -72,6 +72,8 @@ async def _build_profiles(
             await profile_service.build_document_profile(
                 collection_id,
                 document.document_id,
+                source_fingerprint=f"source-{document.document_id}",
+                profile_fingerprint=f"profile-{document.document_id}",
             )
             for document in documents
         ]

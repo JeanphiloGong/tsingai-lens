@@ -304,7 +304,7 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
             assert (owner, selected) == (collection_id, document_id)
             return profile
 
-        async def build_document_profile(self, owner: str, selected: str):
+        async def build_document_profile(self, owner: str, selected: str, **_lineage):
             raise AssertionError("the current profile should be reused")
 
     async def fail_if_parsed(**kwargs):
@@ -383,7 +383,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
         async def read_document_profile(self, *_args):
             return None
 
-        async def build_document_profile(self, *_args):
+        async def build_document_profile(self, *_args, **_lineage):
             return DocumentProfile.from_mapping(
                 {
                     "document_id": document_id,
@@ -476,7 +476,7 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
         async def read_document_profile(self, owner: str, selected: str):
             return None
 
-        async def build_document_profile(self, owner: str, selected: str):
+        async def build_document_profile(self, owner: str, selected: str, **_lineage):
             return DocumentProfile.from_mapping(
                 {
                     "document_id": document_id,

@@ -263,6 +263,14 @@ class DocumentPreparationService:
                         collection_id,
                         document,
                     )
+                    source_document = replace(
+                        source_document,
+                        metadata={
+                            **source_document.metadata,
+                            "parser_version": SOURCE_PARSER_VERSION,
+                            "source_fingerprint": source_identity,
+                        },
+                    )
                     await self.source_artifact_repository.replace_document(
                         collection_id,
                         source_document,
@@ -313,6 +321,8 @@ class DocumentPreparationService:
                     profile = await self.document_profile_service.build_document_profile(
                         collection_id,
                         document_id,
+                        source_fingerprint=source_identity,
+                        profile_fingerprint=profile_identity,
                     )
                 if profile.profile_status != PROFILE_STATUS_COMPLETED:
                     await self.collection_service.update_document_preparation(

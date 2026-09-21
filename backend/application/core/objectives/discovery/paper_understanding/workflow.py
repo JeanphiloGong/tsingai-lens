@@ -22,6 +22,7 @@ from .common import (
     _bounded_mapping_list,
     _mark_bounded_output,
 )
+from .normalization import _downgrade_unresolved_relationships
 from .paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
     ReviewPaperMapModelOutput,
@@ -84,7 +85,10 @@ Non-negotiable rules:
 def _normalize_experimental_paper_map_payload(value: Any) -> Any:
     if not isinstance(value, Mapping):
         return value
-    payload = dict(value)
+    downgraded = _downgrade_unresolved_relationships(value)
+    if not isinstance(downgraded, Mapping):
+        return downgraded
+    payload = dict(downgraded)
     overflows: list[str] = []
     studies = _bounded_mapping_list(
         payload,

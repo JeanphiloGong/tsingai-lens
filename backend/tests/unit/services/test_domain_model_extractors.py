@@ -2381,6 +2381,71 @@ def test_paper_research_map_bounds_overflow_and_marks_output_saturated():
     assert len(client.chat.completions.calls) == 1
 
 
+def test_paper_research_map_bounds_signals_after_relationship_downgrade():
+    payload = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "experiment_label": "LPBF parameter study",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["Ti-6Al-4V"],
+                "process_context": ["LPBF"],
+                "relationships": [
+                    {
+                        "factor_assertions": [
+                            {
+                                "label": "laser power",
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                            }
+                        ],
+                        "outcome": "mechanical properties",
+                        "source_labels": ["S1"],
+                        "confidence": 0.8,
+                    }
+                ],
+                "confidence": 0.8,
+            }
+        ],
+        "unresolved_signals": [
+            {
+                "signal_type": "outcome",
+                "label": f"unresolved-{index}",
+                "variable_role": "not_applicable",
+                "source_labels": ["S1"],
+                "confidence": 0.7,
+            }
+            for index in range(12)
+        ],
+        "evidence_density": "medium",
+        "confidence": 0.8,
+        "warnings": [],
+    }
+    client = _FakeOpenAIClient(json.dumps(payload))
+
+    skim = PaperResearchMapExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "title": "Ti-6Al-4V LPBF parameter study",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Laser power affected the reported mechanical properties.",
+                }
+            ],
+        }
+    )
+
+    assert skim.output_saturated is True
+    assert len(skim.unresolved_signals) == 12
+    assert skim.studies == []
+    assert "unresolved_signals=1" in skim.warnings[0]
+    assert len(client.chat.completions.calls) == 1
+
+
 def test_domain_model_extractors_validates_axis_canonicalization_response():
     client = _FakeOpenAIClient(
         """

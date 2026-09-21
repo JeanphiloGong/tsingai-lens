@@ -16,6 +16,9 @@ from application.core.objectives.analysis.evidence_routing import EvidenceCandid
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
+from application.core.objectives.analysis.paper_experiment import (
+    _objective_explicit_sample_label,
+)
 from application.core.objectives.analysis.source_extraction import (
     SourceReadAudit,
     _objective_missing_context_fields,
@@ -32,13 +35,17 @@ from domain.core import (
     PaperResearchMap,
     PaperSourceUnitCoverageStatus,
     ResearchObjective,
+    SampleVariant,
+    ScientificAttribute,
+    ScientificContext,
     SourceObservation,
+    TestCondition,
 )
 from domain.source import SourceDocumentTree
 
 # Materialization now accepts only assembled experiments and checks their
 # measurements against the Source observations. Rebuild older document checkpoints.
-OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v12"
+OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v13"
 
 
 _CONTRIBUTION_SUMMARY_CHARS = 320
@@ -82,6 +89,9 @@ def materialize_evidence(
     technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> tuple[tuple[ObjectiveEvidence, ...], tuple[PaperContribution, ...]]:
     observations = _experiment_source_observations(experiments=experiments)
+    incomplete_experiment_binding_ids = _incomplete_experiment_binding_ids(
+        experiments
+    )
     inspection_source_refs = _inspection_source_refs_by_document(
         technical_audits=technical_audits,
     )
@@ -97,6 +107,7 @@ def materialize_evidence(
         blocks_by_document_id=blocks_by_document_id,
         tables_by_document_id=tables_by_document_id,
         figures_by_document_id=figures_by_document_id,
+        incomplete_experiment_binding_ids=incomplete_experiment_binding_ids,
     )
     _record_material_scope_exclusions(
         collection_id=collection_id,
@@ -210,6 +221,10 @@ def _experiment_source_observations(
         by_id = {
             item.observation_id: item for item in experiment.source_observations
         }
+        variants = {item.variant_id: item for item in experiment.sample_variants}
+        test_conditions = {
+            item.test_condition_id: item for item in experiment.test_conditions
+        }
         measurement_ids = {item.result_id for item in experiment.measurements}
         for observation in experiment.source_observations:
             if (
@@ -221,6 +236,7 @@ def _experiment_source_observations(
                     "PaperExperiment result lacks a MeasurementResult: "
                     f"{observation.observation_id}"
                 )
+        canonical_observations: dict[str, SourceObservation] = {}
         for measurement in experiment.measurements:
             observation = by_id.get(measurement.result_id)
             result = observation.reported_result if observation is not None else None
@@ -228,6 +244,7 @@ def _experiment_source_observations(
                 result is None
                 or observation.derived_from_observation_ids
                 or measurement.property_normalized != result.outcome
+                or measurement.result_type != result.result_kind
                 or measurement.unit != result.unit
                 or measurement.epistemic_status != observation.status
                 or measurement.value_payload
@@ -241,6 +258,87 @@ def _experiment_source_observations(
                     "PaperExperiment measurement disagrees with Source "
                     f"observation: {measurement.result_id}"
                 )
+            variant = (
+                variants.get(measurement.variant_id)
+                if measurement.variant_id is not None
+                else None
+            )
+            test_condition = (
+                test_conditions.get(measurement.test_condition_id)
+                if measurement.test_condition_id is not None
+                else None
+            )
+            if variant is not None and not _sample_variant_matches_source(
+                observation, variant
+            ):
+                _record_binding_mismatch(
+                    experiment=experiment,
+                    measurement_id=measurement.result_id,
+                    binding_kind="sample",
+                )
+                raise ValueError(
+                    "PaperExperiment sample binding disagrees with Source "
+                    f"observation: {measurement.result_id}"
+                )
+            if test_condition is not None and not _test_condition_matches_source(
+                observation, test_condition
+            ):
+                _record_binding_mismatch(
+                    experiment=experiment,
+                    measurement_id=measurement.result_id,
+                    binding_kind="test",
+                )
+                raise ValueError(
+                    "PaperExperiment test binding disagrees with Source "
+                    f"observation: {measurement.result_id}"
+                )
+            missing_bindings = tuple(
+                name
+                for name, value in (
+                    ("sample", variant),
+                    ("test", test_condition),
+                )
+                if value is None
+            )
+            if missing_bindings:
+                record_analysis_diagnostic(
+                    {
+                        "trace_type": "paper_experiment_measurement_binding_incomplete",
+                        "collection_id": experiment.collection_id,
+                        "document_id": experiment.document_id,
+                        "experiment_id": experiment.experiment_id,
+                        "measurement_id": measurement.result_id,
+                        "missing_bindings": list(missing_bindings),
+                        "disposition": "needs_context",
+                    }
+                )
+            selection_reason = observation.selection_reason
+            if missing_bindings:
+                binding_note = (
+                    "Paper experiment binding remains incomplete; missing "
+                    + ", ".join(missing_bindings)
+                    + "."
+                )
+                selection_reason = " ".join(
+                    item for item in (selection_reason, binding_note) if item
+                )
+            canonical_observations[measurement.result_id] = replace(
+                observation,
+                reported_result=replace(
+                    result,
+                    outcome=measurement.property_normalized,
+                    value=measurement.value_payload.get("value"),
+                    baseline_value=measurement.value_payload.get("baseline_value"),
+                    target_value=measurement.value_payload.get("target_value"),
+                    unit=measurement.unit,
+                    result_kind=measurement.result_type,
+                ),
+                scientific_context=_measurement_context(
+                    variant=variant,
+                    test_condition=test_condition,
+                ),
+                selection_reason=selection_reason,
+            )
         missing_ids = set(experiment.source_observation_ids) - set(by_id)
         if missing_ids:
             record_analysis_diagnostic(
@@ -256,9 +354,203 @@ def _experiment_source_observations(
             observation = by_id.get(observation_id)
             if observation is None or observation_id in seen_ids:
                 continue
-            observations.append(observation)
+            canonical = canonical_observations.get(observation_id)
+            if canonical is None and observation.derived_from_observation_ids:
+                canonical = replace(
+                    observation,
+                    scientific_context=_derived_comparison_context(
+                        observation,
+                        canonical_observations=canonical_observations,
+                    ),
+                )
+            observations.append(canonical or observation)
             seen_ids.add(observation_id)
     return tuple(observations)
+
+
+def _incomplete_experiment_binding_ids(
+    experiments: tuple[PaperExperiment, ...],
+) -> frozenset[str]:
+    """Identify results and contrasts that lack a sample or test binding."""
+
+    incomplete: set[str] = set()
+    for experiment in experiments:
+        incomplete_measurements = {
+            measurement.result_id
+            for measurement in experiment.measurements
+            if measurement.variant_id is None
+            or measurement.test_condition_id is None
+        }
+        incomplete.update(incomplete_measurements)
+        incomplete.update(
+            observation.observation_id
+            for observation in experiment.source_observations
+            if observation.derived_from_observation_ids
+            and any(
+                parent_id in incomplete_measurements
+                for parent_id in observation.derived_from_observation_ids
+            )
+        )
+    return frozenset(incomplete)
+
+
+def _measurement_context(
+    *,
+    variant: SampleVariant | None,
+    test_condition: TestCondition | None,
+) -> ScientificContext:
+    """Project only bound PaperExperiment facts into ObjectiveEvidence context."""
+
+    if variant is None:
+        material: tuple[ScientificAttribute, ...] = ()
+        process: tuple[ScientificAttribute, ...] = ()
+        sample: tuple[ScientificAttribute, ...] = ()
+    else:
+        material = _context_attributes(variant.host_material_system)
+        process = _context_attributes(variant.process_context)
+        sample = _context_attributes(variant.profile_payload)
+    test = (
+        _context_attributes(test_condition.condition_payload)
+        if test_condition is not None
+        else ()
+    )
+    return ScientificContext(
+        material=material,
+        sample=sample,
+        process=process,
+        test=test,
+    )
+
+
+def _context_attributes(value: Any) -> tuple[ScientificAttribute, ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    attributes: list[ScientificAttribute] = []
+    for name, raw in value.items():
+        if isinstance(raw, Mapping):
+            payload = {**raw, "name": str(name)}
+        else:
+            payload = {"name": str(name), "value": raw}
+        if payload.get("value") is None:
+            continue
+        attributes.append(ScientificAttribute.from_mapping(payload))
+    return tuple(attributes)
+
+
+def _sample_variant_matches_source(
+    observation: SourceObservation,
+    variant: SampleVariant,
+) -> bool:
+    source_attributes = observation.scientific_context
+    if not _context_attributes_match(
+        source_attributes.material,
+        _context_attributes(variant.host_material_system),
+    ):
+        return False
+    if not _context_attributes_match(
+        source_attributes.process,
+        _context_attributes(variant.process_context),
+    ):
+        return False
+    if not _context_attributes_match(
+        source_attributes.sample,
+        _context_attributes(variant.profile_payload),
+    ):
+        return False
+    source_label = _objective_explicit_sample_label(observation)
+    return (
+        not source_label
+        or not variant.variant_label
+        or source_label == variant.variant_label
+    )
+
+
+def _test_condition_matches_source(
+    observation: SourceObservation,
+    condition: TestCondition,
+) -> bool:
+    return _context_attributes_match(
+        observation.scientific_context.test,
+        _context_attributes(condition.condition_payload),
+    )
+
+
+def _context_attributes_match(
+    source: tuple[ScientificAttribute, ...],
+    structured: tuple[ScientificAttribute, ...],
+) -> bool:
+    structured_by_name = {
+        item.name.casefold(): item for item in structured
+    }
+    return all(
+        (candidate := structured_by_name.get(item.name.casefold())) is not None
+        and candidate == item
+        for item in source
+    )
+
+
+def _derived_comparison_context(
+    observation: SourceObservation,
+    *,
+    canonical_observations: Mapping[str, SourceObservation],
+) -> ScientificContext:
+    parents = tuple(
+        canonical_observations.get(identifier)
+        for identifier in observation.derived_from_observation_ids
+    )
+    if not parents or any(parent is None for parent in parents):
+        return ScientificContext()
+    return ScientificContext(
+        material=_common_context_attributes(parents, "material"),
+        sample=_common_context_attributes(parents, "sample"),
+        process=_common_context_attributes(parents, "process"),
+        test=_common_context_attributes(parents, "test"),
+    )
+
+
+def _common_context_attributes(
+    observations: tuple[SourceObservation, ...],
+    section: str,
+) -> tuple[ScientificAttribute, ...]:
+    first = tuple(getattr(observations[0].scientific_context, section))
+    common_keys = {
+        _scientific_attribute_key(item) for item in first
+    }
+    for observation in observations[1:]:
+        common_keys &= {
+            _scientific_attribute_key(item)
+            for item in getattr(observation.scientific_context, section)
+        }
+    return tuple(item for item in first if _scientific_attribute_key(item) in common_keys)
+
+
+def _scientific_attribute_key(attribute: ScientificAttribute) -> tuple[Any, ...]:
+    return (
+        attribute.name.casefold(),
+        attribute.value,
+        attribute.unit,
+        attribute.context_scope,
+        attribute.applies_to_outcomes,
+    )
+
+
+def _record_binding_mismatch(
+    *,
+    experiment: PaperExperiment,
+    measurement_id: str,
+    binding_kind: str,
+) -> None:
+    record_analysis_diagnostic(
+        {
+            "trace_type": "paper_experiment_binding_mismatch",
+            "collection_id": experiment.collection_id,
+            "document_id": experiment.document_id,
+            "experiment_id": experiment.experiment_id,
+            "measurement_id": measurement_id,
+            "binding_kind": binding_kind,
+            "disposition": "rejected",
+        }
+    )
 
 
 def _inspection_source_refs_by_document(
@@ -1440,6 +1732,7 @@ def _analysis_evidence_records(
     blocks_by_document_id: Mapping[str, list[Any]],
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
+    incomplete_experiment_binding_ids: frozenset[str] = frozenset(),
 ) -> tuple[ObjectiveEvidence, ...]:
     records: list[ObjectiveEvidence] = []
     seen_evidence_ids: set[str] = set()
@@ -1518,6 +1811,17 @@ def _analysis_evidence_records(
         selection_reason = draft.selection_reason
         resolution_status = draft.resolution_status
         if (
+            draft.evidence_id in incomplete_experiment_binding_ids
+            and selection_status == "extracted"
+            and draft.reported_result is not None
+            and _objective_evidence_matches_target_property(
+                draft,
+                target_axes=property_matching.objective_outcomes(objective),
+            )
+        ):
+            selection_status = "candidate"
+            resolution_status = "unresolved"
+        if (
             draft.status in {"uncertain", "rejected"}
             and selection_status == "extracted"
         ):
@@ -1565,13 +1869,13 @@ def _analysis_evidence_records(
             attribution_scope=draft.attribution_scope,
             scientific_context=draft.scientific_context,
             resolution_status=(
-                resolution_status
-                if selection_status == "failed"
-                else (
+                (
                     resolution_status
                     if resolution_status in {"resolved", "partial"}
                     else "partial"
                 )
+                if selection_status == "extracted"
+                else resolution_status
             ),
             failure_reason=draft.failure_reason,
             confidence=draft.confidence,

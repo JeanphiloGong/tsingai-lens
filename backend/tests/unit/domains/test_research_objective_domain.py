@@ -2,13 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from domain.core.scientific_fact import (
-    ScientificComparison,
-    ScientificContext,
-    ScientificResult,
-    ScientificVariable,
-)
-
 import pytest
 
 from domain.core import (
@@ -17,23 +10,28 @@ from domain.core import (
     ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
-    PreparedDocumentInput,
     PaperContribution,
-    PaperSourceUnitCoverage,
-    PaperSourceUnitCoverageStatus,
+    PaperResearchMap,
     PaperResearchScope,
     PaperResearchSignal,
+    PaperSourceUnitCoverage,
+    PaperSourceUnitCoverageStatus,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    PaperResearchRelationship,
-    PaperResearchMap,
+    PreparedDocumentInput,
+    ResearchObjective,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
-    ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_confidence,
     normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
 )
 
 
@@ -917,6 +915,19 @@ def test_objective_evidence_exposes_research_state_without_promoting_incomplete_
         attribution_scope="descriptive_only",
         resolution_status="partial",
     )
+    needs_context = _candidate_evidence(
+        selection_status="candidate",
+        reported_result={
+            "outcome": "microstructure",
+            "value": None,
+            "unit": None,
+            "direction": "mixed",
+            "result_text": "The sample showed a cellular microstructure.",
+        },
+        attribution_scope="descriptive_only",
+        resolution_status="unresolved",
+        selection_reason="The sample and test bindings remain unresolved.",
+    )
     incomparable = _candidate_evidence(
         selection_status="extracted",
         comparison={
@@ -944,6 +955,7 @@ def test_objective_evidence_exposes_research_state_without_promoting_incomplete_
     assert comparable.evidence_status == "comparable"
     assert association.evidence_status == "association_only"
     assert descriptive.evidence_status == "descriptive"
+    assert needs_context.evidence_status == "needs_context"
     assert incomparable.evidence_status == "non_comparable"
     assert failed.evidence_status == "extraction_failed"
 

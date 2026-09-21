@@ -8,15 +8,17 @@ from typing import Any
 
 import pytest
 
-from application.core.objectives.analysis import evidence_materialization, paper_experiment
+from application.core.objectives.analysis import (
+    evidence_materialization,
+    paper_experiment,
+)
+from application.core.objectives.analysis.evidence_routing import (
+    EvidenceCandidate,
+)
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
-)
-from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.core.objectives.analysis.evidence_routing import (
-    EvidenceCandidate,
 )
 from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionsModelOutput,
@@ -26,6 +28,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     PaperFrameBatchResult,
 )
+from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.objective_analysis_service import (
     OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
     ObjectiveDocumentEvidenceArtifacts,
@@ -38,7 +41,6 @@ from application.core.objectives.objective_input_service import (
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
-    SourceObservation,
     ObjectiveFactSet,
     PaperContribution,
     PaperResearchMap,
@@ -46,14 +48,15 @@ from domain.core import (
     PaperStudyDispositionStatus,
     PreparedDocumentInput,
     ResearchObjective,
+    SourceObservation,
 )
 from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
 from domain.source import SourceFigure, SourceTable, source_documents_from_records
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
 )
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
 )
@@ -78,7 +81,7 @@ def anyio_backend() -> str:
 def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version():
     assert (
         "paper_experiment",
-        "paper-experiment-reconstruction.v17",
+        "paper-experiment-reconstruction.v18",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -92,7 +95,7 @@ def test_document_evidence_checkpoint_uses_current_source_extraction_version():
 def test_document_evidence_checkpoint_uses_current_materialization_version():
     assert (
         "evidence_materialization",
-        "objective-evidence-materialization.v12",
+        "objective-evidence-materialization.v13",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -343,7 +346,13 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                                         },
                                     ],
                                     "test": [
-                                        {"name": "method", "value": "Archimedes"}
+                                        {
+                                            "name": "method",
+                                            "value": "Archimedes",
+                                            "applies_to_outcomes": [
+                                                "relative density"
+                                            ],
+                                        }
                                     ],
                                 },
                                 "resolution_status": "resolved",
@@ -370,7 +379,13 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                                         },
                                     ],
                                     "test": [
-                                        {"name": "method", "value": "Archimedes"}
+                                        {
+                                            "name": "method",
+                                            "value": "Archimedes",
+                                            "applies_to_outcomes": [
+                                                "relative density"
+                                            ],
+                                        }
                                     ],
                                 },
                                 "resolution_status": "resolved",
@@ -390,15 +405,33 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
                             "comparison": None,
                             "reported_result": {
                                 "outcome": "relative density",
-                                "value": target,
-                                "baseline_value": baseline,
-                                "target_value": target,
+                                "value": baseline,
                                 "unit": "%",
-                                "direction": "increase",
-                                "result_text": source_text_by_ref[source_ref],
+                                "direction": "unknown",
+                                "result_text": f"{baseline}% for sample S1",
                             },
                             "attribution_scope": "descriptive_only",
-                            "scientific_context": {},
+                            "scientific_context": {
+                                "sample": [{"name": "sample", "value": "S1"}]
+                            },
+                            "resolution_status": "partial",
+                            "confidence": 0.8,
+                        },
+                        {
+                            "evidence_role": "direct_result",
+                            "changed_variables": [],
+                            "comparison": None,
+                            "reported_result": {
+                                "outcome": "relative density",
+                                "value": target,
+                                "unit": "%",
+                                "direction": "unknown",
+                                "result_text": f"{target}% for sample S2",
+                            },
+                            "attribution_scope": "descriptive_only",
+                            "scientific_context": {
+                                "sample": [{"name": "sample", "value": "S2"}]
+                            },
                             "resolution_status": "partial",
                             "confidence": 0.8,
                         }
@@ -553,12 +586,18 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         evidence.evidence_role == "condition_context"
         for evidence in evidence_records
     ) == 4
+    supporting_evidence_ids = {
+        evidence_id
+        for contribution in finding.paper_contributions
+        for evidence_id in contribution.supporting_evidence_ids
+    }
     for result_ref in ("paper-a-result", "paper-b-result"):
         result_evidence = next(
             evidence
             for evidence in evidence_records
             if evidence.source_ref == result_ref
             and evidence.reported_result is not None
+            and evidence.evidence_id in supporting_evidence_ids
         )
         assert any(
             ref.get("source_ref") == result_ref
@@ -567,7 +606,7 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         )
         assert any(
             ref.get("source_ref") == result_ref.replace("-result", "-methods")
-            and "changed_variables" in ref.get("supports", ())
+            and "scientific_context.process" in ref.get("supports", ())
             for ref in result_evidence.related_source_refs
         )
 

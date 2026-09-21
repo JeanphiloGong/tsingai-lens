@@ -53,7 +53,7 @@ _OBJECTIVE_ROUTE_ROLES = {
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 # Routing is deterministic task organization after semantic screening. Keep a
 # versioned fingerprint so old model-routed analyses are not silently reused.
-OBJECTIVE_EVIDENCE_ROUTING_VERSION = "objective_evidence_routing.v4"
+OBJECTIVE_EVIDENCE_ROUTING_VERSION = "objective_evidence_routing.v5"
 
 
 @dataclass(frozen=True)

@@ -5638,6 +5638,168 @@ def test_adaptive_context_keeps_method_intent_narrow_when_other_context_is_missi
     }
 
 
+def test_adaptive_context_revisits_source_for_uninspected_context_family() -> None:
+    """One paragraph may answer separate sample and test questions."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-laser-power-density",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    result_route = _study_source_route(
+        objective.objective_id,
+        "results-density",
+    )
+    result = SourceObservation.from_mapping(
+        {
+            "evidence_id": "density-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": result_route.source_ref,
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "laser power",
+                    "baseline_value": 900,
+                    "target_value": 1000,
+                    "unit": "W",
+                }
+            ],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "relative density",
+                "baseline_value": 98.0,
+                "target_value": 98.5,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased from 98.0% to 98.5%.",
+            },
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "selective laser melting",
+                    }
+                ],
+            },
+            "attribution_scope": "descriptive_only",
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+    density_method = _study_source_block(
+        "methods-density",
+        "Experiments",
+        (
+            "The optimized conditions S, M, and P used sample density measured "
+            "by Archimedes method and normalized by the nominal Ti-6Al-4V "
+            "density at 4.43 g/cm3."
+        ),
+        3,
+    )
+    prior_sample_read = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": density_method.block_id,
+            "role": "process_or_treatment",
+            "extractable": True,
+            "reason": "Selected to inspect sample context.",
+            "context_fields": ["sample"],
+        }
+    )
+
+    initial_routes = source_extraction._build_adaptive_context_routes(
+        objectives=(objective,),
+        source_facts=(result,),
+        objective_evidence_routes=(result_route,),
+        blocks_by_document_id={"paper-1": [density_method]},
+        tables_by_document_id={"paper-1": []},
+    )
+
+    assert [(route.source_ref, route.context_fields) for route in initial_routes] == [
+        ("methods-density", ("sample",)),
+        ("methods-density", ("test",)),
+    ]
+
+    routes = source_extraction._build_adaptive_context_routes(
+        objectives=(objective,),
+        source_facts=(result,),
+        objective_evidence_routes=(result_route, prior_sample_read),
+        blocks_by_document_id={"paper-1": [density_method]},
+        tables_by_document_id={"paper-1": []},
+    )
+
+    assert [(route.source_ref, route.context_fields) for route in routes] == [
+        ("methods-density", ("test",))
+    ]
+
+
+def test_extraction_route_dedupe_keeps_distinct_context_family_reads() -> None:
+    sample_route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods-density",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "context_fields": ["sample"],
+        }
+    )
+    test_route = EvidenceCandidate.from_mapping(
+        {
+            **sample_route.to_record(),
+            "context_fields": ["test"],
+        }
+    )
+
+    routes = source_extraction._dedupe_extraction_routes((sample_route, test_route))
+
+    assert [route.context_fields for route in routes] == [("sample",), ("test",)]
+
+
+def test_mixed_context_candidate_adds_an_independent_narrow_test_read() -> None:
+    """A broad Methods candidate must not hide an explicit test-method read."""
+
+    fields = (
+        "comparison",
+        "material",
+        "outcome",
+        "process",
+        "sample",
+        "test",
+        "variable",
+    )
+
+    route_groups = source_extraction._context_route_field_groups(
+        fields,
+        explicit_test_source=True,
+    )
+
+    assert route_groups == (("test",),)
+
+
+def test_adaptive_context_scores_normalized_sample_density_as_relative_density_method() -> None:
+    score = source_extraction._adaptive_context_test_source_score(
+        "Experiments",
+        (
+            "Sample density was measured by Archimedes method and normalized "
+            "by the nominal Ti-6Al-4V density at 4.43 g/cm3."
+        ),
+        outcomes=("relative density",),
+    )
+
+    assert score > 0
+
+
 def test_fixed_process_controls_join_result_with_methods_source_lineage() -> None:
     """Shared Methods settings remain fixed context, never changed variables."""
 
@@ -7586,7 +7748,10 @@ def test_complete_result_endpoints_still_expand_missing_study_context() -> None:
         tables_by_document_id={"paper-1": []},
     )
 
-    assert [route.source_ref for route in routes] == ["01-methods"]
+    assert [(route.source_ref, route.context_fields) for route in routes] == [
+        ("01-methods", ("process",)),
+        ("01-methods", ("test",)),
+    ]
 
 
 def test_context_bundle_is_not_complete_without_required_study_context():
@@ -15155,6 +15320,60 @@ def test_objective_table_records_preserve_measured_and_predicted_result_kinds():
         "measured",
         "predicted",
     }
+
+
+def test_objective_table_records_bind_heading_material_to_source_refs() -> None:
+    """Deterministic table context remains authorized for material scope."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-density",
+            "source_kind": "table",
+            "source_ref": "table-density",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Strategies": "sample",
+                "P (W)": "process",
+                "Relative density (%)": "result",
+            },
+            "confidence": 0.9,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": route.source_ref,
+        "caption_text": "SLM parameters and measured relative density.",
+        "heading_path": "Ti-6Al-4V alloy fabricated by selective laser melting",
+        "column_headers": ["Strategies", "P (W)", "Relative density (%)"],
+        "table_matrix": [
+            ["Strategies", "P (W)", "Relative density (%)"],
+            ["Speed S1", "900", "98"],
+        ],
+    }
+
+    records = source_extraction._objective_result_table_matrix_records(
+        route=route,
+        source=source,
+        objective_context=objective,
+        headers=("Strategies", "P (W)", "Relative density (%)"),
+        data_rows=((1, ("Speed S1", "900", "98")),),
+    )
+
+    assert len(records) == 1
+    assert records[0]["scientific_context"]["material"] == [
+        {"name": "material", "value": "Ti-6Al-4V"}
+    ]
+    assert "scientific_context.material" in records[0]["source_refs"][0]["supports"]
 
 
 def test_predicted_result_cannot_enter_finding_result_sets():

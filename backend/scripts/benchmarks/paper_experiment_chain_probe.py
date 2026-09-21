@@ -9,17 +9,15 @@ provider. It contains no recorded model response or synthetic scientific fact.
 from __future__ import annotations
 
 import argparse
+import json
 from copy import deepcopy
 from hashlib import sha256
-import json
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
 from typing import Any
 
 import pandas as pd
-from dotenv import dotenv_values
-
 from _common import (
     DEFAULT_BACKEND_ROOT,
     add_runtime_arguments,
@@ -29,13 +27,18 @@ from _common import (
     resolve_runtime,
     write_json_output,
 )
+from dotenv import dotenv_values
 
 ensure_backend_root_on_path(DEFAULT_BACKEND_ROOT)
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.analysis.diagnostics import capture_analysis_diagnostics
-from application.core.objectives.analysis.evidence_materialization import materialize_evidence
+from application.core.objectives.analysis.diagnostics import (
+    capture_analysis_diagnostics,
+)
+from application.core.objectives.analysis.evidence_materialization import (
+    materialize_evidence,
+)
 from application.core.objectives.analysis.evidence_routing import route_sources
 from application.core.objectives.analysis.finding_synthesis import (
     FindingAssertionJudge,
@@ -53,15 +56,15 @@ from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
     screen_sources,
 )
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
+)
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_analysis_service import (
     ObjectiveEvidenceAnalysisService,
 )
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
-)
-from application.core.objectives.discovery.paper_understanding.workflow import (
-    PaperResearchMapExtractor,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from domain.core import (
@@ -76,7 +79,6 @@ from infra.source.runtime.parsers.docling_pdf import (
     build_pdf_bundle,
     build_pdf_converter,
 )
-
 
 SCENARIO_ID = "cao-2017-ti64-density"
 EXPECTED_PDF_SHA256 = "c5b1a451f081444414c2766efd13c8119af4b5722ce549ad4d64b0b7dfedfef9"
@@ -562,6 +564,298 @@ def _source_payload(document: Any) -> dict[str, Any]:
     }
 
 
+def _table_fact_fidelity_check(document: Any) -> dict[str, Any]:
+    density_tables = tuple(
+        table
+        for table in document.tables
+        if "relative density" in str(table.caption_text or "").casefold()
+    )
+    headers = tuple(
+        str(header).strip()
+        for table in density_tables
+        for header in table.column_headers
+    )
+    rows = tuple(row for table in density_tables for row in table.table_matrix)
+
+    def reviewed_row(sample: str, power: float, density: float) -> dict[str, Any]:
+        sample_key = "".join(character for character in sample.casefold() if character.isalnum())
+        power_text = f"{power:g}"
+        density_text = f"{density:g}"
+        matched_row = next(
+            (
+                list(row)
+                for row in rows
+                if row
+                and (
+                    (first_key := "".join(
+                        character
+                        for character in str(row[0]).casefold()
+                        if character.isalnum()
+                    ))
+                    == sample_key
+                    or first_key.endswith(sample_key)
+                )
+                and power_text in row
+                and density_text in row
+            ),
+            None,
+        )
+        return {
+            "sample": sample,
+            "power_w": power,
+            "relative_density_percent": density,
+            "matched_row": matched_row,
+        }
+
+    reviewed_rows = [reviewed_row(*row) for row in EXPECTED_TABLE_ROWS]
+    normalized_headers = tuple(" ".join(header.casefold().split()) for header in headers)
+    power_header_present = any("p (w)" in header for header in normalized_headers)
+    density_header_present = any(
+        "relative density" in header and "%" in header
+        for header in normalized_headers
+    )
+    return {
+        "acceptance_target": "A_table_fact_fidelity",
+        "name": "table_preserves_reviewed_headers_units_and_rows",
+        "passed": bool(density_tables)
+        and power_header_present
+        and density_header_present
+        and all(item["matched_row"] is not None for item in reviewed_rows),
+        "detail": {
+            "headers": list(headers),
+            "power_header_present": power_header_present,
+            "density_percent_header_present": density_header_present,
+            "reviewed_rows": reviewed_rows,
+        },
+    }
+
+
+def _experiment_binding_check(
+    *,
+    observations: Any,
+    experiments: Any,
+    evidence: Any,
+) -> dict[str, Any]:
+    expected_values = sorted(density for _, _, density in EXPECTED_TABLE_ROWS)
+    evidence_by_id = {item.evidence_id: item for item in evidence}
+    derived_ids = {
+        observation.observation_id
+        for experiment in experiments
+        for observation in experiment.source_observations
+        if observation.derived_from_observation_ids
+    }
+    binding_rows: list[dict[str, Any]] = []
+    for experiment in experiments:
+        variants = {item.variant_id for item in experiment.sample_variants}
+        conditions = {
+            item.test_condition_id for item in experiment.test_conditions
+        }
+        source_ids = {
+            item.observation_id for item in experiment.source_observations
+        }
+        for measurement in experiment.measurements:
+            if (
+                not isinstance(measurement.value_payload.get("value"), (int, float))
+                or measurement.property_normalized.casefold() != "relative density"
+            ):
+                continue
+            projected = evidence_by_id.get(measurement.result_id)
+            sample_bound = measurement.variant_id in variants
+            test_bound = measurement.test_condition_id in conditions
+            fully_bound = bool(sample_bound and test_bound)
+            source_lineage_bound = bool(
+                projected is not None
+                and projected.source_ref
+                and any(
+                    str(ref.get("source_kind") or "") == projected.source_kind
+                    and str(ref.get("source_ref") or "") == projected.source_ref
+                    for ref in projected.related_source_refs
+                )
+            )
+            binding_rows.append(
+                {
+                    "measurement_id": measurement.result_id,
+                    "value": float(measurement.value_payload["value"]),
+                    "unit": measurement.unit,
+                    "source_observation_bound": measurement.result_id in source_ids,
+                    "source_lineage_bound": source_lineage_bound,
+                    "sample_bound": sample_bound,
+                    "test_bound": test_bound,
+                    "derived_measurement": measurement.result_id in derived_ids,
+                    "experiment_status": experiment.status,
+                    "evidence_status": (
+                        projected.evidence_status if projected is not None else None
+                    ),
+                    "selection_status": (
+                        projected.selection_status if projected is not None else None
+                    ),
+                    "resolution_status": (
+                        projected.resolution_status if projected is not None else None
+                    ),
+                    "binding_disposition": (
+                        "complete" if fully_bound else "needs_context"
+                    ),
+                }
+            )
+    measurement_values = sorted(item["value"] for item in binding_rows)
+    table_result_observations = tuple(
+        item
+        for item in observations
+        if item.source_kind == "table"
+        and not item.derived_from_observation_ids
+        and item.reported_result is not None
+        and item.reported_result.outcome.casefold() == "relative density"
+        and isinstance(item.reported_result.value, (int, float))
+    )
+    bindings_are_honest = all(
+        item["source_observation_bound"]
+        and item["source_lineage_bound"]
+        and item["sample_bound"]
+        and not item["derived_measurement"]
+        and item["unit"] == "%"
+        and (
+            item["test_bound"]
+            or (
+                item["experiment_status"] == "incomplete"
+                and item["evidence_status"] == "needs_context"
+                and item["selection_status"] == "candidate"
+                and item["resolution_status"] == "unresolved"
+            )
+        )
+        for item in binding_rows
+    )
+    return {
+        "acceptance_target": "B_experiment_binding",
+        "name": "measurements_have_valid_or_explicitly_incomplete_bindings",
+        "passed": measurement_values == expected_values
+        and len(table_result_observations) == len(EXPECTED_TABLE_ROWS)
+        and bindings_are_honest,
+        "detail": {
+            "expected_measurements": expected_values,
+            "actual_measurements": measurement_values,
+            "table_result_count": len(table_result_observations),
+            "binding_rows": binding_rows,
+            "binding_complete": bool(binding_rows)
+            and all(item["binding_disposition"] == "complete" for item in binding_rows),
+        },
+    }
+
+
+def _comparison_eligibility_check(
+    *,
+    document_id: str,
+    experiments: Any,
+    evidence: Any,
+    findings: Any,
+) -> dict[str, Any]:
+    objective = _objective(document_id)
+    evidence_by_id = {item.evidence_id: item for item in evidence}
+    comparison_rows: list[dict[str, Any]] = []
+    for experiment in experiments:
+        for observation in experiment.source_observations:
+            if (
+                not observation.derived_from_observation_ids
+                or observation.reported_result is None
+                or observation.reported_result.outcome.casefold()
+                != "relative density"
+            ):
+                continue
+            comparison_status = experiment.comparison_status(
+                objective, *observation.derived_from_observation_ids
+            )
+            projected = evidence_by_id.get(observation.observation_id)
+            strategy = next(
+                (
+                    str(attribute.value)
+                    for attribute in observation.scientific_context.sample
+                    if attribute.name.casefold() == "strategy"
+                ),
+                "",
+            )
+            evidence_status = (
+                projected.evidence_status if projected is not None else None
+            )
+            synthesis_eligible = bool(
+                projected is not None
+                and FindingSynthesisService.is_synthesizable_result_evidence(
+                    objective, projected
+                )
+            )
+            comparison_rows.append(
+                {
+                    "observation_id": observation.observation_id,
+                    "parent_measurement_ids": list(
+                        observation.derived_from_observation_ids
+                    ),
+                    "strategy": strategy,
+                    "changed_variables": [
+                        variable.name for variable in observation.changed_variables
+                    ],
+                    "comparison_status": comparison_status,
+                    "evidence_status": evidence_status,
+                    "synthesis_eligible": synthesis_eligible,
+                }
+            )
+    expected_strategy_counts = {"Speed": 1, "Intermediate": 2, "Performance": 2}
+    strategy_counts = _count(item["strategy"] for item in comparison_rows)
+    comparison_shapes_are_preserved = (
+        strategy_counts == expected_strategy_counts
+        and all(
+            {name.casefold() for name in item["changed_variables"]}
+            == {"laser power"}
+            for item in comparison_rows
+        )
+    )
+    eligibility_is_consistent = all(
+        (
+            item["evidence_status"] == "comparable"
+            and item["synthesis_eligible"]
+        )
+        if item["comparison_status"] == "comparable"
+        else (
+            item["evidence_status"] != "comparable"
+            and not item["synthesis_eligible"]
+        )
+        for item in comparison_rows
+    )
+    comparable_evidence_ids = {
+        item.evidence_id
+        for item in evidence
+        if item.evidence_status == "comparable"
+        and FindingSynthesisService.is_synthesizable_result_evidence(
+            objective, item
+        )
+    }
+    finding_claim_evidence_ids = {
+        evidence_id
+        for finding in findings
+        for contribution in finding.paper_contributions
+        for evidence_id in (
+            *contribution.supporting_evidence_ids,
+            *contribution.contradicting_evidence_ids,
+        )
+    }
+    finding_lineage_is_consistent = (
+        finding_claim_evidence_ids <= comparable_evidence_ids
+        and (bool(findings) if comparable_evidence_ids else not findings)
+    )
+    return {
+        "acceptance_target": "C_comparison_eligibility",
+        "name": "comparisons_and_findings_require_complete_bindings",
+        "passed": bool(comparison_rows)
+        and comparison_shapes_are_preserved
+        and eligibility_is_consistent
+        and finding_lineage_is_consistent,
+        "detail": {
+            "comparison_rows": comparison_rows,
+            "strategy_counts": strategy_counts,
+            "comparable_evidence_ids": sorted(comparable_evidence_ids),
+            "finding_claim_evidence_ids": sorted(finding_claim_evidence_ids),
+            "finding_count": len(findings),
+        },
+    }
+
+
 def _acceptance_checks(
     *,
     report: dict[str, Any],
@@ -580,28 +874,7 @@ def _acceptance_checks(
     def add(name: str, passed: bool, detail: Any) -> None:
         checks.append({"name": name, "passed": bool(passed), "detail": detail})
 
-    table_text = "\n".join(
-        str(table.to_record().get("table_markdown") or "")
-        for table in document.tables
-        if "relative density" in str(table.caption_text or "").casefold()
-    )
-    expected_rows_present = [
-        {
-            "sample": sample,
-            "power_w": power,
-            "relative_density_percent": density,
-            "present": all(
-                token in table_text
-                for token in (sample, f"{power:g}", f"{density:g}")
-            ),
-        }
-        for sample, power, density in EXPECTED_TABLE_ROWS
-    ]
-    add(
-        "parsed_table_preserves_reviewed_rows",
-        bool(table_text) and all(item["present"] for item in expected_rows_present),
-        expected_rows_present,
-    )
+    checks.append(_table_fact_fidelity_check(document))
     add(
         "live_profile_classifies_primary_experiment",
         profile.doc_type == "experimental",
@@ -656,159 +929,20 @@ def _acceptance_checks(
             ],
         },
     )
-    density_evidence = tuple(
-        item
-        for item in evidence
-        if item.source_kind == "table"
-        and item.reported_result is not None
-        and item.reported_result.outcome.casefold() == "relative density"
-    )
-    related_lineage_ok = bool(density_evidence) and all(
-        item.related_source_refs
-        and any(
-            str(ref.get("source_kind") or "") == item.source_kind
-            and str(ref.get("source_ref") or "") == item.source_ref
-            for ref in item.related_source_refs
+    checks.append(
+        _experiment_binding_check(
+            observations=observations,
+            experiments=experiments,
+            evidence=evidence,
         )
-        for item in density_evidence
     )
-    add(
-        "source_observations_keep_related_source_lineage",
-        related_lineage_ok,
-        {
-            "observation_count": len(observations),
-            "density_evidence_count": len(density_evidence),
-            "related_source_ref_counts": [
-                len(item.related_source_refs) for item in density_evidence
-            ],
-            "source_refs": sorted(
-                {
-                    (item.source_kind, item.source_ref)
-                    for item in observations
-                }
-            ),
-        },
-    )
-    density_measurements = [
-        item
-        for experiment in experiments
-        for item in experiment.measurements
-        if isinstance(item.value_payload.get("value"), (int, float))
-        and item.property_normalized.casefold() == "relative density"
-    ]
-    measurement_values = sorted(float(item.value_payload["value"]) for item in density_measurements)
-    expected_values = sorted(density for _, _, density in EXPECTED_TABLE_ROWS)
-    table_result_observations = [
-        item
-        for item in observations
-        if item.source_kind == "table"
-        and not item.derived_from_observation_ids
-        and item.reported_result is not None
-        and item.reported_result.outcome.casefold() == "relative density"
-        and isinstance(item.reported_result.value, (int, float))
-    ]
-    add(
-        "paper_experiment_binds_samples_tests_and_measurements",
-        measurement_values == expected_values
-        and len(table_result_observations) == len(EXPECTED_TABLE_ROWS)
-        and any(experiment.sample_variants for experiment in experiments)
-        and any(experiment.test_conditions for experiment in experiments)
-        and all(
-            item.variant_id is not None and item.test_condition_id is not None
-            for item in density_measurements
-        ),
-        {
-            "expected_measurements": expected_values,
-            "actual_measurements": measurement_values,
-            "table_result_count": len(table_result_observations),
-            "statuses": [item.status for item in experiments],
-            "sample_variant_count": sum(len(item.sample_variants) for item in experiments),
-            "test_condition_count": sum(len(item.test_conditions) for item in experiments),
-        },
-    )
-    comparable_observations = [
-        item
-        for experiment in experiments
-        for item in experiment.source_observations
-        if item.derived_from_observation_ids
-        and item.reported_result is not None
-        and item.reported_result.outcome.casefold() == "relative density"
-        and experiment.comparison_status(
-            _objective(document.document_id), *item.derived_from_observation_ids
+    checks.append(
+        _comparison_eligibility_check(
+            document_id=document.document_id,
+            experiments=experiments,
+            evidence=evidence,
+            findings=findings,
         )
-        == "comparable"
-    ]
-    expected_strategy_comparison_counts = {
-        "Speed": 1,
-        "Intermediate": 2,
-        "Performance": 2,
-    }
-    comparison_strategies = [
-        next(
-            (
-                str(attribute.value)
-                for attribute in item.scientific_context.sample
-                if attribute.name.casefold() == "strategy"
-            ),
-            "",
-        )
-        for item in comparable_observations
-    ]
-    strategy_counts = _count(comparison_strategies)
-    add(
-        "comparisons_change_only_laser_power",
-        len(comparable_observations) == sum(expected_strategy_comparison_counts.values())
-        and strategy_counts == expected_strategy_comparison_counts
-        and all(
-            {variable.name.casefold() for variable in item.changed_variables}
-            == {"laser power"}
-            for item in comparable_observations
-        ),
-        [item.to_record() for item in comparable_observations],
-    )
-    add(
-        "objective_evidence_is_source_traceable",
-        bool(evidence)
-        and any(item.evidence_status == "comparable" for item in evidence)
-        and all(item.source_ref and item.related_source_refs for item in evidence),
-        {
-            "count": len(evidence),
-            "status_counts": _count(item.evidence_status for item in evidence),
-        },
-    )
-    evidence_ids = {item.evidence_id for item in evidence}
-    finding_evidence_ids = {
-        evidence_id
-        for finding in findings
-        for contribution in finding.paper_contributions
-        for evidence_id in (
-            *contribution.supporting_evidence_ids,
-            *contribution.contradicting_evidence_ids,
-            *contribution.context_evidence_ids,
-            *contribution.condition_boundary_evidence_ids,
-        )
-    }
-    finding_required = comparable_evidence_count > 0
-    add(
-        "finding_preserves_published_evidence_lineage",
-        (
-            not finding_required
-            or (
-                bool(findings)
-                and bool(finding_evidence_ids)
-                and finding_evidence_ids <= evidence_ids
-            )
-        ),
-        {
-            "finding_required": finding_required,
-            "finding_count": len(findings),
-            "finding_evidence_ids": sorted(finding_evidence_ids),
-            "disposition": (
-                "validated_with_comparable_evidence"
-                if finding_required
-                else "not_required_without_comparable_evidence"
-            ),
-        },
     )
     return checks
 

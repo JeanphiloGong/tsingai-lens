@@ -1925,6 +1925,8 @@ class ObjectiveEvidence:
         """
         if self.selection_status == "failed":
             return "extraction_failed"
+        if self.selection_status in {"candidate", "selected"}:
+            return "needs_context"
         if (
             self.reported_result is not None
             and self.reported_result.result_kind

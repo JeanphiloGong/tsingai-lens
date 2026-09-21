@@ -11,23 +11,25 @@ from application.core.objectives.analysis.evidence_materialization import (
     _canonical_evidence_source,
     _canonical_objective_evidence_axes,
     _objective_detail_evidence,
-    _recover_source_explicit_objective_factors,
     _objective_result_missing_field_families,
     _record_material_scope_exclusions,
-    _researcher_decision_packet_audit,
     _record_researcher_information_parity_snapshot,
     _record_source_coverage_ledger,
+    _recover_source_explicit_objective_factors,
+    _researcher_decision_packet_audit,
     materialize_evidence,
     rebind_persisted_contribution,
     rebind_persisted_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
-from application.core.objectives.analysis.paper_experiment import assemble_paper_experiment
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.paper_experiment import (
+    assemble_paper_experiment,
+)
 from application.core.objectives.analysis.source_extraction import SourceReadAudit
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -2676,7 +2678,12 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
     assert "outside" in (evidence_records[0].selection_reason or "").casefold()
     assert contributions[0].analysis_status == "analyzed"
     assert contributions[0].evidence_disposition == "no_comparable_evidence"
-    assert diagnostics.records[0] == {
+    materialization_trace = next(
+        record
+        for record in diagnostics.records
+        if record.get("trace_type") == "objective_evidence_materialization"
+    )
+    assert materialization_trace == {
         "trace_type": "objective_evidence_materialization",
         "collection_id": "collection-1",
         "objective_id": "objective-1",

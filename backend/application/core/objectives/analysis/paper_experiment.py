@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Group labels are experiment identities, not condition endpoints. Rebuild
 # persisted document checkpoints so exact same-paper condition mappings replace
 # labels such as R0/R1 with their source-grounded process values.
-PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v17"
+PAPER_EXPERIMENT_RECONSTRUCTION_VERSION = "paper-experiment-reconstruction.v18"
 
 _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _OBJECTIVE_MATERIAL_CONTEXT_REF_LIMIT = 8
@@ -284,10 +284,7 @@ def assemble_paper_experiment(
                 )
             )
         if applicable_test and source_kind and source_ref:
-            test_payload = {
-                item.name: {"value": item.value, "unit": item.unit}
-                for item in applicable_test
-            }
+            test_payload = _structured_context_payload(applicable_test)
             test_conditions.append(
                 TestCondition.from_mapping(
                     {
@@ -305,10 +302,7 @@ def assemble_paper_experiment(
                 )
             )
         if sample_label and source_kind and source_ref:
-            sample_payload = {
-                item.name: {"value": item.value, "unit": item.unit}
-                for item in context.sample
-            }
+            sample_payload = _structured_context_payload(context.sample)
             sample_variants.append(
                 _sample_variant_from_context(
                     draft=draft,
@@ -383,17 +377,28 @@ def _sample_variant_from_context(
             "document_id": document_id,
             "collection_id": collection_id,
             "variant_label": variant_label,
-            "host_material_system": {
-                item.name: item.value for item in draft.scientific_context.material
-            },
-            "process_context": {
-                item.name: item.value for item in draft.scientific_context.process
-            },
+            "host_material_system": _structured_context_payload(
+                draft.scientific_context.material
+            ),
+            "process_context": _structured_context_payload(
+                draft.scientific_context.process
+            ),
             "profile_payload": sample_payload,
             "confidence": draft.confidence,
             "epistemic_status": "normalized_from_evidence",
         }
     )
+
+
+def _structured_context_payload(attributes: Any) -> dict[str, Any]:
+    """Preserve every Source-grounded attribute field in aggregate facts."""
+
+    payload: dict[str, Any] = {}
+    for attribute in attributes:
+        record = attribute.to_record()
+        record.pop("name", None)
+        payload[attribute.name] = record
+    return payload
 
 
 def _is_derived_comparison_unit(unit: SourceObservation) -> bool:
@@ -4303,6 +4308,7 @@ def _objective_sample_identity_key(
         "condition_number",
         "condition_no",
         "condition",
+        "sample_state",
         "build_orientation",
         "specimen_orientation",
         "orientation",

@@ -101,11 +101,14 @@ Read the analysis responsibilities in real research order:
    Unknown study identity remains `None`; these conservative series are not a
    claim to have reconstructed every experiment in the paper.
 6. `evidence_materialization.py` consumes only the `PaperExperiment` aggregate
-   produced for the current paper and turns its source observations into
-   durable `ObjectiveEvidence`. It checks each `MeasurementResult` against its
-   Source observation; `SampleVariant` and `TestCondition` links have already
-   been checked during experiment assembly. Missing sample or test bindings
-   remain incomplete, not inferred. Callers cannot pass an independent
+   produced for the current paper. Each `MeasurementResult` is the structured
+   result entry: materialization resolves its Source observation, linked
+   `SampleVariant`, and linked `TestCondition`, then projects those bound facts
+   into durable `ObjectiveEvidence`. It rejects a value, sample, or test binding
+   that disagrees with its Source and records an internal diagnostic. Missing
+   sample or test bindings preserve the reported measurement as
+   `needs_context`; they are never inferred or admitted to Finding synthesis.
+   Callers cannot pass an independent
    observation stream alongside the experiment. Technical read failures are
    supplied separately as
    application `SourceReadAudit` records. Derived comparisons are observations
@@ -196,6 +199,11 @@ structured-output failures become `SourceReadAudit(technical_failure)` records,
 not rejected scientific observations. A successfully inspected Source with no
 fact is `inspected_without_fact`; a rejected extraction is `grounding_rejected`.
 Both count as inspected but neither proves that the paper reports no effect.
+Context-only reads are tracked by their requested family as well as by Source
+locator. If a Methods paragraph was read for sample identity but the result still
+lacks an applicable test method, the same paragraph may receive one bounded,
+independent `test` read. The two calls use the narrow context contract and are
+not merged into one model-authored fact; a full Source read remains unique.
 Provider/format failures and grounding rejections both remain unsuccessful
 reads for failed-source counts, warnings, and retry eligibility. A rejected
 generated answer must not become a successful scientific absence.

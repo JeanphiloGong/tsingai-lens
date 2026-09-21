@@ -207,6 +207,7 @@ _ADAPTIVE_CONTEXT_METHOD_EVIDENCE_MARKERS = (
     "extensometer",
 )
 _ADAPTIVE_CONTEXT_METHOD_IDENTITY_MARKERS = (
+    "method",
     "characteriz",
     "microscop",
     "spectroscop",
@@ -942,6 +943,9 @@ _OBJECTIVE_CONTEXT_ROLES = frozenset(
 _OBJECTIVE_CONTEXT_FIELD_NAMES = frozenset(
     {"material", "sample", "variable", "process", "comparison", "test", "outcome"}
 )
+_OBJECTIVE_NARROW_CONTEXT_FIELDS = frozenset(
+    {"material", "sample", "process", "test"}
+)
 _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS = {
     "process_or_treatment": ("process",),
     "test_condition": ("test",),
@@ -1639,22 +1643,26 @@ _EXTRACTION_ROUTE_ROLE_PRIORITY = {
 def _dedupe_extraction_routes(
     routes: tuple[EvidenceCandidate, ...],
 ) -> tuple[EvidenceCandidate, ...]:
-    """Keep one extraction decision per stable Source locator.
+    """Keep one extraction decision per stable Source and read scope.
 
     Routing may mention the same Source through framing, a table hint, and
-    adaptive context expansion.  The Source is still one research object, so
-    reading it repeatedly would inflate Evidence and could produce divergent
-    facts.  Prefer the route with the most specific scientific role while
-    keeping the first route's stable order for ties.
+    adaptive context expansion. Full scientific reads remain unique per Source,
+    while a targeted context read is unique per requested family. This permits
+    one Methods paragraph to answer separate sample and test questions without
+    asking either model call to classify adjacent context families. Prefer the
+    route with the most specific scientific role while keeping the first
+    route's stable order for ties.
     """
 
-    selected: dict[tuple[str, str, str, str], EvidenceCandidate] = {}
+    selected: dict[tuple[str, str, str, str, str], EvidenceCandidate] = {}
     for route in routes:
+        narrow_context_field = _objective_candidate_narrow_context_field(route)
         key = (
             route.objective_id,
             route.document_id,
             route.source_kind,
             route.source_ref,
+            narrow_context_field or "full",
         )
         existing = selected.get(key)
         if existing is None:
@@ -1665,6 +1673,38 @@ def _dedupe_extraction_routes(
         if route_priority > existing_priority:
             selected[key] = route
     return tuple(selected.values())
+
+
+def _objective_candidate_narrow_context_field(
+    route: EvidenceCandidate,
+) -> str | None:
+    fields = tuple(
+        field
+        for field in route.context_fields
+        if field in _OBJECTIVE_CONTEXT_FIELD_NAMES
+    )
+    return (
+        fields[0]
+        if len(fields) == 1 and fields[0] in _OBJECTIVE_NARROW_CONTEXT_FIELDS
+        else None
+    )
+
+
+def _context_route_field_groups(
+    fields: tuple[str, ...],
+    *,
+    explicit_test_source: bool = False,
+) -> tuple[tuple[str, ...], ...]:
+    """Keep test-method transcription independent from a mixed context read."""
+
+    normalized = tuple(dict.fromkeys(field for field in fields if field))
+    if len(normalized) <= 1:
+        return (normalized,)
+    if set(normalized) <= _OBJECTIVE_NARROW_CONTEXT_FIELDS:
+        return tuple((field,) for field in normalized)
+    if explicit_test_source and "test" in normalized:
+        return (("test",),)
+    return (normalized,)
 
 
 def extract_and_validate_source_facts(
@@ -2587,15 +2627,24 @@ def _build_adaptive_context_routes(
     if not anchors_by_key:
         return ()
 
-    existing_source_keys = {
-        (
+    fully_inspected_source_keys: set[tuple[str, str, str, str]] = set()
+    inspected_context_fields_by_source: dict[
+        tuple[str, str, str, str], set[str]
+    ] = {}
+    for route in objective_evidence_routes:
+        source_key = (
             route.objective_id,
             route.document_id,
             route.source_kind,
             route.source_ref,
         )
-        for route in objective_evidence_routes
-    }
+        narrow_context_field = _objective_candidate_narrow_context_field(route)
+        if narrow_context_field is None:
+            fully_inspected_source_keys.add(source_key)
+            continue
+        inspected_context_fields_by_source.setdefault(source_key, set()).add(
+            narrow_context_field
+        )
     adaptive_routes: list[EvidenceCandidate] = []
     figures_by_document_id = figures_by_document_id or {}
     document_trees_by_document_id = document_trees_by_document_id or {}
@@ -2635,7 +2684,8 @@ def _build_adaptive_context_routes(
             tables_by_document_id=tables_by_document_id,
             figures_by_document_id=figures_by_document_id,
             document_tree=document_tree,
-            existing_source_keys=existing_source_keys,
+            fully_inspected_source_keys=fully_inspected_source_keys,
+            inspected_context_fields_by_source=inspected_context_fields_by_source,
         )
 
         selected_by_key: dict[
@@ -2709,7 +2759,11 @@ def _build_adaptive_context_routes(
                 frame_candidate_keys=frame_candidate_keys,
                 blocks_by_document_id=blocks_by_document_id,
                 document_tree=document_tree,
-                existing_source_keys=existing_source_keys,
+                inspected_source_keys=(
+                    fully_inspected_source_keys
+                    | set(inspected_context_fields_by_source)
+                ),
+                inspected_context_fields_by_source=inspected_context_fields_by_source,
             )
             anchor_selected, anchor_uncovered = _choose_context_reads(
                 objective=objective,
@@ -2784,32 +2838,60 @@ def _build_adaptive_context_routes(
             }
         )
         for candidate, matched_fields, anchor_refs in selected_candidates:
-            route = EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": objective_id,
-                    "document_id": document_id,
-                    "source_kind": candidate.source_kind,
-                    "source_ref": candidate.source_ref,
-                    "role": candidate.role,
-                    "extractable": True,
-                    "reason": (
-                        (
-                            "Same-paper structural neighbor selected for result "
-                            "Source(s): "
-                            if not matched_fields
-                            else "Same-paper context expansion for result Source(s): "
-                        )
-                        + f"{', '.join(sorted(anchor_refs))}. Matched Source fields: "
-                        f"{', '.join(sorted(matched_fields)) or 'none; requires validation'}."
-                    ),
-                    "confidence": 0.8,
-                    "context_fields": sorted(matched_fields),
-                }
+            route_fields = tuple(sorted(matched_fields))
+            candidate_heading, candidate_text = candidate_search_text.get(
+                (candidate.source_kind, candidate.source_ref),
+                ("", ""),
             )
-            adaptive_routes.append(route)
-            existing_source_keys.add(
-                (objective_id, document_id, candidate.source_kind, candidate.source_ref)
+            route_field_groups = _context_route_field_groups(
+                route_fields,
+                explicit_test_source=bool(
+                    "test" in route_fields
+                    and _adaptive_context_test_source_score(
+                        candidate_heading,
+                        candidate_text,
+                        outcomes=objective.outcomes,
+                    )
+                ),
             )
+            for scoped_route_fields in route_field_groups:
+                route = EvidenceCandidate.from_mapping(
+                    {
+                        "objective_id": objective_id,
+                        "document_id": document_id,
+                        "source_kind": candidate.source_kind,
+                        "source_ref": candidate.source_ref,
+                        "role": candidate.role,
+                        "extractable": True,
+                        "reason": (
+                            (
+                                "Same-paper structural neighbor selected for result "
+                                "Source(s): "
+                                if not scoped_route_fields
+                                else "Same-paper context expansion for result Source(s): "
+                            )
+                            + f"{', '.join(sorted(anchor_refs))}. Matched Source fields: "
+                            f"{', '.join(scoped_route_fields) or 'none; requires validation'}."
+                        ),
+                        "confidence": 0.8,
+                        "context_fields": scoped_route_fields,
+                    }
+                )
+                adaptive_routes.append(route)
+                source_key = (
+                    objective_id,
+                    document_id,
+                    candidate.source_kind,
+                    candidate.source_ref,
+                )
+                narrow_context_field = _objective_candidate_narrow_context_field(route)
+                if narrow_context_field is None:
+                    fully_inspected_source_keys.add(source_key)
+                else:
+                    inspected_context_fields_by_source.setdefault(
+                        source_key,
+                        set(),
+                    ).add(narrow_context_field)
     return tuple(adaptive_routes)
 
 
@@ -2859,7 +2941,10 @@ def _collect_context_source_candidates(
     tables_by_document_id: dict[str, list[Any]],
     figures_by_document_id: dict[str, list[Any]],
     document_tree: SourceDocumentTree | None,
-    existing_source_keys: set[tuple[str, str, str, str]],
+    fully_inspected_source_keys: set[tuple[str, str, str, str]],
+    inspected_context_fields_by_source: Mapping[
+        tuple[str, str, str, str], set[str]
+    ],
 ) -> tuple[
     list[_ContextSourceCandidate],
     dict[tuple[str, str], tuple[str, str]],
@@ -2869,6 +2954,18 @@ def _collect_context_source_candidates(
     candidates: list[_ContextSourceCandidate] = []
     candidate_search_text: dict[tuple[str, str], tuple[str, str]] = {}
     frame_candidate_keys: set[tuple[str, str]] = set()
+    indexed_source_keys = set(fully_inspected_source_keys)
+
+    def remaining_fields(
+        source_kind: str,
+        source_ref: str,
+        matched_fields: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        source_key = (objective_id, document_id, source_kind, source_ref)
+        inspected_fields = inspected_context_fields_by_source.get(source_key, set())
+        return tuple(
+            field for field in matched_fields if field not in inspected_fields
+        )
 
     # Framing is a paper-level reading decision.  When it marked a Source
     # relevant, that decision must survive an over-selective first router;
@@ -2966,7 +3063,7 @@ def _collect_context_source_candidates(
             source_key = (route_source_kind, source_ref)
             if (
                 (objective_id, document_id, *source_key)
-                in existing_source_keys
+                in indexed_source_keys
                 or source_key in frame_candidate_keys
             ):
                 continue
@@ -3018,6 +3115,11 @@ def _collect_context_source_candidates(
                 specific_terms=specific_terms,
                 specific_term_fields=specific_term_fields,
             )
+            matched_fields = remaining_fields(
+                route_source_kind,
+                source_ref,
+                matched_fields,
+            )
             candidates.append(
                 _ContextSourceCandidate(
                     priority=-1,
@@ -3032,7 +3134,7 @@ def _collect_context_source_candidates(
             )
             candidate_search_text[source_key] = (heading, source_text)
             frame_candidate_keys.add(source_key)
-            existing_source_keys.add(
+            indexed_source_keys.add(
                 (objective_id, document_id, *source_key)
             )
     for position, block in enumerate(blocks_by_document_id.get(document_id, ())):
@@ -3047,7 +3149,7 @@ def _collect_context_source_candidates(
         if not source_ref or not text:
             continue
         source_key = (objective_id, document_id, "text_window", source_ref)
-        if source_key in existing_source_keys:
+        if source_key in indexed_source_keys:
             continue
         role = _adaptive_context_route_role(heading)
         matched_fields = _adaptive_context_matched_fields(
@@ -3057,6 +3159,7 @@ def _collect_context_source_candidates(
             specific_terms=specific_terms,
             specific_term_fields=specific_term_fields,
         )
+        matched_fields = remaining_fields("text_window", source_ref, matched_fields)
         if not matched_fields:
             continue
         priority = 0 if specific_terms and _contains_any_term(text, specific_terms) else 1
@@ -3073,6 +3176,7 @@ def _collect_context_source_candidates(
             )
         )
         candidate_search_text[("text_window", source_ref)] = (heading, text)
+        indexed_source_keys.add(source_key)
 
     for position, table in enumerate(tables_by_document_id.get(document_id, ())):
         source_ref = _text(getattr(table, "table_id", ""))
@@ -3096,7 +3200,7 @@ def _collect_context_source_candidates(
             if part
         ).casefold()
         source_key = (objective_id, document_id, "table", source_ref)
-        if source_key in existing_source_keys:
+        if source_key in indexed_source_keys:
             continue
         role = _adaptive_context_route_role(heading)
         table_text = " ".join(
@@ -3117,6 +3221,7 @@ def _collect_context_source_candidates(
             specific_terms=specific_terms,
             specific_term_fields=specific_term_fields,
         )
+        matched_fields = remaining_fields("table", source_ref, matched_fields)
         if not matched_fields:
             continue
         priority = 0 if specific_terms and _contains_any_term(table_text, specific_terms) else 1
@@ -3133,6 +3238,7 @@ def _collect_context_source_candidates(
             )
         )
         candidate_search_text[("table", source_ref)] = (heading, table_text)
+        indexed_source_keys.add(source_key)
 
     for position, figure in enumerate(figures_by_document_id.get(document_id, ())):
         source_ref = _text(getattr(figure, "figure_id", ""))
@@ -3153,7 +3259,7 @@ def _collect_context_source_candidates(
             if part
         ).casefold()
         source_key = (objective_id, document_id, "figure", source_ref)
-        if source_key in existing_source_keys:
+        if source_key in indexed_source_keys:
             continue
         matched_fields = _adaptive_context_matched_fields(
             heading=heading,
@@ -3162,6 +3268,7 @@ def _collect_context_source_candidates(
             specific_terms=specific_terms,
             specific_term_fields=specific_term_fields,
         )
+        matched_fields = remaining_fields("figure", source_ref, matched_fields)
         if not matched_fields:
             continue
         priority = 0 if specific_terms and _contains_any_term(caption, specific_terms) else 1
@@ -3178,6 +3285,7 @@ def _collect_context_source_candidates(
             )
         )
         candidate_search_text[("figure", source_ref)] = (heading, caption)
+        indexed_source_keys.add(source_key)
 
     return candidates, candidate_search_text, frame_candidate_keys
 
@@ -3193,7 +3301,10 @@ def _match_context_candidates_to_result(
     frame_candidate_keys: set[tuple[str, str]],
     blocks_by_document_id: dict[str, list[Any]],
     document_tree: SourceDocumentTree | None,
-    existing_source_keys: set[tuple[str, str, str, str]],
+    inspected_source_keys: set[tuple[str, str, str, str]],
+    inspected_context_fields_by_source: Mapping[
+        tuple[str, str, str, str], set[str]
+    ],
 ) -> tuple[list[_ContextSourceCandidate], int]:
     """Match one result's gaps and index previously unseen structural neighbors."""
     objective_id = anchor.objective_id
@@ -3209,6 +3320,13 @@ def _match_context_candidates_to_result(
             missing_fields=anchor_missing_fields,
             specific_terms=anchor_terms,
             specific_term_fields=anchor_term_fields,
+        )
+        inspected_fields = inspected_context_fields_by_source.get(
+            (objective_id, document_id, candidate.source_kind, candidate.source_ref),
+            set(),
+        )
+        matched_fields = tuple(
+            field for field in matched_fields if field not in inspected_fields
         )
         if not matched_fields and source_key not in frame_candidate_keys:
             continue
@@ -3265,7 +3383,7 @@ def _match_context_candidates_to_result(
             source_key = ("text_window", source_ref)
             if (
                 (objective_id, document_id, *source_key)
-                in existing_source_keys
+                in inspected_source_keys
                 or source_key in candidate_search_text
             ):
                 continue
@@ -3376,7 +3494,16 @@ def _choose_context_reads(
             # same paragraph establishes sample or process context.
             # Keep this read narrowly test-focused and continue the
             # selection loop for every other real context gap.
+            remaining_narrow_fields = (
+                selected_fields & _OBJECTIVE_NARROW_CONTEXT_FIELDS
+            ) - {"test"}
             selected_fields = {"test"}
+            if remaining_narrow_fields:
+                remaining_candidates.append(
+                    chosen._replace(
+                        matched_fields=tuple(sorted(remaining_narrow_fields))
+                    )
+                )
         chosen = chosen._replace(matched_fields=tuple(sorted(selected_fields)))
         anchor_selected.append(chosen)
         anchor_uncovered.difference_update(chosen.matched_fields)
@@ -4267,14 +4394,14 @@ def _adaptive_context_test_source_score(
     if not evidence_hits:
         return 0
     outcome_hits = sum(
-        property_matching.axis_label_is_mentioned(searchable, outcome)
+        _adaptive_context_source_mentions_test_outcome(searchable, outcome)
         for outcome in outcomes
         if str(outcome or "").strip()
     )
     if not outcome_hits:
         return 0
     identifies_method = any(
-        marker in searchable
+        marker in text.casefold()
         for marker in _ADAPTIVE_CONTEXT_METHOD_IDENTITY_MARKERS
     ) or any(
         marker in heading.casefold()
@@ -4289,6 +4416,26 @@ def _adaptive_context_test_source_score(
     return (4 * outcome_hits) + (2 if method_section else 0) + min(
         evidence_hits,
         2,
+    )
+
+
+def _adaptive_context_source_mentions_test_outcome(
+    searchable: str,
+    outcome: str,
+) -> bool:
+    """Recognize an explicit method-to-outcome phrase for routing only."""
+
+    if property_matching.axis_label_is_mentioned(searchable, outcome):
+        return True
+    normalized_outcome = property_matching.normalize_property_label(outcome)
+    if normalized_outcome != "relative density":
+        return False
+    searchable_tokens = property_matching.axis_tokens(
+        property_matching.axis_key(searchable)
+    )
+    return "density" in searchable_tokens and any(
+        marker in searchable
+        for marker in ("normaliz", "nominal density", "reference density")
     )
 
 
@@ -5095,6 +5242,11 @@ def _objective_result_table_matrix_records(
                             for header in headers
                             if header in row_values
                         ),
+                        supports=tuple(
+                            f"scientific_context.{section}"
+                            for section in ("material", "sample", "process", "test")
+                            if row_attributes[section]
+                        ),
                     ),
                     "resolution_status": "resolved",
                     "confidence": route.confidence,
@@ -5215,6 +5367,11 @@ def _objective_process_table_matrix_records(
                         f"{header}: {row_values[header]}"
                         for header in headers
                         if header in row_values
+                    ),
+                    supports=tuple(
+                        f"scientific_context.{section}"
+                        for section in ("material", "sample", "process", "test")
+                        if row_attributes[section]
                     ),
                 ),
                 "resolution_status": "resolved",

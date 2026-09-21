@@ -10,6 +10,12 @@ import math
 import re
 from typing import Any, Final, Mapping
 
+from domain.core.scientific_fact import (
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
 from domain.pipeline import ExecutionStats
 
 
@@ -75,31 +81,6 @@ EVIDENCE_STATUS_VALUES: Final[frozenset[str]] = frozenset(
         "non_comparable",
         "extraction_failed",
     }
-)
-EVIDENCE_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
-    {
-        "increase",
-        "decrease",
-        "improve",
-        "worsen",
-        "changed",
-        "no_change",
-        "mixed",
-        "unknown",
-    }
-)
-EVIDENCE_RESULT_KINDS: Final[frozenset[str]] = frozenset(
-    {
-        "measured",
-        "observed",
-        "predicted",
-        "simulated",
-        "modeled",
-        "unknown",
-    }
-)
-EVIDENCE_CONTEXT_SCOPES: Final[frozenset[str]] = frozenset(
-    {"experimental", "simulation", "background", "unknown"}
 )
 EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
     {"resolved", "partial", "unresolved", "skipped", "unknown"}
@@ -1790,211 +1771,6 @@ class PaperContribution:
         }
 
 
-EvidenceScalar = str | int | float | bool
-
-
-@dataclass(frozen=True)
-class ObjectiveEvidenceAttribute:
-    name: str
-    value: EvidenceScalar
-    unit: str | None = None
-    context_scope: str = "unknown"
-    applies_to_outcomes: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not _text(self.name) or _scientific_scalar(self.value) is None:
-            raise ValueError("objective evidence attribute requires name and value")
-        if self.context_scope not in EVIDENCE_CONTEXT_SCOPES:
-            raise ValueError(
-                f"unsupported objective evidence context scope: {self.context_scope}"
-            )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceAttribute":
-        value = _scientific_scalar(payload.get("value"))
-        return cls(
-            name=_text(payload.get("name")) or "",
-            value=value if value is not None else "",
-            unit=_text(payload.get("unit")),
-            context_scope=_choice(
-                payload.get("context_scope"),
-                EVIDENCE_CONTEXT_SCOPES,
-                "unknown",
-            ),
-            applies_to_outcomes=normalize_objective_terms(
-                payload.get("applies_to_outcomes")
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        record = {"name": self.name, "value": self.value, "unit": self.unit}
-        # Omit the backward-compatible default so existing Evidence payloads
-        # retain their established shape. Explicit scope is persisted because
-        # it changes how a researcher may use the context for comparison.
-        if self.context_scope != "unknown":
-            record["context_scope"] = self.context_scope
-        if self.applies_to_outcomes:
-            record["applies_to_outcomes"] = list(self.applies_to_outcomes)
-        return record
-
-
-@dataclass(frozen=True)
-class ObjectiveEvidenceVariable:
-    """One factor label and its optional comparison endpoints.
-
-    Association evidence can name the intervention without containing a
-    source-local baseline/target pair.  Endpoint completeness is therefore
-    enforced by ``ObjectiveEvidence._validate_attribution`` for experimental
-    attribution, rather than by this value object.
-    """
-
-    name: str
-    baseline_value: EvidenceScalar | None
-    target_value: EvidenceScalar | None
-    unit: str | None = None
-
-    def __post_init__(self) -> None:
-        if not _text(self.name):
-            raise ValueError("objective evidence variable requires name")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceVariable":
-        return cls(
-            name=_text(payload.get("name")) or "",
-            baseline_value=_scientific_scalar(payload.get("baseline_value")),
-            target_value=_scientific_scalar(payload.get("target_value")),
-            unit=_text(payload.get("unit")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "baseline_value": self.baseline_value,
-            "target_value": self.target_value,
-            "unit": self.unit,
-        }
-
-
-@dataclass(frozen=True)
-class ObjectiveEvidenceComparison:
-    baseline_label: str
-    target_label: str
-    axis_names: tuple[str, ...]
-    comparable: bool
-    incomparability_reasons: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not _text(self.baseline_label) or not _text(self.target_label):
-            raise ValueError("objective evidence comparison requires both groups")
-        if not self.axis_names:
-            raise ValueError("objective evidence comparison requires axes")
-        if not self.comparable and not self.incomparability_reasons:
-            raise ValueError("incomparable evidence requires reasons")
-        if self.comparable and self.incomparability_reasons:
-            raise ValueError("comparable evidence cannot have incomparability reasons")
-
-    @classmethod
-    def from_mapping(
-        cls, payload: Mapping[str, Any]
-    ) -> "ObjectiveEvidenceComparison":
-        return cls(
-            baseline_label=_text(payload.get("baseline_label")) or "",
-            target_label=_text(payload.get("target_label")) or "",
-            axis_names=normalize_objective_terms(payload.get("axis_names")),
-            comparable=payload.get("comparable") is True,
-            incomparability_reasons=normalize_objective_terms(
-                payload.get("incomparability_reasons")
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "baseline_label": self.baseline_label,
-            "target_label": self.target_label,
-            "axis_names": list(self.axis_names),
-            "comparable": self.comparable,
-            "incomparability_reasons": list(self.incomparability_reasons),
-        }
-
-
-@dataclass(frozen=True)
-class ObjectiveEvidenceResult:
-    outcome: str
-    value: EvidenceScalar | None
-    unit: str | None
-    direction: str
-    result_text: str
-    baseline_value: EvidenceScalar | None = None
-    target_value: EvidenceScalar | None = None
-    result_kind: str = "observed"
-
-    def __post_init__(self) -> None:
-        if not _text(self.outcome) or not _text(self.result_text):
-            raise ValueError("objective evidence result requires outcome and result text")
-        if self.direction not in EVIDENCE_RESULT_DIRECTIONS:
-            raise ValueError(f"unsupported evidence result direction: {self.direction}")
-        if self.result_kind not in EVIDENCE_RESULT_KINDS:
-            raise ValueError(f"unsupported evidence result kind: {self.result_kind}")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceResult":
-        return cls(
-            outcome=_text(payload.get("outcome")) or "",
-            value=_scientific_scalar(payload.get("value")),
-            unit=_text(payload.get("unit")),
-            direction=_choice(
-                payload.get("direction"), EVIDENCE_RESULT_DIRECTIONS, "unknown"
-            ),
-            result_text=_text(payload.get("result_text")) or "",
-            baseline_value=_scientific_scalar(payload.get("baseline_value")),
-            target_value=_scientific_scalar(payload.get("target_value")),
-            result_kind=_choice(
-                payload.get("result_kind"), EVIDENCE_RESULT_KINDS, "observed"
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "outcome": self.outcome,
-            "value": self.value,
-            "baseline_value": self.baseline_value,
-            "target_value": self.target_value,
-            "unit": self.unit,
-            "direction": self.direction,
-            "result_text": self.result_text,
-            "result_kind": self.result_kind,
-        }
-
-
-@dataclass(frozen=True)
-class ObjectiveEvidenceContext:
-    material: tuple[ObjectiveEvidenceAttribute, ...] = ()
-    sample: tuple[ObjectiveEvidenceAttribute, ...] = ()
-    process: tuple[ObjectiveEvidenceAttribute, ...] = ()
-    test: tuple[ObjectiveEvidenceAttribute, ...] = ()
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidenceContext":
-        return cls(
-            material=_evidence_attributes(payload.get("material")),
-            sample=_evidence_attributes(payload.get("sample")),
-            process=_evidence_attributes(payload.get("process")),
-            test=_evidence_attributes(payload.get("test")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "material": [item.to_record() for item in self.material],
-            "sample": [item.to_record() for item in self.sample],
-            "process": [item.to_record() for item in self.process],
-            "test": [item.to_record() for item in self.test],
-        }
-
-    @property
-    def has_content(self) -> bool:
-        return bool(self.material or self.sample or self.process or self.test)
-
-
 @dataclass(frozen=True)
 class ObjectiveEvidence:
     collection_id: str
@@ -2010,11 +1786,11 @@ class ObjectiveEvidence:
     evidence_role: str
     selection_status: str
     selection_reason: str | None
-    changed_variables: tuple[ObjectiveEvidenceVariable, ...]
-    comparison: ObjectiveEvidenceComparison | None
-    reported_result: ObjectiveEvidenceResult | None
+    changed_variables: tuple[ScientificVariable, ...]
+    comparison: ScientificComparison | None
+    reported_result: ScientificResult | None
     attribution_scope: str
-    scientific_context: ObjectiveEvidenceContext
+    scientific_context: ScientificContext
     resolution_status: str
     failure_reason: str | None
     confidence: float
@@ -2213,7 +1989,7 @@ class ObjectiveEvidence:
         )
         reported_result_payload = payload.get("reported_result")
         reported_result = (
-            ObjectiveEvidenceResult.from_mapping(reported_result_payload)
+            ScientificResult.from_mapping(reported_result_payload)
             if isinstance(reported_result_payload, Mapping)
             else None
         )
@@ -2247,9 +2023,9 @@ class ObjectiveEvidence:
                 "candidate",
             ),
             selection_reason=_text(payload.get("selection_reason")),
-            changed_variables=_evidence_variables(payload.get("changed_variables")),
+            changed_variables=_scientific_variables(payload.get("changed_variables")),
             comparison=(
-                ObjectiveEvidenceComparison.from_mapping(payload["comparison"])
+                ScientificComparison.from_mapping(payload["comparison"])
                 if isinstance(payload.get("comparison"), Mapping)
                 else None
             ),
@@ -2260,9 +2036,9 @@ class ObjectiveEvidence:
                 "not_attributable",
             ),
             scientific_context=(
-                ObjectiveEvidenceContext.from_mapping(payload["scientific_context"])
+                ScientificContext.from_mapping(payload["scientific_context"])
                 if isinstance(payload.get("scientific_context"), Mapping)
-                else ObjectiveEvidenceContext()
+                else ScientificContext()
             ),
             resolution_status=_choice(
                 payload.get("resolution_status"),
@@ -2874,33 +2650,11 @@ def _objective_derivation_basis(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(records)
 
 
-def _scientific_scalar(value: Any) -> EvidenceScalar | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    return _text(value)
-
-
-def _evidence_attributes(value: Any) -> tuple[ObjectiveEvidenceAttribute, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ObjectiveEvidenceAttribute.from_mapping(item)
-        for item in value
-        if isinstance(item, Mapping)
-    )
-
-
-def _evidence_variables(value: Any) -> tuple[ObjectiveEvidenceVariable, ...]:
+def _scientific_variables(value: Any) -> tuple[ScientificVariable, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     variables = tuple(
-        ObjectiveEvidenceVariable.from_mapping(item)
+        ScientificVariable.from_mapping(item)
         for item in value
         if isinstance(item, Mapping)
     )

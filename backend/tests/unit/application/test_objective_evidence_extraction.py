@@ -37,10 +37,10 @@ from application.core.paper_facts.extraction import TableMatrixRepairModelOutput
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
-    SourceObservation,
-    ObjectiveEvidenceResult,
     PaperResearchMap,
     PreparedDocumentInput,
+    ScientificResult,
+    SourceObservation,
 )
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from httpx import Request, Response
@@ -14440,7 +14440,7 @@ def test_objective_table_records_preserve_measured_and_predicted_result_kinds():
 
 
 def test_predicted_result_cannot_enter_finding_result_sets():
-    result = ObjectiveEvidenceResult.from_mapping(
+    result = ScientificResult.from_mapping(
         {
             "outcome": "yield strength",
             "value": 405,

@@ -56,9 +56,10 @@ These types are parts of a larger record, not separate product concepts:
 
 - `SampleVariant`, `TestCondition`, and `MeasurementResult` belong to a
   `PaperExperiment`.
-- `ObjectiveEvidenceAttribute`, `ObjectiveEvidenceVariable`,
-  `ObjectiveEvidenceComparison`, `ObjectiveEvidenceResult`, and
-  `ObjectiveEvidenceContext` describe parts of one `ObjectiveEvidence`.
+- `ScientificAttribute`, `ScientificVariable`, `ScientificComparison`,
+  `ScientificResult`, and `ScientificContext` are shared scientific-fact value
+  objects used by `SourceObservation`, `ObjectiveEvidence`, and, where
+  applicable, `Finding`. They do not belong to the Evidence lifecycle.
 - `InspectedObjectiveSourceRef` records which canonical Sources were inspected
   while accounting for one `PaperContribution`.
 
@@ -93,8 +94,8 @@ standalone paper entity.
 - `PaperExperiment.comparison_status()` checks two measurement identities and
   returns `comparable`, `non_comparable`, or `insufficient_context` for internal
   diagnostics.
-- `ObjectiveEvidenceComparison` carries the formal comparison content that can
-  enter downstream Evidence and Finding decisions.
+- `ScientificComparison` carries the source-supported comparison content that
+  can enter downstream Evidence and Finding decisions.
 
 The internal status check is deliberately not another persisted
 `ExperimentComparison` object. Source lineage already lives on observations,

@@ -22,7 +22,6 @@ from application.core.objectives import property_matching
 from application.source.collection_service import CollectionService
 from domain.core import (
     EVIDENCE_ATTRIBUTION_SCOPES,
-    EVIDENCE_RESULT_DIRECTIONS,
     EVIDENCE_ROLE_VALUES,
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -31,6 +30,7 @@ from domain.core import (
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
+    SCIENTIFIC_RESULT_DIRECTIONS,
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.objective_repository import ObjectiveRepository
@@ -338,7 +338,7 @@ class AgentObjectiveAnalysisService:
                 direction = self._required_text(
                     reported_result.get("direction"), "reported result direction"
                 )
-                if direction not in EVIDENCE_RESULT_DIRECTIONS:
+                if direction not in SCIENTIFIC_RESULT_DIRECTIONS:
                     raise ValueError(
                         f"unsupported Evidence result direction: {direction}"
                     )

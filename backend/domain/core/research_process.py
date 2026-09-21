@@ -17,12 +17,12 @@ from domain.core.evidence_backbone import (
     SampleVariant,
     TestCondition,
 )
-from domain.core.research_objective import (
-    ObjectiveEvidenceComparison,
-    ObjectiveEvidenceContext,
-    ObjectiveEvidenceResult,
-    ObjectiveEvidenceVariable,
-    ResearchObjective,
+from domain.core.research_objective import ResearchObjective
+from domain.core.scientific_fact import (
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
 )
 
 SOURCE_OBSERVATION_STATUSES: Final[frozenset[str]] = frozenset(
@@ -54,12 +54,10 @@ class SourceObservation:
     attribution_scope: str = "not_attributable"
     resolution_status: str = "unknown"
     failure_reason: str | None = None
-    changed_variables: tuple[ObjectiveEvidenceVariable, ...] = ()
-    comparison: ObjectiveEvidenceComparison | None = None
-    reported_result: ObjectiveEvidenceResult | None = None
-    scientific_context: ObjectiveEvidenceContext = field(
-        default_factory=ObjectiveEvidenceContext
-    )
+    changed_variables: tuple[ScientificVariable, ...] = ()
+    comparison: ScientificComparison | None = None
+    reported_result: ScientificResult | None = None
+    scientific_context: ScientificContext = field(default_factory=ScientificContext)
     status: str = "unvalidated"
     source_refs: tuple[dict[str, Any], ...] = ()
     derived_from_observation_ids: tuple[str, ...] = ()
@@ -152,24 +150,24 @@ class SourceObservation:
             ).strip(),
             source_excerpt=source_excerpt,
             changed_variables=tuple(
-                ObjectiveEvidenceVariable.from_mapping(item)
+                ScientificVariable.from_mapping(item)
                 for item in payload.get("changed_variables") or ()
                 if isinstance(item, Mapping)
             ),
             comparison=(
-                ObjectiveEvidenceComparison.from_mapping(payload["comparison"])
+                ScientificComparison.from_mapping(payload["comparison"])
                 if isinstance(payload.get("comparison"), Mapping)
                 else None
             ),
             reported_result=(
-                ObjectiveEvidenceResult.from_mapping(payload["reported_result"])
+                ScientificResult.from_mapping(payload["reported_result"])
                 if isinstance(payload.get("reported_result"), Mapping)
                 else None
             ),
             scientific_context=(
-                ObjectiveEvidenceContext.from_mapping(payload["scientific_context"])
+                ScientificContext.from_mapping(payload["scientific_context"])
                 if isinstance(payload.get("scientific_context"), Mapping)
-                else ObjectiveEvidenceContext()
+                else ScientificContext()
             ),
             confidence=float(payload.get("confidence") or 0),
             selection_status=selection_status,

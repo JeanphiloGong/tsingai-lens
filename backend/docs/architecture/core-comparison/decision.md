@@ -26,8 +26,8 @@ identity.
 
 - `ObjectiveEvidence` records one versioned, Source-grounded fact relevant to
   a confirmed research question.
-- `ObjectiveEvidenceComparison` records whether that Evidence contains a
-  grounded within-paper comparison and the limits of that comparison.
+- `ScientificComparison` records a grounded within-paper comparison and its
+  limits as a shared value inside Source observations and formal Evidence.
 - `Finding` records the published cross-paper conclusion and its uncertainty.
 
 Published Finding and ObjectiveEvidence records are the evaluation and export

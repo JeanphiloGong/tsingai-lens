@@ -12,7 +12,7 @@ from application.chat.capabilities.contracts import (
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from domain.core import Finding
-from domain.core.research_objective import EVIDENCE_RESULT_DIRECTIONS
+from domain.core.scientific_fact import SCIENTIFIC_RESULT_DIRECTIONS
 
 
 ReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
@@ -72,7 +72,8 @@ class CurateFindingArguments(BaseModel):
             "source_analysis_version, parent_finding_id, created_by_user_id, and "
             "created_by_tool_call_id. Preserve canonical field names and value types; "
             "for example use `limitations` (plural), and keep numeric values numeric. "
-            "direction must be one of " + ", ".join(sorted(EVIDENCE_RESULT_DIRECTIONS))
+            "direction must be one of "
+            + ", ".join(sorted(SCIENTIFIC_RESULT_DIRECTIONS))
             + ". For a verified rise-then-fall trend, use mixed and describe the "
             "treatment levels and comparators in statement; non-monotonic is not "
             "a valid direction value. "
@@ -86,10 +87,13 @@ class CurateFindingArguments(BaseModel):
     @model_validator(mode="after")
     def _validate_complete_finding(self) -> "CurateFindingArguments":
         direction = self.curated_finding.get("direction")
-        if not isinstance(direction, str) or direction not in EVIDENCE_RESULT_DIRECTIONS:
+        if (
+            not isinstance(direction, str)
+            or direction not in SCIENTIFIC_RESULT_DIRECTIONS
+        ):
             raise ValueError(
                 "curated_finding.direction must be one of: "
-                + ", ".join(sorted(EVIDENCE_RESULT_DIRECTIONS))
+                + ", ".join(sorted(SCIENTIFIC_RESULT_DIRECTIONS))
             )
         candidate = Finding.from_mapping(self.curated_finding)
         self._parsed_finding = candidate

@@ -9,12 +9,14 @@ from typing import Any, Final, Mapping
 
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
-    EVIDENCE_RESULT_DIRECTIONS,
     PAPER_CONTRIBUTION_STATUSES,
     ObjectiveEvidence,
-    ObjectiveEvidenceAttribute,
-    ObjectiveEvidenceContext,
     PaperContribution,
+)
+from domain.core.scientific_fact import (
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificContext,
 )
 
 
@@ -199,7 +201,7 @@ class Finding:
     certainty: float
     display_rank: int
     mechanisms: tuple[FindingMechanismRelation, ...]
-    scientific_context: ObjectiveEvidenceContext
+    scientific_context: ScientificContext
     limitations: tuple[str, ...]
     paper_contributions: tuple[FindingPaperContribution, ...]
     origin: str = "system_generated"
@@ -235,7 +237,7 @@ class Finding:
             set(factor_keys)
         ):
             raise ValueError("finding factors must be non-empty and unique")
-        if self.direction not in EVIDENCE_RESULT_DIRECTIONS:
+        if self.direction not in SCIENTIFIC_RESULT_DIRECTIONS:
             raise ValueError(f"unsupported finding direction: {self.direction}")
         if self.assertion_strength not in FINDING_ASSERTION_STRENGTHS:
             raise ValueError(
@@ -427,7 +429,7 @@ class Finding:
             factors=factors,
             outcome=outcome,
             direction=_choice(
-                payload.get("direction"), EVIDENCE_RESULT_DIRECTIONS, "unknown"
+                payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
             ),
             assertion_strength=_choice(
                 payload.get("assertion_strength"),
@@ -451,7 +453,7 @@ class Finding:
                 for item in _mapping_list(payload.get("mechanisms"))
             ),
             scientific_context=(
-                ObjectiveEvidenceContext.from_mapping(
+                ScientificContext.from_mapping(
                     _mapping(payload.get("scientific_context"))
                 )
             ),
@@ -530,9 +532,9 @@ class Finding:
         supporting_evidence: tuple[ObjectiveEvidence, ...],
         *,
         excluded_factors: tuple[str, ...] = (),
-    ) -> ObjectiveEvidenceContext:
+    ) -> ScientificContext:
         if not supporting_evidence:
-            return ObjectiveEvidenceContext()
+            return ScientificContext()
         excluded_names = {
             _normalize_term(value)
             for value in (
@@ -544,7 +546,7 @@ class Finding:
                 ),
             )
         }
-        return ObjectiveEvidenceContext(
+        return ScientificContext(
             material=_common_attributes(
                 supporting_evidence,
                 "material",
@@ -761,7 +763,7 @@ def _common_attributes(
     category: str,
     *,
     excluded_names: set[str] | frozenset[str] = frozenset(),
-) -> tuple[ObjectiveEvidenceAttribute, ...]:
+) -> tuple[ScientificAttribute, ...]:
     first = tuple(
         item
         for item in getattr(evidence_records[0].scientific_context, category)
@@ -777,7 +779,7 @@ def _common_attributes(
     return tuple(item for item in first if _attribute_key(item) in common_keys)
 
 
-def _attribute_key(attribute: ObjectiveEvidenceAttribute) -> tuple[str, str, str]:
+def _attribute_key(attribute: ScientificAttribute) -> tuple[str, str, str]:
     return (
         _normalize_term(attribute.name),
         _stable_text(attribute.value),

@@ -29,9 +29,9 @@ from domain.core import (
     FindingPaperContribution,
     ObjectiveAnalysis,
     ObjectiveEvidence,
-    ObjectiveEvidenceContext,
     PaperContribution,
     ResearchObjective,
+    ScientificContext,
     directions_contradict,
 )
 
@@ -3237,7 +3237,7 @@ class FindingSynthesisService:
         outcome: str,
         direction: str,
         comparison_interval: str,
-        common_context: ObjectiveEvidenceContext,
+        common_context: ScientificContext,
         condition_context: list[dict[str, Any]],
         supporting_evidence: tuple[ObjectiveEvidence, ...],
         contradicting_evidence: tuple[ObjectiveEvidence, ...],
@@ -3433,7 +3433,7 @@ class FindingSynthesisService:
         )
 
     @staticmethod
-    def _finding_context_prefix(context: ObjectiveEvidenceContext) -> str:
+    def _finding_context_prefix(context: ScientificContext) -> str:
         material_values = tuple(
             dict.fromkeys(str(item.value).strip() for item in context.material)
         )

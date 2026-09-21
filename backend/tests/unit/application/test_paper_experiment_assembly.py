@@ -24,9 +24,9 @@ from application.core.objectives.analysis.source_extraction import (
 )
 from domain.core import (
     ObjectiveAnalysis,
-    ObjectiveEvidenceAttribute,
     PreparedDocumentInput,
     ResearchObjective,
+    ScientificAttribute,
 )
 from domain.source import SourceTable
 
@@ -386,7 +386,7 @@ def test_p004_treatment_states_and_source_disagreement_are_not_pooled() -> None:
             raw.scientific_context,
             sample=(
                 *raw.scientific_context.sample,
-                ObjectiveEvidenceAttribute("state", "as-SLM"),
+                ScientificAttribute("state", "as-SLM"),
             ),
         ),
     )
@@ -396,7 +396,7 @@ def test_p004_treatment_states_and_source_disagreement_are_not_pooled() -> None:
             ht.scientific_context,
             sample=(
                 *ht.scientific_context.sample,
-                ObjectiveEvidenceAttribute("state", "HT-SLM"),
+                ScientificAttribute("state", "HT-SLM"),
             ),
         ),
     )
@@ -456,7 +456,7 @@ def test_unreported_test_field_is_missing_context_not_a_conflicting_test() -> No
             right.scientific_context,
             test=(
                 *right.scientific_context.test,
-                ObjectiveEvidenceAttribute("temperature", 25, "C"),
+                ScientificAttribute("temperature", 25, "C"),
             ),
         ),
     )

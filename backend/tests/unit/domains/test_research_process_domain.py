@@ -2,7 +2,90 @@ from __future__ import annotations
 
 import pytest
 
-from domain.core import MeasurementResult, PaperExperiment, SourceObservation
+import domain.core as core_domain
+from domain.core import (
+    MeasurementResult,
+    ObjectiveEvidence,
+    PaperExperiment,
+    SourceObservation,
+)
+
+
+def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None:
+    scientific_variable = getattr(core_domain, "ScientificVariable")
+    scientific_comparison = getattr(core_domain, "ScientificComparison")
+    scientific_result = getattr(core_domain, "ScientificResult")
+    scientific_context = getattr(core_domain, "ScientificContext")
+    payload = {
+        "collection_id": "col-1",
+        "objective_id": "obj-1",
+        "document_id": "doc-1",
+        "source_kind": "table",
+        "source_ref": "table-2",
+        "source_excerpt": "P150 elongation increased from 72% to 82%.",
+        "changed_variables": [
+            {
+                "name": "platform preheating",
+                "baseline_value": "NP",
+                "target_value": "P150",
+            }
+        ],
+        "comparison": {
+            "baseline_label": "NP",
+            "target_label": "P150",
+            "axis_names": ["platform preheating"],
+            "comparable": True,
+        },
+        "reported_result": {
+            "outcome": "elongation",
+            "baseline_value": 72,
+            "target_value": 82,
+            "value": 82,
+            "unit": "%",
+            "direction": "increase",
+            "result_text": "P150 elongation increased from 72% to 82%.",
+        },
+        "scientific_context": {
+            "material": [{"name": "alloy", "value": "316L"}],
+            "test": [{"name": "method", "value": "tensile test"}],
+        },
+        "confidence": 0.9,
+    }
+
+    observation = SourceObservation.from_mapping(
+        {
+            **payload,
+            "observation_id": "obs-1",
+            "observation_role": "direct_result",
+            "status": "validated",
+        }
+    )
+    evidence = ObjectiveEvidence.from_mapping(
+        {
+            **payload,
+            "analysis_version": 1,
+            "evidence_id": "evd-1",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "attribution_scope": "isolated_effect",
+            "resolution_status": "resolved",
+        }
+    )
+
+    for scientific_record in (observation, evidence):
+        assert isinstance(scientific_record.changed_variables[0], scientific_variable)
+        assert isinstance(scientific_record.comparison, scientific_comparison)
+        assert isinstance(scientific_record.reported_result, scientific_result)
+        assert isinstance(scientific_record.scientific_context, scientific_context)
+
+    for evidence_owned_name in (
+        "ObjectiveEvidenceAttribute",
+        "ObjectiveEvidenceVariable",
+        "ObjectiveEvidenceComparison",
+        "ObjectiveEvidenceResult",
+        "ObjectiveEvidenceContext",
+    ):
+        assert not hasattr(core_domain, evidence_owned_name)
 
 
 def test_source_observation_ignores_legacy_anchor_ids() -> None:

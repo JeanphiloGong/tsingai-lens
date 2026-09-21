@@ -7,6 +7,11 @@ Benchmark and probe scripts live under [`benchmarks/`](benchmarks/). Keep
 general local debugging helpers at this level instead of adding them to the
 benchmark-only directory.
 
+The PaperExperiment live chain acceptance probe is maintained at
+[`benchmarks/paper_experiment_chain_probe.py`](benchmarks/paper_experiment_chain_probe.py).
+It is opt-in because it uses a real PDF and an online model; see the benchmark
+README for its runtime contract and invocation.
+
 ## Expert Gold Evaluation
 
 Use [`evaluation/expert_gold/`](evaluation/expert_gold/) for offline utilities

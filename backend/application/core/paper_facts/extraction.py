@@ -59,7 +59,7 @@ class TableMatrixRepairModelOutput(BaseModel):
         return 0.0 if value is None else value
 
 
-PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v6"
+PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v7"
 
 _TABLE_MATRIX_REPAIR_SYSTEM_PROMPT = """
 You are repairing parsed table structure for a materials-literature backend.
@@ -115,9 +115,12 @@ def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "4. Reassemble only supported fragments. If supplied views conflict "
         "or remain incomplete, keep the unresolved cells and add a warning.\n\n"
         "Preservation rules:\n"
-        "`repaired_table_matrix` must contain that header followed by every logical "
+        "`repaired_table_matrix` must contain one logical header followed by every logical "
         "data row in the Markdown, in the same order and with the same logical "
-        "columns. Do not add, reorder, summarize, or truncate logical data rows. "
+        "columns. The flattened header is not authoritative when adjacent header "
+        "fragments are visibly shifted or split: reconstruct the same fixed number "
+        "of logical columns from `table_visual_text`, and record the header repair. "
+        "Do not add, reorder, summarize, or truncate logical data rows. "
         "A final row containing only a carried specimen-label fragment and a "
         "carried uncertainty fragment may be merged into the preceding logical row "
         "and omitted; record that merge in `repairs`.\n"

@@ -40,7 +40,7 @@ they are not promoted into standalone `BaselineReference` records.
 | Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> source observations | When deterministic extraction is insufficient | None |
 | Ground | `source_validation.validate_source_fact` | One source observation and its exact Source -> validated, uncertain, or rejected observation | No | None |
 | Bind | `paper_experiment.reconstruct_paper_experiments` / `assemble_paper_experiments` | Same-paper facts -> scoped `PaperExperiment` records with measurement links and derived-observation lineage | No | None |
-| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` Source observations plus application `SourceReadAudit` records -> Evidence and contribution records | No | None; caller stores records |
+| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` aggregates plus application `SourceReadAudit` records -> Evidence and contribution records | No | None; caller stores records |
 | Compare | `finding_synthesis.FindingSynthesisService.synthesize` | Paper contributions and Evidence -> Findings | Optional assertion judge | None; caller publishes |
 
 Extraction and grounding alternate per Source, not as two collection-wide
@@ -61,8 +61,10 @@ not a persisted record or grounded Evidence.
 
 - [`table_repair.py`](table_repair.py): `repair_table_source()` restores a
   parser-fragmented table, with unchanged row-label, token, and numeric-sequence
-  checks. It returns the original or verified Source and any repair error.
-  Its optional model call is layout recovery, not scientific fact extraction.
+  checks. If the first result is empty, leaves the fragmented matrix unchanged,
+  or remains structurally fragmented, it makes one validation-informed layout
+  retry. A second invalid result is a technical Source failure, not scientific
+  absence. The optional model calls recover layout; they do not extract facts.
 - [`source_text.py`](source_text.py): numeric text parsing shared by table
   checks and Source inspection; no model or persistence.
 - [`../llm/structured_response.py`](../llm/structured_response.py): provider

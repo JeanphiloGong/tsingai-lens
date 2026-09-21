@@ -130,6 +130,20 @@ _OBJECTIVE_MEASURED_RESULT_TERMS = (
     "measurement",
     "observed",
 )
+# Compact symbols are common in additive-manufacturing tables, but they are
+# not universal process names.  Resolve them only when the same Source is
+# visibly an SLM/LPBF parameter table with the corresponding units.
+_SLM_PROCESS_PARAMETER_COLUMNS = {
+    ("p", "w"): "laser power",
+    ("d", "mm"): "layer thickness",
+    ("v", "mm/s"): "scanning speed",
+    ("h", "mm"): "hatch spacing",
+}
+_SLM_PROCESS_CONTEXT_PATTERN = re.compile(
+    r"\b(?:SLM|LPBF|PBF-L|selective\s+laser\s+melting|"
+    r"laser\s+powder[-\s]bed\s+fusion)\b",
+    flags=re.IGNORECASE,
+)
 _GROUP_LABEL_PATTERN = re.compile(
     r"\b(?:sample|specimen|group|condition)\s*[A-Za-z]?\d+\b|\b[A-Z]{1,3}\d+\b"
 )
@@ -3592,7 +3606,14 @@ def _objective_missing_context_fields(
     )
     if not has_fixed_process_context:
         missing.add("process")
-    if not unit.scientific_context.test:
+    if unit.reported_result is None:
+        if not unit.scientific_context.test:
+            missing.add("test")
+    elif not property_matching.applicable_test_context_attributes(
+        unit.scientific_context.test,
+        unit.reported_result.outcome,
+        reference_attributes=unit.scientific_context.material,
+    ):
         missing.add("test")
     return frozenset(missing)
 
@@ -3600,25 +3621,23 @@ def _objective_missing_context_fields(
 def _objective_test_context_applies_to_outcome(
     attribute: Any,
     outcome: str,
+    *,
+    context_attributes: Iterable[Any] = (),
+    reference_attributes: Iterable[Any] = (),
 ) -> bool:
-    """Return whether a Source explicitly assigns one test fact to an outcome."""
+    """Return whether one test fact is usable for a result outcome.
 
-    raw_outcomes = (
-        attribute.get("applies_to_outcomes", ())
-        if isinstance(attribute, Mapping)
-        else getattr(attribute, "applies_to_outcomes", ())
-    )
-    applies_to_outcomes = tuple(
-        str(value).strip()
-        for value in raw_outcomes
-        if str(value).strip()
-    )
-    return bool(
-        applies_to_outcomes
-        and property_matching.outcome_matches_objective_scope(
-            outcome,
-            applies_to_outcomes,
-        )
+    Keep this small compatibility helper at the extraction boundary while the
+    shared applicability rule lives in ``property_matching``. Callers that
+    have the full Source context should pass it so source-local aliases such as
+    ``sample density`` can be checked against their normalization fact.
+    """
+
+    return property_matching.test_context_attribute_applies_to_outcome(
+        attribute,
+        outcome,
+        context_attributes=context_attributes,
+        reference_attributes=reference_attributes,
     )
 
 
@@ -3955,11 +3974,28 @@ def _objective_context_bundle_can_bind_result(
         tuple[str, str],
         set[tuple[str, str]],
     ] = {}
+    document_test_attributes = tuple(
+        attribute
+        for context in document_context
+        for attribute in context.scientific_context.test
+    )
+    document_reference_attributes = tuple(
+        attribute
+        for context in document_context
+        for attribute in context.scientific_context.material
+    )
     for context in document_context:
         for section in ("process", "test"):
             for attribute in getattr(context.scientific_context, section):
                 if section == "process" and not _objective_attribute_is_experimental_context(
                     attribute
+                ):
+                    continue
+                if section == "test" and not property_matching.test_context_attribute_applies_to_outcome(
+                    attribute,
+                    unit.reported_result.outcome,
+                    context_attributes=document_test_attributes,
+                    reference_attributes=document_reference_attributes,
                 ):
                     continue
                 name = (
@@ -3989,11 +4025,28 @@ def _objective_context_bundle_can_bind_result(
         group_values: dict[str, dict[tuple[str, str], set[tuple[str, str]]]] = {}
         for label, contexts in group_context.items():
             values: dict[tuple[str, str], set[tuple[str, str]]] = {}
+            group_test_attributes = tuple(
+                attribute
+                for context in contexts
+                for attribute in context.scientific_context.test
+            )
+            group_reference_attributes = tuple(
+                attribute
+                for context in contexts
+                for attribute in context.scientific_context.material
+            )
             for context in contexts:
                 for section in ("process", "test"):
                     for attribute in getattr(context.scientific_context, section):
                         if section == "process" and not _objective_attribute_is_experimental_context(
                             attribute
+                        ):
+                            continue
+                        if section == "test" and not property_matching.test_context_attribute_applies_to_outcome(
+                            attribute,
+                            unit.reported_result.outcome,
+                            context_attributes=group_test_attributes,
+                            reference_attributes=group_reference_attributes,
                         ):
                             continue
                         name = (
@@ -4918,6 +4971,7 @@ def _objective_result_table_matrix_records(
         return ()
 
     records: list[dict[str, Any]] = []
+    inherited_strategy: str | None = None
     for row_index, row in data_rows:
         row_values = _objective_table_row_values(headers=headers, row=row)
         row_attributes = _objective_table_row_attributes(
@@ -4926,6 +4980,10 @@ def _objective_result_table_matrix_records(
             row_values=row_values,
             result_columns=result_columns,
             objective_context=objective_context,
+            inherited_strategy=inherited_strategy,
+        )
+        inherited_strategy = (
+            row_attributes["sample"].get("strategy") or inherited_strategy
         )
         if _objective_result_table_row_is_reference_context(
             route=route,
@@ -5069,6 +5127,7 @@ def _objective_process_table_matrix_records(
             )
         )
     records: list[dict[str, Any]] = []
+    inherited_strategy: str | None = None
     for row_index, row in data_rows:
         row_values = _objective_table_row_values(headers=headers, row=row)
         row_attributes = _objective_table_row_attributes(
@@ -5077,6 +5136,10 @@ def _objective_process_table_matrix_records(
             row_values=row_values,
             result_columns=result_columns,
             objective_context=objective_context,
+            inherited_strategy=inherited_strategy,
+        )
+        inherited_strategy = (
+            row_attributes["sample"].get("strategy") or inherited_strategy
         )
         row_attributes = _objective_table_row_attributes_with_sample_number(
             row_attributes=row_attributes,
@@ -5170,6 +5233,7 @@ def _objective_table_row_attributes(
     row_values: dict[str, str],
     result_columns: set[str],
     objective_context: ResearchObjective | None,
+    inherited_strategy: str | None = None,
 ) -> dict[str, dict[str, str]]:
     material_attributes: dict[str, str] = {}
     sample_attributes: dict[str, str] = {}
@@ -5178,10 +5242,17 @@ def _objective_table_row_attributes(
     for column, value in row_values.items():
         role = str(route.column_roles.get(column) or "").lower()
         column_key = _objective_column_key(column)
+        strategy_sample_attributes = _objective_strategy_sample_attributes(
+            column_key=column_key,
+            value=value,
+            inherited_strategy=inherited_strategy,
+            source=source,
+        )
         process_attribute_label = _objective_process_attribute_label(
             column=column,
             role=role,
             objective_context=objective_context,
+            source=source,
         )
         is_objective_condition_axis = bool(
             objective_context is not None
@@ -5189,13 +5260,13 @@ def _objective_table_row_attributes(
             and process_attribute_label != column
         )
         is_source_symbol_axis = bool(
-            property_matching.process_column_axis_keys(column)
+            _objective_table_process_axis_keys(column=column, source=source)
         )
         is_objective_symbol_axis = bool(
             objective_context is not None
             and column not in result_columns
             and not _objective_value_column_is_non_result(column)
-            and property_matching.process_column_axis_keys(column)
+            and _objective_table_process_axis_keys(column=column, source=source)
             and _objective_label_matches_variables(
                 column,
                 objective_context=objective_context,
@@ -5208,7 +5279,9 @@ def _objective_table_row_attributes(
             caption=str(source.get("caption_text") or ""),
             objective_context=objective_context,
         )
-        if compound_label_attributes is not None:
+        if strategy_sample_attributes is not None:
+            sample_attributes.update(strategy_sample_attributes)
+        elif compound_label_attributes is not None:
             for context_name, attributes in compound_label_attributes.items():
                 {
                     "material": material_attributes,
@@ -5243,6 +5316,7 @@ def _objective_table_row_attributes(
                     column=column,
                     role=role,
                     objective_context=objective_context,
+                    source=source,
                 )
             ] = value
         elif (
@@ -5269,6 +5343,132 @@ def _objective_table_row_attributes(
         "process": process_attributes,
         "test": test_attributes,
     }
+
+
+def _objective_strategy_sample_attributes(
+    *,
+    column_key: str,
+    value: Any,
+    inherited_strategy: str | None = None,
+    source: Mapping[str, Any] | None = None,
+) -> dict[str, str] | None:
+    """Split a source-local strategy group from its sample label.
+
+    Additive-manufacturing papers often print a strategy once and carry it
+    down a table (``Speed S1``, ``S``), while PDF layout extraction may remove
+    the spanning label or join it to the sample (``IntermediateM1``).  The
+    split is deliberately limited to a Strategies column and the same source
+    table; it never invents a strategy from a generic sample identifier.
+    """
+    if column_key not in {"strategies", "strategy"}:
+        return None
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None
+
+    explicit = re.fullmatch(
+        r"(?P<strategy>[A-Za-z][A-Za-z -]*[A-Za-z])\s+"
+        r"(?P<sample>[A-Za-z][A-Za-z0-9._-]*)",
+        text,
+    )
+    if explicit is not None:
+        return {
+            "strategy": explicit.group("strategy"),
+            "sample": explicit.group("sample"),
+        }
+
+    if source is None or not _objective_source_is_slm_parameter_table(source):
+        return None
+
+    compact_text = re.sub(r"\s+", "", text)
+    compact_folded = compact_text.casefold()
+    for candidate in sorted(
+        _objective_strategy_candidates(source),
+        key=lambda item: len(re.sub(r"\s+", "", item)),
+        reverse=True,
+    ):
+        compact_candidate = re.sub(r"\s+", "", candidate)
+        if not compact_candidate or not compact_folded.startswith(
+            compact_candidate.casefold()
+        ):
+            continue
+        sample = compact_text[len(compact_candidate) :]
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]*", sample):
+            return {"strategy": candidate, "sample": sample}
+
+    # A bare label can inherit only an already observed strategy from this
+    # source-local table. The SLM gate prevents this rule from leaking into
+    # unrelated tables where a single letter could be a real condition.
+    if inherited_strategy and re.fullmatch(
+        r"[A-Za-z][A-Za-z0-9._-]*", text
+    ):
+        # A lower-to-upper transition is evidence that the parser may have
+        # collapsed a *new* compound group (for example ``AnnealedA1``).
+        # Never silently carry the previous group across that boundary when
+        # this Source cannot independently support the prefix.
+        if re.search(r"[a-z][A-Z]", text):
+            return None
+        return {"strategy": inherited_strategy, "sample": text}
+    return None
+
+
+def _objective_strategy_candidates(source: Mapping[str, Any]) -> set[str]:
+    """Collect explicit strategy prefixes visible in the same Source."""
+    candidates: set[str] = set()
+    labels = [
+        str(row[0] or "")
+        for row in normalize_table_matrix(source.get("table_matrix"))
+        if row and str(row[0] or "").strip()
+    ]
+    labels.extend(
+        str(line or "")
+        for line in str(source.get("table_visual_text") or "").splitlines()
+    )
+    normalized_labels = [" ".join(label.split()) for label in labels]
+    for label in normalized_labels:
+        match = re.fullmatch(
+            r"(?P<strategy>[A-Za-z][A-Za-z -]*[A-Za-z])\s+"
+            r"(?P<sample>[A-Z][A-Za-z0-9._-]*)",
+            label,
+        )
+        if match is not None:
+            candidates.add(match.group("strategy"))
+
+    # A PDF extractor may collapse a spanning group label into a compound
+    # value (``IntermediateM1``). Infer a prefix only at a visible camel-case
+    # boundary and require another row with the same sample stem. This is a
+    # source-local structural inference, not a global list of strategy names.
+    compact_labels = [
+        re.sub(r"\s+", "", label)
+        for label in normalized_labels
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]*", re.sub(r"\s+", "", label))
+    ]
+    for label in compact_labels:
+        for split in range(3, len(label) - 1):
+            prefix = label[:split]
+            sample = label[split:]
+            if not re.fullmatch(r"[A-Za-z][a-z -]*", prefix):
+                continue
+            if not re.fullmatch(r"[A-Z][A-Za-z0-9._-]*", sample):
+                continue
+            sample_stem_match = re.match(r"([A-Za-z]+)", sample)
+            if sample_stem_match is None:
+                continue
+            sample_stem = sample_stem_match.group(1).casefold()
+            peer_count = sum(
+                1
+                for other in compact_labels
+                if other != label
+                and re.fullmatch(
+                    rf"{re.escape(sample_stem)}[A-Za-z0-9._-]*",
+                    other,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if peer_count:
+                candidates.add(prefix)
+                break
+    return candidates
 
 
 def _objective_table_context_attribute_records(
@@ -5448,6 +5648,7 @@ def _objective_process_attribute_label(
     column: str,
     role: str,
     objective_context: ResearchObjective | None,
+    source: Mapping[str, Any] | None = None,
 ) -> str:
     if objective_context is not None:
         condition_axes = tuple(
@@ -5458,7 +5659,10 @@ def _objective_process_attribute_label(
         )
         if len(condition_axes) == 1:
             return condition_axes[0]
-        symbol_axes = property_matching.process_column_axis_keys(column)
+        symbol_axes = _objective_table_process_axis_keys(
+            column=column,
+            source=source,
+        )
         # Some source abbreviations intentionally map to several possible
         # process names (for example ``VED`` can mean volumetric energy
         # density or the broader energy-density family).  Resolve that
@@ -5494,6 +5698,58 @@ def _objective_process_attribute_label(
     ):
         return role_label
     return column
+
+
+def _objective_table_process_axis_keys(
+    *,
+    column: Any,
+    source: Mapping[str, Any] | None,
+) -> set[str]:
+    """Resolve compact process symbols only in a source-supported SLM table."""
+    known_axes = property_matching.process_column_axis_keys(column)
+    if known_axes or source is None:
+        return known_axes
+    property_name, unit = _split_property_unit(str(column or ""))
+    axis = _SLM_PROCESS_PARAMETER_COLUMNS.get(
+        (
+            " ".join(property_name.split()).casefold(),
+            re.sub(r"\s+", "", str(unit or "")).casefold(),
+        )
+    )
+    if axis is None or not _objective_source_is_slm_parameter_table(source):
+        return set()
+    return {axis}
+
+
+def _objective_source_is_slm_parameter_table(
+    source: Mapping[str, Any],
+) -> bool:
+    """Require all compact SLM axes and an explicit SLM/LPBF source context."""
+    headers = tuple(
+        str(header or "").strip()
+        for header in source.get("column_headers", ())
+        if str(header or "").strip()
+    )
+    header_keys = {
+        (
+            " ".join(property_name.split()).casefold(),
+            re.sub(r"\s+", "", str(unit or "")).casefold(),
+        )
+        for header in headers
+        for property_name, unit in (_split_property_unit(header),)
+    }
+    if not set(_SLM_PROCESS_PARAMETER_COLUMNS).issubset(header_keys):
+        return False
+    context_parts = [
+        str(source.get("caption_text") or ""),
+        str(source.get("heading_path") or ""),
+    ]
+    context_parts.extend(
+        str(item.get("text") or "")
+        for item in source.get("table_reading_context", ())
+        if isinstance(item, Mapping)
+    )
+    return bool(_SLM_PROCESS_CONTEXT_PATTERN.search(" ".join(context_parts)))
 
 
 def _objective_table_column_is_process_attribute(

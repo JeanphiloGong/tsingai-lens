@@ -283,16 +283,11 @@ def repair_table_source(
             source=repair_source,
             paper_facts_extractor=paper_facts_extractor,
         )
-        parsed_repair_items = []
-        for repair_payload in repair_payloads:
-            model_request_count += 1
-            parsed_repair_items.append(
-                (
-                    repair_payload,
-                    paper_facts_extractor.repair_table_matrix(repair_payload),
-                )
-            )
-        parsed_repairs = tuple(parsed_repair_items)
+        model_request_count += len(repair_payloads)
+        parsed_repairs = _request_objective_table_matrix_repairs(
+            repair_payloads=repair_payloads,
+            paper_facts_extractor=paper_facts_extractor,
+        )
     except Exception as exc:
         logger.exception(
             "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
@@ -305,38 +300,97 @@ def repair_table_source(
         record_trace("provider_failed", f"{exc.__class__.__name__}: {exc}")
         return source, exc
 
-    repair_records = []
-    for repair_payload, parsed in parsed_repairs:
-        repairs = getattr(parsed, "repairs", None)
-        if repairs:
-            row_offset = int(
-                repair_payload["source"]["table_slice"]["first_source_row_index"]
-            )
-            for repair_item in repairs:
-                repair_record = (
-                    repair_item.model_dump()
-                    if hasattr(repair_item, "model_dump")
-                    else dict(repair_item)
-                )
-                if repair_record.get("row_index") is not None:
-                    repair_record["row_index"] = (
-                        int(repair_record["row_index"]) + row_offset - 1
-                    )
-                repair_records.append(repair_record)
-        warnings.extend(
-            str(warning)
-            for warning in getattr(parsed, "warnings", None) or ()
-            if str(warning).strip()
-        )
-    model_repair_count = len(repair_records)
     repaired_matrix = _merge_objective_table_matrix_repairs(
         source=source,
         canonical_matrix=canonical_matrix,
         parsed_repairs=parsed_repairs,
     )
     model_row_count = len(repaired_matrix)
-    if not repaired_matrix:
-        reason = "table matrix repair returned no usable matrix"
+    repaired_matrix, residual_repairs = (
+        _cleanup_objective_repaired_table_matrix_residual_fragments(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
+            column_headers=repaired_matrix[0] if repaired_matrix else (),
+        )
+    )
+    repaired_matrix, uncertainty_repairs = (
+        _rebind_objective_table_mean_uncertainty_columns(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
+            column_headers=repaired_matrix[0] if repaired_matrix else (),
+        )
+    )
+    structural_failure = _objective_table_repair_structural_failure(
+        canonical_matrix=canonical_matrix,
+        repaired_matrix=repaired_matrix,
+    )
+    if structural_failure:
+        retry_payloads = tuple(
+            {
+                **repair_payload,
+                "repair_focus": [
+                    *repair_payload.get("repair_focus", ()),
+                    f"previous output failed validation: {structural_failure}",
+                    (
+                        "repair every source-supported fragmented header or cell; "
+                        "do not return the rejected flattened structure unchanged"
+                    ),
+                ],
+            }
+            for repair_payload in repair_payloads
+        )
+        try:
+            model_request_count += len(retry_payloads)
+            parsed_repairs = _request_objective_table_matrix_repairs(
+                repair_payloads=retry_payloads,
+                paper_facts_extractor=paper_facts_extractor,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Research objective table matrix repair retry failed "
+                "collection_id=%s objective_id=%s document_id=%s source_ref=%s",
+                collection_id,
+                route.objective_id,
+                route.document_id,
+                route.source_ref,
+            )
+            record_trace("provider_failed", f"{exc.__class__.__name__}: {exc}")
+            return source, exc
+        repaired_matrix = _merge_objective_table_matrix_repairs(
+            source=source,
+            canonical_matrix=canonical_matrix,
+            parsed_repairs=parsed_repairs,
+        )
+        model_row_count = len(repaired_matrix)
+        repaired_matrix, residual_repairs = (
+            _cleanup_objective_repaired_table_matrix_residual_fragments(
+                original_matrix=canonical_matrix,
+                repaired_matrix=repaired_matrix,
+                column_headers=repaired_matrix[0] if repaired_matrix else (),
+            )
+        )
+        repaired_matrix, uncertainty_repairs = (
+            _rebind_objective_table_mean_uncertainty_columns(
+                original_matrix=canonical_matrix,
+                repaired_matrix=repaired_matrix,
+                column_headers=repaired_matrix[0] if repaired_matrix else (),
+            )
+        )
+
+    repair_records = _objective_table_matrix_repair_records(parsed_repairs)
+    warnings.extend(
+        str(warning)
+        for _, parsed in parsed_repairs
+        for warning in getattr(parsed, "warnings", None) or ()
+        if str(warning).strip()
+    )
+    model_repair_count = len(repair_records)
+    deterministic_rebind_count = len(uncertainty_repairs)
+    final_row_count = len(repaired_matrix)
+    if reason := _objective_table_repair_structural_failure(
+        canonical_matrix=canonical_matrix,
+        repaired_matrix=repaired_matrix,
+    ):
         record_trace("rejected", reason)
         return source, ValueError(reason)
     if continuation and (
@@ -345,33 +399,6 @@ def repair_table_source(
         != re.sub(r"\s+", "", continuation["row"][0]).casefold()
     ):
         reason = "table matrix repair did not bind the continuation label to the final row"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    repaired_matrix, residual_repairs = (
-        _cleanup_objective_repaired_table_matrix_residual_fragments(
-            original_matrix=canonical_matrix,
-            repaired_matrix=repaired_matrix,
-            column_headers=source.get("column_headers", ()),
-        )
-    )
-    repaired_matrix, uncertainty_repairs = (
-        _rebind_objective_table_mean_uncertainty_columns(
-            original_matrix=canonical_matrix,
-            repaired_matrix=repaired_matrix,
-            column_headers=source.get("column_headers", ()),
-        )
-    )
-    deterministic_rebind_count = len(uncertainty_repairs)
-    final_row_count = len(repaired_matrix)
-    if (
-        repaired_matrix == canonical_matrix
-        and _objective_table_matrix_has_structural_fragments(canonical_matrix)
-    ):
-        reason = "table matrix repair left the fragmented matrix unchanged"
-        record_trace("rejected", reason)
-        return source, ValueError(reason)
-    if _objective_table_matrix_has_structural_fragments(repaired_matrix):
-        reason = "table matrix repair returned a structurally fragmented matrix"
         record_trace("rejected", reason)
         return source, ValueError(reason)
     number_sequence_verified = (
@@ -398,13 +425,27 @@ def repair_table_source(
     if not _objective_table_repair_preserves_row_label_order(
         original_matrix=canonical_matrix,
         repaired_matrix=repaired_matrix,
+        visual_text=(
+            str(source.get("table_visual_text") or "")
+            + ("\n" + continuation["row"][0] if continuation else "")
+        ),
     ):
         reason = "table matrix repair changed or reordered source row labels"
         record_trace("rejected", reason)
         return source, ValueError(reason)
     repaired_source = dict(source)
     repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
+    repaired_source["raw_column_headers"] = list(
+        source.get("column_headers", ())
+    )
     repaired_source["table_matrix"] = repaired_matrix
+    repaired_source["column_headers"] = list(repaired_matrix[0])
+    repaired_source["header_row_count"] = 1
+    repaired_source["table_markdown"] = render_markdown_table(
+        repaired_matrix,
+        repaired_matrix[0],
+        header_row_count=1,
+    )
     repaired_source["table_matrix_structural_repair_applied"] = True
     repair_attestation = {
         "schema_version": "objective_table_repair_attestation.v1",
@@ -431,6 +472,57 @@ def repair_table_source(
         )
     record_trace("verified")
     return repaired_source, None
+
+
+def _request_objective_table_matrix_repairs(
+    *,
+    repair_payloads: tuple[dict[str, Any], ...],
+    paper_facts_extractor: PaperFactsExtractor,
+) -> tuple[tuple[dict[str, Any], Any], ...]:
+    return tuple(
+        (
+            repair_payload,
+            paper_facts_extractor.repair_table_matrix(repair_payload),
+        )
+        for repair_payload in repair_payloads
+    )
+
+
+def _objective_table_matrix_repair_records(
+    parsed_repairs: tuple[tuple[dict[str, Any], Any], ...],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for repair_payload, parsed in parsed_repairs:
+        row_offset = int(
+            repair_payload["source"]["table_slice"]["first_source_row_index"]
+        )
+        for repair_item in getattr(parsed, "repairs", None) or ():
+            record = (
+                repair_item.model_dump()
+                if hasattr(repair_item, "model_dump")
+                else dict(repair_item)
+            )
+            if record.get("row_index") is not None:
+                record["row_index"] = int(record["row_index"]) + row_offset - 1
+            records.append(record)
+    return records
+
+
+def _objective_table_repair_structural_failure(
+    *,
+    canonical_matrix: list[list[str]],
+    repaired_matrix: list[list[str]],
+) -> str | None:
+    if not repaired_matrix:
+        return "table matrix repair returned no usable matrix"
+    if (
+        repaired_matrix == canonical_matrix
+        and _objective_table_matrix_has_structural_fragments(canonical_matrix)
+    ):
+        return "table matrix repair left the fragmented matrix unchanged"
+    if _objective_table_matrix_has_structural_fragments(repaired_matrix):
+        return "table matrix repair returned a structurally fragmented matrix"
+    return None
 
 
 def _objective_table_matrix_sha256(matrix: Any) -> str:
@@ -574,9 +666,34 @@ def _merge_objective_table_matrix_repairs(
         )
         if not repaired_slice:
             return []
-        slice_rows = repaired_slice[1:] if _objective_row_matches_headers(
-            tuple(repaired_slice[0]), tuple(headers)
-        ) else repaired_slice
+        first_row = repaired_slice[0]
+        # Header-key normalization intentionally ignores punctuation, but a
+        # missing bracket or superscript is exactly the structural corruption
+        # this repair is meant to fix. Use the literal normalized cells here
+        # so a source-supported repaired header is not mistaken for the
+        # unchanged parser header.
+        is_source_header = first_row == headers
+        is_supported_repaired_header = (
+            not is_source_header
+            and _objective_repaired_header_is_supported(
+                first_row,
+                source_headers=headers,
+                visual_text=str(source.get("table_visual_text") or ""),
+            )
+        )
+        if is_supported_repaired_header:
+            # The source header is the parser's flattened artifact. Once the
+            # candidate header has passed the visual/source-token gate, carry
+            # that repaired header into the merged matrix; otherwise the
+            # rejected fragments would still fail the structural gate below.
+            if merged[0] != headers and merged[0] != first_row:
+                return []
+            merged[0] = list(first_row)
+        slice_rows = (
+            repaired_slice[1:]
+            if is_source_header or is_supported_repaired_header
+            else repaired_slice
+        )
         merged.extend(slice_rows)
     # A layout parser may spill more than one logical row (for example when a
     # wrapped specimen label and its uncertainty land on separate grid rows).
@@ -670,27 +787,18 @@ def _objective_table_repair_preserves_source_tokens(
     )
     if repaired_values - original_values:
         return False
-    position = 0
-    for row in repaired_matrix[1:]:
-        label = re.sub(r"\s+", "", row[0])
-        if not label or not any(char.isalpha() for char in label):
-            return False
-        pattern = (
-            r"(?<![\w-])"
-            + r"\s*".join(re.escape(char) for char in label)
-            + r"(?![\w-])"
-        )
-        match = re.search(pattern, visual_text[position:], flags=re.IGNORECASE)
-        if match is None:
-            return False
-        position += match.end()
-    return True
+    return _objective_visual_label_sequence_supported(
+        repaired_matrix=repaired_matrix,
+        original_matrix=original_matrix,
+        visual_text=visual_text,
+    )
 
 
 def _objective_table_repair_preserves_row_label_order(
     *,
     original_matrix: list[list[str]],
     repaired_matrix: list[list[str]],
+    visual_text: str = "",
 ) -> bool:
     if not original_matrix or not repaired_matrix:
         return False
@@ -706,7 +814,114 @@ def _objective_table_repair_preserves_row_label_order(
 
     original_tokens = semantic_label_tokens(original_matrix)
     repaired_tokens = semantic_label_tokens(repaired_matrix)
-    return bool(original_tokens) and original_tokens == repaired_tokens
+    if bool(original_tokens) and original_tokens == repaired_tokens:
+        return True
+    if not visual_text.strip():
+        return False
+    return _objective_visual_label_sequence_supported(
+        repaired_matrix=repaired_matrix,
+        original_matrix=original_matrix,
+        visual_text=visual_text,
+    )
+
+
+def _objective_visual_label_sequence_supported(
+    *,
+    repaired_matrix: list[list[str]],
+    original_matrix: list[list[str]],
+    visual_text: str,
+) -> bool:
+    """Allow only row-label expansions visible in the same table view.
+
+    Printed strategy labels are often shown once and visually carried forward
+    (for example ``Speed`` followed by rows ``S1`` and ``S``).  The parsed grid
+    loses that span, so a repair may add the visible prefix to later rows.  A
+    prefix is accepted only when the original row identity remains a suffix
+    and the complete repaired label, or its source row identity plus prefix,
+    occurs in order in the supplied table view.
+    """
+    if not visual_text.strip():
+        return False
+
+    original_rows = list(original_matrix[1:])
+    repaired_rows = list(repaired_matrix[1:])
+    if len(original_rows) == len(repaired_rows) + 1 and original_rows[-1]:
+        # An explicitly linked continuation may contribute a label-only row
+        # that the repair correctly binds into the preceding final row.
+        if not any(str(cell or "").strip() for cell in original_rows[-1][1:]):
+            original_rows.pop()
+    if len(original_rows) != len(repaired_rows):
+        return False
+
+    def compact(value: Any) -> str:
+        return re.sub(r"[^\w]+", "", str(value or "").casefold())
+
+    def pattern_for(value: str) -> str:
+        return (
+            r"(?<![\w-])"
+            + r"[\s\W]*".join(re.escape(char) for char in compact(value))
+            + r"(?![\w-])"
+        )
+
+    visual = str(visual_text)
+
+    def scan_full_labels() -> bool:
+        position = 0
+        for row in repaired_rows:
+            label = compact(row[0] if row else "")
+            if not label:
+                return False
+            match = re.search(
+                pattern_for(label), visual[position:], flags=re.IGNORECASE
+            )
+            if match is None:
+                return False
+            position += match.end()
+        return True
+
+    # Fragmented parser labels may not retain a row-local suffix in the raw
+    # grid. The complete repaired labels are still safe when the clipped PDF
+    # view contains them in the same order and the numeric/source-token gate
+    # above has already passed.
+    if scan_full_labels():
+        return True
+
+    position = 0
+    for original_row, repaired_row in zip(
+        original_rows, repaired_rows, strict=True
+    ):
+        original_label = compact(original_row[0] if original_row else "")
+        repaired_label = compact(repaired_row[0] if repaired_row else "")
+        if not original_label or not repaired_label:
+            return False
+        if not repaired_label.endswith(original_label):
+            return False
+
+        full_match = re.search(
+            pattern_for(repaired_label), visual[position:], flags=re.IGNORECASE
+        )
+        if full_match is not None:
+            position += full_match.end()
+            continue
+
+        prefix = repaired_label[: -len(original_label)]
+        if not prefix:
+            return False
+        suffix_match = re.search(
+            pattern_for(original_label), visual[position:], flags=re.IGNORECASE
+        )
+        if suffix_match is None:
+            return False
+        prefix_pattern = pattern_for(prefix)
+        prefix_match = re.search(
+            prefix_pattern,
+            visual[: position + suffix_match.start()],
+            flags=re.IGNORECASE,
+        )
+        if prefix_match is None:
+            return False
+        position += suffix_match.end()
+    return True
 
 
 def _objective_column_numeric_tokens(
@@ -812,9 +1027,75 @@ def _validated_objective_repaired_table_matrix(
     if expected_width and not _objective_row_matches_headers(
         tuple(repaired_rows[0]),
         tuple(headers),
+    ) and not _objective_repaired_header_is_supported(
+        repaired_rows[0],
+        source_headers=headers,
+        visual_text=str(source.get("table_visual_text") or ""),
     ):
+        if not _objective_table_row_looks_like_data(repaired_rows[0]):
+            return []
         repaired_rows.insert(0, headers)
     return repaired_rows
+
+
+def _objective_table_row_looks_like_data(row: list[str]) -> bool:
+    """Distinguish a header-like row from a headerless numeric data row."""
+    if len(row) < 2 or not str(row[0]).strip():
+        return False
+    return any(
+        NUMBER_PATTERN.search(str(cell or ""))
+        for cell in row[1:]
+    )
+
+
+def _objective_repaired_header_is_supported(
+    row: list[str],
+    *,
+    source_headers: list[str],
+    visual_text: str = "",
+) -> bool:
+    """Accept a repaired header only when its labels are source-supported."""
+    if len(row) != len(source_headers) or not row:
+        return False
+    if any(not str(cell).strip() for cell in row):
+        return False
+    source_tokens = {
+        token
+        for header in source_headers
+        for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(
+            str(header).casefold()
+        )
+    }
+    visual_tokens = {
+        token
+        for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(
+            str(visual_text).casefold()
+        )
+    }
+    first_source = re.sub(r"\W+", "", str(source_headers[0]).casefold())
+    first_repaired = re.sub(r"\W+", "", str(row[0]).casefold())
+    if first_source and first_source != first_repaired:
+        return False
+    for cell in row:
+        tokens = {
+            token
+            for token in _OBJECTIVE_TABLE_TOKEN_PATTERN.findall(
+                str(cell).casefold()
+            )
+        }
+        if not tokens:
+            return False
+        supported = tokens & (source_tokens | visual_tokens)
+        if not supported:
+            return False
+        # Permit a normalized mathematical term such as ``sqrt`` only when
+        # the same cell still carries multiple source-supported anchors. A
+        # wholly invented header (or a one-token edit such as ``P invented``)
+        # therefore cannot pass this gate.
+        unknown = tokens - (source_tokens | visual_tokens)
+        if unknown and len(tokens & source_tokens) < 2:
+            return False
+    return True
 
 
 def normalize_table_matrix(value: Any) -> list[list[str]]:

@@ -36,9 +36,9 @@ from domain.core import (
 )
 from domain.source import SourceDocumentTree
 
-# Selected Source coverage replaces framing-wide mandatory coverage. Rebuild
-# persisted document checkpoints so reruns cannot replay the old disposition.
-OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v11"
+# Materialization now accepts only assembled experiments and checks their
+# measurements against the Source observations. Rebuild older document checkpoints.
+OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION = "objective-evidence-materialization.v12"
 
 
 _CONTRIBUTION_SUMMARY_CHARS = 320
@@ -71,7 +71,7 @@ def materialize_evidence(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
-    observations: tuple[SourceObservation, ...],
+    experiments: tuple[PaperExperiment, ...],
     paper_maps: tuple[PaperResearchMap, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
@@ -79,14 +79,9 @@ def materialize_evidence(
     tables_by_document_id: Mapping[str, list[Any]],
     figures_by_document_id: Mapping[str, list[Any]],
     document_trees_by_document_id: Mapping[str, SourceDocumentTree] | None = None,
-    experiments: tuple[PaperExperiment, ...] = (),
     technical_audits: tuple[SourceReadAudit, ...] = (),
 ) -> tuple[tuple[ObjectiveEvidence, ...], tuple[PaperContribution, ...]]:
-    if experiments:
-        observations = _merge_domain_experiment_inputs(
-            experiments=experiments,
-            observations=observations,
-        )
+    observations = _experiment_source_observations(experiments=experiments)
     inspection_source_refs = _inspection_source_refs_by_document(
         technical_audits=technical_audits,
     )
@@ -197,27 +192,73 @@ def materialize_evidence(
     return evidence_records, contributions
 
 
-def _merge_domain_experiment_inputs(
+def _experiment_source_observations(
     *,
     experiments: tuple[PaperExperiment, ...],
-    observations: tuple[SourceObservation, ...],
 ) -> tuple[SourceObservation, ...]:
-    """Read assembled facts directly without losing validation or derivation metadata."""
+    """Flatten the PaperExperiment aggregate without accepting a second fact source.
 
-    domain_drafts = {
-        item.observation_id: item
-        for experiment in experiments
-        for item in experiment.source_observations
-    }
-    original_ids = {item.observation_id for item in observations}
-    return (
-        *(domain_drafts.get(item.observation_id, item) for item in observations),
-        *(
-            item
-            for identifier, item in domain_drafts.items()
-            if identifier not in original_ids
-        ),
-    )
+    The aggregate owns the ordered Source observations used to materialize
+    Evidence. Structured measurements, samples, and test conditions remain on
+    the same aggregate and are validated during assembly; they are not merged
+    with an independently supplied observation stream here.
+    """
+
+    observations: list[SourceObservation] = []
+    seen_ids: set[str] = set()
+    for experiment in experiments:
+        by_id = {
+            item.observation_id: item for item in experiment.source_observations
+        }
+        measurement_ids = {item.result_id for item in experiment.measurements}
+        for observation in experiment.source_observations:
+            if (
+                observation.reported_result is not None
+                and not observation.derived_from_observation_ids
+                and observation.observation_id not in measurement_ids
+            ):
+                raise ValueError(
+                    "PaperExperiment result lacks a MeasurementResult: "
+                    f"{observation.observation_id}"
+                )
+        for measurement in experiment.measurements:
+            observation = by_id.get(measurement.result_id)
+            result = observation.reported_result if observation is not None else None
+            if (
+                result is None
+                or observation.derived_from_observation_ids
+                or measurement.property_normalized != result.outcome
+                or measurement.unit != result.unit
+                or measurement.epistemic_status != observation.status
+                or measurement.value_payload
+                != {
+                    "value": result.value,
+                    "baseline_value": result.baseline_value,
+                    "target_value": result.target_value,
+                }
+            ):
+                raise ValueError(
+                    "PaperExperiment measurement disagrees with Source "
+                    f"observation: {measurement.result_id}"
+                )
+        missing_ids = set(experiment.source_observation_ids) - set(by_id)
+        if missing_ids:
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "paper_experiment_source_binding_incomplete",
+                    "collection_id": experiment.collection_id,
+                    "document_id": experiment.document_id,
+                    "experiment_id": experiment.experiment_id,
+                    "missing_source_observation_ids": sorted(missing_ids),
+                }
+            )
+        for observation_id in experiment.source_observation_ids:
+            observation = by_id.get(observation_id)
+            if observation is None or observation_id in seen_ids:
+                continue
+            observations.append(observation)
+            seen_ids.add(observation_id)
+    return tuple(observations)
 
 
 def _inspection_source_refs_by_document(

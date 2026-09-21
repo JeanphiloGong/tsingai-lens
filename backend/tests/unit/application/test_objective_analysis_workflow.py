@@ -92,7 +92,7 @@ def test_document_evidence_checkpoint_uses_current_source_extraction_version():
 def test_document_evidence_checkpoint_uses_current_materialization_version():
     assert (
         "evidence_materialization",
-        "objective-evidence-materialization.v11",
+        "objective-evidence-materialization.v12",
     ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
@@ -488,7 +488,17 @@ def test_information_parity_chain_publishes_source_traceable_cross_paper_finding
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
-        observations=reconstructed,
+        experiments=tuple(
+            experiment
+            for document_id in ("paper-a", "paper-b")
+            for experiment in paper_experiment.assemble_paper_experiments(
+                collection_id=collection_id,
+                document_id=document_id,
+                source_facts=tuple(
+                    item for item in reconstructed if item.document_id == document_id
+                ),
+            )
+        ),
         paper_maps=(),
         frames=frames,
         routes=routes,

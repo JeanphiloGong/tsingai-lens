@@ -2211,6 +2211,34 @@ def _objective_retain_source_grounded_context(
                 source=source,
                 source_text=source_text,
             )
+            if (
+                group == "test"
+                and _objective_test_context_name_requires_relation(
+                    attribute.get("name")
+                )
+            ):
+                # A composed label such as ``tensile test method`` must be
+                # tied to its method value in one source-local relation. The
+                # broad axis matcher intentionally works across a Source, so
+                # it cannot by itself distinguish two unrelated methods.
+                name_is_grounded = False
+            if (
+                not name_is_grounded
+                and group == "test"
+                and value_is_grounded
+                and _objective_test_context_name_is_source_grounded(
+                    attribute.get("name"),
+                    method_value=value,
+                    source_text=source_text,
+                )
+            ):
+                # Scientific prose often states the method value (for example,
+                # ``measured by Archimedes method``) without repeating the
+                # extractor's descriptive field label (``density measurement
+                # method``).  The value remains the authority; this narrow
+                # fallback only accepts a method-shaped label with a source
+                # visible scientific token.
+                name_is_grounded = True
             if not name_is_grounded:
                 # Papers commonly label a row only as ``S1``/``S2`` or
                 # ``specimen A``. The model's generic context name is valid
@@ -2286,35 +2314,21 @@ def _objective_retain_outcome_applicable_test_context(
     if not isinstance(test_attributes, (list, tuple)):
         return retained
 
-    def has_explicit_outcome_scope(attribute: Mapping[str, Any]) -> bool:
-        raw_outcomes = attribute.get("applies_to_outcomes")
-        return isinstance(raw_outcomes, (list, tuple)) and any(
-            str(outcome).strip() for outcome in raw_outcomes
-        )
-
-    scoped = [
-        dict(attribute)
-        for attribute in test_attributes
-        if isinstance(attribute, Mapping)
-        and has_explicit_outcome_scope(attribute)
-        and property_matching.outcome_matches_objective_scope(
-            outcome,
-            tuple(attribute["applies_to_outcomes"]),
-        )
-    ]
-    unscoped = [
-        dict(attribute)
-        for attribute in test_attributes
-        if isinstance(attribute, Mapping)
-        and not has_explicit_outcome_scope(attribute)
-    ]
-    # A single source-local test method without an explicit outcome tag is
-    # still usable when the Source exposes no competing test.  If multiple
-    # unscoped methods are present, keep the family unresolved instead of
-    # assigning one to the result by position or model confidence.
-    applicable = scoped or (unscoped if len(unscoped) == 1 else [])
+    applicable = property_matching.applicable_test_context_attributes(
+        tuple(
+            attribute
+            for attribute in test_attributes
+            if isinstance(attribute, Mapping)
+        ),
+        outcome,
+        reference_attributes=tuple(
+            attribute
+            for attribute in context.get("material", ())
+            if isinstance(attribute, Mapping)
+        ),
+    )
     scientific_context = dict(context)
-    scientific_context["test"] = applicable
+    scientific_context["test"] = [dict(attribute) for attribute in applicable]
     retained["scientific_context"] = scientific_context
     return retained
 
@@ -2371,6 +2385,115 @@ def _objective_axis_is_source_grounded(
     return any(
         property_matching.axis_values_match(token, axis)
         for token in re.findall(r"[A-Za-z\u0370-\u03ff]+", source_text)
+    )
+
+
+def _objective_test_context_name_is_source_grounded(
+    value: Any,
+    *,
+    method_value: Any,
+    source_text: str,
+) -> bool:
+    """Recognize a source-local label tied to an explicit test value."""
+
+    normalized = property_matching.normalize_property_label(value)
+    normalized_method = property_matching.normalize_property_label(method_value)
+    if not normalized or not normalized_method:
+        return False
+    label_tokens = tuple(
+        token
+        for token in property_matching.axis_key(normalized).split()
+        if token
+    )
+    tokens = property_matching.axis_tokens(" ".join(label_tokens))
+    method_tokens = {
+        "characterization",
+        "measurement",
+        "method",
+        "procedure",
+        "standard",
+        "technique",
+        "test",
+    }
+    if not tokens & method_tokens:
+        return False
+    scientific_tokens = tuple(
+        token
+        for token in label_tokens
+        if token not in method_tokens
+    )
+    if not scientific_tokens:
+        return False
+    label_pattern = r"\s+".join(
+        re.escape(token) for token in scientific_tokens
+    )
+    method_tokens = tuple(
+        token
+        for token in property_matching.axis_key(normalized_method).split()
+        if token
+    )
+    method_pattern = r"\s+".join(re.escape(token) for token in method_tokens)
+    if not label_pattern or not method_pattern:
+        return False
+    relation = (
+        r"(?:measure\w*|characteri[sz]\w*|test\w*|determin\w*|"
+        r"use\w*|appl(?:y|ied|ies)\w*|according\s+to)"
+    )
+    label_then_method = re.compile(
+        rf"\b{label_pattern}\b(?:\W+\w+){{0,8}}\W+{relation}"
+        rf"(?:\W+\w+){{0,8}}\W+{method_pattern}\b",
+        flags=re.IGNORECASE,
+    )
+    method_then_label = re.compile(
+        rf"\b{method_pattern}\b(?:\W+\w+){{0,8}}\W+{relation}"
+        rf"(?:\W+\w+){{0,8}}\W+{label_pattern}\b",
+        flags=re.IGNORECASE,
+    )
+    # Tables and method lists often use an explicit ``label: value`` (or
+    # ``label = value``) form instead of a prose verb. Keep this branch
+    # source-local and exact so a method mentioned in a neighboring sentence
+    # cannot satisfy the label by accident.
+    explicit_label = re.sub(r"\s+", r"\\s+", " ".join(label_tokens))
+    explicit_method = re.sub(r"\s+", r"\\s+", " ".join(method_tokens))
+    if re.search(
+        rf"\b{explicit_label}\b\s*(?::|=|->|\|)\s*"
+        rf"{explicit_method}\b",
+        source_text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    # A semicolon/colon or a contrastive conjunction usually starts an
+    # independent claim. Do not let a method from the second claim satisfy a
+    # descriptive label in the first one.
+    clauses = re.split(
+        r"(?<=[.!?;:])\s+|\n+|;|:(?=\s)|"
+        r"\s+(?=(?:while|whereas|but|and|or)\b)",
+        source_text,
+        flags=re.IGNORECASE,
+    )
+    for sentence in clauses:
+        if label_then_method.search(sentence) or method_then_label.search(sentence):
+            return True
+    return False
+
+
+def _objective_test_context_name_requires_relation(value: Any) -> bool:
+    """Return whether a test label contains a specific method descriptor."""
+
+    normalized = property_matching.normalize_property_label(value)
+    if not normalized:
+        return False
+    method_descriptors = {
+        "characterization",
+        "measurement",
+        "method",
+        "procedure",
+        "standard",
+        "technique",
+    }
+    return bool(
+        property_matching.axis_tokens(property_matching.axis_key(normalized))
+        & method_descriptors
     )
 
 

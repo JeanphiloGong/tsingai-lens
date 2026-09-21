@@ -26,6 +26,12 @@ path assumptions or a fixed `backend/.env` location.
 - `source_parser_benchmark.py`
   Offline Source parser benchmark for the active Docling path and optional
   MinerU CLI comparison without changing production parser behavior
+- `paper_experiment_chain_probe.py`
+  Opt-in live acceptance probe for the complete PaperExperiment chain. It
+  parses one SHA-256-pinned real PDF with Docling, calls the configured live
+  model for every model-backed step, and verifies source-grounded measurements,
+  strategy-local comparisons, Evidence/Finding lineage, and complete model
+  traces. It never writes collection data.
 - `_common.py`
   Shared runtime resolution, env-file precedence, JSON summary helpers, and
   response-text utilities used by the benchmark entrypoints
@@ -57,6 +63,10 @@ python scripts/benchmarks/paper_map_prompt_probe.py \
   --variant current_provider_parse \
   --variant compact_provider_parse
 python scripts/benchmarks/source_parser_benchmark.py --help
+python scripts/benchmarks/paper_experiment_chain_probe.py \
+  --pdf /path/to/reviewed-cao-2017-ti64.pdf \
+  --summary-output /tmp/paper-experiment-live.json \
+  --env-file .env
 python scripts/benchmarks/objective_question_probe.py \
   --scenario-file /path/to/local/scenarios.json \
   --execution live --repeat 2 --output /path/to/local/results.json

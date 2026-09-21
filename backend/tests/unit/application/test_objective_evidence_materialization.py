@@ -22,6 +22,7 @@ from application.core.objectives.analysis.evidence_materialization import (
     rebind_persisted_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.paper_experiment import assemble_paper_experiment
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
@@ -53,7 +54,7 @@ def test_grounding_rejection_remains_retryable_not_a_scientific_absence() -> Non
     })
     records, contributions = materialize_evidence(
         collection_id=objective.collection_id, objective=objective, analysis=analysis,
-        observations=(), technical_audits=(SourceReadAudit(
+        experiments=(), technical_audits=(SourceReadAudit(
             collection_id=objective.collection_id, objective_id=objective.objective_id,
             document_id="paper-1", source_kind="text_window", source_ref="result-1",
             disposition="grounding_rejected", reason="Source grounding failed: unsupported result value",
@@ -2206,7 +2207,11 @@ def test_materialization_persists_context_as_needs_context_evidence() -> None:
         collection_id=objective.collection_id,
         analysis=analysis,
         objective=objective,
-        observations=(draft,),
+        experiments=(assemble_paper_experiment(
+            collection_id=objective.collection_id,
+            document_id=draft.document_id,
+            source_facts=(draft,),
+        ),),
         paper_maps=(),
         frames=(frame,),
         routes=(route,),
@@ -2525,7 +2530,7 @@ def test_empty_evidence_materialization_records_bounded_abstention_trace() -> No
             collection_id="collection-1",
             analysis=analysis,
             objective=objective,
-            observations=(),
+            experiments=(),
             paper_maps=(),
             frames=(frame,),
             routes=(),
@@ -2642,7 +2647,11 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
             collection_id="collection-1",
             analysis=analysis,
             objective=objective,
-            observations=(draft,),
+            experiments=(assemble_paper_experiment(
+                collection_id=objective.collection_id,
+                document_id=draft.document_id,
+                source_facts=(draft,),
+            ),),
             paper_maps=(),
             frames=(frame,),
             routes=(route,),
@@ -2673,9 +2682,9 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
         "objective_id": "objective-1",
         "analysis_version": 1,
         "draft_count": 1,
-        "experiment_count": 0,
+        "experiment_count": 1,
         "bound_experiment_count": 0,
-        "measurement_count": 0,
+        "measurement_count": 1,
         "comparison_assessment_counts": {},
         "grounding_rejection_count": 0,
         "failed_draft_count": 0,

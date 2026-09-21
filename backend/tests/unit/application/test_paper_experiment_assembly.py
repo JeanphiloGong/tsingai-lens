@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from application.core.objectives.analysis.evidence_materialization import (
-    _merge_domain_experiment_inputs,
+    _experiment_source_observations,
     materialize_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
@@ -196,15 +196,89 @@ def test_materialization_reads_source_facts_from_experiment_first() -> None:
         source_facts=(draft,),
     )
 
-    merged = _merge_domain_experiment_inputs(
+    merged = _experiment_source_observations(
         experiments=(experiment,),
-        observations=(draft,),
     )
 
     assert len(merged) == 1
     assert merged[0].source_refs[0]["page"] == 4
     assert merged[0].scientific_context.test[0].name == "temperature"
     assert merged[0].status == draft.status
+
+
+def test_materialization_exposes_only_the_experiment_fact_input() -> None:
+    draft = _observation("obs-1")
+    experiment = assemble_paper_experiment(
+        collection_id="col-1",
+        document_id="doc-1",
+        source_facts=(draft,),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-1",
+            "question": "How does temperature affect strength?",
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="doc-1", preparation_fingerprint="fixture"
+            ),
+        ),
+        total_document_count=1,
+        pipeline_version="test",
+        model_name=None,
+        prompt_versions={},
+    )
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'observations'"):
+        materialize_evidence(
+            collection_id="col-1",
+            analysis=analysis,
+            objective=objective,
+            observations=(draft,),
+            experiments=(experiment,),
+            paper_maps=(),
+            frames=(),
+            routes=(),
+            blocks_by_document_id={},
+            tables_by_document_id={},
+            figures_by_document_id={},
+        )
+
+
+def test_experiment_measurement_cannot_disagree_with_its_source_observation() -> None:
+    draft = _observation("obs-1")
+    experiment = assemble_paper_experiment(
+        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
+    )
+    altered = replace(
+        experiment.measurements[0],
+        value_payload={**experiment.measurements[0].value_payload, "value": 999},
+    )
+
+    with pytest.raises(ValueError, match="measurement disagrees with Source"):
+        _experiment_source_observations(
+            experiments=(replace(experiment, measurements=(altered,)),)
+        )
+
+
+def test_experiment_cannot_materialize_unbound_raw_result_as_evidence() -> None:
+    draft = _observation("obs-1")
+    experiment = assemble_paper_experiment(
+        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
+    )
+
+    with pytest.raises(ValueError, match="result lacks a MeasurementResult"):
+        _experiment_source_observations(
+            experiments=(replace(experiment, measurements=()),)
+        )
 
 
 def _p002_result(identifier: str, sample: str, value: float) -> SourceObservation:
@@ -612,7 +686,6 @@ def test_retained_p002_table_survives_read_bind_and_materialize_without_methods(
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
-        observations=facts,
         experiments=experiments,
         technical_audits=tuple(read_audits),
         paper_maps=(),

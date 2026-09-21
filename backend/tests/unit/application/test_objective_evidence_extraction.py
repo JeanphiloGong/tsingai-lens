@@ -1516,7 +1516,7 @@ def test_study_intent_result_route_is_inspection_trace_not_durable_evidence() ->
             collection_id="col-test",
             analysis=analysis,
             objective=objective,
-            observations=drafts,
+            experiments=(),
             technical_audits=tuple(read_audits),
             paper_maps=(),
             frames=(frame,),
@@ -1628,7 +1628,7 @@ def test_secondary_only_result_route_is_inspection_trace_not_durable_evidence() 
             collection_id="col-test",
             analysis=analysis,
             objective=objective,
-            observations=drafts,
+            experiments=(),
             technical_audits=tuple(read_audits),
             paper_maps=(),
             frames=(frame,),
@@ -3755,7 +3755,7 @@ def test_empty_context_inspection_is_trace_only_not_scientific_evidence() -> Non
             collection_id="col-test",
             analysis=analysis,
             objective=objective,
-            observations=drafts,
+            experiments=(),
             technical_audits=tuple(read_audits),
             paper_maps=(),
             frames=(frame,),
@@ -11281,6 +11281,115 @@ def test_source_grounding_keeps_single_test_with_empty_outcome_scope() -> None:
     ]
 
 
+def test_source_grounding_keeps_sample_density_method_scope_for_normalized_density() -> None:
+    retained = source_validation._objective_retain_outcome_applicable_test_context(
+        {
+            "reported_result": {"outcome": "relative density"},
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "density measurement method",
+                        "value": "Archimedes method",
+                        "applies_to_outcomes": ["sample density"],
+                    },
+                    {
+                        "name": "normalization density",
+                        "value": 4.43,
+                        "unit": "g/cm3",
+                        "applies_to_outcomes": ["sample density"],
+                    },
+                ]
+            },
+        }
+    )
+
+    assert len(retained["scientific_context"]["test"]) == 2
+
+
+def test_source_grounding_keeps_composed_test_method_name_when_source_names_method_value() -> None:
+    """A source may describe a method by value without repeating model's label."""
+
+    retained = source_validation._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "density measurement method",
+                        "value": "Archimedes method",
+                        "context_scope": "experimental",
+                        "applies_to_outcomes": ["relative density"],
+                    }
+                ]
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": (
+                "Sample density was measured by Archimedes method and normalized "
+                "to the nominal density; relative density is reported in Table II."
+            ),
+        },
+    )
+
+    assert retained["scientific_context"]["test"] == [
+        {
+            "name": "density measurement method",
+            "value": "Archimedes method",
+            "context_scope": "experimental",
+            "applies_to_outcomes": ["relative density"],
+        }
+    ]
+
+
+def test_source_grounding_preserves_ordered_multiword_method_label() -> None:
+    retained = source_validation._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "sample density measurement method",
+                        "value": "Archimedes method",
+                        "context_scope": "experimental",
+                    }
+                ]
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": "Sample density was measured by Archimedes method.",
+        },
+    )
+
+    assert retained["scientific_context"]["test"][0]["name"] == (
+        "sample density measurement method"
+    )
+
+
+def test_source_grounding_rejects_method_from_independent_semicolon_clause() -> None:
+    retained = source_validation._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "test": [
+                    {
+                        "name": "tensile test method",
+                        "value": "Archimedes method",
+                        "context_scope": "experimental",
+                    }
+                ]
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": (
+                "Tensile test was conducted; sample density was measured by "
+                "Archimedes method."
+            ),
+        },
+    )
+
+    assert retained["scientific_context"]["test"] == []
+
+
 def test_document_context_binds_only_test_method_applicable_to_result_outcome() -> None:
     """A paper-wide method is usable only for the outcome it explicitly measures."""
 
@@ -11375,6 +11484,123 @@ def test_document_context_binds_only_test_method_applicable_to_result_outcome() 
     )
 
 
+def test_document_context_binds_source_named_density_method_to_relative_density_result() -> None:
+    """A normalized density result may use the paper's sample-density method."""
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-relative-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    result = SourceObservation.from_mapping(
+        {
+            "evidence_id": "relative-density-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-density",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "laser power",
+                    "baseline_value": 900,
+                    "target_value": 1000,
+                    "unit": "W",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "S1",
+                "target_label": "S",
+                "axis_names": ["laser power"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 98.5,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 98.5%.",
+            },
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [{"name": "sample", "value": "S"}],
+                "process": [
+                    {"name": "manufacturing process", "value": "SLM"}
+                ],
+            },
+            "attribution_scope": "association_only",
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+    density_methods = SourceObservation.from_mapping(
+        {
+            "evidence_id": "density-methods",
+            "objective_id": objective.objective_id,
+            "document_id": result.document_id,
+            "source_kind": "text_window",
+            "source_ref": "methods-density",
+            "evidence_role": "condition_context",
+            "selection_status": "extracted",
+            "scientific_context": {
+                "material": [
+                    {
+                        "name": "nominal Ti-6Al-4V density",
+                        "value": 4.43,
+                        "unit": "g/cm3",
+                        "context_scope": "background",
+                    }
+                ],
+                "test": [
+                    {
+                        "name": "density measurement method",
+                        "value": "Archimedes method",
+                        "context_scope": "experimental",
+                        "applies_to_outcomes": ["sample density"],
+                    },
+                ]
+            },
+            "attribution_scope": "not_attributable",
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    bound = paper_experiment._bind_unambiguous_document_context(
+        (density_methods, result)
+    )
+    assert source_extraction._objective_context_bundle_can_bind_result(
+        result,
+        context_seed=(density_methods,),
+        objective=objective,
+    )
+    result_with_context = next(
+        item for item in bound if item.evidence_id == result.evidence_id
+    )
+
+    assert [item.name for item in result_with_context.scientific_context.test] == [
+        "density measurement method",
+    ]
+    assert result_with_context.scientific_context.test[0].applies_to_outcomes == (
+        "sample density",
+    )
+    assert [
+        item.name for item in result_with_context.scientific_context.material
+    ] == ["material", "nominal Ti-6Al-4V density"]
+    experiment = paper_experiment.assemble_paper_experiment(
+        collection_id="col-density",
+        document_id=result.document_id,
+        source_facts=(result_with_context,),
+    )
+    assert len(experiment.test_conditions) == 1
+    assert experiment.measurements[0].test_condition_id == (
+        experiment.test_conditions[0].test_condition_id
+    )
+
+
 def test_simulation_context_does_not_close_experimental_process_gap() -> None:
     objective = _research_objective(
         {
@@ -11452,6 +11678,79 @@ def test_simulation_context_does_not_close_experimental_process_gap() -> None:
     assert not source_extraction._objective_context_bundle_can_bind_result(
         result,
         context_seed=(simulation_context,),
+        objective=objective,
+    )
+
+
+def test_unrelated_test_method_does_not_close_relative_density_result() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-relative-density",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    result = SourceObservation.from_mapping(
+        {
+            "evidence_id": "density-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-density",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "laser power",
+                    "baseline_value": 900,
+                    "target_value": 1000,
+                    "unit": "W",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "S1",
+                "target_label": "S",
+                "axis_names": ["laser power"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 98.5,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 98.5%.",
+            },
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [{"name": "sample", "value": "S"}],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser powder bed fusion",
+                    }
+                ],
+                "test": [
+                    {
+                        "name": "tensile test",
+                        "value": "room temperature",
+                        "applies_to_outcomes": ["ultimate tensile strength"],
+                    }
+                ],
+            },
+            "attribution_scope": "association_only",
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    assert "test" in source_extraction._objective_missing_context_fields(
+        result,
+        objective,
+    )
+    assert not source_extraction._objective_context_bundle_can_bind_result(
+        result,
+        context_seed=(),
         objective=objective,
     )
 
@@ -11977,6 +12276,420 @@ def test_research_objective_table_repair_rejects_invented_label_tokens():
     )
 
 
+def test_table_repair_accepts_source_visible_repeated_strategy_labels():
+    """A printed category label may be carried into later parsed rows."""
+    original_matrix = [
+        ["Condition", "Result"],
+        ["Speed S1", "1"],
+        ["S", "2"],
+        ["Intermediate M1", "3"],
+        ["Intermediate M", "4"],
+        ["Intermediate M2", "5"],
+        ["Performance P", "6"],
+        ["P1", "7"],
+        ["P2", "8"],
+    ]
+    repaired_matrix = [
+        ["Condition", "Result"],
+        ["Speed S1", "1"],
+        ["Speed S", "2"],
+        ["Intermediate M1", "3"],
+        ["Intermediate M", "4"],
+        ["Intermediate M2", "5"],
+        ["Performance P", "6"],
+        ["Performance P1", "7"],
+        ["Performance P2", "8"],
+    ]
+
+    assert table_repair._objective_table_repair_preserves_row_label_order(
+        original_matrix=original_matrix,
+        repaired_matrix=repaired_matrix,
+        visual_text=(
+            "Condition Result\n"
+            "Speed S1 1\n"
+            "Speed S 2\n"
+            "Intermediate M1 3\n"
+            "Intermediate M 4\n"
+            "Intermediate M2 5\n"
+            "Performance P 6\n"
+            "Performance P1 7\n"
+            "Performance P2 8"
+        ),
+    )
+
+
+def test_objective_table_strategy_rows_split_source_supported_compound_labels():
+    """Strategy categories stay separate from paper-local sample identifiers."""
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-ti64",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Strategies": "sample",
+                "Relative density (%)": "result",
+            },
+        }
+    )
+    headers = (
+        "Strategies",
+        "P (W)",
+        "d (mm)",
+        "v (mm/s)",
+        "h (mm)",
+        "Relative density (%)",
+    )
+    source = {
+        "caption_text": "Table II. SLM parameters and measured relative density",
+        "heading_path": "Results",
+        "column_headers": headers,
+        "table_visual_text": (
+            "Strategies\nP (W) d (mm) v (mm/s) h (mm) Relative density (%)\n"
+            "Speed\nS1\nS\nIntermediate M1\nM\nM2\n"
+            "Performance\nP\nP1\nP2"
+        ),
+        "table_matrix": [
+            list(headers),
+            ["Speed S1", "900", "0.1", "1400", "0.23", "98"],
+            ["S", "1000", "0.1", "1400", "0.23", "98.5"],
+            ["IntermediateM1", "700", "0.05", "1925", "0.19", "98.5"],
+            ["M", "800", "0.05", "1925", "0.19", "99.2"],
+            ["M2", "850", "0.05", "1925", "0.19", "99.1"],
+            ["Performance P", "350", "0.05", "770", "0.18", "99.6"],
+            ["P1", "400", "0.05", "770", "0.18", "99.5"],
+            ["P2", "500", "0.05", "770", "0.18", "98.7"],
+        ],
+    }
+
+    inherited_strategy = None
+    parsed: list[tuple[str | None, str | None, dict[str, str]]] = []
+    for row in source["table_matrix"][1:]:
+        row_values = source_extraction._objective_table_row_values(
+            headers=headers,
+            row=tuple(row),
+        )
+        attributes = source_extraction._objective_table_row_attributes(
+            route=route,
+            source=source,
+            row_values=row_values,
+            result_columns={"Relative density (%)"},
+            objective_context=objective,
+            inherited_strategy=inherited_strategy,
+        )
+        inherited_strategy = attributes["sample"].get("strategy") or inherited_strategy
+        parsed.append(
+            (
+                attributes["sample"].get("strategy"),
+                attributes["sample"].get("sample"),
+                attributes["process"],
+            )
+        )
+
+    assert [(strategy, sample) for strategy, sample, _process in parsed] == [
+        ("Speed", "S1"),
+        ("Speed", "S"),
+        ("Intermediate", "M1"),
+        ("Intermediate", "M"),
+        ("Intermediate", "M2"),
+        ("Performance", "P"),
+        ("Performance", "P1"),
+        ("Performance", "P2"),
+    ]
+    assert {
+        key: parsed[0][2][key]
+        for key in (
+            "laser power",
+            "layer thickness",
+            "scanning speed",
+            "hatch spacing",
+        )
+    } == {
+        "laser power": "900",
+        "layer thickness": "0.1",
+        "scanning speed": "1400",
+        "hatch spacing": "0.23",
+    }
+
+
+def test_objective_strategy_parser_does_not_inherit_unknown_compound_group():
+    source = {
+        "caption_text": "Table II. SLM parameters",
+        "column_headers": [
+            "Strategies",
+            "P (W)",
+            "d (mm)",
+            "v (mm/s)",
+            "h (mm)",
+        ],
+        "table_matrix": [
+            ["Strategies", "P (W)", "d (mm)", "v (mm/s)", "h (mm)"],
+            ["Speed S1", "900", "0.1", "1400", "0.23"],
+            ["AnnealedA1", "800", "0.1", "1400", "0.23"],
+        ],
+    }
+
+    assert source_extraction._objective_strategy_sample_attributes(
+        column_key="strategies",
+        value="AnnealedA1",
+        inherited_strategy="Speed",
+        source=source,
+    ) is None
+
+
+def test_objective_comparison_does_not_cross_strategy_groups():
+    """A strategy is a fixed condition, not an ignorable row identifier."""
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    rows = (
+        ("Speed", "S1", 900, 98.0),
+        ("Speed", "S", 1000, 98.5),
+        ("Intermediate", "M1", 700, 98.5),
+        ("Intermediate", "M", 800, 99.2),
+        ("Intermediate", "M2", 850, 99.1),
+        ("Performance", "P", 350, 99.6),
+        ("Performance", "P1", 400, 99.5),
+        ("Performance", "P2", 500, 98.7),
+    )
+
+    observations = tuple(
+        SourceObservation.from_mapping(
+            {
+                "observation_id": f"obs-{sample}",
+                "collection_id": objective.collection_id,
+                "objective_id": objective.objective_id,
+                "document_id": "paper-ti64",
+                "source_kind": "table",
+                "source_ref": "table-2",
+                "evidence_role": "direct_result",
+                "source_excerpt": f"{strategy} {sample}",
+                "scientific_context": {
+                    "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                    "sample": [
+                        {"name": "strategy", "value": strategy},
+                        {"name": "sample", "value": sample},
+                    ],
+                    "process": [
+                        {"name": "laser power", "value": power, "unit": "W"},
+                        {"name": "layer thickness", "value": "0.05", "unit": "mm"},
+                        {"name": "scanning speed", "value": "770", "unit": "mm/s"},
+                        {"name": "hatch spacing", "value": "0.18", "unit": "mm"},
+                    ],
+                    "test": [],
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": density,
+                    "unit": "%",
+                    "direction": "unknown",
+                    "result_text": f"relative density = {density}%",
+                },
+                "attribution_scope": "descriptive_only",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-2",
+                        "row_index": index,
+                    }
+                ],
+                "status": "validated",
+                "confidence": 0.9,
+            }
+        )
+        for index, (strategy, sample, power, density) in enumerate(rows, start=1)
+    )
+
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
+        observations,
+        objectives=(objective,),
+    )
+
+    assert len(comparisons) == 5
+    assert {
+        str(
+            next(
+                attribute.value
+                for attribute in item.scientific_context.sample
+                if attribute.name.casefold() == "strategy"
+            )
+        )
+        for item in comparisons
+    } == {"Speed", "Intermediate", "Performance"}
+    assert all(
+        {variable.name.casefold() for variable in item.changed_variables}
+        == {"laser power"}
+        for item in comparisons
+    )
+
+
+def test_table_repair_rejects_header_tokens_not_supported_by_source():
+    source_headers = ["Specimen", "Yield strength (MPa)"]
+
+    repaired = table_repair._validated_objective_repaired_table_matrix(
+        source={
+            "column_headers": source_headers,
+            "table_visual_text": "Specimen\nYield strength (MPa)",
+        },
+        repaired_table_matrix=[
+            ["Specimen", "invented outcome"],
+            ["A", "100"],
+        ],
+    )
+
+    assert repaired == []
+
+
+def test_table_repair_merge_uses_source_supported_repaired_header():
+    source_headers = ["Condition", "Result (MPa"]
+    repaired_headers = ["Condition", "Result (MPa)"]
+    parsed = SimpleNamespace(
+        repaired_table_matrix=[repaired_headers, ["A", "100"]]
+    )
+
+    merged = table_repair._merge_objective_table_matrix_repairs(
+        source={
+            "column_headers": source_headers,
+            "table_visual_text": "Condition\nResult (MPa)\nA\n100",
+        },
+        canonical_matrix=[source_headers, ["A", "100"]],
+        parsed_repairs=(({}, parsed),),
+    )
+
+    assert merged == [repaired_headers, ["A", "100"]]
+
+
+def test_table_repair_propagates_repaired_header_to_source_payload():
+    original_matrix = [
+        ["Condition", "Result (MPa"],
+        ["A (", "100"],
+    ]
+    repaired_matrix = [
+        ["Condition", "Result (MPa)"],
+        ["A (100)", "100"],
+    ]
+
+    class RepairingPaperFactsExtractor:
+        def repair_table_matrix(self, _payload):
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=repaired_matrix,
+                confidence=0.95,
+            )
+
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-strength",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "column_headers": original_matrix[0],
+        "header_row_count": 1,
+        "table_matrix": original_matrix,
+        "table_visual_text": "Condition Result (MPa) A (100) 100",
+    }
+
+    repaired_source, repair_error = table_repair.repair_table_source(
+        collection_id="col-test",
+        route=route,
+        source=source,
+        paper_facts_extractor=RepairingPaperFactsExtractor(),
+    )
+
+    assert repair_error is None
+    assert repaired_source["raw_column_headers"] == original_matrix[0]
+    assert repaired_source["column_headers"] == repaired_matrix[0]
+    assert repaired_source["header_row_count"] == 1
+    assert repaired_source["table_matrix"] == repaired_matrix
+    assert repaired_source["table_markdown"].splitlines()[0].startswith(
+        "| Condition | Result (MPa) |"
+    )
+
+
+def test_table_repair_retries_once_when_first_output_keeps_fragmented_header():
+    original_matrix = [
+        ["Condition", "Result (MPa"],
+        ["A", "100"],
+    ]
+    repaired_matrix = [
+        ["Condition", "Result (MPa)"],
+        ["A", "100"],
+    ]
+
+    class RepairingPaperFactsExtractor:
+        def __init__(self) -> None:
+            self.payloads = []
+
+        def repair_table_matrix(self, payload):
+            self.payloads.append(payload)
+            return TableMatrixRepairModelOutput(
+                repaired_table_matrix=(
+                    original_matrix if len(self.payloads) == 1 else repaired_matrix
+                ),
+                confidence=0.95,
+            )
+
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-strength",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "column_headers": original_matrix[0],
+        "header_row_count": 1,
+        "table_matrix": original_matrix,
+        "table_visual_text": "Condition Result (MPa) A 100",
+    }
+    extractor = RepairingPaperFactsExtractor()
+
+    repaired_source, repair_error = table_repair.repair_table_source(
+        collection_id="col-test",
+        route=route,
+        source=source,
+        paper_facts_extractor=extractor,
+    )
+
+    assert repair_error is None
+    assert repaired_source["table_matrix"] == repaired_matrix
+    assert len(extractor.payloads) == 2
+    assert any(
+        "previous output failed validation" in focus
+        for focus in extractor.payloads[1]["repair_focus"]
+    )
+
+
 def test_research_objective_table_repair_accepts_cross_row_uncertainty_rebinding():
     original_matrix = [
         ["Specimens", "Hardness (HV)"],
@@ -12497,7 +13210,10 @@ def test_p004_table_repair_reads_explicit_continuation_label_and_keeps_lineage()
     )
     evidence, _ = evidence_materialization.materialize_evidence(
         collection_id="col-test", analysis=analysis, objective=objective,
-        observations=units, technical_audits=tuple(read_audits), paper_maps=(),
+        experiments=paper_experiment.assemble_paper_experiments(
+            collection_id="col-test", document_id=primary.document_id,
+            source_facts=units,
+        ), technical_audits=tuple(read_audits), paper_maps=(),
         frames=(), routes=(route,), blocks_by_document_id={},
         tables_by_document_id={primary.document_id: tables}, figures_by_document_id={},
     )
@@ -12990,9 +13706,11 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
-        observations=units,
+        experiments=paper_experiment.assemble_paper_experiments(
+            collection_id="col-test", document_id="paper-1",
+            source_facts=units,
+        ),
         technical_audits=tuple(read_audits),
-        experiments=(),
         paper_maps=(),
         routes=(route,),
         frames=(

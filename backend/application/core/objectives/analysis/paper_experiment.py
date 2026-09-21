@@ -16,7 +16,6 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis.source_extraction import (
     _objective_missing_context_fields,
-    _objective_test_context_applies_to_outcome,
 )
 from domain.core import (
     MeasurementResult,
@@ -240,14 +239,14 @@ def assemble_paper_experiment(
         result = draft.reported_result
         context = draft.scientific_context
         sample_label = _objective_explicit_sample_label(draft)
-        applicable_test = tuple(
-            item
-            for item in context.test
-            if result is not None
-            and (
-                not item.applies_to_outcomes
-                or _objective_test_context_applies_to_outcome(item, result.outcome)
+        applicable_test = (
+            property_matching.applicable_test_context_attributes(
+                context.test,
+                result.outcome,
+                reference_attributes=context.material,
             )
+            if result is not None
+            else ()
         )
         if (
             result is not None
@@ -597,6 +596,8 @@ def _bind_unambiguous_document_context(
             dict[tuple[tuple[str, str], str], dict[str, Any]],
         ],
     ] = {}
+    test_attributes_by_scope: dict[tuple[str, str], list[Any]] = {}
+    reference_attributes_by_scope: dict[tuple[str, str], list[Any]] = {}
     for unit in units:
         if (
             unit.selection_status == "failed"
@@ -618,9 +619,18 @@ def _bind_unambiguous_document_context(
         )
         for section in _OBJECTIVE_CONTEXT_SECTIONS:
             for attribute in getattr(unit.scientific_context, section):
-                if attribute.context_scope == "background":
+                is_density_reference = (
+                    section == "material"
+                    and attribute.context_scope == "background"
+                    and property_matching.is_density_normalization_reference(attribute)
+                )
+                if attribute.context_scope == "background" or section == "material":
+                    reference_attributes_by_scope.setdefault(scope, []).append(attribute)
+                if attribute.context_scope == "background" and not is_density_reference:
                     # Prior-study facts stay auditable but cannot describe the
-                    # current paper's material, process, sample, or test.
+                    # current paper's material, process, sample, or test. A
+                    # numeric normalization basis is retained separately so a
+                    # reported relative value remains reproducible.
                     continue
                 name = (
                     property_matching.normalize_property_label(attribute.name)
@@ -628,6 +638,8 @@ def _bind_unambiguous_document_context(
                 )
                 if not name:
                     continue
+                if section == "test":
+                    test_attributes_by_scope.setdefault(scope, []).append(attribute)
                 key = (section, name)
                 signature = (
                     _objective_fact_scalar_key(attribute.value),
@@ -691,9 +703,21 @@ def _bind_unambiguous_document_context(
             if (
                 section == "test"
                 and unit.reported_result is not None
-                and not _objective_test_context_applies_to_outcome(
+                and not property_matching.test_context_attribute_applies_to_outcome(
                     attribute,
                     unit.reported_result.outcome,
+                    context_attributes=tuple(
+                        test_attributes_by_scope.get(
+                            (unit.objective_id, unit.document_id),
+                            (),
+                        )
+                    ),
+                    reference_attributes=tuple(
+                        reference_attributes_by_scope.get(
+                            (unit.objective_id, unit.document_id),
+                            (),
+                        )
+                    ),
                 )
             ):
                 continue

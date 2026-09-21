@@ -932,7 +932,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
         "finding_synthesis": "finding_synthesis.v15",
-        "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v6",
+        "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v7",
     }
 
 

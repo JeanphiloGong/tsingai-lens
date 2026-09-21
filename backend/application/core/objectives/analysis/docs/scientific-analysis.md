@@ -41,6 +41,12 @@ Read the analysis responsibilities in real research order:
    conserve grid tokens and numeric sequences. Older Sources without this
    optional view may remain unresolved until reparsed from the original PDF.
    Analysis does not rewrite those stored Sources or fabricate a missing view.
+   When the first model result is empty, returns the unchanged fragmented
+   matrix, or remains structurally fragmented, repair makes one additional
+   request containing the deterministic layout-validation error. This retry may
+   correct layout only; it receives no new scientific evidence. If the second
+   result is still invalid, the Source remains a technical failure rather than
+   being interpreted as an absence of results.
    Oversized repair inputs repeat the caption and flattened
    header on every slice, then merge in Source row order. A final row
    containing only carried label and uncertainty fragments may merge into the
@@ -87,11 +93,21 @@ Read the analysis responsibilities in real research order:
    `assemble_paper_experiments` then records separate Source/outcome/context
    series rather than assuming a document is one experiment. Each measurement
    links only to its own supported sample and outcome-applicable test facts.
+   A numeric density-normalization basis reported by the paper may remain with
+   the applicable measurement method so a relative-density result is
+   reproducible. It is supporting measurement context, not evidence that the
+   reference material or nominal density describes the specimen's material
+   identity.
    Unknown study identity remains `None`; these conservative series are not a
    claim to have reconstructed every experiment in the paper.
-6. `evidence_materialization.py` consumes the `PaperExperiment` Source
-   observations as the primary scientific input and turns them into durable
-   `ObjectiveEvidence`. Technical read failures are supplied separately as
+6. `evidence_materialization.py` consumes only the `PaperExperiment` aggregate
+   produced for the current paper and turns its source observations into
+   durable `ObjectiveEvidence`. It checks each `MeasurementResult` against its
+   Source observation; `SampleVariant` and `TestCondition` links have already
+   been checked during experiment assembly. Missing sample or test bindings
+   remain incomplete, not inferred. Callers cannot pass an independent
+   observation stream alongside the experiment. Technical read failures are
+   supplied separately as
    application `SourceReadAudit` records. Derived comparisons are observations
    with explicit `derived_from_observation_ids`, not additional raw
    measurements. It deduplicates replayed scientific claims by stable

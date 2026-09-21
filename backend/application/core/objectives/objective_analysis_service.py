@@ -439,7 +439,6 @@ class ObjectiveEvidenceAnalysisService:
             collection_id=collection_id,
             analysis=analysis,
             objective=objective,
-            observations=paper_evidence_drafts,
             technical_audits=tuple(read_audits),
             paper_maps=objective_inputs["paper_maps"],
             frames=screened_sources,

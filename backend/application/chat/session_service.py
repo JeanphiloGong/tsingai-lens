@@ -26,6 +26,7 @@ from domain.chat import (
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
+    ToolPermissionMode,
     ToolResultStatus,
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
@@ -377,6 +378,7 @@ class ChatSessionService:
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         branch_revision: bool = False,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
         if branch_revision:
@@ -394,6 +396,7 @@ class ChatSessionService:
                 previous_messages=previous_messages,
                 message=message,
                 source_contexts=source_contexts,
+                permission_mode=permission_mode,
             )
         return self._turn_record(result, previous_count=len(previous_messages))
 
@@ -405,6 +408,7 @@ class ChatSessionService:
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         branch_revision: bool = False,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AsyncIterator[dict[str, Any]]:
         session = await self.get_session_for_user(session_id, user_id)
         if branch_revision:
@@ -439,6 +443,7 @@ class ChatSessionService:
                         result = await self._run_response(
                             session, previous_messages=current_messages, message=message,
                             source_contexts=source_contexts, emit=emit,
+                            permission_mode=permission_mode,
                         )
                     emit(
                         {
@@ -482,6 +487,7 @@ class ChatSessionService:
         message: str | None = None, source_contexts: tuple[ChatSourceContext, ...] = (),
         claimed_call: ChatToolCall | None = None,
         emit: Callable[[dict[str, Any]], None] | None = None,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AgentRunResult:
         # The caller holds the execution lock through the final snapshot write.
         loop = asyncio.get_running_loop()
@@ -572,7 +578,12 @@ class ChatSessionService:
             if claimed_call is not None:
                 result = await self.runner.resume_claimed_call(**arguments, claimed_call=claimed_call)
             else:
-                result = await self.runner.run_turn(**arguments, user_message=message, source_contexts=source_contexts)
+                result = await self.runner.run_turn(
+                    **arguments,
+                    user_message=message,
+                    source_contexts=source_contexts,
+                    permission_mode=permission_mode,
+                )
             update_snapshot(
                 status=result.status.value, message_id=None, message_created_at=None, content="",
                 completion_reason=result.completion_reason.value if result.completion_reason else None,

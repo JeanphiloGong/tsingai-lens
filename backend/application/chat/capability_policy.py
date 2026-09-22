@@ -19,6 +19,7 @@ from domain.chat import (
     ChatMessage,
     ChatMessageRole,
     ChatToolCall,
+    ToolPermissionMode,
     ToolCallStatus,
     ToolResultStatus,
     ToolRisk,
@@ -40,15 +41,47 @@ def evaluate_authorization(risk: ToolRisk | str) -> AuthorizationDecision:
     return AuthorizationDecision(may_execute=False)
 
 
-
 def validate_batch(
     capabilities: CapabilityRegistry,
     requested,
     messages,
+    *,
+    permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
 ) -> tuple[tuple[str, str] | None, dict[str, BaseModel]]:
+    permission_mode = ToolPermissionMode(permission_mode)
     successful_results = active_successful_results_by_name(messages)
+    latest_user = next(
+        (message for message in reversed(messages) if message.role is ChatMessageRole.USER),
+        None,
+    )
+    request_text = str(latest_user.content if latest_user is not None else "").casefold()
+    _, forbidden_writes = intent_policy._write_request_scope(request_text)
     validated_arguments: dict[str, BaseModel] = {}
     for call, handler in requested:
+        if handler is None and call.risk is ToolRisk.UNKNOWN:
+            return (
+                ("unknown_capability", "The requested research capability is not available."),
+                validated_arguments,
+            )
+        if permission_mode is ToolPermissionMode.NONE or (
+            permission_mode is ToolPermissionMode.READ_ONLY
+            and call.risk is ToolRisk.WRITE
+        ):
+            return (
+                (
+                    "tool_permission_denied",
+                    "The current tool permission mode does not allow this research action.",
+                ),
+                validated_arguments,
+            )
+        if call.risk is ToolRisk.WRITE and call.name in forbidden_writes:
+            return (
+                (
+                    "current_request_prohibits_tool",
+                    "The current request prohibits this research action.",
+                ),
+                validated_arguments,
+            )
         if handler is None:
             code = "capability_unavailable_for_turn" if capabilities.get(call.name) else "unknown_capability"
             return (
@@ -132,33 +165,34 @@ def validate_batch(
     return None, validated_arguments
 
 
-# define a method that decides which tool definitions to send to the model on its next turn
 def select_tool_specs(
     capabilities: CapabilityRegistry,
     messages: list[ChatMessage],
     calls: list[ChatToolCall],
     *,
     inherited_completed_writes: set[str] | None = None,
+    permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
 ) -> tuple[Any, ...]:
-    """
-    Args:
-        capabilities(CapabilityRegistry): the registry of tools available to the current agent run
-            capabilities.specs: the complete registered tool definitions, each tool spec tells the model:
-                - the tool name
-                - what the tool does
-                - which parameters it accepts
-                - the parameter schema
-                - its risk category
-            capabilities.discovery: the configuration for deferred tool discovery
-                - tools: the catalog of tools that can be discovered
-                - discovery.spec: the definition of discover_research_tools itself
-        messages(list[ChatMessage]): conversation history, including user messages and tool results
-    Returns:
-        tuple[ToolSpec]: a tuple containing zero or more ToolSpec objects
-    """
-    # retrieve all available capabilities
-    # create a set containing only the names of the registered tools
-    # if
+    permission_mode = ToolPermissionMode(permission_mode)
+    if permission_mode is ToolPermissionMode.NONE:
+        return ()
+
+    specs = capabilities.specs
+
+    def select_names(names: set[str] | frozenset[str]) -> tuple[Any, ...]:
+        return tuple(
+            spec
+            for spec in specs
+            if spec.name in names
+            and not (
+                permission_mode is ToolPermissionMode.READ_ONLY
+                and spec.risk is ToolRisk.WRITE
+            )
+        )
+
+    def append_discovery(items: tuple[Any, ...]) -> tuple[Any, ...]:
+        return (*items, capabilities.discovery.spec) if capabilities.discovery.tools else items
+
     if any(
         call.risk is ToolRisk.WRITE and call.status is ToolCallStatus.FAILED
         and call.decision_user_id is not None
@@ -166,7 +200,6 @@ def select_tool_specs(
     ):
         # A failed approved action needs an explanation before a new decision.
         return ()
-    specs = capabilities.specs
     registered_names = {spec.name for spec in specs}
 
     latest_user = next(
@@ -179,18 +212,16 @@ def select_tool_specs(
     )
     user_text = str(latest_user.content if latest_user is not None else "").casefold()
     successful_results = active_successful_results_by_name(messages)
-    if intent_policy.mentions_terms(user_text, intent_policy.NO_TOOL_PHRASES):
-        return ()
     requested_names = intent_policy.capability_names_for_intent(
-            user_text,
-            has_source_context=bool(
-                latest_user is not None and latest_user.source_contexts
-            ),
-            prior_tool_names={
-                request.name
-                for message in messages
-                for request in message.tool_calls
-            },
+        user_text,
+        has_source_context=bool(
+            latest_user is not None and latest_user.source_contexts
+        ),
+        prior_tool_names={
+            request.name
+            for message in messages
+            for request in message.tool_calls
+        },
     )
     loaded_names = {
         name
@@ -201,6 +232,14 @@ def select_tool_specs(
     # Prerequisite readers are also loaded by the backend. Retain their schemas
     # for later decisions in this request, just like explicitly discovered tools.
     loaded_names.update(set(successful_results).intersection(capabilities.discovery.tools))
+    if permission_mode is ToolPermissionMode.READ_ONLY:
+        requested_names.difference_update(intent_policy.WRITE_CAPABILITIES)
+        loaded_names.difference_update(
+            name
+            for name in loaded_names
+            if (handler := capabilities.get(name)) is not None
+            and handler.spec.risk is ToolRisk.WRITE
+        )
     allowed_names = loaded_names | requested_names.intersection(intent_policy.WRITE_CAPABILITIES)
     finding_draft_requested = bool(
         successful_results.get("inspect_published_finding")
@@ -221,7 +260,7 @@ def select_tool_specs(
         and all(calls[-1].arguments.get(key) for key in ("document_id", "source_kind", "source_ref"))
         and "read_source" in registered_names
     ):
-        return tuple(spec for spec in specs if spec.name == "read_source")
+        return select_names({"read_source"})
     if (
         "revise_research_plan" in allowed_names
         and "inspect_research_plans" in registered_names
@@ -229,10 +268,7 @@ def select_tool_specs(
     ):
         allowed_names.discard("revise_research_plan")
     if not loaded_names and capabilities.discovery.tools:
-        return (
-            *(spec for spec in specs if spec.name in allowed_names),
-            capabilities.discovery.spec,
-        )
+        return append_discovery(select_names(allowed_names))
     mandatory_stage = False
 
     completed_browse = any(
@@ -253,9 +289,9 @@ def select_tool_specs(
     source_grounded_intent = source_grounded_intent and not finding_review_pending
     if (source_grounded_intent and "inspect_document_sources" in registered_names
             and _pending_document_overviews(successful_results, calls)):
-        return tuple(spec for spec in specs if spec.name == "inspect_document_sources")
+        return select_names({"inspect_document_sources"})
     if source_grounded_intent and _pending_finding_sources(successful_results, calls) and "read_source" in registered_names:
-        return tuple(spec for spec in specs if spec.name in {"read_source", "inspect_table"})
+        return select_names({"read_source", "inspect_table"})
     has_attached_source_context = bool(
         latest_user is not None and latest_user.source_contexts
     )
@@ -294,7 +330,7 @@ def select_tool_specs(
     )
     if source_candidates and not has_exact_source_read:
         if not failed_source_read:
-            return tuple(spec for spec in specs if spec.name in {"read_source", "inspect_table"})
+            return select_names({"read_source", "inspect_table"})
 
     # A cross-paper comparison or support claim needs source-backed facts,
     # not only the paper map. Once the map is complete, require a focused
@@ -493,18 +529,18 @@ def select_tool_specs(
     # and may legitimately create another immutable version with the same
     # capability name.
     allowed_names.difference_update(completed_writes)
-    selected = tuple(spec for spec in specs if spec.name in allowed_names)
+    selected_specs = select_names(allowed_names)
     if (
         not mandatory_stage
         and capabilities.discovery.tools
         and (finding_draft_requested or failed_source_read
              or allowed_names.intersection({"create_evidence_version", "create_finding_version"})
-             or required_tool_before_answer(
-            tuple(spec.name for spec in selected), successful_results=successful_results, calls=calls,
+            or required_tool_before_answer(
+            tuple(spec.name for spec in selected_specs), successful_results=successful_results, calls=calls,
         ) is None)
     ):
-        return (*selected, capabilities.discovery.spec)
-    return selected
+        return append_discovery(selected_specs)
+    return selected_specs
 
 
 def required_tool_before_answer(

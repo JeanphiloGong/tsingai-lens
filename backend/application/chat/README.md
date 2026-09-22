@@ -74,7 +74,11 @@ Read and transient-draft discovery uses the model's interpretation of the
 request, including filenames, paper identifiers, and conversational references.
 It does not require words such as "paper" or "source" to unlock inspection.
 Greetings, general knowledge, and application explanations can finish without
-discovery. An explicit no-tools request exposes no capabilities.
+discovery. Tool visibility is controlled by the caller's explicit per-turn
+`permission_mode`: `confirm` keeps the normal discovery and exact write
+approval path, `read_only` removes durable writes while retaining reads and
+transient drafts, and `none` exposes no capabilities. A phrase such as “do not
+search” is conversational guidance for the model, not an authorization switch.
 
 `discover_research_tools` is an ordinary typed function call, not a provider's
 native ToolSearch API. Its short catalog comes from registered read/draft

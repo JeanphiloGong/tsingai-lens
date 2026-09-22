@@ -29,6 +29,7 @@ from domain.chat import (
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ToolPermissionMode,
     ToolRisk,
 )
 from infra.persistence.memory import MemoryObjectiveRepository, MemoryPipelineRunRepository
@@ -105,8 +106,10 @@ class _Service:
         *,
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
     ) -> dict:
         await self.get_session_for_user(session_id, user_id)
+        self.permission_mode = permission_mode
         if message == "blocked":
             raise ChatApprovalPendingError(self.pending.tool_call_id)
         if message == "forged source":
@@ -141,12 +144,14 @@ class _Service:
         *,
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
     ):
         turn = await self.post_message_for_user(
             session_id,
             user_id,
             message=message,
             source_contexts=source_contexts,
+            permission_mode=permission_mode,
         )
 
         async def events():
@@ -213,6 +218,20 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert turn.messages[-1].content.startswith("你好")
     assert [item.role for item in messages.items] == ["user", "assistant"]
     assert messages.pending_approval.tool_call_id == "call-1"
+
+
+def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
+    service = _Service()
+
+    asyncio.run(
+        sessions_controller.post_chat_message(
+            "chat-1",
+            ChatTurnRequest(message="你好", permission_mode="none"),
+            _request(service),
+        )
+    )
+
+    assert service.permission_mode is ToolPermissionMode.NONE
 
 
 @pytest.mark.parametrize("count", [1, 3, 12])

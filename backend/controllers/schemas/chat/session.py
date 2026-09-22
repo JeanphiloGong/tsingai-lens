@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from domain.chat import ToolPermissionMode
+
 
 class ChatSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -128,6 +130,7 @@ class ChatTurnRequest(BaseModel):
         default_factory=list,
         max_length=12,
     )
+    permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM
 
 
 class ChatToolDecisionRequest(BaseModel):

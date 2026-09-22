@@ -261,6 +261,15 @@ Analysis. The quoted content is never treated as model instructions. Existing
 messages have an empty context list and historical contexts may have a null
 digest.
 
+The message request accepts an optional `permission_mode` with values
+`confirm` (the default), `read_only`, or `none`. `confirm` preserves the normal
+Research Agent behavior: read and transient-draft capabilities may execute and
+durable writes require exact user approval. `read_only` rejects durable writes
+before execution, while `none` exposes and accepts no capabilities. This is a
+per-turn caller policy; natural-language phrases such as “do not search” do not
+change tool visibility. The mode does not remove Source, collection, or domain
+validation, and it does not turn a model proposal into approval.
+
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have

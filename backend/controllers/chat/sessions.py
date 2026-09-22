@@ -34,7 +34,7 @@ from controllers.schemas.chat.session import (
     ChatTreeResponse,
     ChatTreeNodeResponse,
 )
-from domain.chat import ChatSourceContext
+from domain.chat import ChatSourceContext, ToolPermissionMode
 
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
@@ -222,11 +222,17 @@ async def post_chat_message(
     try:
         user_id = await current_user_id(request)
         if "text/event-stream" in request.headers.get("accept", ""):
+            permission_kwargs = (
+                {"permission_mode": payload.permission_mode}
+                if payload.permission_mode is not ToolPermissionMode.CONFIRM
+                else {}
+            )
             events = await request.app.state.chat_session_service.stream_message_for_user(
                 session_id,
                 user_id,
                 message=payload.message,
                 source_contexts=_source_contexts(payload),
+                **permission_kwargs,
                 **({"branch_revision": True} if payload.branch_revision else {}),
             )
             return StreamingResponse(
@@ -237,11 +243,17 @@ async def post_chat_message(
                     "X-Accel-Buffering": "no",
                 },
             )
+        permission_kwargs = (
+            {"permission_mode": payload.permission_mode}
+            if payload.permission_mode is not ToolPermissionMode.CONFIRM
+            else {}
+        )
         turn = await request.app.state.chat_session_service.post_message_for_user(
             session_id,
             user_id,
             message=payload.message,
             source_contexts=_source_contexts(payload),
+            **permission_kwargs,
             **({"branch_revision": True} if payload.branch_revision else {}),
         )
     except ChatSessionNotFoundError as exc:

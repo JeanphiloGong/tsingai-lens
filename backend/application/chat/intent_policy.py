@@ -122,20 +122,6 @@ WRITE_CAPABILITIES = {
     "revise_research_plan",
 }
 
-NO_TOOL_PHRASES = (
-    "不用查",
-    "不要查",
-    "无需查",
-    "不查论文",
-    "不用检索",
-    "不要检索",
-    "不用操作",
-    "不要操作",
-    "without searching",
-    "do not search",
-    "don't search",
-    "without tools",
-)
 NO_WRITE_PHRASES = (
     "只读", "read-only", "不要写入", "不写入",
     "不要保存",

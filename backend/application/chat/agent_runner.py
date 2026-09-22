@@ -40,6 +40,7 @@ from domain.chat import (
     ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
+    ToolPermissionMode,
     ToolResultStatus,
     ToolRisk,
 )
@@ -413,11 +414,16 @@ class ResearchAgentRunner:
         previous_messages: tuple[ChatMessage, ...],
         user_message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
     ) -> AgentRunResult:
+        # Normalize the caller policy before creating any trajectory state. A
+        # direct application caller must not leave a partial turn when it
+        # supplies an unsupported mode; HTTP callers are already schema-bound.
+        permission_mode = ToolPermissionMode(permission_mode)
         progress = _RunProgress(self.limits, progress_callback=progress_callback,
                                 response_started_callback=response_started_callback)
         messages = [
@@ -442,6 +448,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             inherited_completed_writes=set(),
+            permission_mode=permission_mode,
             progress=progress,
         )
 
@@ -519,6 +526,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             inherited_completed_writes=inherited_completed_writes,
+            permission_mode=ToolPermissionMode.CONFIRM,
             progress=progress,
         )
 
@@ -532,6 +540,7 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None,
         text_delta_callback: Callable[[str], None] | None,
         inherited_completed_writes: set[str],
+        permission_mode: ToolPermissionMode | str,
         progress: _RunProgress,
     ) -> AgentRunResult:
         while True:
@@ -558,6 +567,7 @@ class ResearchAgentRunner:
                         messages,
                         calls,
                         inherited_completed_writes=inherited_completed_writes,
+                        permission_mode=permission_mode,
                     )
                     tool_names = tuple(spec.name for spec in tool_specs)
                     if not tool_specs and results:
@@ -858,7 +868,12 @@ class ResearchAgentRunner:
                 error = ("resource_budget", "These Sources or actions remain uninspected or unexecuted in this turn.")
                 validated_arguments = {}
             else:
-                error, validated_arguments = capability_policy.validate_batch(self.capabilities, requested, messages)
+                error, validated_arguments = capability_policy.validate_batch(
+                    self.capabilities,
+                    requested,
+                    messages,
+                    permission_mode=permission_mode,
+                )
             if error:
                 completed = tuple(self._failure(call, *error) for call, _ in requested)
             elif len(requested) == 1 and capability_policy.evaluate_authorization(requested[0][0].risk).requires_approval:

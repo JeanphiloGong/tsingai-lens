@@ -4,8 +4,8 @@ import json
 import pytest
 
 from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
-from application.chat.capability_policy import select_tool_specs
-from domain.chat import ChatMessage, ToolRisk
+from application.chat.capability_policy import select_tool_specs, validate_batch
+from domain.chat import ChatMessage, ChatToolCall, ToolPermissionMode, ToolRisk
 from tests.unit.application.test_research_agent_runner import _Capability, _Model, _context
 
 
@@ -21,6 +21,151 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
     assert [spec.name for spec in specs] == ["discover_research_tools"]
     assert "search_sources" in specs[0].description
     assert "SearchSourcesArguments" not in str(specs[0].model_schema())
+
+
+def test_no_tool_wording_does_not_hide_default_discovery():
+    registry = CapabilityRegistry((_Capability("search_sources", ToolRisk.READ),))
+    message = ChatMessage.user(
+        message_id="u",
+        session_id="chat-1",
+        content="Explain the LPBF concept; do not search.",
+        created_at="2026-09-09T00:00:00Z",
+    )
+
+    specs = select_tool_specs(registry, [message], [])
+
+    assert [spec.name for spec in specs] == ["discover_research_tools"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (ToolPermissionMode.NONE, ()),
+        (ToolPermissionMode.READ_ONLY, ("discover_research_tools",)),
+        (ToolPermissionMode.CONFIRM, ("discover_research_tools",)),
+    ],
+)
+def test_explicit_tool_permission_mode_controls_visible_specs(mode, expected):
+    registry = CapabilityRegistry(
+        (
+            _Capability("search_sources", ToolRisk.READ),
+            _Capability("create_objective_candidate", ToolRisk.WRITE),
+        )
+    )
+    message = ChatMessage.user(
+        message_id="u",
+        session_id="chat-1",
+        content="Explain the collection.",
+        created_at="2026-09-09T00:00:00Z",
+    )
+
+    specs = select_tool_specs(registry, [message], [], permission_mode=mode)
+
+    assert tuple(spec.name for spec in specs) == expected
+
+
+@pytest.mark.anyio
+async def test_invalid_permission_mode_is_rejected_before_checkpointing():
+    checkpoints = []
+
+    async def checkpoint(messages, calls, results):
+        checkpoints.append((messages, calls, results))
+
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="This response should not run.")),
+        capabilities=CapabilityRegistry(()),
+    )
+
+    with pytest.raises(ValueError, match="unsafe"):
+        await runner.run_turn(
+            context=_context(),
+            previous_messages=(),
+            user_message="Explain the collection.",
+            permission_mode="unsafe",
+            checkpoint=checkpoint,
+        )
+
+    assert checkpoints == []
+
+
+def test_read_only_rejects_a_forged_write_call_before_execution():
+    write = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    call = ChatToolCall.requested(
+        tool_call_id="call-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        position=0,
+        name=write.spec.name,
+        arguments={},
+        risk=ToolRisk.WRITE,
+    )
+
+    error, validated = validate_batch(
+        CapabilityRegistry((write,)),
+        ((call, write),),
+        (),
+        permission_mode=ToolPermissionMode.READ_ONLY,
+    )
+
+    assert error is not None
+    assert error[0] == "tool_permission_denied"
+    assert validated == {}
+    assert write.executed_arguments == []
+
+
+def test_none_rejects_a_forged_read_call_before_execution():
+    read = _Capability("search_sources", ToolRisk.READ)
+    call = ChatToolCall.requested(
+        tool_call_id="call-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        position=0,
+        name=read.spec.name,
+        arguments={},
+        risk=ToolRisk.READ,
+    )
+
+    error, validated = validate_batch(
+        CapabilityRegistry((read,)),
+        ((call, read),),
+        (),
+        permission_mode=ToolPermissionMode.NONE,
+    )
+
+    assert error is not None
+    assert error[0] == "tool_permission_denied"
+    assert validated == {}
+    assert read.executed_arguments == []
+
+
+def test_current_request_write_prohibition_rejects_a_forged_write_call():
+    write = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    call = ChatToolCall.requested(
+        tool_call_id="call-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        position=0,
+        name=write.spec.name,
+        arguments={},
+        risk=ToolRisk.WRITE,
+    )
+
+    error, validated = validate_batch(
+        CapabilityRegistry((write,)),
+        ((call, write),),
+        (
+            ChatMessage.user(
+                message_id="u",
+                session_id="chat-1",
+                content="Create the objective, but do not save it.",
+                created_at="2026-09-09T00:00:00Z",
+            ),
+        ),
+    )
+
+    assert error is not None
+    assert error[0] == "current_request_prohibits_tool"
+    assert validated == {}
 
 
 def test_initial_catalog_defers_new_registered_read_capability():
@@ -216,10 +361,35 @@ async def test_catalog_cannot_load_a_write():
     assert result.tool_results[0].status == "failed"
 
 
-def test_explicit_no_tools_disables_catalog():
+@pytest.mark.anyio
+async def test_read_only_rejects_a_model_write_even_when_it_is_emitted_directly():
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name=writer.spec.name),)),
+        ModelTurn(content="The requested write is not allowed in read-only mode."),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((writer,)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Create an objective candidate.",
+        permission_mode=ToolPermissionMode.READ_ONLY,
+    )
+
+    assert result.tool_results[-1].error_code == "tool_permission_denied"
+    assert writer.executed_arguments == []
+
+
+def test_explicit_none_mode_disables_catalog():
     registry = CapabilityRegistry((_Capability("search_sources", ToolRisk.READ),))
     message = ChatMessage.user(message_id="u", session_id="chat-1", content="Explain LPBF, do not search.", created_at="2026-09-09T00:00:00Z")
-    assert select_tool_specs(registry, [message], []) == ()
+    assert select_tool_specs(
+        registry, [message], [], permission_mode=ToolPermissionMode.NONE,
+    ) == ()
 
 
 @pytest.mark.parametrize("request_text", [

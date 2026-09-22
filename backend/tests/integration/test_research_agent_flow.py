@@ -213,7 +213,13 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     ]
     assert trajectory.json()["pending_approval"] is None
     assert model.all_tool_spec_names[0] == ("discover_research_tools",)
-    assert "create_objective_candidate" not in model.all_tool_spec_names[-1]
+    assert any(
+        "create_objective_candidate" in names
+        for names in model.all_tool_spec_names
+    )
+    assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
+    # The write schema is discovered before approval, then hidden after the
+    # successful same-continuation write to prevent duplicate execution.
     assert [item["role"] for item in trajectory.json()["items"]] == [
         "user",
         "assistant",

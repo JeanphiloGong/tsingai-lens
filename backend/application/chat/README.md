@@ -30,7 +30,11 @@ user message -> bounded model decision -> capability call
 ```
 
 Read capabilities may inspect canonical collection resources. Write
-capabilities stop for exact user approval. Chat never owns a second Objective,
+capabilities stop for exact user approval by default. Session permissions can
+deny writes or authorize enumerated actions until expiry. ChatSessionService
+claims every automatic write in the repository before resuming the same Runner;
+it never sends write calls through the parallel read executor. Revocation and
+claim share the session row lock. Chat never owns a second Objective,
 Evidence, Finding, or Analysis record; it calls the Source and Core services.
 
 ## Boundary Checklist
@@ -75,7 +79,9 @@ are assigned contiguous positions so checkpointed requests and results stay pair
 
 Read and draft capabilities can execute during the turn. Write capabilities
 persist their exact arguments and digest, stop for the authenticated user's
-approval, and execute only that approved call once. Rejection, provider
+approval or a current scoped grant, and execute only that authorized call once.
+Automatic authority records its permission revision and scope_grant basis.
+Rejection, provider
 failure, malformed model output, and resource limits remain technical trajectory
 outcomes; they are not scientific conclusions.
 

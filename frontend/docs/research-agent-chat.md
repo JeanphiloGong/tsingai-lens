@@ -21,7 +21,14 @@ small, intent-matched set of collection, Source, Finding, Objective, or plan
 actions for each decision; it does not receive the whole capability catalogue.
 Collection screening stays separate from Source reading, and deriving a new
 Objective requires an explicit request. A Core write remains paused until the
-user approves the exact persisted arguments.
+user approves the exact persisted arguments by default. The session permission
+control offers read-only, per-call confirmation, and expiring automatic grants
+for explicitly selected revision/review/plan actions. Granting Evidence or
+Finding creation includes publishing its new analysis version. The control
+uses GET/PUT on the session's `/permissions` endpoint and an optimistic revision;
+conflicts require reload, never an automatic overwrite. Revoking during a turn
+blocks the next unclaimed write, not an operation already running. New sessions
+and branches default to confirmation.
 
 ## Product Boundary
 

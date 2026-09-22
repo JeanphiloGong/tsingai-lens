@@ -16,6 +16,21 @@ class ChatSessionCreateRequest(BaseModel):
     collection_id: str = Field(min_length=1, max_length=64)
 
 
+class ChatPermissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["read_only", "confirm", "auto"]
+    actions: list[str] = Field(default_factory=list, max_length=6)
+    expires_at: str | None = None
+    expected_revision: int = Field(ge=0)
+
+
+class ChatPermissionResponse(BaseModel):
+    mode: Literal["read_only", "confirm", "auto"]
+    actions: list[str]
+    expires_at: str | None
+    revision: int
+
+
 class ChatSessionResponse(BaseModel):
     session_id: str
     user_id: str
@@ -119,6 +134,8 @@ class ChatToolCallResponse(BaseModel):
     decision_user_id: str | None = None
     decision_arguments_digest: str | None = None
     decided_at: str | None = None
+    decision_basis: Literal["explicit", "scope_grant"] = "explicit"
+    authorization_revision: int | None = None
 
 
 class ChatTurnRequest(BaseModel):

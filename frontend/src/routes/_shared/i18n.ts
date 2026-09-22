@@ -11,6 +11,15 @@ interface Translations {
 
 const translations: Record<Language, Translations> = {
 	en: {
+		agentPermission: {
+			title: 'Agent permissions', mode: 'Mode', read_only: 'Read and suggest', confirm: 'Confirm each write', auto: 'Authorized automatic execution',
+			loading: 'Loading', actions: 'Allowed in this session and collection', hours: 'Valid for (hours)', expires: 'Expires',
+			save: 'Apply permissions', revoke: 'Revoke automatic execution', reload: 'Reload settings',
+			create_evidence_version: 'Create Evidence and publish an analysis version',
+			create_finding_version: 'Create Finding and publish an analysis version',
+			record_finding_feedback: 'Save Finding feedback', curate_finding: 'Save expert Finding review',
+			create_research_plan: 'Save a research plan', revise_research_plan: 'Save a plan revision'
+		},
 		brand: {
 			title: 'Lens',
 			sub: '',
@@ -2802,6 +2811,14 @@ const translations: Record<Language, Translations> = {
 		}
 	},
 	zh: {
+		agentPermission: {
+			title: 'Agent 操作权限', mode: '模式', read_only: '只读与建议', confirm: '逐次确认', auto: '授权自动执行',
+			loading: '加载中', actions: '仅授权当前会话与论文集合', hours: '有效时间（小时）', expires: '到期时间',
+			save: '应用权限', revoke: '撤销自动执行', reload: '重新加载设置',
+			create_evidence_version: '创建 Evidence 并发布分析版本', create_finding_version: '创建 Finding 并发布分析版本',
+			record_finding_feedback: '保存结论反馈', curate_finding: '保存专家修订',
+			create_research_plan: '保存研究计划', revise_research_plan: '保存计划修订'
+		},
 		brand: {
 			title: 'Lens',
 			sub: '',

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
+from domain.chat.permissions import change_permission, permission_record, permits_automatic
 
 
 class MemoryChatRepository:
@@ -16,6 +18,34 @@ class MemoryChatRepository:
         self.results: dict[str, ChatToolResult] = {}
         self.active_sessions: set[str] = set()
         self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
+        self.permissions = {}
+        self.proposed_revisions = {}
+
+    async def read_permission(self, session_id, user_id):
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError("chat session not found")
+        return permission_record(self.permissions.get(session_id))
+
+    async def set_permission(self, session_id, user_id, **changes):
+        current = await self.read_permission(session_id, user_id)
+        self.permissions[session_id] = change_permission(current, **changes)
+        return dict(self.permissions[session_id])
+
+    async def claim_automatic_call(self, *, session_id, tool_call_id, user_id, started_at):
+        permission = await self.read_permission(session_id, user_id)
+        call = self.calls[tool_call_id]
+        if call.session_id != session_id:
+            raise FileNotFoundError("chat tool call not found")
+        if (call.status.value != "approval_required"
+                or self.proposed_revisions[tool_call_id] != permission["revision"]
+                or not permits_automatic(permission, call.name, now=started_at)):
+            return None
+        claimed = replace(call.approve(user_id=user_id, arguments_digest=call.arguments_digest,
+                                       decided_at=started_at), decision_basis="scope_grant",
+                          authorization_revision=permission["revision"]).start(started_at)
+        self.calls[tool_call_id] = claimed
+        return claimed
 
     @asynccontextmanager
     async def session_execution(self, session_id: str):
@@ -65,6 +95,8 @@ class MemoryChatRepository:
     ) -> None:
         self.sessions[session.session_id] = session
         self.messages[session.session_id] = messages
+        for call in tool_calls:
+            self.proposed_revisions.setdefault(call.tool_call_id, permission_record(self.permissions.get(session.session_id))["revision"])
         self.calls.update((item.tool_call_id, item) for item in tool_calls)
         self.results.update((item.tool_call_id, item) for item in tool_results)
 
@@ -84,6 +116,9 @@ class MemoryChatRepository:
         call = self.calls.get(tool_call_id)
         if call is None or call.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
+        permission = await self.read_permission(session_id, user_id)
+        if decision == "approved" and permission["mode"] == "read_only":
+            raise ValueError("permission_read_only")
         decided = (
             call.approve(
                 user_id=user_id,
@@ -97,6 +132,8 @@ class MemoryChatRepository:
                 decided_at=decided_at,
             )
         )
+        if decision == "approved":
+            decided = replace(decided, authorization_revision=permission["revision"])
         self.calls[tool_call_id] = decided
         return decided
 
@@ -115,6 +152,9 @@ class MemoryChatRepository:
         if call is None or call.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
         if call.status.value == "approved":
+            permission = await self.read_permission(session_id, user_id)
+            if permission["mode"] == "read_only" or (call.authorization_revision or 0) != permission["revision"]:
+                raise ValueError("permission_changed_before_execution")
             claimed = call.start(started_at)
             self.calls[tool_call_id] = claimed
             return claimed

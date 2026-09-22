@@ -12,8 +12,9 @@ from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from application.chat.agent_runner import AgentRunResult, ResearchAgentRunner
+from application.chat.agent_runner import AgentRunResult, AgentRunStatus, ResearchAgentRunner
 from application.chat.capabilities import AgentContext
+from application.chat.intent_policy import _write_request_scope
 from application.core.objectives.evidence_authoring_service import (
     normalize_source_text,
     resolve_canonical_objective_source,
@@ -584,6 +585,68 @@ class ChatSessionService:
                     source_contexts=source_contexts,
                     permission_mode=permission_mode,
                 )
+            while result.pending_approval is not None:
+                pending = result.pending_approval
+                await self.get_session_for_user(session.session_id, session.user_id)
+                permission = await self.repository.read_permission(
+                    session.session_id, session.user_id
+                )
+                request = next(
+                    (
+                        item.content
+                        for item in reversed(result.messages)
+                        if item.role.value == "user"
+                    ),
+                    "",
+                )
+                _, forbidden = _write_request_scope(request)
+                if permission["mode"] == "read_only" or pending.name in forbidden:
+                    denied = await self.repository.decide_tool_call(
+                        session_id=session.session_id,
+                        user_id=session.user_id,
+                        tool_call_id=pending.tool_call_id,
+                        arguments_digest=pending.arguments_digest,
+                        decision="rejected",
+                        decided_at=_now_iso(),
+                    )
+                    observation = ChatToolResult(
+                        tool_call_id=denied.tool_call_id,
+                        status="failed",
+                        error_code="permission_write_denied",
+                        error_message=(
+                            "The current permission or request prohibits this write. "
+                            "No research record was changed."
+                        ),
+                    )
+                    messages = (*result.messages, ChatMessage.from_tool_result(
+                        message_id=f"msg_{uuid4().hex}",
+                        session_id=session.session_id,
+                        result=observation,
+                        created_at=_now_iso(),
+                    ))
+                    await arguments["checkpoint"](messages, (denied,), (observation,))
+                    result = replace(
+                        result,
+                        status=AgentRunStatus.FAILED,
+                        messages=messages,
+                        pending_approval=None,
+                        error_code="permission_write_denied",
+                        tool_calls=(*result.tool_calls[:-1], denied),
+                        tool_results=(*result.tool_results, observation),
+                    )
+                    break
+                automatic = await self.repository.claim_automatic_call(
+                    session_id=session.session_id,
+                    tool_call_id=pending.tool_call_id,
+                    user_id=session.user_id,
+                    started_at=_now_iso(),
+                )
+                if automatic is None:
+                    break
+                arguments["previous_messages"] = result.messages
+                result = await self.runner.resume_claimed_call(
+                    **arguments, claimed_call=automatic
+                )
             update_snapshot(
                 status=result.status.value, message_id=None, message_created_at=None, content="",
                 completion_reason=result.completion_reason.value if result.completion_reason else None,
@@ -729,6 +792,20 @@ class ChatSessionService:
         decision: str,
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
+        if decision == "approved":
+            history = await self.repository.read_messages(session_id)
+            request = next(
+                (
+                    item.content
+                    for item in reversed(history)
+                    if item.role.value == "user"
+                ),
+                "",
+            )
+            _, forbidden = _write_request_scope(request)
+            requested = await self.repository.read_tool_call(tool_call_id)
+            if requested is not None and requested.name in forbidden:
+                raise ValueError("current_request_prohibits_write")
         existing = await self.repository.read_tool_call(tool_call_id)
         if existing is None or existing.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")

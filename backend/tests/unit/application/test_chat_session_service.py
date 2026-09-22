@@ -39,6 +39,7 @@ from domain.chat import (
 )
 from domain.source import SourceBlock, SourceDocument
 from tests.unit.application.test_research_agent_runner import _Model
+from tests.support.chat_repository import MemoryChatRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -124,8 +125,9 @@ class _SourceArtifactRepository:
         return None
 
 
-class _Repository:
+class _Repository(MemoryChatRepository):
     def __init__(self) -> None:
+        super().__init__()
         self.sessions: dict[str, ChatSession] = {}
         self.active_sessions: set[str] = set()
         self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
@@ -184,6 +186,8 @@ class _Repository:
     ) -> None:
         self.sessions[session.session_id] = session
         self.messages[session.session_id] = messages
+        for call in tool_calls:
+            self.proposed_revisions.setdefault(call.tool_call_id, 0)
         self.calls.update((item.tool_call_id, item) for item in tool_calls)
         self.results.update((item.tool_call_id, item) for item in tool_results)
         self.trajectory_snapshots.append(

@@ -19,6 +19,8 @@ from application.chat.session_service import (
 from application.repositories.chat_repository import ChatSessionBusyError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
+    ChatPermissionRequest,
+    ChatPermissionResponse,
     ChatMessageFeedbackRequest,
     ChatBranchRequest,
     ChatMessageFeedbackResponse,
@@ -38,6 +40,30 @@ from domain.chat import ChatSourceContext, ToolPermissionMode
 
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
+
+
+@router.get("/{session_id}/permissions", response_model=ChatPermissionResponse)
+async def get_chat_permission(session_id: str, request: Request):
+    service = request.app.state.chat_session_service
+    user_id = await current_user_id(request)
+    try:
+        await service.get_session_for_user(session_id, user_id)
+        return await service.repository.read_permission(session_id, user_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/{session_id}/permissions", response_model=ChatPermissionResponse)
+async def set_chat_permission(session_id: str, payload: ChatPermissionRequest, request: Request):
+    service = request.app.state.chat_session_service
+    user_id = await current_user_id(request)
+    try:
+        await service.get_session_for_user(session_id, user_id)
+        return await service.repository.set_permission(session_id, user_id, **payload.model_dump())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
 
 def _session_not_found(exc: ChatSessionNotFoundError) -> dict[str, str]:

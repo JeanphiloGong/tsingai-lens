@@ -51,6 +51,7 @@ class ChatSessionRow(Base):
     fork_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fork_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_snapshot: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
+    operation_permission: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
 
 
 class ChatMessageRow(Base):
@@ -176,6 +177,9 @@ class ChatToolCallRow(Base):
         DateTime(timezone=True), nullable=True
     )
     result_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_basis: Mapped[str] = mapped_column(String(32), nullable=False, server_default="explicit")
+    authorization_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    proposed_permission_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     result_data: Mapped[dict[str, Any] | None] = mapped_column(
         _JSON_DOCUMENT, nullable=True
     )

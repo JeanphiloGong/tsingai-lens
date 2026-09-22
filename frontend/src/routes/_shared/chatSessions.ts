@@ -90,6 +90,8 @@ export type ChatTree = {
 };
 
 export type ChatToolCall = {
+    decision_basis?: 'explicit' | 'scope_grant';
+    authorization_revision?: number | null;
 	tool_call_id: string;
 	session_id: string;
 	assistant_message_id: string;
@@ -242,6 +244,25 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
 		signal,
 		method: 'GET'
 	})) as ChatSession;
+}
+
+export type ChatPermission = {
+	mode: 'read_only' | 'confirm' | 'auto';
+	actions: string[];
+	expires_at: string | null;
+	revision: number;
+};
+
+export async function fetchChatPermission(sessionId: string) {
+	return await requestJson(`${chatSessionPath(sessionId)}/permissions`) as ChatPermission;
+}
+
+export async function updateChatPermission(sessionId: string, permission: ChatPermission) {
+	return await requestJson(`${chatSessionPath(sessionId)}/permissions`, {
+		method: 'PUT',
+		body: JSON.stringify({ mode: permission.mode, actions: permission.actions,
+			expires_at: permission.expires_at, expected_revision: permission.revision })
+	}) as ChatPermission;
 }
 
 export async function branchChatMessage(

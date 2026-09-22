@@ -143,6 +143,30 @@ handoff record or a second research-result identity.
 
 ### Research Agent Chat
 
+Session operation permissions are exposed by authenticated
+`GET/PUT /api/v1/chat-sessions/{session_id}/permissions`. PUT accepts `mode`
+(`read_only`, `confirm`, `auto`), an explicit `actions` list, nullable
+`expires_at`, and `expected_revision`. Existing and branched sessions default
+to `confirm`; revision conflicts and invalid grants return `409`, inaccessible
+sessions return `404`. The model cannot call this settings endpoint.
+
+Automatic grants cover only the six enumerated revision/review/plan actions in
+`domain/chat/permissions.py`. Evidence and Finding version creation publish a
+new analysis version; there is no separate save-only permission. Other writes
+still require exact confirmation. Calls record `decision_basis` (`explicit` or
+`scope_grant`) and `authorization_revision`. Existing approval descriptions in
+this document describe the default confirm mode.
+
+Revocation and acquiring execution authority lock the same session row. A
+revocation completed first prevents a new claim; an already claimed operation
+may finish. Repeated claims never restart a running/terminal call. A crash
+after claim may leave an interrupted operation requiring investigation; this
+does not promise transactional exactly-once effects across every domain service.
+New grants do not automatically execute old pending calls. Read-only mode
+blocks even explicit approvals. Request-level no-save constraints further
+restrict writes; natural-language detection remains bounded, and read-only
+settings are the deterministic control.
+
 - `POST /api/v1/chat-sessions`
 - `GET /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`

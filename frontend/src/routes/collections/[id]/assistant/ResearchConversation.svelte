@@ -37,6 +37,7 @@
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
 	import ConversationHeader from './ConversationHeader.svelte';
+	import OperationPermissions from './OperationPermissions.svelte';
 	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
@@ -1197,6 +1198,9 @@
 			/>
 		{/if}
 
+		{#if session}
+			{#key session.session_id}<OperationPermissions sessionId={session.session_id} />{/key}
+		{/if}
 		{#if error}
 			<div class="status status-error" role="alert">
 				<span>{error}</span>

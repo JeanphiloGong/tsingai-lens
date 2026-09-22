@@ -163,10 +163,19 @@ class ChatToolCall:
     decision_user_id: str | None = None
     decision_arguments_digest: str | None = None
     decided_at: str | None = None
+    decision_basis: str = "explicit"
+    authorization_revision: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.position, int) or isinstance(self.position, bool) or self.position < 0:
             raise ValueError("tool call position must be a non-negative integer")
+        if self.decision_basis not in {"explicit", "scope_grant"}:
+            raise ValueError("invalid decision basis")
+        if self.decision_basis == "scope_grant" and (
+            self.authorization_revision is None or self.authorization_revision < 1
+            or not self.decision_user_id
+        ):
+            raise ValueError("scope grant requires its revision and authorizing user")
         for field_name in (
             "tool_call_id",
             "session_id",
@@ -353,6 +362,8 @@ class ChatToolCall:
             decision_user_id=payload.get("decision_user_id"),
             decision_arguments_digest=payload.get("decision_arguments_digest"),
             decided_at=payload.get("decided_at"),
+            decision_basis=payload.get("decision_basis", "explicit"),
+            authorization_revision=payload.get("authorization_revision"),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -372,6 +383,8 @@ class ChatToolCall:
             "decision_user_id": self.decision_user_id,
             "decision_arguments_digest": self.decision_arguments_digest,
             "decided_at": self.decided_at,
+            "decision_basis": self.decision_basis,
+            "authorization_revision": self.authorization_revision,
         }
 
 

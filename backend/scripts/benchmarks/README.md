@@ -32,6 +32,12 @@ path assumptions or a fixed `backend/.env` location.
   model for every model-backed step, and verifies source-grounded measurements,
   strategy-local comparisons, Evidence/Finding lineage, and complete model
   traces. It never writes collection data.
+- `paper_experiment_material_suite_probe.py`
+  Case-driven live acceptance probe for multiple real materials. It reuses the
+  production PaperExperiment path, accepts per-paper Objectives and expected
+  paper roles from a local JSON manifest, and reports experimental, review, and
+  incomplete-input behavior without writing collection data. Keep real PDF
+  paths and manifests outside the repository.
 - `_common.py`
   Shared runtime resolution, env-file precedence, JSON summary helpers, and
   response-text utilities used by the benchmark entrypoints

@@ -62,6 +62,10 @@ authenticated user + collection
   -> ChatSessionService checkpoints the trajectory and final response
 ```
 
+Exact Finding reads return review_scope:
+feedback lists belong to that version only and do not include ancestors.
+A new Finding's empty feedback list cannot erase an older version's reviews.
+
 Source context attached from the document reader is resolved against the
 canonical Source before the model runs. A quote is inspection material, not
 Evidence or permission to mutate a scientific record.

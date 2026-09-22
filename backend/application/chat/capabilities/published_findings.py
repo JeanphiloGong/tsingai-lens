@@ -284,7 +284,10 @@ class InspectPublishedFindingCapability:
             "new Finding derived from this parent. Includes updated Evidence for "
             "reassessing replaced inputs. The complete Finding object is the "
             "only valid basis for a curation or parent-derived authoring write; do not "
-            "reconstruct omitted fields from a summary."
+            "reconstruct omitted fields from a summary. Feedback and curation apply "
+            "only to the exact returned version. Empty lists do not establish that "
+            "ancestor versions have no reviews; inspect a known ancestor explicitly "
+            "or report historical review coverage as unknown."
         ),
         risk=ToolRisk.READ,
         input_model=InspectPublishedFindingArguments,
@@ -375,6 +378,7 @@ class InspectPublishedFindingCapability:
                 "finding": dict(detail["finding"]),
                 "feedback_records": [item.to_record() for item in feedback],
                 "curation_records": [item.to_record() for item in curations],
+                "review_scope": {**review_key, "includes_ancestor_reviews": False},
                 "evidence_review": review,
                 "replacement_evidence": replacement_evidence,
                 "finding_is_published": True,

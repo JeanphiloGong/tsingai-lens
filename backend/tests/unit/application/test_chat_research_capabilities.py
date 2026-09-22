@@ -2446,6 +2446,7 @@ async def test_fresh_finding_inspection_recalls_saved_feedback_and_curation() ->
         objective_id=key["objective_id"], analysis_version=key["analysis_version"], finding_id=key["finding_id"],
     ))
     assert result.data["finding"] == published
+    assert result.data["review_scope"] == {**key, "includes_ancestor_reviews": False}
     assert result.data["feedback_records"][0]["note"] == feedback.to_record()["note"]
     assert result.data["curation_records"][0]["curated_finding"] == curation.to_record()["curated_finding"]
     assert len(feedback_service.feedback_calls) == len(feedback_service.curation_calls) == 1

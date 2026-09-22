@@ -1,0 +1,521 @@
+{
+  "expected_snapshot": {},
+  "scenarios": [
+    {
+      "id": "S01",
+      "collection_id": "REPLACE_S01_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "你好，你能帮我做什么？",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true,
+          "no_tools": true
+        }
+      ]
+    },
+    {
+      "id": "S02",
+      "collection_id": "REPLACE_S02_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "为什么 LPBF 中过高能量输入可能同时带来致密化和新的缺陷？先说说你的理解，不用查论文。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true,
+          "no_tools": true
+        }
+      ]
+    },
+    {
+      "id": "S03",
+      "collection_id": "REPLACE_S03_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "帮我分析打印质量。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true,
+          "no_tools": true
+        }
+      ]
+    },
+    {
+      "id": "S04",
+      "collection_id": "REPLACE_S04_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "这批论文主要在研究什么？有哪些值得关注的方向？",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S05",
+      "collection_id": "REPLACE_S05_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "哪些论文适合用来研究热处理对 Ti-6Al-4V 延伸率的影响？",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S06",
+      "collection_id": "REPLACE_S06_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "我准备从这批论文中先看和热处理、延伸率相关的论文。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "把文件名里有 ELI 的那篇也一起看，综述先不用深入阅读。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S07",
+      "collection_id": "REPLACE_S07_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "REPLACE：列出本轮确切论文 ID 和标题，并明确后续‘那篇/三篇/综述’指哪些文献。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "请深入看那篇研究热处理和 Ti-6Al-4V 力学性能的实验论文，说明改变了什么、测了什么、结果是多少，并给出原始来源。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S08",
+      "collection_id": "REPLACE_S08_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "REPLACE：列出本轮确切论文 ID 和标题，并明确后续‘那篇/三篇/综述’指哪些文献。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "比较这三篇论文，它们是否都支持热处理会提高 Ti-6Al-4V 的延伸率？请检查实验条件是否可比。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S09",
+      "collection_id": "REPLACE_S09_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "为什么一篇论文说热处理后强度下降，另一篇却说强度提高？请区分论文事实和你提出的候选机制。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S10",
+      "collection_id": "REPLACE_S10_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "REPLACE：列出本轮确切论文 ID 和标题，并明确后续‘那篇/三篇/综述’指哪些文献。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "综述里说热处理会改变延伸率，这能直接当成实验结果证据吗？方法论文又能说明什么？",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S11",
+      "collection_id": "REPLACE_S11_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "先根据摘要判断这些论文的延伸率结论是否一致。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "摘要信息不够的话，继续检查相关 Methods、Results 和表格，但只看解决这个问题所需的部分。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S12",
+      "collection_id": "REPLACE_S12_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "请先阅读当前集合中相关实验论文的 Methods、Results 和表格，核对延伸率结果。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "required_tools": [
+            "read_source"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "根据你刚才看的几篇论文，说说你的综合判断，还有哪些值得继续研究？不要保存任何对象。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S13",
+      "collection_id": "REPLACE_S13_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "我想研究能量输入如何影响 Ti-6Al-4V 的晶粒组织、抗拉强度和延性。请先给我 1 到 3 个候选研究问题草案，不要保存。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S14",
+      "collection_id": "REPLACE_S14_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "我想研究能量输入如何影响 Ti-6Al-4V 的晶粒组织、抗拉强度和延性。请先给我 1 到 3 个候选研究问题草案，不要保存。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "只保留延性这个研究问题，材料限定为退火态 Ti-6Al-4V，并说明哪些论文应纳入或保留观察；先给审阅草案，不要保存。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S15",
+      "collection_id": "REPLACE_S15_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "当前 collection 中已有研究目标和分析进度吗？请先查看状态并说明，如果要启动分析需要我做什么。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S16",
+      "collection_id": "REPLACE_S16_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "查看已经发布的研究结论，解释它的依据和适用边界；如果忽略了热处理条件，请提出修订草案，不要直接修改。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S17",
+      "collection_id": "REPLACE_S17_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "目前最大的证据缺口是什么？如果要验证这个判断，请提出一个研究方案草案，设备功率上限 300 W，每组最多 4 个样品，不要保存。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S18",
+      "collection_id": "REPLACE_S18_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "核对实际原文、读取范围、未知条件和引用；不能只按 completed 通过。"
+      ],
+      "turns": [
+        {
+          "message": "比较这十篇论文并说说你的判断。如果本轮只能检查一部分，请保留已读结果并明确哪些未读或失败，不要把技术失败说成科学结论。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S19",
+      "collection_id": "REPLACE_S19_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [
+        "create_objective_candidate"
+      ],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "确认目标范围和参数批准前后不变；无重复写入。"
+      ],
+      "turns": [
+        {
+          "message": "请为热处理影响 Ti-6Al-4V 延伸率建立研究问题候选，并请求我批准保存。",
+          "approve": [
+            "create_objective_candidate"
+          ],
+          "expected_statuses": [
+            "completed"
+          ],
+          "required_tools": [
+            "create_objective_candidate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S20",
+      "collection_id": "REPLACE_S20_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [],
+      "automatic_actions": [],
+      "scientific_rubric": [
+        "回应用户质疑并依据原文修正；不能只附和用户。"
+      ],
+      "turns": [
+        {
+          "message": "比较当前实验论文的延伸率趋势，说明依据。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        },
+        {
+          "message": "你刚才把材料等级未注明当作牌号不同，这个判断不成立，请重新核查并修正，不要保存。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true
+        }
+      ]
+    },
+    {
+      "id": "S21",
+      "collection_id": "REPLACE_S21_collection",
+      "user_id": "REPLACE_owner",
+      "allowed_approval_actions": [
+        "create_evidence_version",
+        "create_finding_version"
+      ],
+      "automatic_actions": [
+        "create_evidence_version",
+        "create_finding_version"
+      ],
+      "scientific_rubric": [
+        "必须填入确切 Finding/Evidence/Source 身份；人工预先核对真实趋势。",
+        "先定位错误层；需改 Evidence 时发布新 Evidence 再重建 Finding；旧分析快照和 Source 不变。",
+        "新会话实际回读新版本和替代关系；祖先反馈未知不能写成不存在。"
+      ],
+      "turns": [
+        {
+          "message": "REPLACE：Finding 的 collection/objective/version/finding 身份。这个结论可能把条件相关趋势写成了单调下降，请读取 Evidence 和原文核对，先给结构化草案，不保存。",
+          "expected_statuses": [
+            "completed"
+          ],
+          "no_writes": true,
+          "required_tools": [
+            "inspect_published_finding",
+            "read_source",
+            "create_evidence_draft"
+          ]
+        },
+        {
+          "message": "请保存已核对的 Evidence 修订，并请求批准。",
+          "approve": [
+            "create_evidence_version"
+          ],
+          "expected_statuses": [
+            "completed"
+          ],
+          "required_tools": [
+            "create_evidence_version"
+          ]
+        },
+        {
+          "message": "请用当前有效 Evidence 重新综合并发布修订 Finding，请求批准。",
+          "approve": [
+            "create_finding_version"
+          ],
+          "expected_statuses": [
+            "completed"
+          ],
+          "required_tools": [
+            "create_finding_version"
+          ]
+        },
+        {
+          "message": "请读取当前结论和依据，解释修订的新旧版本关系及原文支持。",
+          "new_session": true,
+          "expected_statuses": [
+            "completed"
+          ],
+          "required_tools": [
+            "inspect_published_finding"
+          ],
+          "no_writes": true
+        }
+      ]
+    }
+  ]
+}

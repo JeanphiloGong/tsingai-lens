@@ -180,50 +180,6 @@ class _RunProgress:
     read_batch_tokens: int = 12_000
     compaction_attempts: int = 0
     complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
-    research_plan: list[dict[str, str]] = field(default_factory=list)
-
-    def initialize_research_plan(self, request: str) -> None:
-        """Create a visible plan only for multi-step Finding review requests."""
-        normalized = request.casefold()
-        review_terms = ("finding", "结论", "证据")
-        draft_terms = ("修订草案", "结论草案", "draft finding", "finding draft")
-        if not any(term in normalized for term in review_terms) or not any(
-            term in normalized for term in draft_terms
-        ):
-            return
-        self.research_plan = [
-            {"id": "inspect_finding", "status": "in_progress"},
-            {"id": "inspect_sources", "status": "pending"},
-            {"id": "validate_claim", "status": "pending"},
-            {"id": "draft_finding", "status": "pending"},
-            {"id": "approval", "status": "pending"},
-        ]
-
-    def update_research_plan(self, tool_name: str, status: ToolResultStatus) -> None:
-        if not self.research_plan or status is not ToolResultStatus.SUCCEEDED:
-            return
-        transitions = {
-            "inspect_published_finding": ("inspect_finding", "inspect_sources"),
-            "create_finding_draft": ("validate_claim", "approval"),
-            "create_evidence_draft": ("validate_claim", "approval"),
-        }
-        transition = transitions.get(tool_name)
-        if transition is None:
-            return
-        current, next_step = transition
-        if tool_name in {"create_finding_draft", "create_evidence_draft"}:
-            for item in self.research_plan:
-                if item["id"] in {"inspect_sources", "validate_claim"} or (
-                    item["id"] == "draft_finding" and tool_name == "create_finding_draft"
-                ):
-                    item["status"] = "completed"
-            next_step = "approval"
-        current_item = next((item for item in self.research_plan if item["id"] == current), None)
-        if current_item is not None:
-            current_item["status"] = "completed"
-        next_item = next((item for item in self.research_plan if item["id"] == next_step), None)
-        if next_item is not None and next_item["status"] == "pending":
-            next_item["status"] = "in_progress"
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -364,7 +320,7 @@ class _RunProgress:
                                       if self.limits.max_tool_calls is not None else None),
             "remaining_token_budget": (max(0, self.limits.max_model_tokens - self.model_tokens)
                                        if self.limits.max_model_tokens is not None else None),
-            "research_plan": [dict(item) for item in self.research_plan] if self.research_plan else None,
+            "research_plan": None,
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
@@ -435,7 +391,6 @@ class ResearchAgentRunner:
                 source_contexts=source_contexts,
             ),
         ]
-        progress.initialize_research_plan(user_message)
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
         await self._checkpoint(checkpoint, messages, calls, results)
@@ -466,7 +421,6 @@ class ResearchAgentRunner:
                                 response_started_callback=response_started_callback)
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
-        progress.initialize_research_plan(self._active_user_request(messages))
         inherited_completed_writes = capability_policy.completed_write_names(messages)
         calls = [claimed_call]
         results: list[ChatToolResult] = []
@@ -812,7 +766,6 @@ class ResearchAgentRunner:
                     capability_result = replace(capability_result, data={
                         **dict(capability_result.data), "source_coverage": coverage,
                     })
-                progress.update_research_plan(call.name, capability_result.status)
                 results.append(capability_result)
                 messages.append(self._result_message(context, capability_result))
                 progress_increased = progress.observe(call, capability_result) or progress_increased

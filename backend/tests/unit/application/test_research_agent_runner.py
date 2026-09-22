@@ -2595,7 +2595,7 @@ async def test_finding_recheck_can_choose_its_linked_source() -> None:
                for message in model.contexts[1])
 
 
-async def test_finding_recheck_emits_a_progressive_research_plan() -> None:
+async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan() -> None:
     from application.chat.capabilities.document_sources import ReadSourceArguments
 
     source = {
@@ -2634,10 +2634,11 @@ async def test_finding_recheck_emits_a_progressive_research_plan() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    plans = [event["research_plan"] for event in progress_events if event.get("research_plan")]
-    assert plans
-    assert plans[0][0] == {"id": "inspect_finding", "status": "in_progress"}
-    assert plans[-1][-1] == {"id": "approval", "status": "in_progress"}
+    assert any(event["phase"] == "tools" for event in progress_events)
+    assert any(event["executed_tool_count"] > 0 for event in progress_events)
+    assert all(event.get("research_plan") is None for event in progress_events)
+    assert any(call.name == "read_source" and call.status is ToolCallStatus.SUCCEEDED
+               for call in result.tool_calls)
 
 
 @pytest.mark.parametrize("request_publication", [False, True])
@@ -2693,9 +2694,8 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    plan = next(event["research_plan"] for event in reversed(events) if event.get("research_plan"))
-    assert next(item for item in plan if item["id"] == "draft_finding")["status"] == "pending"
-    assert plan[-1] == {"id": "approval", "status": "in_progress"}
+    assert all(event.get("research_plan") is None for event in events)
+    assert any(event["executed_tool_count"] > 0 for event in events)
 
 
 @pytest.mark.parametrize("write_before_read", [False, True])

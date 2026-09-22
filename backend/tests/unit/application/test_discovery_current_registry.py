@@ -52,7 +52,7 @@ def test_discovered_name_resolves_current_parameters(discovered_messages, legacy
 
     selected = select_tool_specs(registry, discovered_messages, [])
 
-    assert [spec.name for spec in selected] == ["read_source"]
+    assert [spec.name for spec in selected] == ["read_source", "discover_research_tools"]
     assert selected[0] is read.spec
     assert selected[0].input_model is CurrentReadArguments
     assert read.executed_arguments == []

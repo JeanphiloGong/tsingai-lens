@@ -46,7 +46,9 @@ async def test_cycle_trace_records_the_actual_terminal_outcome(ending, caplog) -
             if ending == "model_unavailable":
                 raise RuntimeError("private-provider-detail")
             if ending == "approval_required":
-                assert [spec.name for spec in tool_specs] == [write_capability_name]
+                assert [spec.name for spec in tool_specs if spec.name != "discover_research_tools"] == [
+                    write_capability_name
+                ]
                 return ModelTurn(
                     tool_calls=(
                         ModelToolCall(

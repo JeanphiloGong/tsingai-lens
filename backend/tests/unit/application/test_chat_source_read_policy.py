@@ -123,7 +123,7 @@ def test_reading_progress_keeps_earlier_search_scope_and_distinguishes_failed_ou
     }
     instruction = capability_policy.stage_instruction(("inspect_document_sources",), calls, successful_results=results)
     assert instruction is not None
-    progress = {item["document_id"]: item for item in json.loads(instruction.rsplit("\n", 1)[1])}
+    progress = {item["document_id"]: item for item in json.loads(instruction.rsplit("\n", 1)[1])["reading_ledger"]}
     assert set(progress) == {"eli", "hp-lpbf"}
     assert progress["hp-lpbf"]["outline_status"] == ("inspection_failed" if outline_failed else "not_inspected")
     assert progress["hp-lpbf"]["prepared_source_pages"] is None
@@ -230,7 +230,6 @@ def test_finding_review_checks_document_structure_even_after_an_abstract_search(
     assert capability_policy._pending_document_overviews(results) == ("paper-a", "paper-b")
     results["inspect_document_sources"] = [{"document": {"document_id": "paper-a"}, "document_outline": []}]
     assert capability_policy._pending_document_overviews(results) == ("paper-b",)
-    assert capability_policy.required_tool_before_answer(("inspect_document_sources",), successful_results=results) == "inspect_document_sources"
     results["inspect_document_sources"].append({"document": {"document_id": "paper-b"}, "document_outline": []})
     assert capability_policy._pending_document_overviews(results) == ()
 
@@ -294,7 +293,10 @@ async def test_p002_methods_read_does_not_verify_a_new_table_search(parallel_sea
         assert result.status == "completed"
         assert result.tool_results[-1].data["complete_table"] is True
     else:
-        assert result.error_code == "required_research_action_not_completed"
+        assert result.status == "completed"
+        assert not any(item.data.get("complete_table") is True for item in result.tool_results)
+        active = capability_policy.active_successful_results_by_name(result.messages)
+        assert capability_policy._pending_source_search_candidates(active)
 
 
 @pytest.mark.anyio
@@ -397,7 +399,7 @@ def test_search_for_a_new_source_version_cannot_reuse_an_old_complete_read():
         "read_source": [{**source, "source_digest": "old", "content_truncated": False}],
         "search_sources": [{"matches": [{**source, "source_digest": "new"}]}],
     }
-    assert capability_policy.required_tool_before_answer(("read_source",), successful_results=results) == "read_source"
+    assert capability_policy._pending_source_search_candidates(results) == ((DOCUMENT, "text_window", METHODS),)
 
 
 @pytest.mark.parametrize("prior_turn", [False, True])

@@ -1065,7 +1065,6 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
         },
     )
     model = _Model(
-        ModelTurn(content="孔隙率可能随能量输入降低。"),
         ModelTurn(
             tool_calls=(ModelToolCall(name="browse_collection_papers", arguments={}),)
         ),
@@ -1082,7 +1081,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
             ),)
         ),
         ModelTurn(content="已读取结果原文；目前只能对第一篇论文形成有依据的初步判断。"),
-        discover=("browse_collection_papers",),
+        discover=("browse_collection_papers", "search_sources", "read_source"),
         source_inspection_required=True,
     )
     runner = ResearchAgentRunner(
@@ -1110,12 +1109,8 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
         "search_sources",
         "read_source",
     ]
-    assert model.tool_spec_names[:4] == [
-        ("browse_collection_papers",),
-        ("browse_collection_papers",),
-        ("search_sources",),
-        ("read_source",),
-    ]
+    assert all({"browse_collection_papers", "search_sources", "read_source"}.issubset(names)
+               for names in model.tool_spec_names)
 
     explicit_search = intent_policy.capability_names_for_intent(
         "请搜索相关论文然后谈谈判断。",
@@ -1125,7 +1120,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
     assert "search_sources" in explicit_search
 
 
-async def test_literature_based_opinion_fails_if_required_read_is_refused() -> None:
+async def test_literature_based_opinion_completion_does_not_certify_source_support() -> None:
     unsupported_answer = "不读取原文也可以判断能量输入降低了孔隙率。"
     runner = ResearchAgentRunner(
         model=_Model(
@@ -1144,10 +1139,10 @@ async def test_literature_based_opinion_fails_if_required_read_is_refused() -> N
         user_message="根据这些论文谈谈能量输入对孔隙率的影响。",
     )
 
-    assert result.status is AgentRunStatus.FAILED
-    assert result.error_code == "required_research_action_not_completed"
-    assert result.messages[-1].content != unsupported_answer
-    assert "不能据此判断论文没有证据" in result.messages[-1].content
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.error_code is None
+    assert result.messages[-1].content == unsupported_answer
+    assert all(call.name == "discover_research_tools" for call in result.tool_calls)
 
 
 async def test_evidence_write_requires_a_complete_matching_source_read() -> None:
@@ -1262,13 +1257,7 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names == [
-        (
-            "get_collection_context",
-            "query_published_findings",
-            "assess_objective_quality",
-        )
-    ]
+    assert model.tool_spec_names == [("propose_research_plan",)]
 
 
 async def test_finding_review_does_not_expose_mutation_capabilities_without_save_request() -> None:
@@ -1362,7 +1351,7 @@ async def test_objective_status_question_does_not_expose_derivation() -> None:
     ]
 
 
-async def test_status_question_retries_a_premature_answer_before_each_required_read() -> None:
+async def test_status_question_can_choose_each_status_read() -> None:
     collection_context = _Capability(
         "get_collection_context",
         ToolRisk.READ,
@@ -1388,14 +1377,12 @@ async def test_status_question_retries_a_premature_answer_before_each_required_r
                 arguments={},
             ),)
         ),
-        ModelTurn(content="我已经看到了 collection 的状态。"),
         ModelTurn(
             tool_calls=(ModelToolCall(
                 name="inspect_research_process",
                 arguments={},
             ),)
         ),
-        ModelTurn(content="我已经看到了研究流程的状态。"),
         ModelTurn(
             tool_calls=(ModelToolCall(
                 name="inspect_objective_analysis",
@@ -1403,6 +1390,7 @@ async def test_status_question_retries_a_premature_answer_before_each_required_r
             ),)
         ),
         ModelTurn(content="现在可以完整说明研究目标和分析进度了。"),
+        discover=("get_collection_context", "inspect_research_process", "inspect_objective_analysis"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -1425,8 +1413,8 @@ async def test_status_question_retries_a_premature_answer_before_each_required_r
     ]
     assert process.executed_arguments == [{}]
     assert analysis.executed_arguments == [{"objective_id": "objective-1"}]
-    assert model.tool_spec_names.count(("inspect_research_process",)) == 2
-    assert model.tool_spec_names.count(("inspect_objective_analysis",)) == 2
+    assert all({"get_collection_context", "inspect_research_process", "inspect_objective_analysis"}.issubset(names)
+               for names in model.tool_spec_names)
 
 
 async def test_filename_follow_up_keeps_paper_reads_without_exposing_writes() -> None:
@@ -1543,7 +1531,7 @@ async def test_candidate_creation_with_explicit_stop_hides_confirmation_and_anal
     assert "start_objective_analysis" not in exposed
 
 
-async def test_model_cannot_execute_a_registered_capability_hidden_for_this_turn() -> None:
+async def test_discovered_write_requires_approval_before_execution() -> None:
     writer = _Capability("create_objective_candidate", ToolRisk.WRITE, _QuestionArguments)
     model = _Model(
         ModelTurn(
@@ -1565,9 +1553,11 @@ async def test_model_cannot_execute_a_registered_capability_hidden_for_this_turn
         user_message="一般来说，怎样把一个宽泛兴趣收窄成研究问题？不用操作当前文献。",
     )
 
-    assert model.tool_spec_names == [(), ()]
+    assert model.tool_spec_names == [("create_objective_candidate",)]
     assert writer.executed_arguments == []
-    assert result.tool_results[0].error_code == "capability_unavailable_for_turn"
+    assert result.status is AgentRunStatus.APPROVAL_REQUIRED
+    assert result.pending_approval is not None
+    assert result.pending_approval.name == "create_objective_candidate"
 
 
 async def test_runner_forwards_model_text_deltas_before_returning_the_turn() -> None:
@@ -1851,6 +1841,7 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                 ),),
             ),
             ModelTurn(content="The approved plan draft has been saved."),
+            discover=("inspect_published_finding", "propose_research_plan"),
         ),
         capabilities=CapabilityRegistry((reader, drafter, writer)),
     )
@@ -2024,8 +2015,8 @@ async def test_finding_draft_repair_receives_actionable_evidence_role_error() ->
     assert "finding_supporting_evidence_required" in failed.error_message
     assert arguments["statement"] not in failed.error_message
     assert any(message.tool_result == failed for message in model.contexts[1])
-    assert "assertion_strength" in model.contexts[1][-1].content
-    assert "causal, associative, or descriptive" in model.contexts[1][-1].content
+    assert "finding_supporting_evidence_required" in failed.error_message
+    assert "invalid_tool_arguments" in model.contexts[1][-1].content
     assert result.status is AgentRunStatus.COMPLETED
     assert any(item.data.get("draft") == {**corrected, "context_evidence_ids": [], "condition_boundary_evidence_ids": [],
         "limitations": [], "abstention_reason": None} for item in result.tool_results)
@@ -2391,7 +2382,7 @@ async def test_resource_budget_final_answer_keeps_latest_structured_draft() -> N
     assert "transient_chat_result" in final_instruction
 
 
-async def test_complete_paper_browse_is_not_repeated_during_source_reading() -> None:
+async def test_complete_paper_browse_remains_available_during_source_reading() -> None:
     browse = _Capability(
         "browse_collection_papers",
         ToolRisk.READ,
@@ -2426,11 +2417,11 @@ async def test_complete_paper_browse_is_not_repeated_during_source_reading() -> 
     )
 
     assert "browse_collection_papers" in model.tool_spec_names[0]
-    assert "browse_collection_papers" not in model.tool_spec_names[1]
-    assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
+    assert "browse_collection_papers" in model.tool_spec_names[1]
+    assert "discover_research_tools" in model.all_tool_spec_names[-1]
 
 
-async def test_comparison_requires_source_search_after_paper_map() -> None:
+async def test_comparison_can_choose_source_search_after_paper_map() -> None:
     browse = _Capability(
         "browse_collection_papers",
         ToolRisk.READ,
@@ -2486,6 +2477,7 @@ async def test_comparison_requires_source_search_after_paper_map() -> None:
             ),)
         ),
         ModelTurn(content="已基于精确来源检查论文间的实验条件。"),
+        discover=("browse_collection_papers", "search_sources", "read_source"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2499,13 +2491,13 @@ async def test_comparison_requires_source_search_after_paper_map() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names[1] == ("search_sources",)
-    assert model.tool_spec_names[2] == ("read_source",)
+    assert "search_sources" in model.tool_spec_names[1]
+    assert "read_source" in model.tool_spec_names[2]
     assert search.executed_arguments == [{}]
     assert read.executed_arguments == [{}]
 
 
-async def test_finding_revision_keeps_source_discovery_before_required_draft() -> None:
+async def test_finding_revision_keeps_source_discovery_and_optional_draft() -> None:
     inspect = _Capability("inspect_published_finding", ToolRisk.READ, _FindingArguments)
     draft = _Capability("create_finding_draft", ToolRisk.DRAFT)
     query = _Capability("query_published_findings", ToolRisk.READ)
@@ -2520,7 +2512,6 @@ async def test_finding_revision_keeps_source_discovery_before_required_draft() -
                 },
             ),)
         ),
-        ModelTurn(content="我会形成一份保留温度边界的修订草案。"),
         ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={}),)),
         ModelTurn(
             tool_calls=(ModelToolCall(
@@ -2529,6 +2520,7 @@ async def test_finding_revision_keeps_source_discovery_before_required_draft() -
             ),)
         ),
         ModelTurn(content="修订草案已形成，但尚未修改已发布结论。"),
+        discover=("inspect_published_finding", "read_source", "create_finding_draft"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2570,7 +2562,7 @@ async def test_context_preparation_exhausting_allowance_finalizes_without_negati
     assert not result.tool_calls
 
 
-async def test_finding_recheck_reads_its_linked_source_before_other_navigation() -> None:
+async def test_finding_recheck_can_choose_its_linked_source() -> None:
     from application.chat.capabilities.document_sources import ReadSourceArguments
 
     source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
@@ -2593,13 +2585,14 @@ async def test_finding_recheck_reads_its_linked_source_before_other_navigation()
         context=_context(), previous_messages=(), user_message="请核对这个 Finding 的原文并给修订草案，先不要保存。",
     )
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names[1] == ("read_source",)
+    assert "read_source" in model.tool_spec_names[1]
     # A linked passage does not resolve all of the researcher's source checks.
     assert {"read_source", "create_finding_draft"}.issubset(model.tool_spec_names[2])
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == [
         "inspect_published_finding", "read_source", "create_finding_draft",
     ]
-    assert "results-7" in model.contexts[1][-1].content
+    assert any(message.tool_result and "results-7" in json.dumps(message.tool_result.data)
+               for message in model.contexts[1])
 
 
 async def test_finding_recheck_emits_a_progressive_research_plan() -> None:
@@ -2719,11 +2712,16 @@ async def test_evidence_save_request_requires_real_approval_after_complete_read(
     })
     write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceWriteArguments)
     model = _Model(
-        *( [ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),))]
-           if write_before_read else [] ),
+        *(
+            [ModelTurn(tool_calls=(ModelToolCall(
+                "create_evidence_version", {**source, "source_digest": "a" * 64},
+            ),))]
+            if write_before_read else []
+        ),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
-        ModelTurn(content="The Evidence correction is ready. Please confirm saving it."),
-        ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),)),
+        ModelTurn(tool_calls=(ModelToolCall(
+            "create_evidence_version", {**source, "source_digest": "a" * 64},
+        ),)),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read, write))).run_turn(
         context=_context(), previous_messages=(), user_message="Read the Source and save the corrected Evidence as a new version.",
@@ -2733,7 +2731,7 @@ async def test_evidence_save_request_requires_real_approval_after_complete_read(
     assert not write.executed_arguments
     if write_before_read:
         assert result.tool_results[0].error_code == "source_read_incomplete"
-        assert model.tool_spec_names[1] == ("read_source",)
+        assert "read_source" in model.tool_spec_names[1]
 
 
 @pytest.mark.parametrize("kind", ["evidence", "finding"])
@@ -2748,15 +2746,14 @@ def test_publication_hint_retains_actual_draft_instead_of_restarting_review(kind
         },
     )
     retained = json.loads(instruction.split("\n", 1)[1])
-    assert retained == {key: value for key, value in draft.items() if key != "draft_id"}
-    assert f"calling create_{kind}_version" in instruction
+    assert retained["latest_transient_results"][f"create_{kind}_draft"]["draft"] == draft
+    assert "not a prescribed next step" in instruction
     assert "call create_finding_draft" not in instruction
 
 
 async def test_publishing_an_earlier_finding_draft_requires_actual_approval() -> None:
     write = _Capability("create_finding_version", ToolRisk.WRITE)
     model = _Model(
-        ModelTurn(content="The earlier draft is ready. Please approve publication."),
         ModelTurn(tool_calls=(ModelToolCall("create_finding_version", {}),)),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,))).run_turn(
@@ -2767,7 +2764,7 @@ async def test_publishing_an_earlier_finding_draft_requires_actual_approval() ->
     assert not write.executed_arguments
 
 
-async def test_exact_finding_inspection_narrows_next_step_to_research_plan_draft() -> None:
+async def test_exact_finding_inspection_retains_tools_for_optional_plan_draft() -> None:
     inspect = _Capability("inspect_published_finding", ToolRisk.READ)
     propose = _Capability(
         "propose_research_plan",
@@ -2787,7 +2784,6 @@ async def test_exact_finding_inspection_narrows_next_step_to_research_plan_draft
                 arguments={},
             ),)
         ),
-        ModelTurn(content="我会按约束形成完整的研究方案草案。"),
         ModelTurn(
             tool_calls=(ModelToolCall(
                 name="propose_research_plan",
@@ -2812,15 +2808,13 @@ async def test_exact_finding_inspection_narrows_next_step_to_research_plan_draft
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names[1:3] == [
-        ("propose_research_plan",),
-        ("propose_research_plan",),
-    ]
+    assert all(set(names) == {"inspect_published_finding", "propose_research_plan"}
+               for names in model.tool_spec_names)
     assert propose.executed_arguments == [{}]
-    assert "COMPLETED STRUCTURED DELIVERABLE" in model.contexts[-1][-1].content
+    assert "plan-draft-1" in model.contexts[-1][-1].content
 
 
-async def test_research_plan_progresses_once_through_required_evidence_reads() -> None:
+async def test_research_plan_can_choose_evidence_reads_before_draft() -> None:
     context = _Capability("get_collection_context", ToolRisk.READ)
     quality = _Capability("assess_objective_quality", ToolRisk.READ)
     query = _Capability(
@@ -2876,12 +2870,12 @@ async def test_research_plan_progresses_once_through_required_evidence_reads() -
             ),)
         ),
         ModelTurn(content="方案草案已形成，但尚未保存或授权执行。"),
-        discover=("propose_research_plan",),
+        discover=("get_collection_context", "assess_objective_quality", "query_published_findings", "inspect_published_finding", "propose_research_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry((context, query, inspect, quality, propose)),
-        limits=AgentRunLimits(max_tool_calls=6),
+        limits=AgentRunLimits(max_tool_calls=7),
     )
 
     result = await runner.run_turn(
@@ -2894,18 +2888,10 @@ async def test_research_plan_progresses_once_through_required_evidence_reads() -
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names == [
-        (
-            "get_collection_context",
-            "query_published_findings",
-            "assess_objective_quality",
-        ),
-        ("query_published_findings", "assess_objective_quality"),
-        ("query_published_findings",),
-        ("inspect_published_finding",),
-        ("propose_research_plan",),
-        (),
-    ]
+    assert all(set(names) == {"get_collection_context", "assess_objective_quality", "query_published_findings",
+                              "inspect_published_finding", "propose_research_plan"}
+               for names in model.tool_spec_names)
+    assert propose.executed_arguments == [{}]
 
 
 async def test_research_plan_can_abstain_when_no_published_finding_exists() -> None:
@@ -2941,7 +2927,7 @@ async def test_research_plan_can_abstain_when_no_published_finding_exists() -> N
                 "完成证据分析。"
             )
         ),
-        discover=("propose_research_plan",),
+        discover=("assess_objective_quality", "query_published_findings", "propose_research_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -2955,16 +2941,13 @@ async def test_research_plan_can_abstain_when_no_published_finding_exists() -> N
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names == [
-        ("query_published_findings", "assess_objective_quality"),
-        ("query_published_findings",),
-        (),
-    ]
+    assert all(set(names) == {"assess_objective_quality", "query_published_findings", "propose_research_plan"}
+               for names in model.tool_spec_names)
     assert inspect.executed_arguments == []
     assert propose.executed_arguments == []
 
 
-async def test_source_search_narrows_next_step_to_exact_source_readers() -> None:
+async def test_source_search_retains_discovered_source_navigation() -> None:
     search = _Capability(
         "search_sources",
         ToolRisk.READ,
@@ -3003,6 +2986,7 @@ async def test_source_search_narrows_next_step_to_exact_source_readers() -> None
             tool_calls=(ModelToolCall(name="read_source", arguments={}),)
         ),
         ModelTurn(content="已读取搜索命中的原文来源。"),
+        discover=("search_sources", "read_source", "inspect_document_sources", "inspect_table"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -3018,14 +3002,14 @@ async def test_source_search_narrows_next_step_to_exact_source_readers() -> None
     assert result.status is AgentRunStatus.COMPLETED
     assert set(model.tool_spec_names[1]) == {
         "read_source",
-        "inspect_table",
+        "inspect_table", "search_sources", "inspect_document_sources",
     }
-    assert "paper-1" in model.contexts[1][-1].content
-    assert "block-methods-7" in model.contexts[1][-1].content
+    assert any(message.tool_result and "paper-1" in json.dumps(message.tool_result.data) for message in model.contexts[1])
+    assert any(message.tool_result and "block-methods-7" in json.dumps(message.tool_result.data) for message in model.contexts[1])
     assert inspect.executed_arguments == []
 
 
-async def test_source_search_cannot_be_answered_without_one_exact_reader() -> None:
+async def test_source_search_completion_does_not_imply_an_exact_read() -> None:
     search = _Capability(
         "search_sources",
         ToolRisk.READ,
@@ -3057,9 +3041,10 @@ async def test_source_search_cannot_be_answered_without_one_exact_reader() -> No
         user_message="搜索热处理方法后判断其对孔隙率的影响。",
     )
 
-    assert result.status is AgentRunStatus.FAILED
-    assert result.error_code == "required_research_action_not_completed"
-    assert result.messages[-1].content != "可以直接根据搜索结果下结论。"
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.error_code is None
+    assert result.messages[-1].content == "可以直接根据搜索结果下结论。"
+    assert not read.executed_arguments and not table.executed_arguments
 
 
 async def test_source_read_proof_does_not_cross_user_request_boundary() -> None:
@@ -3121,9 +3106,11 @@ async def test_source_read_proof_does_not_cross_user_request_boundary() -> None:
         user_message="搜索并读取 paper-2 的原文后再判断。",
     )
 
-    assert second.status is AgentRunStatus.FAILED
-    assert second.error_code == "required_research_action_not_completed"
-    assert second_model.tool_spec_names[1] == ("read_source",)
+    assert second.status is AgentRunStatus.COMPLETED
+    active = capability_policy.active_successful_results_by_name(second.messages)
+    assert "read_source" not in active
+    assert not capability_policy.has_successful_exact_source_read(active)
+    assert second_read.executed_arguments == []
 
 
 def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> None:
@@ -3327,7 +3314,7 @@ def test_finding_writes_respect_each_requested_action(request_text, writes) -> N
     assert names.intersection(intent_policy.WRITE_CAPABILITIES) == writes
 
 
-def test_failed_curation_gets_canonical_repair_instruction() -> None:
+def test_failed_curation_retains_failure_observation() -> None:
     failed = ChatToolCall.requested(
         tool_call_id="curate-1", session_id="chat-1", assistant_message_id="msg-1",
         name="curate_finding", arguments={}, risk=ToolRisk.WRITE,
@@ -3336,9 +3323,9 @@ def test_failed_curation_gets_canonical_repair_instruction() -> None:
         ("curate_finding",), [failed], successful_results={}
     )
     assert instruction is not None
-    assert "complete top-level object" in instruction
-    assert "limitations" in instruction
-    assert "value types" in instruction
+    assert json.loads(instruction.split("\n", 1)[1])["latest_failure"] == {
+        "tool": "curate_finding", "error_code": "invalid_tool_arguments",
+    }
 
 
 def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
@@ -3387,7 +3374,6 @@ def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
 def test_completed_finding_publication_does_not_force_an_additional_review_write(name) -> None:
     results = {"create_finding_version": [{"finding": {"finding_id": "finding-1"}}],
                "inspect_published_finding": [{"finding": {"finding_id": "parent-1"}}]}
-    assert capability_policy.required_tool_before_answer((name, "discover_research_tools"), successful_results=results) is None
     assert capability_policy.stage_instruction((name,), [], successful_results=results) is None
 
 
@@ -3395,7 +3381,6 @@ def test_completed_finding_publication_does_not_force_an_additional_review_write
 async def test_review_save_requires_real_approval_instead_of_a_prose_confirmation(name) -> None:
     capability = _Capability(name, ToolRisk.WRITE)
     model = _Model(
-        ModelTurn(content="待批准内容，请确认是否保存。"),
         ModelTurn(tool_calls=(ModelToolCall(name=name, arguments={}),)),
     )
     deltas = []
@@ -3465,7 +3450,7 @@ def test_attached_source_context_does_not_force_collection_browse() -> None:
     assert "read_source" in runner.capabilities.discovery.tools
 
 
-async def test_research_plan_read_request_requires_inspection_tool() -> None:
+async def test_research_plan_read_request_does_not_force_inspection_tool() -> None:
     inspect = _Capability(
         "inspect_research_plans",
         ToolRisk.READ,
@@ -3488,8 +3473,8 @@ async def test_research_plan_read_request_requires_inspection_tool() -> None:
         user_message="查看已保存的研究方案",
     )
 
-    assert result.status is AgentRunStatus.FAILED
-    assert result.error_code == "required_research_action_not_completed"
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.error_code is None
     assert inspect.executed_arguments == []
 
 
@@ -3539,12 +3524,12 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
 
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED
     assert model.tool_spec_names[:2] == [
-        ("inspect_research_plans",),
-        ("revise_research_plan",),
+        ("inspect_research_plans", "revise_research_plan"),
+        ("inspect_research_plans", "revise_research_plan"),
     ]
 
 
-async def test_process_status_requires_canonical_objective_analysis_state() -> None:
+async def test_process_status_can_inspect_canonical_objective_analysis_state() -> None:
     context = _Capability(
         "get_collection_context",
         ToolRisk.READ,
@@ -3575,6 +3560,7 @@ async def test_process_status_requires_canonical_objective_analysis_state() -> N
             tool_calls=(ModelToolCall(name="inspect_objective_analysis", arguments={}),)
         ),
         ModelTurn(content="文献准备完成，已确认目标的分析状态见上。"),
+        discover=("get_collection_context", "inspect_research_process", "inspect_objective_analysis"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -3588,11 +3574,11 @@ async def test_process_status_requires_canonical_objective_analysis_state() -> N
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names[1] == (
-        "inspect_research_process",
-    )
-    assert model.tool_spec_names[2] == ("inspect_objective_analysis",)
-    assert "objective-confirmed" in model.contexts[2][-1].content
+    assert all({"get_collection_context", "inspect_research_process", "inspect_objective_analysis"}.issubset(names)
+               for names in model.tool_spec_names)
+    assert analysis.executed_arguments == [{}]
+    assert any(message.tool_result and "objective-confirmed" in json.dumps(message.tool_result.data)
+               for message in model.contexts[2])
 
 
 async def test_finding_inspection_is_bounded_to_query_ids_and_does_not_repeat_failed_id() -> None:
@@ -3653,14 +3639,14 @@ async def test_finding_inspection_is_bounded_to_query_ids_and_does_not_repeat_fa
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert model.tool_spec_names[1] == ("inspect_published_finding",)
-    assert model.tool_spec_names[2] == ("inspect_published_finding",)
+    assert "inspect_published_finding" in model.tool_spec_names[1]
+    assert "inspect_published_finding" in model.tool_spec_names[2]
     assert inspect.executed_arguments == [
         {"objective_id": "objective-1", "finding_id": "finding-1"},
         {"objective_id": "objective-1", "finding_id": "finding-2"},
     ]
-    assert "objective_id=objective-1, finding_id=finding-1" in model.contexts[1][-1].content
-    assert "objective_id=objective-1, finding_id=finding-2" in model.contexts[1][-1].content
+    assert any(message.tool_result and "finding-1" in json.dumps(message.tool_result.data)
+               and "finding-2" in json.dumps(message.tool_result.data) for message in model.contexts[1])
 
 
 async def test_invalid_model_response_is_retried_once_without_unavailable_error() -> None:

@@ -31,7 +31,11 @@ class DiscoverResearchToolsArguments(BaseModel):
 
 class DiscoverResearchToolsCapability:
     def __init__(self, specs: tuple[ToolSpec, ...]) -> None:
-        self.tools = {spec.name: spec for spec in specs if spec.risk in {ToolRisk.READ, ToolRisk.DRAFT}}
+        self.tools = {
+            spec.name: spec
+            for spec in specs
+            if spec.risk in {ToolRisk.READ, ToolRisk.DRAFT, ToolRisk.WRITE}
+        }
         catalog = "\n".join(
             f"- {spec.name} [{spec.risk.value}]: {spec.description.split('. ', 1)[0].rstrip('.')}."
             for spec in self.tools.values()
@@ -55,7 +59,10 @@ class DiscoverResearchToolsCapability:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id, status="failed",
                 error_code="tool_not_discoverable",
-                error_message="Select only read or transient-draft tools named in the catalog.",
+                error_message=(
+                    "Select only registered research tools named in the catalog. "
+                    "Discovery grants no execution approval."
+                ),
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id, status="succeeded",

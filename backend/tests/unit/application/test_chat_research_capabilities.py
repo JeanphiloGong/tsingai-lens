@@ -518,10 +518,11 @@ class _StartResearchProcessModel:
     async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         assert messages
+        visible = {item.name for item in tool_specs if item.name != "discover_research_tools"}
         if self.turns[0].tool_calls != ():
-            assert {item.name for item in tool_specs} == {"start_research_process"}
+            assert visible == {"start_research_process"}
         else:
-            assert tool_specs == ()
+            assert visible == set()
         return self.turns.popleft()
 
 
@@ -1321,12 +1322,13 @@ async def test_agent_records_finding_feedback_only_after_exact_approval() -> Non
         async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
             messages = context.messages
             assert messages
+            visible = {item.name for item in tool_specs if item.name != "discover_research_tools"}
             if self.turns[0].tool_calls != ():
-                assert {item.name for item in tool_specs} == {
+                assert visible == {
                     "record_finding_feedback"
                 }
             else:
-                assert tool_specs == ()
+                assert visible == set()
             return self.turns.popleft()
 
     runner = ResearchAgentRunner(
@@ -1864,12 +1866,13 @@ async def test_agent_publishes_authored_finding_only_after_exact_approval() -> N
         async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
             messages = context.messages
             assert messages
+            visible = {item.name for item in tool_specs if item.name != "discover_research_tools"}
             if self.turns[0].tool_calls != ():
-                assert {item.name for item in tool_specs} == {
+                assert visible == {
                     "create_finding_version"
                 }
             else:
-                assert tool_specs == ()
+                assert visible == set()
             return self.turns.popleft()
 
     runner = ResearchAgentRunner(
@@ -2487,6 +2490,7 @@ async def test_finding_correction_rereads_records_drafts_and_saves_only_after_ap
             ModelToolCall(read.spec.name, {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "block-result"}),
         )),
         ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", draft_arguments),)),
+        ModelTurn(content="The narrower correction is drafted from the inspected sources and is not saved."),
     ))
     model = _Model(*decisions, source_inspection_required=True)
     context = AgentContext("chat-1", "user-1", "col-1")
@@ -3137,12 +3141,13 @@ class _ObjectiveAnalysisModel:
     async def respond(self, *, context: tuple, tool_specs: tuple, timeout_seconds=180.0, max_output_tokens=16_384) -> ModelTurn:
         messages = context.messages
         assert messages
+        visible = {item.name for item in tool_specs if item.name != "discover_research_tools"}
         if self.turns[0].tool_calls != ():
-            assert {item.name for item in tool_specs} == {
+            assert visible == {
                 "start_objective_analysis"
             }
         else:
-            assert tool_specs == ()
+            assert visible == set()
         return self.turns.popleft()
 
 

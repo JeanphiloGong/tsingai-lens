@@ -186,7 +186,7 @@ def test_initial_catalog_defers_new_registered_read_capability():
 
 
 @pytest.mark.anyio
-async def test_discovered_paper_claim_requires_sources_after_survey_and_hides_premature_text():
+async def test_discovered_paper_claim_may_finish_without_a_backend_read_mandate():
     browse = _Capability("browse_collection_papers", ToolRisk.READ, result_data={
         "paper_total": 1, "returned_paper_count": 1, "next_offset": None,
         "papers": [{"document_id": "review-1"}],
@@ -208,9 +208,9 @@ async def test_discovered_paper_claim_requires_sources_after_survey_and_hides_pr
         text_delta_callback=chunks.append,
     )
     assert result.status == "completed"
-    assert search.executed_arguments == [{}]
-    assert "Premature" not in "".join(chunks)
-    assert "remains unverified" in "".join(chunks)
+    assert search.executed_arguments == []
+    assert "Premature claim from the paper map." == "".join(chunks)
+    assert result.messages[-1].content == "Premature claim from the paper map."
 
 
 @pytest.mark.anyio
@@ -348,7 +348,7 @@ async def test_discovered_read_runs_and_does_not_carry_into_next_request():
 
 
 @pytest.mark.anyio
-async def test_catalog_cannot_load_a_write():
+async def test_catalog_can_load_a_write_without_executing_or_approving_it():
     writer = _Capability("create_evidence_version", ToolRisk.WRITE)
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["create_evidence_version"], "source_inspection_required": False}),)),
@@ -358,14 +358,14 @@ async def test_catalog_cannot_load_a_write():
     result = await runner.run_turn(context=_context(), previous_messages=(), user_message="Read the measurements.")
     assert writer.executed_arguments == []
     assert result.pending_approval is None
-    assert result.tool_results[0].status == "failed"
+    assert result.tool_results[0].status == "succeeded"
+    assert result.tool_results[0].data["loaded_tool_names"] == ["create_evidence_version"]
 
 
 @pytest.mark.anyio
-async def test_read_only_rejects_a_model_write_even_when_it_is_emitted_directly():
+async def test_read_only_hides_a_model_write_schema():
     writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name=writer.spec.name),)),
         ModelTurn(content="The requested write is not allowed in read-only mode."),
     )
     runner = ResearchAgentRunner(
@@ -380,7 +380,8 @@ async def test_read_only_rejects_a_model_write_even_when_it_is_emitted_directly(
         permission_mode=ToolPermissionMode.READ_ONLY,
     )
 
-    assert result.tool_results[-1].error_code == "tool_permission_denied"
+    assert result.status == "completed"
+    assert model.tool_spec_names == [()]
     assert writer.executed_arguments == []
 
 
@@ -582,7 +583,7 @@ async def test_automatically_loaded_exact_reader_stays_available_in_the_turn():
 
 
 @pytest.mark.anyio
-async def test_successful_navigation_after_a_failed_read_requires_the_new_source():
+async def test_successful_navigation_after_a_failed_read_retains_reading_choice():
     from application.chat import AgentContext
     from application.chat.capabilities.document_sources import ReadSourceCapability, SearchSourcesCapability
     from tests.unit.application.test_chat_p002_source_fixture import _P002CollectionService, _P002SourceRepository
@@ -604,5 +605,5 @@ async def test_successful_navigation_after_a_failed_read_requires_the_new_source
     assert result.tool_calls[-1].name == "search_sources"
     assert result.tool_calls[-1].status == "succeeded"
     assert result.tool_results[-1].data["matches"]
-    assert result.error_code == "required_research_action_not_completed"
-    assert model.all_tool_spec_names[-1] == ("read_source",)
+    assert result.error_code is None
+    assert set(model.all_tool_spec_names[-1]) == {"read_source", "search_sources", "discover_research_tools"}

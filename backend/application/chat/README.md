@@ -48,7 +48,7 @@ do not add scientific state to the Chat trajectory.
 authenticated user + collection
   -> ChatSessionService validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
-  -> ResearchAgentRunner exposes short read/draft descriptions and explicit writes
+  -> ResearchAgentRunner exposes a catalog of registered read, draft and write tools
   -> ChatModel selects names through discover_research_tools when needed
   -> Runner exposes the selected registered parameter schemas for this request
   -> ChatModel returns an answer, independent reads, or one draft/write call
@@ -70,7 +70,7 @@ approval, and execute only that approved call once. Rejection, provider
 failure, malformed model output, and resource limits remain technical trajectory
 outcomes; they are not scientific conclusions.
 
-Read and transient-draft discovery uses the model's interpretation of the
+Research tool discovery uses the model's interpretation of the
 request, including filenames, paper identifiers, and conversational references.
 It does not require words such as "paper" or "source" to unlock inspection.
 Greetings, general knowledge, and application explanations can finish without
@@ -81,14 +81,16 @@ transient drafts, and `none` exposes no capabilities. A phrase such as “do not
 search” is conversational guidance for the model, not an authorization switch.
 
 `discover_research_tools` is an ordinary typed function call, not a provider's
-native ToolSearch API. Its short catalog comes from registered read/draft
+native ToolSearch API. Its short catalog comes from registered read/draft/write
 handlers. It loads up to six named schemas per call and performs no scientific
 read, write, or approval. Successful results retain selected names only for
 the active user request; definitions always come from the current registry.
 The registry and each tool's risk are the authority for catalog membership;
 there is no parallel static list of known capabilities. Removed names are
-ignored. Discovery grants no execution permission. Automatically selected
-prerequisite readers remain available after execution in that request too.
+ignored. Discovery grants no execution permission. Loaded tools remain
+available after navigation; the model can discover additional tools, revisit a
+completed browse, or answer without a prescribed reader/draft order. The
+`source_inspection_required` flag records the model's assessment, not a gate.
 The next user request starts with a fresh catalog.
 
 Persistence intent is scoped to the requested action: saving error feedback

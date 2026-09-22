@@ -59,7 +59,6 @@ _TrajectoryCheckpoint = Callable[
 ]
 
 _MODEL_RESPONSE_RETRY_LIMIT = 5
-_REQUIRED_ACTION_RETRY_LIMIT = 1
 _MAX_TOOL_CALLS_PER_RESPONSE = 32
 
 
@@ -551,8 +550,6 @@ class ResearchAgentRunner:
                     checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                 )
             response_retries = 0
-            required_action_retries = 0
-            required_action_instruction: ChatMessage | None = None
             while True:
                 stop_reason = progress.stop_before_model()
                 if stop_reason is not None:
@@ -630,26 +627,20 @@ class ResearchAgentRunner:
                         ",".join(tool_names) or "none",
                     )
                     decision_messages = tuple(messages)
-                    stage_instruction: ChatMessage | None = None
-                    if required_action_instruction is not None:
-                        decision_messages = (*decision_messages, required_action_instruction)
-                    else:
-                        stage_content = capability_policy.stage_instruction(
-                            tool_names,
-                            calls,
-                            successful_results=capability_policy.active_successful_results_by_name(messages),
-                        )
-                        if stage_content is not None:
-                            stage_instruction = ChatMessage.user(
-                                message_id=self._message_id(),
-                                session_id=context.session_id,
-                                content=stage_content,
-                                created_at=_now_iso(),
-                            )
-                            decision_messages = (*decision_messages, stage_instruction)
+                    stage_content = capability_policy.stage_instruction(
+                        tool_names,
+                        calls,
+                        successful_results=capability_policy.active_successful_results_by_name(messages),
+                    )
+                    if stage_content is not None:
+                        decision_messages = (*decision_messages, ChatMessage.user(
+                            message_id=self._message_id(),
+                            session_id=context.session_id,
+                            content=stage_content,
+                            created_at=_now_iso(),
+                        ))
                     if (
-                        required_action_instruction is None
-                        and stage_instruction is None
+                        stage_content is None
                         and not tool_specs
                         and (
                             self._latest_structured_deliverable(results) is not None
@@ -673,11 +664,7 @@ class ResearchAgentRunner:
                                     message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                                 ),
                             ),
-                            require_tool_call=capability_policy.required_tool_before_answer(
-                                tool_names,
-                                successful_results=capability_policy.active_successful_results_by_name(messages),
-                                calls=calls,
-                            ) is not None,
+                            require_tool_call=False,
                         ),
                         tool_specs, progress, text_delta_callback,
                     )
@@ -792,50 +779,6 @@ class ResearchAgentRunner:
                         calls,
                         results,
                         "provider_timeout" if provider_timeout else "model_unavailable",
-                    )
-                required_tool = capability_policy.required_tool_before_answer(
-                    tool_names,
-                    successful_results=capability_policy.active_successful_results_by_name(messages),
-                    calls=calls,
-                )
-                if (
-                    not turn.tool_calls
-                    and required_tool is not None
-                    and required_action_retries < _REQUIRED_ACTION_RETRY_LIMIT
-                ):
-                    required_action_retries += 1
-                    required_action_instruction = ChatMessage.user(
-                        message_id=self._message_id(),
-                        session_id=context.session_id,
-                        content=(
-                            "The active researcher explicitly requested a structured "
-                            "research deliverable. Do not answer yet. Use the prior "
-                            "research results and call the required research "
-                            f"action, `{required_tool}`, now."
-                        ),
-                        created_at=_now_iso(),
-                    )
-                    logger.info(
-                        "Research Agent retrying premature answer required_tool=%s",
-                        required_tool,
-                    )
-                    continue
-                if not turn.tool_calls and required_tool is not None:
-                    logger.warning(
-                        "Research Agent required action not completed tool=%s",
-                        required_tool,
-                    )
-                    messages.append(
-                        self._assistant(context, self._failure_answer(messages, calls, results), progress)
-                    )
-                    await self._checkpoint(checkpoint, messages, calls, results)
-                    progress.trace(context, phase="terminal", termination_reason="required_research_action_not_completed")
-                    return self._result(
-                        AgentRunStatus.FAILED,
-                        messages,
-                        calls,
-                        results,
-                        "required_research_action_not_completed",
                     )
                 break
 

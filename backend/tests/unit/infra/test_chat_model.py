@@ -215,8 +215,9 @@ def test_prompt_separates_product_questions_from_collection_reads() -> None:
     assert "application's purpose" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "without calling a tool" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "current collection's contents" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "browse the visible paper" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "screening only" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Use the collection overview when they are unknown" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Choose navigation" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "search snippets are navigation, not full-source evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "researcher may add" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "one highest-information clarification question" in RESEARCH_AGENT_SYSTEM_PROMPT
 

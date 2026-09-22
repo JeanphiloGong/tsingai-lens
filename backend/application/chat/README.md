@@ -19,6 +19,11 @@ into that research meaning, including when explaining pending approval.
 
 One turn follows this sequence:
 
+Finding lookup is not limited to the latest bounded query results. The exact
+handler validates collection ownership and the requested record identity. A
+transient draft remains an observation: the model may read again or revise its
+answer; draft success does not synthesize an automatic final response.
+
 ```text
 user message -> bounded model decision -> capability call
   -> capability result -> trajectory checkpoint -> final answer or approval

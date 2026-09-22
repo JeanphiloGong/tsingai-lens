@@ -3581,7 +3581,7 @@ async def test_process_status_can_inspect_canonical_objective_analysis_state() -
                for message in model.contexts[2])
 
 
-async def test_finding_inspection_is_bounded_to_query_ids_and_does_not_repeat_failed_id() -> None:
+async def test_finding_inspection_preserves_query_observations_and_failed_results() -> None:
     query = _Capability(
         "query_published_findings",
         ToolRisk.READ,

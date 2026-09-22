@@ -567,46 +567,6 @@ class ResearchAgentRunner:
                         permission_mode=permission_mode,
                     )
                     tool_names = tuple(spec.name for spec in tool_specs)
-                    if not tool_specs and results:
-                        latest = results[-1]
-                        latest_call = next((call for call in reversed(calls)
-                                            if call.tool_call_id == latest.tool_call_id), None)
-                        if (
-                            latest_call is not None and latest_call.name == "create_finding_draft"
-                            and latest.status is ToolResultStatus.SUCCEEDED
-                            and isinstance(latest.data.get("draft"), Mapping)
-                            and latest.data.get("persistence") == "transient_chat_result"
-                        ):
-                            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
-                            content = ("结论草案已生成，尚未保存或发布。" if chinese else
-                                       "The Finding draft is ready and has not been saved or published.")
-                            messages.append(self._assistant(context, content, progress))
-                            await self._checkpoint(checkpoint, messages, calls, results)
-                            if text_delta_callback is not None:
-                                text_delta_callback(content)
-                            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
-                            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
-                                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
-                        if (
-                            latest_call is not None and latest_call.name == "propose_research_plan"
-                            and latest.status is ToolResultStatus.SUCCEEDED
-                            and latest.data.get("draft_status") in {"ready_for_researcher_review", "needs_finding_review"}
-                            and isinstance(latest.data.get("content"), str) and latest.data["content"].strip()
-                        ):
-                            # The arguments were reviewed before execution; the capability
-                            # already rendered the complete draft and its source basis.
-                            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
-                            lead = "研究方案草案已生成，尚未保存。" if chinese else "The research-plan draft is ready and has not been saved."
-                            if latest.data["draft_status"] == "needs_finding_review":
-                                lead += "所引用的研究结论仍需研究者审阅。" if chinese else " Its supporting conclusions still require researcher review."
-                            content = f"{lead}\n\n{latest.data['content']}"
-                            messages.append(self._assistant(context, content, progress))
-                            await self._checkpoint(checkpoint, messages, calls, results)
-                            if text_delta_callback is not None:
-                                text_delta_callback(content)
-                            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
-                            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
-                                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
                     schema_chars = sum(
                         len(
                             json.dumps(

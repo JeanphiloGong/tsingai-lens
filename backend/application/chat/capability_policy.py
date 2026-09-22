@@ -110,17 +110,6 @@ def validate_batch(
                 ),
                 validated_arguments,
             )
-        if call.name == "inspect_published_finding":
-            allowed = _published_finding_candidates(successful_results)
-            finding = (str(call.arguments.get("objective_id") or "").strip(), str(call.arguments.get("finding_id") or "").strip())
-            if allowed and finding not in allowed:
-                return (
-                    (
-                        "finding_reference_not_in_query",
-                        "Inspect a Finding identifier returned by the preceding query.",
-                    ),
-                    validated_arguments,
-                )
         if call.name == "revise_research_plan":
             inspected_plans = {
                 (str(result.get("objective_id") or ""), str(plan.get("plan_id") or ""))
@@ -580,41 +569,6 @@ def _confirmed_objective_ids(
             ):
                 ids.append(objective_id)
     return tuple(ids[:12])
-
-
-def _published_finding_candidates(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-) -> tuple[tuple[str, str], ...]:
-    candidates: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for result in successful_results.get("query_published_findings", ()):
-        for objective in result.get("objectives") or ():
-            if not isinstance(objective, Mapping):
-                continue
-            objective_id = str(objective.get("objective_id") or "").strip()
-            for finding in objective.get("findings") or ():
-                if not isinstance(finding, Mapping):
-                    continue
-                finding_id = str(finding.get("finding_id") or "").strip()
-                candidate = (objective_id, finding_id)
-                if all(candidate) and candidate not in seen:
-                    seen.add(candidate)
-                    candidates.append(candidate)
-    return tuple(candidates[:24])
-
-
-def _failed_finding_candidates(
-    calls: list[ChatToolCall],
-) -> set[tuple[str, str]]:
-    failed: set[tuple[str, str]] = set()
-    for call in calls:
-        if call.name != "inspect_published_finding" or call.status is not ToolCallStatus.FAILED:
-            continue
-        objective_id = str(call.arguments.get("objective_id") or "").strip()
-        finding_id = str(call.arguments.get("finding_id") or "").strip()
-        if objective_id and finding_id:
-            failed.add((objective_id, finding_id))
-    return failed
 
 
 def stage_instruction(

@@ -90,10 +90,9 @@
 		...(responseSnapshot?.status === 'running'
 			? {
 					...responseSnapshot.progress,
-					elapsed_ms: Math.max(
-						responseSnapshot.progress.elapsed_ms ?? 0,
-						now - Date.parse(responseSnapshot.started_at)
-					)
+					// The server's monotonic elapsed time is authoritative. Rebuilding it
+					// from the browser wall clock makes stale or skewed timestamps look active.
+					elapsed_ms: responseSnapshot.progress.elapsed_ms ?? 0
 				}
 			: {}),
 		...(recoveryError ? { phase: 'reconnecting' } : {})
@@ -350,7 +349,7 @@
 			{/if}
 		</div>
 	</div>
-	{#if !following && messages.length}
+	{#if !following && messages.length && !pendingApproval}
 		<div class="jump-to-latest">
 			<IconButton label={$t('researchAgent.latestMessage')} onClick={scrollToLatest}
 				>&darr;</IconButton

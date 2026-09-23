@@ -325,7 +325,7 @@
 					const trajectory = await fetchChatTrajectory(item.session_id, sessionController?.signal);
 					activity = getChatSessionActivity(
 						trajectory.items,
-						trajectory.running ?? false,
+						Boolean(trajectory.running || trajectory.response?.status === 'running'),
 						trajectory.pending_approval?.tool_call_id ?? null
 					);
 				} catch {
@@ -470,7 +470,7 @@
 					(call) =>
 						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
-		if (running && responseSnapshot?.status === 'running' && !sending && !recoveryError) {
+		if (running && responseSnapshot?.status === 'running' && !pendingApproval && !sending && !recoveryError) {
 			void resumeResponse();
 			return;
 		}
@@ -502,7 +502,9 @@
 		messages = trajectory.items;
 		branches = trajectory.branches ?? [];
 		branchDraft = trajectory.branch_draft ?? null;
-		running = trajectory.running ?? false;
+		// A persisted running response is authoritative when the trajectory flag
+		// was written by an earlier polling pass.
+		running = Boolean(trajectory.running || trajectory.response?.status === 'running');
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
 		if (trajectory.response) acceptSnapshot(trajectory.response);
@@ -980,7 +982,7 @@
 						if (!isCurrentSession(generation, activeCollectionId)) return;
 						branches = trajectory.branches ?? [];
 						branchDraft = trajectory.branch_draft ?? null;
-						running = trajectory.running ?? false;
+						running = Boolean(trajectory.running || trajectory.response?.status === 'running');
 						scheduleRecovery();
 					} catch (err) {
 						if (isCurrentSession(generation, activeCollectionId)) error = errorMessage(err);

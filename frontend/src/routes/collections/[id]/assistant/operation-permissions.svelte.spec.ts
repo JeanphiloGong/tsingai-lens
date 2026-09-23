@@ -5,16 +5,32 @@ import OperationPermissions from './OperationPermissions.svelte';
 afterEach(() => vi.unstubAllGlobals());
 
 it('saves exact scoped actions and revokes through the authenticated API', async () => {
-	let permission = { mode: 'confirm', actions: [] as string[], expires_at: null as string | null, revision: 0 };
+	let permission = {
+		mode: 'confirm',
+		actions: [] as string[],
+		expires_at: null as string | null,
+		revision: 0
+	};
 	const writes: Record<string, unknown>[] = [];
-	vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
-		if (options?.method === 'PUT') {
-			const input = JSON.parse(options.body);
-			writes.push(input);
-			permission = { mode: input.mode, actions: input.actions, expires_at: input.expires_at, revision: permission.revision + 1 };
-		}
-		return new Response(JSON.stringify(permission), { status: 200, headers: { 'Content-Type': 'application/json' } });
-	}));
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async (_url, options) => {
+			if (options?.method === 'PUT') {
+				const input = JSON.parse(options.body);
+				writes.push(input);
+				permission = {
+					mode: input.mode,
+					actions: input.actions,
+					expires_at: input.expires_at,
+					revision: permission.revision + 1
+				};
+			}
+			return new Response(JSON.stringify(permission), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		})
+	);
 	const screen = render(OperationPermissions, { sessionId: 'session-1' });
 	await expect.poll(() => screen.container.querySelector('select')).not.toBeNull();
 	(screen.container.querySelector('details') as HTMLDetailsElement).open = true;
@@ -22,8 +38,14 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 	select.value = 'auto';
 	select.dispatchEvent(new Event('change', { bubbles: true }));
 	await expect.poll(() => screen.container.querySelectorAll('input[type=checkbox]').length).toBe(6);
+	await expect
+		.element(screen.getByText('Select at least one action to enable automatic execution.'))
+		.toBeVisible();
+	expect((screen.container.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
 	(screen.container.querySelector('input[type=checkbox]') as HTMLInputElement).click();
-	await expect.poll(() => (screen.container.querySelector('button') as HTMLButtonElement).disabled).toBe(false);
+	await expect
+		.poll(() => (screen.container.querySelector('button') as HTMLButtonElement).disabled)
+		.toBe(false);
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => writes.length).toBe(1);
 	expect(writes[0].actions).toEqual(['create_evidence_version']);
@@ -31,5 +53,10 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 	await expect.poll(() => screen.container.querySelectorAll('button').length).toBe(2);
 	(screen.container.querySelectorAll('button')[1] as HTMLButtonElement).click();
 	await expect.poll(() => writes.length).toBe(2);
-	expect(writes[1]).toMatchObject({ mode: 'confirm', actions: [], expires_at: null, expected_revision: 1 });
+	expect(writes[1]).toMatchObject({
+		mode: 'confirm',
+		actions: [],
+		expires_at: null,
+		expected_revision: 1
+	});
 });

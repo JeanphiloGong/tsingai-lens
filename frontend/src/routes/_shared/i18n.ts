@@ -11,9 +11,11 @@ interface Translations {
 
 const translations: Record<Language, Translations> = {
 	en: {
+		agentReview: { details: 'Exact action details', statement: 'Proposed conclusion', question: 'Research question', reported_result: 'Reported result', authoring_note: 'Reason for revision', limitations: 'Scope and remaining uncertainties', source_excerpt: 'Original passage', passage: 'View passage', permissions: 'Permissions' },
 		agentPermission: {
 			title: 'Agent permissions', mode: 'Mode', read_only: 'Read and suggest', confirm: 'Confirm each write', auto: 'Authorized automatic execution',
 			loading: 'Loading', actions: 'Allowed in this session and collection', hours: 'Valid for (hours)', expires: 'Expires',
+			unsaved: 'Changes are not applied yet.', selectAction: 'Select at least one action to enable automatic execution.',
 			save: 'Apply permissions', revoke: 'Revoke automatic execution', reload: 'Reload settings',
 			create_evidence_version: 'Create Evidence and publish an analysis version',
 			create_finding_version: 'Create Finding and publish an analysis version',
@@ -367,7 +369,9 @@ const translations: Record<Language, Translations> = {
 				cycle: 'Cycle {cycle}',
 				actions: '{completed} / {total} research actions',
 				toggleHistory: 'Toggle research progress history',
-				historyLabel: 'Completed research stages',
+				historyLabel: 'Research stage history',
+				currentAction: 'Current action: {action}',
+				openSource: 'Open source location',
 				sourceState: {
 					reading: 'Reading',
 					received: 'Latest retrieved content',
@@ -2811,9 +2815,11 @@ const translations: Record<Language, Translations> = {
 		}
 	},
 	zh: {
+		agentReview: { details: '查看完整操作详情', statement: '拟议结论', question: '研究问题', reported_result: '实验结果', authoring_note: '修订理由', limitations: '适用范围与待核查项', source_excerpt: '原文依据', passage: '查看原文片段', permissions: '操作权限' },
 		agentPermission: {
 			title: 'Agent 操作权限', mode: '模式', read_only: '只读与建议', confirm: '逐次确认', auto: '授权自动执行',
 			loading: '加载中', actions: '仅授权当前会话与论文集合', hours: '有效时间（小时）', expires: '到期时间',
+			unsaved: '权限修改尚未应用。', selectAction: '至少选择一个动作后，才能启用自动执行。',
 			save: '应用权限', revoke: '撤销自动执行', reload: '重新加载设置',
 			create_evidence_version: '创建 Evidence 并发布分析版本', create_finding_version: '创建 Finding 并发布分析版本',
 			record_finding_feedback: '保存结论反馈', curate_finding: '保存专家修订',
@@ -3157,7 +3163,9 @@ const translations: Record<Language, Translations> = {
 				cycle: '第 {cycle} 轮',
 				actions: '已完成 {completed} / {total} 个研究动作',
 				toggleHistory: '展开或收起研究进度历史',
-				historyLabel: '已完成的研究阶段',
+				historyLabel: '研究阶段历史',
+				currentAction: '当前动作：{action}',
+				openSource: '打开原文位置',
 				sourceState: { reading: '正在读取', received: '最近取得的内容', failed: '读取失败' },
 				sourceKind: { passage: '原文片段', table: '表格', search: '原文检索', outline: '文档章节' },
 				sourcePage: '第 {page} 页',

@@ -42,7 +42,12 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 });
 
 vi.mock('$app/stores', () => ({ page: pageStore }));
-vi.stubGlobal('fetch', fetchMock);
+vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+	if (requestPath(input).endsWith('/permissions')) {
+		return Promise.resolve(jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
+	}
+	return fetchMock(input, init);
+});
 
 const Page = (await import('./+page.svelte')).default;
 const Conversation = (await import('./ResearchConversation.svelte')).default;

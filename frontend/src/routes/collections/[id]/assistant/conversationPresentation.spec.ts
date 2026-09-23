@@ -85,6 +85,7 @@ describe('buildChatPresentation', () => {
 				kind: 'passage',
 				status: 'reading',
 				title: 'Ti6Al4V treatment study',
+				href: '',
 				page: '7',
 				heading: '3.4 Tensile properties',
 				excerpt: 'Elongation increases at the first treatment level.',
@@ -94,6 +95,13 @@ describe('buildChatPresentation', () => {
 		const received = message('read-result', 'tool', {
 			toolResult: {
 				...result('read'),
+				resource_refs: [
+					{
+						resource_type: 'source',
+						resource_id: 'results-1',
+						href: '/collections/c1/documents/paper-a?source_ref=results-1'
+					}
+				],
 				data: {
 					document_id: 'paper-a',
 					source_ref: 'results-1',
@@ -103,6 +111,7 @@ describe('buildChatPresentation', () => {
 		});
 		expect(getCurrentReadings([...messages, received])[0]).toMatchObject({
 			status: 'received',
+			href: '/collections/c1/documents/paper-a?source_ref=results-1',
 			page: '7',
 			excerpt: 'Complete passage with all comparisons.'
 		});

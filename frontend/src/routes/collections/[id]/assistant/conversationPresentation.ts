@@ -36,6 +36,7 @@ export type CurrentReading = {
 	kind: 'passage' | 'table' | 'search' | 'outline';
 	status: 'reading' | 'received' | 'failed';
 	title: string;
+	href: string;
 	page: string;
 	heading: string;
 	excerpt: string;
@@ -90,6 +91,10 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 			? records.filter((item) => item.document_id === documentId)
 			: [];
 		const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+		const internalHref = (value: unknown) => {
+			const href = text(value);
+			return href.startsWith('/collections/') ? href : '';
+		};
 		const sectionSources = Array.isArray(data.sources)
 			? data.sources.filter(
 					(item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object'
@@ -115,12 +120,23 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 					)
 					.find(Boolean)) ??
 			'';
+		const context = messages
+			.slice(questionIndex)
+			.flatMap((message) => message.source_contexts)
+			.find(
+				(item) => item.document_id === documentId && (!sourceRef || item.source_ref === sourceRef)
+			);
+		const resultHref = result?.resource_refs
+			.map((resource) => internalHref(resource.href))
+			.find(Boolean);
+		const href = resultHref || internalHref(context?.resource_ref.href);
 		const page = data.page ?? source?.page ?? request.page;
 		return {
 			toolCallId: operation.toolCallId,
 			kind: kinds[operation.toolName as keyof typeof kinds],
 			status: !result ? 'reading' : result.status === 'failed' ? 'failed' : 'received',
 			title,
+			href,
 			page: typeof page === 'number' || typeof page === 'string' ? String(page) : '',
 			heading: text(data.heading_path ?? source?.heading_path ?? request.heading_path),
 			excerpt:

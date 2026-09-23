@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
 	import { authState } from '../../../_shared/auth';
@@ -126,6 +127,7 @@
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
 	let inspectedModelCall: ChatModelCall | null = null;
+	let inspectedModelCallMessageId = '';
 	let modelCallLoading = false;
 	let modelCallError = '';
 	let modelCallController: AbortController | null = null;
@@ -159,7 +161,7 @@
 
 	let destroyed = false;
 
-		onDestroy(() => {
+	onDestroy(() => {
 		destroyed = true;
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
@@ -173,14 +175,22 @@
 
 	async function inspectModelCall(messageId: string) {
 		if (!session || modelCallLoading) return;
+		const ownerSessionId = session.session_id;
 		modelCallController?.abort();
 		const controller = new AbortController();
 		modelCallController = controller;
+		inspectedModelCallMessageId = messageId;
 		modelCallLoading = true;
 		modelCallError = '';
 		inspectedModelCall = null;
 		try {
-			const listed = await fetchChatModelCalls(session.session_id, { signal: controller.signal });
+			const listed = await fetchChatModelCalls(ownerSessionId, { signal: controller.signal });
+			if (
+				controller.signal.aborted ||
+				modelCallController !== controller ||
+				session?.session_id !== ownerSessionId
+			)
+				return;
 			const summary = [...listed.items]
 				.reverse()
 				.find((item) => item.response_message_id === messageId);
@@ -188,13 +198,25 @@
 				modelCallError = $t('researchAgent.modelCall.unavailable');
 				return;
 			}
-			inspectedModelCall = await fetchChatModelCall(
-				session.session_id,
+			const modelCall = await fetchChatModelCall(
+				ownerSessionId,
 				summary.call_id,
 				controller.signal
 			);
+			if (
+				controller.signal.aborted ||
+				modelCallController !== controller ||
+				session?.session_id !== ownerSessionId
+			)
+				return;
+			inspectedModelCall = modelCall;
 		} catch (err) {
-			if (controller.signal.aborted) return;
+			if (
+				controller.signal.aborted ||
+				modelCallController !== controller ||
+				session?.session_id !== ownerSessionId
+			)
+				return;
 			modelCallError = errorMessage(err);
 		} finally {
 			if (modelCallController === controller) {
@@ -209,6 +231,7 @@
 		modelCallController = null;
 		modelCallLoading = false;
 		inspectedModelCall = null;
+		inspectedModelCallMessageId = '';
 		modelCallError = '';
 	}
 
@@ -226,7 +249,8 @@
 			const result = await fetchChatCorrectionCases(activeSession.session_id, {
 				signal: controller.signal
 			});
-			if (!isCurrentSession(generation, ownerCollectionId) || correctionController !== controller) return;
+			if (!isCurrentSession(generation, ownerCollectionId) || correctionController !== controller)
+				return;
 			correctionCases = result.items;
 		} catch (err) {
 			if (!controller.signal.aborted && isCurrentSession(generation, ownerCollectionId))
@@ -247,7 +271,11 @@
 		correctionSaving = true;
 		correctionError = '';
 		try {
-			const saved = await createChatCorrectionCase(session.session_id, input, sessionController?.signal);
+			const saved = await createChatCorrectionCase(
+				session.session_id,
+				input,
+				sessionController?.signal
+			);
 			if (!isCurrentSession(generation, ownerCollectionId)) return false;
 			correctionCases = [
 				...correctionCases.filter((item) => item.case_id !== saved.case_id),
@@ -310,10 +338,9 @@
 	}
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (browser && (collectionId !== loadedCollectionId || userId !== loadedUserId)) {
-		sessionActivities = {};
 		loadedCollectionId = collectionId;
 		loadedUserId = userId;
-		void loadSession();
+		loadCollectionSession();
 	}
 	$: if (session && !loading) {
 		sessionActivities = {
@@ -330,6 +357,11 @@
 
 	function sessionStorageKey() {
 		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}${embedded ? ':documents' : ''}`;
+	}
+
+	function loadCollectionSession() {
+		sessionActivities = {};
+		void loadSession();
 	}
 
 	function refreshPendingSources() {
@@ -605,7 +637,13 @@
 					(call) =>
 						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
-		if (running && responseSnapshot?.status === 'running' && !pendingApproval && !sending && !recoveryError) {
+		if (
+			running &&
+			responseSnapshot?.status === 'running' &&
+			!pendingApproval &&
+			!sending &&
+			!recoveryError
+		) {
 			void resumeResponse();
 			return;
 		}
@@ -1115,11 +1153,12 @@
 				if (isRevision) {
 					try {
 						const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
-						if (!isCurrentSession(generation, activeCollectionId)) return;
-						branches = trajectory.branches ?? [];
-						branchDraft = trajectory.branch_draft ?? null;
-						running = Boolean(trajectory.running || trajectory.response?.status === 'running');
-						scheduleRecovery();
+						if (isCurrentSession(generation, activeCollectionId)) {
+							branches = trajectory.branches ?? [];
+							branchDraft = trajectory.branch_draft ?? null;
+							running = Boolean(trajectory.running || trajectory.response?.status === 'running');
+							scheduleRecovery();
+						}
 					} catch (err) {
 						if (isCurrentSession(generation, activeCollectionId)) error = errorMessage(err);
 					}
@@ -1364,13 +1403,13 @@
 					type="button"
 					disabled={sessionNavigationDisabled}
 					on:click={() => (datasetPageOpen = true)}
-				><Archive size={14} />{$t('researchAgent.correctionDataset.open')}</button
+					><Archive size={14} />{$t('researchAgent.correctionDataset.open')}</button
 				>
 				<button
 					type="button"
 					disabled={sessionNavigationDisabled}
 					on:click={() => (candidatePanelOpen = true)}
-				><Sparkles size={14} />{$t('researchAgent.correctionCandidate.open')}</button
+					><Sparkles size={14} />{$t('researchAgent.correctionCandidate.open')}</button
 				>
 			</div>
 		{/if}
@@ -1420,14 +1459,13 @@
 			loading={modelCallLoading}
 			error={modelCallError}
 			onRetry={() => {
-				const messageId = inspectedModelCall?.response_message_id;
-				if (messageId) void inspectModelCall(messageId);
+				if (inspectedModelCallMessageId) void inspectModelCall(inspectedModelCallMessageId);
 			}}
 			onClose={closeModelCallInspector}
 		/>
 		{#if correctionPanelOpen && session}
 			<CorrectionCasePanel
-				messages={messages}
+				{messages}
 				cases={correctionCases}
 				saving={correctionSaving}
 				error={correctionError}
@@ -1534,7 +1572,10 @@
 							{#each selectedPapers as paper (paper.document_id)}
 								<li>
 									<a
-										href={`/collections/${collectionId}/documents/${paper.document_id}`}
+										href={resolve('/collections/[id]/documents/[document_id]', {
+											id: collectionId,
+											document_id: paper.document_id
+										})}
 										title={paper.title ?? ''}>{paper.title}</a
 									>
 									<IconButton

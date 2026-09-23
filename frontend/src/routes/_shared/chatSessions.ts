@@ -653,11 +653,14 @@ export async function fetchChatCorrectionReviewStatus(
 	)) as ChatCorrectionReviewStatus;
 }
 
-export async function createChatCorrectionDataset(input: {
-	collection_id: string;
-	items: ChatCorrectionDatasetSelection[];
-	paper_families: Record<string, string>;
-}, signal?: AbortSignal): Promise<ChatCorrectionDataset> {
+export async function createChatCorrectionDataset(
+	input: {
+		collection_id: string;
+		items: ChatCorrectionDatasetSelection[];
+		paper_families: Record<string, string>;
+	},
+	signal?: AbortSignal
+): Promise<ChatCorrectionDataset> {
 	return (await requestJson('/chat-correction-datasets', {
 		signal,
 		method: 'POST',

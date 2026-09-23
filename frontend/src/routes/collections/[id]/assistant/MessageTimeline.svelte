@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import {
@@ -43,7 +44,7 @@
 		Boolean(recoveringCallId);
 	$: questionsByAnswer = (() => {
 		let question: ChatMessage | undefined;
-		const questions = new Map<string, ChatMessage>();
+		const questions = new SvelteMap<string, ChatMessage>();
 		for (const message of messages) {
 			if (message.role === 'user') question = message;
 			else if (message.role === 'assistant' && question)
@@ -52,7 +53,7 @@
 		return questions;
 	})();
 	$: unansweredQuestions = (() => {
-		const ids = new Set<string>();
+		const ids = new SvelteSet<string>();
 		let questionId = '';
 		for (const message of messages) {
 			if (message.role === 'user') {
@@ -295,8 +296,8 @@
 										responseSnapshot?.status === 'running')}
 								incomplete={item.message.message_id === responseMessage?.message_id}
 								feedbackState={feedbackByMessage[item.message.message_id]}
-									{onFeedback}
-								onInspectModelCall={onInspectModelCall}
+								{onFeedback}
+								{onInspectModelCall}
 								streamingText={sending ? streamingText : (responseSnapshot?.content ?? '')}
 								progress={sending
 									? progress

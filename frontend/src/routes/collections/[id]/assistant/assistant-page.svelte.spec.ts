@@ -6,6 +6,7 @@ import { collections } from '../../../_shared/collections';
 
 import type {
 	ChatMessage,
+	ChatModelCall,
 	ChatResponseSnapshot,
 	ChatToolCall,
 	ChatToolResult,
@@ -44,7 +45,9 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
 	if (requestPath(input).endsWith('/permissions')) {
-		return Promise.resolve(jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
+		return Promise.resolve(
+			jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 })
+		);
 	}
 	return fetchMock(input, init);
 });
@@ -169,6 +172,30 @@ function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
 	};
 }
 
+function savedModelCall(responseMessageId = 'answer-model-call'): ChatModelCall {
+	return {
+		call_id: 'model-call-1',
+		session_id: session.session_id,
+		trigger_message_id: 'question-model-call',
+		response_message_id: responseMessageId,
+		purpose: 'decision',
+		model: 'research-model-v1',
+		request_digest: 'request-digest-1',
+		status: 'provider_succeeded',
+		started_at: createdAt,
+		finished_at: createdAt,
+		error_code: null,
+		provider_confirmed: true,
+		prompt_tokens: 120,
+		completion_tokens: 24,
+		total_tokens: 144,
+		request: {
+			messages: [{ role: 'user', content: 'Compare the reported conditions.' }],
+			tools: []
+		}
+	};
+}
+
 function installApi({
 	trajectory = { feedback: [], items: [], pending_approval: null },
 	messageTurn,
@@ -222,6 +249,35 @@ function installApi({
 				: Promise.resolve(jsonResponse({ detail: 'Unexpected document preparation' }, 500));
 		}
 		return Promise.resolve(jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500));
+	});
+}
+
+function installModelCallApi({
+	answer,
+	list,
+	detail = () => jsonResponse(savedModelCall(answer.message_id))
+}: {
+	answer: ChatMessage;
+	list: (signal: AbortSignal | null | undefined) => Response | Promise<Response>;
+	detail?: (callId: string, signal: AbortSignal | null | undefined) => Response | Promise<Response>;
+}) {
+	localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+	installApi({ trajectory: { feedback: [], items: [answer], pending_approval: null } });
+	const fallback = fetchMock.getMockImplementation()!;
+	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+		const path = requestPath(input);
+		const signal = input instanceof Request ? input.signal : init?.signal;
+		if (
+			path === `/api/v1/chat-sessions/${session.session_id}/model-calls` &&
+			requestMethod(input, init) === 'GET'
+		)
+			return Promise.resolve(list(signal));
+		const match = path.match(
+			new RegExp(`^/api/v1/chat-sessions/${session.session_id}/model-calls/([^/]+)$`)
+		);
+		if (match && requestMethod(input, init) === 'GET')
+			return Promise.resolve(detail(decodeURIComponent(match[1]), signal));
+		return fallback(input, init);
 	});
 }
 
@@ -319,6 +375,103 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
 			.toBeVisible();
+	});
+
+	it('loads the exact saved model request for an assistant answer', async () => {
+		const answer = message('answer-model-call', 'assistant', 'A source-grounded answer.');
+		const modelCall = savedModelCall(answer.message_id);
+		installModelCallApi({
+			answer,
+			list: () => jsonResponse({ items: [modelCall], limit: 50, offset: 0 }),
+			detail: (callId) => {
+				expect(callId).toBe(modelCall.call_id);
+				return jsonResponse(modelCall);
+			}
+		});
+
+		await renderReady();
+		await browserPage.getByRole('button', { name: 'Exact model request' }).click();
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Exact model request' }))
+			.toBeVisible();
+		await expect.element(browserPage.getByText(modelCall.model, { exact: true })).toBeVisible();
+		await expect
+			.element(browserPage.getByText('Compare the reported conditions.', { exact: false }))
+			.toBeVisible();
+	});
+
+	it('shows an explicit unavailable state for answers without a saved model request', async () => {
+		const answer = message('answer-before-audit', 'assistant', 'A historical answer.');
+		installModelCallApi({
+			answer,
+			list: () => jsonResponse({ items: [], limit: 50, offset: 0 })
+		});
+
+		await renderReady();
+		await browserPage.getByRole('button', { name: 'Exact model request' }).click();
+
+		await expect
+			.element(browserPage.getByText('This historical answer has no saved provider request.'))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Retry request lookup' }))
+			.toBeVisible();
+	});
+
+	it('retries a failed model request lookup with the original answer identity', async () => {
+		const answer = message('answer-model-call', 'assistant', 'A source-grounded answer.');
+		const modelCall = savedModelCall(answer.message_id);
+		let attempts = 0;
+		installModelCallApi({
+			answer,
+			list: () => {
+				attempts++;
+				return attempts === 1
+					? jsonResponse({ detail: 'temporary failure' }, 503)
+					: jsonResponse({ items: [modelCall], limit: 50, offset: 0 });
+			},
+			detail: () => jsonResponse(modelCall)
+		});
+
+		await renderReady();
+		await browserPage.getByRole('button', { name: 'Exact model request' }).click();
+		await expect
+			.element(browserPage.getByText('The request could not be completed. Please try again.'))
+			.toBeVisible();
+		await browserPage.getByRole('button', { name: 'Retry request lookup' }).click();
+
+		await expect.element(browserPage.getByText(modelCall.model, { exact: true })).toBeVisible();
+		expect(attempts).toBe(2);
+	});
+
+	it('cancels an in-flight model request lookup when the inspector closes', async () => {
+		const answer = message('answer-model-call', 'assistant', 'A source-grounded answer.');
+		const modelCall = savedModelCall(answer.message_id);
+		let lookupSignal: AbortSignal | null | undefined;
+		let releaseLookup!: (response: Response) => void;
+		const pendingLookup = new Promise<Response>((resolve) => {
+			releaseLookup = resolve;
+		});
+		installModelCallApi({
+			answer,
+			list: (signal) => {
+				lookupSignal = signal;
+				return pendingLookup;
+			}
+		});
+
+		await renderReady();
+		await browserPage.getByRole('button', { name: 'Exact model request' }).click();
+		await expect.element(browserPage.getByText('Loading the saved request...')).toBeVisible();
+		await browserPage.getByRole('button', { name: 'Close request details' }).click();
+		expect(lookupSignal?.aborted).toBe(true);
+
+		releaseLookup(jsonResponse({ items: [modelCall], limit: 50, offset: 0 }));
+		await new Promise(requestAnimationFrame);
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Exact model request' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('prefills the exact Finding review without submitting or replacing researcher edits', async () => {

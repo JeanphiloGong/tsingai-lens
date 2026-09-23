@@ -101,7 +101,11 @@
 	.digest {
 		margin: 10px 0;
 		color: var(--text-tertiary);
-		font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+		font:
+			11px ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			monospace;
 		word-break: break-all;
 	}
 	pre {
@@ -109,7 +113,11 @@
 		padding: 12px;
 		overflow: auto;
 		background: var(--surface-muted, #f8fafc);
-		font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+		font:
+			11px/1.5 ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			monospace;
 		white-space: pre-wrap;
 		word-break: break-word;
 	}

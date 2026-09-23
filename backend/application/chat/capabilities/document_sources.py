@@ -316,6 +316,7 @@ class SearchSourcesCapability:
         ),
         risk=ToolRisk.READ,
         input_model=SearchSourcesArguments,
+        parallel_safe=True,
     )
 
     def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:

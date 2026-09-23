@@ -5,6 +5,7 @@ import pytest
 
 from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
 from application.chat.capability_policy import select_tool_specs, validate_batch
+from application.chat.capabilities.document_sources import SearchSourcesCapability
 from domain.chat import ChatMessage, ChatToolCall, ToolPermissionMode, ToolRisk
 from tests.unit.application.test_research_agent_runner import _Capability, _Model, _context
 
@@ -21,6 +22,10 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
     assert [spec.name for spec in specs] == ["discover_research_tools"]
     assert "search_sources" in specs[0].description
     assert "SearchSourcesArguments" not in str(specs[0].model_schema())
+
+
+def test_search_sources_is_declared_as_a_parallel_safe_read():
+    assert SearchSourcesCapability.spec.parallel_safe is True
 
 
 def test_no_tool_wording_does_not_hide_default_discovery():

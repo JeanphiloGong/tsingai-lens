@@ -78,6 +78,12 @@ Evidence or permission to mutate a scientific record.
 Repeated identical calls within one model response execute once. Retained calls
 are assigned contiguous positions so checkpointed requests and results stay paired.
 
+Independent read calls whose capability is marked `parallel_safe` run behind the
+configured read semaphore. Their completion timing cannot reorder the model's
+request positions or the persisted tool-result messages; a read capability that
+is not marked safe stays sequential. Draft and write calls are never mixed into
+that read batch.
+
 Read and draft capabilities can execute during the turn. Write capabilities
 persist their exact arguments and digest, stop for the authenticated user's
 approval or a current scoped grant, and execute only that authorized call once.

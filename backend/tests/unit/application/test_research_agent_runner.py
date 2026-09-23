@@ -842,6 +842,48 @@ async def test_read_batch_preserves_intent_order_and_partial_failure(
     )
 
 
+async def test_independent_read_capabilities_run_in_parallel_and_keep_request_order() -> None:
+    active = peak = 0
+
+    class Read(_Capability):
+        async def execute(self, context, arguments):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.02 if self.spec.name == "read_slow" else 0.001)
+                return await super().execute(context, arguments)
+            finally:
+                active -= 1
+
+    slow = Read("read_slow", ToolRisk.READ)
+    fast = Read("read_fast", ToolRisk.READ)
+    slow.spec = replace(slow.spec, parallel_safe=True)
+    fast.spec = replace(fast.spec, parallel_safe=True)
+    result = await ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(
+                ModelToolCall(name=slow.spec.name),
+                ModelToolCall(name=fast.spec.name),
+            )),
+            ModelTurn(content="Both independent reads completed."),
+        ),
+        capabilities=CapabilityRegistry((slow, fast)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Inspect both independent Sources.",
+    )
+
+    read_calls = _calls_for(result, slow.spec.name, fast.spec.name)
+    read_results = _results_for(result, slow.spec.name, fast.spec.name)
+    assert peak == 2
+    assert [call.name for call in read_calls] == [slow.spec.name, fast.spec.name]
+    assert [item.tool_call_id for item in read_results] == [
+        call.tool_call_id for call in read_calls
+    ]
+
+
 async def test_tool_response_deduplicates_and_bounds_one_model_batch() -> None:
     read = _Capability("test_read", ToolRisk.READ, _QuestionArguments)
     requested = tuple(

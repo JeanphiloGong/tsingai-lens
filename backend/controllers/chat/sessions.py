@@ -20,6 +20,11 @@ from application.evaluation.chat_correction_review_service import (
     ChatCorrectionReviewStaleError,
     ChatCorrectionSampleNotFoundError,
 )
+from application.evaluation.chat_correction_candidate_service import (
+    ChatCorrectionCandidateNotFoundError,
+    ChatCorrectionCandidateService,
+    ChatCorrectionCandidateUnavailableError,
+)
 from application.repositories.chat_repository import ChatSessionBusyError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
@@ -36,6 +41,9 @@ from controllers.schemas.chat.session import (
     ChatCorrectionCaseCreateRequest,
     ChatCorrectionCaseListResponse,
     ChatCorrectionCaseResponse,
+    ChatCorrectionCandidateCreateRequest,
+    ChatCorrectionCandidateListResponse,
+    ChatCorrectionCandidateResponse,
     ChatCorrectionReviewCreateRequest,
     ChatCorrectionReviewListResponse,
     ChatCorrectionReviewResponse,
@@ -229,6 +237,126 @@ async def get_chat_correction_case(
             detail={"code": "chat_correction_case_not_found", "case_id": case_id},
         )
     return ChatCorrectionCaseResponse.model_validate(case.to_record())
+
+
+def _chat_correction_candidate_service(request: Request) -> ChatCorrectionCandidateService:
+    service = getattr(request.app.state, "chat_correction_candidate_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "chat_correction_candidate_unavailable",
+                "message": "Chat correction candidate generation is unavailable.",
+            },
+        )
+    return service
+
+
+@router.post(
+    "/{session_id}/correction-candidates",
+    response_model=ChatCorrectionCandidateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Propose a correction candidate from one owned saved Chat turn",
+)
+async def create_chat_correction_candidate(
+    session_id: str,
+    payload: ChatCorrectionCandidateCreateRequest,
+    request: Request,
+) -> ChatCorrectionCandidateResponse:
+    service = _chat_correction_candidate_service(request)
+    try:
+        candidate = await service.propose_for_user(
+            session_id,
+            await current_user_id(request),
+            challenge_message_id=payload.challenge_message_id,
+            answer_message_id=payload.answer_message_id,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "chat_correction_candidate_invalid", "message": str(exc)},
+        ) from exc
+    return ChatCorrectionCandidateResponse.model_validate(candidate.to_record())
+
+
+@router.get(
+    "/{session_id}/correction-candidates",
+    response_model=ChatCorrectionCandidateListResponse,
+    summary="List correction candidate proposals for an owned Chat session",
+)
+async def list_chat_correction_candidates(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ChatCorrectionCandidateListResponse:
+    service = _chat_correction_candidate_service(request)
+    try:
+        candidates = await service.list_for_user(
+            session_id, await current_user_id(request), limit=limit, offset=offset
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatCorrectionCandidateListResponse(
+        items=[ChatCorrectionCandidateResponse.model_validate(item.to_record()) for item in candidates],
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/{session_id}/correction-candidates/{candidate_id}",
+    response_model=ChatCorrectionCandidateResponse,
+    summary="Read one correction candidate proposal",
+)
+async def get_chat_correction_candidate(
+    session_id: str, candidate_id: str, request: Request
+) -> ChatCorrectionCandidateResponse:
+    service = _chat_correction_candidate_service(request)
+    try:
+        candidate = await service.get_for_user(
+            session_id, candidate_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "chat_correction_candidate_not_found", "candidate_id": candidate_id},
+        )
+    return ChatCorrectionCandidateResponse.model_validate(candidate.to_record())
+
+
+@router.post(
+    "/{session_id}/correction-candidates/{candidate_id}/select",
+    response_model=ChatCorrectionCandidateResponse,
+    summary="Select a candidate and import it into the P2/P3 review path",
+)
+async def select_chat_correction_candidate(
+    session_id: str, candidate_id: str, request: Request
+) -> ChatCorrectionCandidateResponse:
+    service = _chat_correction_candidate_service(request)
+    try:
+        candidate = await service.select_for_user(
+            session_id, candidate_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatCorrectionCandidateNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "chat_correction_candidate_not_found", "candidate_id": str(exc)},
+        ) from exc
+    except ChatCorrectionCandidateUnavailableError as exc:
+        raise HTTPException(status_code=503, detail={"code": "chat_correction_candidate_unavailable", "message": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "chat_correction_candidate_not_selectable", "message": str(exc)},
+        ) from exc
+    return ChatCorrectionCandidateResponse.model_validate(candidate.to_record())
 
 
 def _chat_correction_review_service(request: Request):

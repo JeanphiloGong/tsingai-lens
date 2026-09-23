@@ -1130,6 +1130,32 @@ The JSONL response starts with a manifest provenance record, then accepted
 sample rows and excluded records. This export is separate from the Objective
 Finding dataset and does not schedule training or alter online Chat behavior.
 
+### Chat Correction Candidates
+
+- `POST /api/v1/chat-sessions/{session_id}/correction-candidates`
+- `GET /api/v1/chat-sessions/{session_id}/correction-candidates`
+- `GET /api/v1/chat-sessions/{session_id}/correction-candidates/{candidate_id}`
+- `POST /api/v1/chat-sessions/{session_id}/correction-candidates/{candidate_id}/select`
+
+These endpoints are explicit, owner-scoped proposal operations over an already
+persisted Chat trajectory. The optional create body names a user challenge and
+disputed answer; when omitted, the service inspects the latest possible answer
+and challenge boundary. The model receives only the selected user challenge,
+final assistant text, event IDs, and P1 model-call summaries. It cannot invent
+a corrected answer or Source.
+
+Every attempt stores the exact proposal request, raw provider response, finish
+reason, event and model-call IDs, and one of `needs_review`, `ambiguous`,
+`no_candidate`, `invalid_proposal`, or `provider_failed`. Fake IDs, tool-call
+messages, wrong ordering, missing successful P1 calls, schema failures, and
+truncated output remain invalid proposals. Transport/provider failures remain
+`provider_failed` and are never represented as no candidate.
+
+`select` is the only candidate write-through operation. It reruns the P2
+trajectory validator, persists the correction case, freezes the P3 sample, and
+records the resulting case/sample IDs on the candidate. It does not create a
+review decision, alter the Chat trajectory, or run in the background.
+
 ### Documents And Source Verification
 
 - `GET /api/v1/collections/{collection_id}/documents/profiles`

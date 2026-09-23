@@ -289,6 +289,47 @@ class ChatCorrectionCaseListResponse(BaseModel):
     offset: int
 
 
+class ChatCorrectionCandidateCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    challenge_message_id: str | None = Field(default=None, min_length=1, max_length=128)
+    answer_message_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ChatCorrectionCandidateResponse(BaseModel):
+    candidate_id: str
+    owner_id: str
+    collection_id: str
+    session_id: str
+    challenge_message_id: str | None
+    answer_message_id: str | None
+    event_ids: list[str]
+    model_call_ids: list[str]
+    status: Literal[
+        "needs_review",
+        "ambiguous",
+        "no_candidate",
+        "invalid_proposal",
+        "provider_failed",
+    ]
+    proposal: dict[str, Any] | None
+    request: dict[str, Any]
+    raw_response: str | None
+    finish_reason: str | None
+    error_code: str | None
+    selected_case_id: str | None
+    selected_sample_id: str | None
+    digest: str
+    created_at: str
+    updated_at: str
+
+
+class ChatCorrectionCandidateListResponse(BaseModel):
+    items: list[ChatCorrectionCandidateResponse] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
 class ChatCorrectionSampleResponse(BaseModel):
     sample_id: str
     case_id: str

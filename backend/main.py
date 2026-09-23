@@ -84,6 +84,9 @@ from application.evaluation.chat_correction_review_service import ChatCorrection
 from application.evaluation.chat_correction_dataset_service import (
     ChatCorrectionDatasetService,
 )
+from application.evaluation.chat_correction_candidate_service import (
+    ChatCorrectionCandidateService,
+)
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.source.collection_service import CollectionService
@@ -110,6 +113,9 @@ from application.repositories.chat_correction_review_repository import (
 )
 from application.repositories.chat_correction_dataset_repository import (
     ChatCorrectionDatasetRepository,
+)
+from application.repositories.chat_correction_candidate_repository import (
+    ChatCorrectionCandidateRepository,
 )
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.repositories.document_profile_repository import (
@@ -139,6 +145,9 @@ from infra.persistence.postgres.chat_correction_review_repository import (
 )
 from infra.persistence.postgres.chat_correction_dataset_repository import (
     PostgresChatCorrectionDatasetRepository,
+)
+from infra.persistence.postgres.chat_correction_candidate_repository import (
+    PostgresChatCorrectionCandidateRepository,
 )
 from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
@@ -235,6 +244,7 @@ class ApplicationOverrides:
     finding_review_repository: FindingReviewRepository | None = None
     chat_correction_review_repository: ChatCorrectionReviewRepository | None = None
     chat_correction_dataset_repository: ChatCorrectionDatasetRepository | None = None
+    chat_correction_candidate_repository: ChatCorrectionCandidateRepository | None = None
     experiment_plan_repository: ExperimentPlanRepository | None = None
     chat_repository: ChatRepository | None = None
     chat_session_service: ChatSessionService | None = None
@@ -286,6 +296,7 @@ class ApplicationRuntime:
     objective_analysis_service: ObjectiveAnalysisService
     chat_correction_review_service: ChatCorrectionReviewService | None
     chat_correction_dataset_service: ChatCorrectionDatasetService | None
+    chat_correction_candidate_service: ChatCorrectionCandidateService | None
 
     async def close(self) -> None:
         if self.database_engine is not None:
@@ -596,6 +607,18 @@ async def build_application_runtime(
             if correction_review_service is not None and correction_dataset_repository is not None
             else None
         )
+        correction_candidate_repository = overrides.chat_correction_candidate_repository
+        if correction_candidate_repository is None and session_factory is not None:
+            correction_candidate_repository = PostgresChatCorrectionCandidateRepository(session_factory)
+        correction_candidate_service = (
+            ChatCorrectionCandidateService(
+                chat_session_service=chat_session_service,
+                repository=correction_candidate_repository,
+                review_service=correction_review_service,
+            )
+            if correction_candidate_repository is not None
+            else None
+        )
 
         return ApplicationRuntime(
             database_engine=database_engine,
@@ -624,6 +647,7 @@ async def build_application_runtime(
             objective_analysis_service=objective_analysis_service,
             chat_correction_review_service=correction_review_service,
             chat_correction_dataset_service=correction_dataset_service,
+            chat_correction_candidate_service=correction_candidate_service,
         )
     except BaseException:
         if database_engine is not None:
@@ -662,6 +686,7 @@ def install_application_runtime(
     application.state.objective_analysis_service = runtime.objective_analysis_service
     application.state.chat_correction_review_service = runtime.chat_correction_review_service
     application.state.chat_correction_dataset_service = runtime.chat_correction_dataset_service
+    application.state.chat_correction_candidate_service = runtime.chat_correction_candidate_service
 
 
 def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
@@ -812,6 +837,7 @@ def create_app(
     finding_review_repository: FindingReviewRepository | None = None,
     chat_correction_review_repository: ChatCorrectionReviewRepository | None = None,
     chat_correction_dataset_repository: ChatCorrectionDatasetRepository | None = None,
+    chat_correction_candidate_repository: ChatCorrectionCandidateRepository | None = None,
     experiment_plan_repository: ExperimentPlanRepository | None = None,
     chat_repository: ChatRepository | None = None,
     chat_session_service: ChatSessionService | None = None,
@@ -827,6 +853,7 @@ def create_app(
         finding_review_repository=finding_review_repository,
         chat_correction_review_repository=chat_correction_review_repository,
         chat_correction_dataset_repository=chat_correction_dataset_repository,
+        chat_correction_candidate_repository=chat_correction_candidate_repository,
         experiment_plan_repository=experiment_plan_repository,
         chat_repository=chat_repository,
         chat_session_service=chat_session_service,

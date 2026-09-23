@@ -32,6 +32,10 @@ from domain.evaluation.chat_correction_dataset import (
     ChatCorrectionDatasetSelection,
     ChatCorrectionDatasetSplit,
 )
+from domain.evaluation.chat_correction_candidate import (
+    ChatCorrectionCandidate,
+    ChatCorrectionCandidateStatus,
+)
 
 __all__ = [
     "EVALUATION_FAILURE_TYPES",
@@ -60,4 +64,6 @@ __all__ = [
     "ChatCorrectionDatasetRow",
     "ChatCorrectionDatasetSelection",
     "ChatCorrectionDatasetSplit",
+    "ChatCorrectionCandidate",
+    "ChatCorrectionCandidateStatus",
 ]

@@ -201,6 +201,35 @@ export type ChatCorrectionCase = {
 	updated_at: string;
 };
 
+export type ChatCorrectionCandidateStatus =
+	| 'needs_review'
+	| 'ambiguous'
+	| 'no_candidate'
+	| 'invalid_proposal'
+	| 'provider_failed';
+
+export type ChatCorrectionCandidate = {
+	candidate_id: string;
+	owner_id: string;
+	collection_id: string;
+	session_id: string;
+	challenge_message_id: string | null;
+	answer_message_id: string | null;
+	event_ids: string[];
+	model_call_ids: string[];
+	status: ChatCorrectionCandidateStatus;
+	proposal: Record<string, unknown> | null;
+	request: Record<string, unknown>;
+	raw_response: string | null;
+	finish_reason: string | null;
+	error_code: string | null;
+	selected_case_id: string | null;
+	selected_sample_id: string | null;
+	digest: string;
+	created_at: string;
+	updated_at: string;
+};
+
 export type ChatCorrectionSample = {
 	sample_id: string;
 	case_id: string;
@@ -500,6 +529,54 @@ export async function createChatCorrectionCase(
 		method: 'POST',
 		body: JSON.stringify(input)
 	})) as ChatCorrectionCase;
+}
+
+export async function createChatCorrectionCandidate(
+	sessionId: string,
+	input: { challenge_message_id?: string | null; answer_message_id?: string | null } = {},
+	signal?: AbortSignal
+): Promise<ChatCorrectionCandidate> {
+	return (await requestJson(`${chatSessionPath(sessionId)}/correction-candidates`, {
+		signal,
+		method: 'POST',
+		body: JSON.stringify(input)
+	})) as ChatCorrectionCandidate;
+}
+
+export async function fetchChatCorrectionCandidates(
+	sessionId: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+): Promise<{ items: ChatCorrectionCandidate[]; limit: number; offset: number }> {
+	const query = new URLSearchParams({
+		limit: String(options.limit ?? 50),
+		offset: String(options.offset ?? 0)
+	});
+	return (await requestJson(`${chatSessionPath(sessionId)}/correction-candidates?${query}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatCorrectionCandidate[]; limit: number; offset: number };
+}
+
+export async function fetchChatCorrectionCandidate(
+	sessionId: string,
+	candidateId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionCandidate> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-candidates/${encodeURIComponent(candidateId)}`,
+		{ signal, method: 'GET' }
+	)) as ChatCorrectionCandidate;
+}
+
+export async function selectChatCorrectionCandidate(
+	sessionId: string,
+	candidateId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionCandidate> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-candidates/${encodeURIComponent(candidateId)}/select`,
+		{ signal, method: 'POST' }
+	)) as ChatCorrectionCandidate;
 }
 
 export async function createChatCorrectionSample(

@@ -50,6 +50,7 @@
 	import ModelCallInspector from './ModelCallInspector.svelte';
 	import CorrectionCasePanel from './CorrectionCasePanel.svelte';
 	import CorrectionReviewPage from './CorrectionReviewPage.svelte';
+	import CorrectionCandidatePanel from './CorrectionCandidatePanel.svelte';
 	import ChatCorrectionDatasetPage from './ChatCorrectionDatasetPage.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
@@ -64,7 +65,8 @@
 		GitBranch,
 		ArrowRight,
 		Link2,
-		Archive
+		Archive,
+		Sparkles
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -134,6 +136,7 @@
 	let correctionController: AbortController | null = null;
 	let reviewCase: ChatCorrectionCase | null = null;
 	let datasetPageOpen = false;
+	let candidatePanelOpen = false;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -495,6 +498,7 @@
 		correctionPanelOpen = false;
 		reviewCase = null;
 		datasetPageOpen = false;
+		candidatePanelOpen = false;
 		correctionSaving = false;
 		correctionError = '';
 		responseSnapshot = null;
@@ -1302,6 +1306,11 @@
 						correctionPanelOpen = true;
 					}}><Link2 size={17} /></IconButton
 				>
+				<IconButton
+					label={$t('researchAgent.correctionCandidate.open')}
+					disabled={!session || sessionNavigationDisabled}
+					onClick={() => (candidatePanelOpen = true)}><Sparkles size={17} /></IconButton
+				>
 			</div>
 			{#if showHistory}
 				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
@@ -1356,6 +1365,12 @@
 					disabled={sessionNavigationDisabled}
 					on:click={() => (datasetPageOpen = true)}
 				><Archive size={14} />{$t('researchAgent.correctionDataset.open')}</button
+				>
+				<button
+					type="button"
+					disabled={sessionNavigationDisabled}
+					on:click={() => (candidatePanelOpen = true)}
+				><Sparkles size={14} />{$t('researchAgent.correctionCandidate.open')}</button
 				>
 			</div>
 		{/if}
@@ -1439,6 +1454,13 @@
 				collectionId={session.collection_id}
 				sessionId={session.session_id}
 				onClose={() => (datasetPageOpen = false)}
+			/>
+		{/if}
+		{#if candidatePanelOpen && session}
+			<CorrectionCandidatePanel
+				sessionId={session.session_id}
+				{messages}
+				onClose={() => (candidatePanelOpen = false)}
 			/>
 		{/if}
 		{#if checkpointId}

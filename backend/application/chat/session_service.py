@@ -199,6 +199,7 @@ class ChatSessionService:
         original_message_id: str,
         feedback_message_id: str,
         corrected_message_id: str | None = None,
+        persist: bool = True,
     ) -> ChatCorrectionCase:
         """Persist an explicit answer -> challenge -> answer reference.
 
@@ -346,7 +347,29 @@ class ChatSessionService:
             created_at=now,
             updated_at=now,
         )
+        if not persist:
+            return case
         return await self.repository.save_correction_case(case)
+
+    async def validate_correction_case_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        original_message_id: str,
+        feedback_message_id: str,
+        corrected_message_id: str,
+    ) -> ChatCorrectionCase:
+        """Run the P2 trajectory validator without persisting a case."""
+
+        return await self.link_correction_case_for_user(
+            session_id,
+            user_id,
+            original_message_id=original_message_id,
+            feedback_message_id=feedback_message_id,
+            corrected_message_id=corrected_message_id,
+            persist=False,
+        )
 
     async def get_pending_approval_for_user(
         self,

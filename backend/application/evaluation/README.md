@@ -24,6 +24,11 @@ prepare Source documents, discover Objectives, or run Objective analyses.
   Freezes currently accepted Chat correction samples into owner-scoped,
   source-backed manifests with paper-family/session-tree partition checks and
   explicit exclusion records. It remains independent from the Finding dataset.
+- `chat_correction_candidate_service.py`
+  Runs an explicit, owner-scoped structured proposal over saved Chat evidence,
+  keeps provider outcomes separate from deterministic validation, and imports a
+  selected proposal through the existing P2/P3 services without creating a
+  review decision.
 
 ## Identity Contract
 

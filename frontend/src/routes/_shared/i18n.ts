@@ -324,6 +324,34 @@ const translations: Record<Language, Translations> = {
 					conflicting_assignment: 'conflicting assignment'
 				}
 			},
+			correctionCandidate: {
+				open: 'Propose correction candidate',
+				eyebrow: 'Review queue',
+				title: 'Correction candidates',
+				close: 'Close candidate panel',
+				hint: 'Inspect a saved challenge and let the model select existing messages. Nothing is accepted automatically.',
+				challenge: 'Challenge to inspect',
+				latest: 'Use the latest possible challenge',
+				run: 'Propose candidate',
+				running: 'Proposing...',
+				loading: 'Loading candidate history...',
+				empty: 'No candidate proposals have been run for this session.',
+				noAnswer: 'No disputed answer',
+				calls: 'model calls',
+				select: 'Import for review',
+				selected: 'Imported into review',
+				audit: 'Audit details',
+				events: 'Events',
+				finish: 'Finish',
+				digest: 'Digest',
+				status: {
+					needs_review: 'Needs human review',
+					ambiguous: 'Ambiguous',
+					no_candidate: 'No candidate',
+					invalid_proposal: 'Invalid proposal',
+					provider_failed: 'Provider failed'
+				}
+			},
 			retrySession: 'Retry conversation',
 			awaitingResult: 'Awaiting the saved research result',
 			checkingResult: 'Checking the saved research result...',
@@ -3235,6 +3263,34 @@ const translations: Record<Language, Translations> = {
 					missing_paper_family: '缺少论文家族',
 					partition_conflict: '训练/评测分区冲突',
 					conflicting_assignment: '分区指定冲突'
+				}
+			},
+			correctionCandidate: {
+				open: '提出纠错候选',
+				eyebrow: '审核队列',
+				title: '纠错候选',
+				close: '关闭候选面板',
+				hint: '检查已保存的质疑，让模型选择已有消息。不会自动接受任何候选。',
+				challenge: '要检查的质疑',
+				latest: '使用最近的可能质疑',
+				run: '提出候选',
+				running: '正在提出...',
+				loading: '正在加载候选记录...',
+				empty: '本会话还没有运行候选提议。',
+				noAnswer: '没有争议回答',
+				calls: '次模型调用',
+				select: '导入审核',
+				selected: '已导入审核流程',
+				audit: '审计详情',
+				events: '事件',
+				finish: '结束原因',
+				digest: '摘要',
+				status: {
+					needs_review: '需要人工审核',
+					ambiguous: '存在歧义',
+					no_candidate: '没有候选',
+					invalid_proposal: '候选无效',
+					provider_failed: '模型服务失败'
 				}
 			},
 			retrySession: '重试加载会话',

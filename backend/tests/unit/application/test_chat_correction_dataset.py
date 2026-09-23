@@ -30,6 +30,29 @@ class _SourceRepository:
         return SimpleNamespace(document_id=document_id)
 
 
+async def test_source_documents_accept_flat_tool_resource_refs() -> None:
+    service = ChatCorrectionDatasetService(
+        chat_session_service=SimpleNamespace(),
+        review_service=SimpleNamespace(),
+        repository=MemoryChatCorrectionDatasetRepository(),
+        source_artifact_repository=_SourceRepository(),
+    )
+
+    documents, error = await service._source_documents(
+        "collection",
+        (
+            {
+                "kind": "tool_resource",
+                "resource_type": "source",
+                "resource_id": "doc-1:blk-doc-1-1",
+            },
+        ),
+    )
+
+    assert error is None
+    assert documents == ("doc-1",)
+
+
 async def _accepted_service():
     _chat, case_service, review_service, _reviews, case = await _setup()
     sample = await review_service.create_sample_for_user(

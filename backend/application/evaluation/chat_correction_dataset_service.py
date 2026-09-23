@@ -359,7 +359,9 @@ class ChatCorrectionDatasetService:
                     return (), "Source reference is missing its document or locator"
                 documents.add(document_id)
             elif kind == "tool_resource":
-                resource = source.get("resource_ref")
+                # ChatToolResult serializes resource refs as flat records. Older
+                # callers may still wrap that record under ``resource_ref``.
+                resource = source.get("resource_ref") or source
                 if not isinstance(resource, Mapping) or resource.get("resource_type") != "source":
                     continue
                 resource_id = str(resource.get("resource_id") or "")

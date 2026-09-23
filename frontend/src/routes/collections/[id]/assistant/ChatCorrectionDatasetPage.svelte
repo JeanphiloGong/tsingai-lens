@@ -31,6 +31,20 @@
 	let error = '';
 	let created: ChatCorrectionDataset | null = null;
 
+	function sourceDocumentId(ref: Record<string, unknown>) {
+		if (ref.kind === 'message_source' && typeof ref.document_id === 'string') {
+			return ref.document_id;
+		}
+		if (
+			ref.kind === 'tool_resource' &&
+			ref.resource_type === 'source' &&
+			typeof ref.resource_id === 'string'
+		) {
+			return ref.resource_id.split(':', 1)[0] ?? '';
+		}
+		return '';
+	}
+
 	onMount(() => {
 		void load();
 	});
@@ -58,8 +72,9 @@
 			splits = Object.fromEntries(samples.map((sample) => [sample.sample_id, 'train']));
 			for (const sample of samples) {
 				for (const ref of sample.source_refs) {
-					if (ref.kind !== 'message_source' || typeof ref.document_id !== 'string') continue;
-					families[ref.document_id] ??= ref.document_id;
+					const documentId = sourceDocumentId(ref);
+					if (!documentId) continue;
+					families[documentId] ??= documentId;
 				}
 			}
 		} catch (value) {

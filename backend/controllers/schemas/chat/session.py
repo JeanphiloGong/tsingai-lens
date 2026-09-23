@@ -227,6 +227,40 @@ class ChatResponseSnapshotResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ChatModelCallSummaryResponse(BaseModel):
+    call_id: str
+    session_id: str
+    trigger_message_id: str | None
+    response_message_id: str | None
+    purpose: Literal["decision", "compaction", "finalization"]
+    model: str
+    request_digest: str
+    status: Literal[
+        "recorded",
+        "provider_succeeded",
+        "provider_failed",
+        "response_invalid",
+        "cancelled",
+    ]
+    started_at: str
+    finished_at: str | None
+    error_code: str | None
+    provider_confirmed: bool
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+
+
+class ChatModelCallResponse(ChatModelCallSummaryResponse):
+    request: dict[str, Any]
+
+
+class ChatModelCallListResponse(BaseModel):
+    items: list[ChatModelCallSummaryResponse] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None

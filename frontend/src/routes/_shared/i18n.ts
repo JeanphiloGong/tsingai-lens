@@ -334,7 +334,7 @@ const translations: Record<Language, Translations> = {
 				draft: 'Unsent revision',
 				resume: 'Send revision'
 			},
-			feedback: {
+				feedback: {
 				helpful: 'Helpful',
 				notHelpful: 'Not helpful',
 				edit: 'Edit feedback',
@@ -352,9 +352,22 @@ const translations: Record<Language, Translations> = {
 					incomplete: 'Incomplete answer',
 					unclear: 'Unclear explanation',
 					other: 'Other'
-				}
-			},
-			sending: 'Sending...',
+					}
+				},
+				modelCall: {
+					eyebrow: 'Traceable execution',
+					title: 'Exact model request',
+					close: 'Close request details',
+					loading: 'Loading the saved request...',
+					unavailable: 'This historical answer has no saved provider request.',
+					retry: 'Retry request lookup',
+					recorded: 'Recorded before provider submission',
+					providerSucceeded: 'Provider response received',
+					providerFailed: 'Provider request failed',
+					responseInvalid: 'Provider response could not be parsed',
+					cancelled: 'Request cancelled'
+				},
+				sending: 'Sending...',
 			progress: {
 				starting: 'Starting research...',
 				model: 'Planning research step {cycle}...',
@@ -3128,7 +3141,7 @@ const translations: Record<Language, Translations> = {
 				draft: '尚未发送的修改',
 				resume: '发送修改'
 			},
-			feedback: {
+				feedback: {
 				helpful: '有帮助',
 				notHelpful: '没有帮助',
 				edit: '编辑评价',
@@ -3146,9 +3159,22 @@ const translations: Record<Language, Translations> = {
 					incomplete: '回答不完整',
 					unclear: '表达不清楚',
 					other: '其他'
-				}
-			},
-			sending: '发送中...',
+					}
+				},
+				modelCall: {
+					eyebrow: '可追溯执行',
+					title: '模型实际请求',
+					close: '关闭请求详情',
+					loading: '正在读取已保存请求...',
+					unavailable: '这条历史回答没有可回看的模型请求。',
+					retry: '重试读取请求',
+					recorded: '已在发送前记录',
+					providerSucceeded: '已收到模型响应',
+					providerFailed: '模型请求失败',
+					responseInvalid: '模型响应无法解析',
+					cancelled: '请求已取消'
+				},
+				sending: '发送中...',
 			progress: {
 				starting: '正在开始研究...',
 				model: '正在规划第 {cycle} 个研究步骤...',

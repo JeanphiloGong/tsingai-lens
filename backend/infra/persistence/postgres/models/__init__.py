@@ -3,6 +3,7 @@
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
 from infra.persistence.postgres.models.chat import (
+    ChatModelCallRow,
     ChatMessageFeedbackRow,
     ChatMessageRow,
     ChatSessionRow,
@@ -26,6 +27,7 @@ from infra.persistence.postgres.models.objective_workspace import ObjectiveExper
 __all__ = [
     "AuthSession",
     "AuthUser",
+    "ChatModelCallRow",
     "ChatMessageRow",
     "ChatMessageFeedbackRow",
     "ChatSessionRow",

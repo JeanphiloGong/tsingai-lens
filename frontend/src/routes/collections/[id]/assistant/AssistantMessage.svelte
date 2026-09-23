@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { RotateCcw } from '@lucide/svelte';
+	import { FileSearch, RotateCcw } from '@lucide/svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
@@ -11,6 +11,7 @@
 	export let message: ChatMessage;
 	export let disabled = false;
 	export let onRegenerate: (() => void) | undefined = undefined;
+	export let onInspectModelCall: ((messageId: string) => void) | undefined = undefined;
 	export let feedbackState: ChatFeedbackState | undefined = undefined;
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let streaming = false;
@@ -40,6 +41,13 @@
 		<slot />
 		{#if !streaming && !incomplete && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}
 			<div class="answer-actions">
+				{#if onInspectModelCall}
+					<IconButton
+						label={$t('researchAgent.modelCall.title')}
+						onClick={() => onInspectModelCall?.(message.message_id)}
+						><FileSearch size={16} /></IconButton
+					>
+				{/if}
 				{#if onRegenerate}
 					<IconButton
 						label={$t('researchAgent.revision.regenerate')}

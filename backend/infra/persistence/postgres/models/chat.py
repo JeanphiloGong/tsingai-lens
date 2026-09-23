@@ -54,6 +54,45 @@ class ChatSessionRow(Base):
     operation_permission: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
 
 
+class ChatModelCallRow(Base):
+    """One exact request submitted by the Chat model client."""
+
+    __tablename__ = "chat_model_calls"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('decision', 'compaction', 'finalization')",
+            name="model_call_purpose_valid",
+        ),
+        CheckConstraint(
+            "status IN ('recorded', 'provider_succeeded', 'provider_failed', "
+            "'response_invalid', 'cancelled')",
+            name="model_call_status_valid",
+        ),
+        CheckConstraint("finished_at IS NULL OR finished_at >= started_at", name="model_call_times_valid"),
+        CheckConstraint("length(request_digest) = 64", name="model_call_digest_length"),
+    )
+
+    call_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    trigger_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    response_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    request: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_confirmed: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class ChatMessageRow(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (
@@ -194,6 +233,7 @@ class ChatToolCallRow(Base):
 
 
 __all__ = [
+    "ChatModelCallRow",
     "ChatMessageFeedbackRow",
     "ChatMessageRow",
     "ChatSessionRow",

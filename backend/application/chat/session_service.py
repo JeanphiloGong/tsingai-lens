@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
+import json
 import logging
 from typing import Any
 from urllib.parse import urlencode
@@ -32,6 +33,8 @@ from domain.chat import (
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.chat_repository import ChatRepository, ChatResponseSnapshot, ChatSessionBusyError
+from application.repositories.chat_repository import ChatModelCall
+from application.chat.model_calls import ModelCallInput, ModelCallOutcome
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 
 
@@ -42,6 +45,45 @@ _SNAPSHOT_INTERVAL_SECONDS = 0.25
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class _RepositoryModelCallObserver:
+    """Owns the durable boundary around one provider submission."""
+
+    def __init__(self, repository: ChatRepository) -> None:
+        self.repository = repository
+
+    async def start(self, call: ModelCallInput) -> str:
+        self.session_id = call.session_id
+        request = json.loads(json.dumps(call.request, ensure_ascii=False, separators=(",", ":")))
+        call_id = f"model_call_{uuid4().hex}"
+        digest = sha256(
+            json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        await self.repository.start_model_call(ChatModelCall(
+            call_id=call_id,
+            session_id=call.session_id,
+            trigger_message_id=call.trigger_message_id,
+            response_message_id=call.response_message_id,
+            purpose=call.purpose,
+            model=str(request.get("model") or "unknown"),
+            request=request,
+            request_digest=digest,
+            started_at=_now_iso(),
+        ))
+        return call_id
+
+    async def finish(self, call_id: str, outcome: ModelCallOutcome) -> None:
+        # The provider status is deliberately persisted separately from the
+        # scientific answer status. A successful HTTP response is not approval.
+        call = await self.repository.read_model_call(self.session_id, call_id)
+        if call is None:
+            raise FileNotFoundError(f"chat model call not found: {call_id}")
+        await self.repository.finish_model_call(
+            session_id=call.session_id, call_id=call_id, outcome=outcome,
+        )
+
+    session_id: str = ""
 
 
 class ChatSessionNotFoundError(FileNotFoundError):
@@ -120,6 +162,18 @@ class ChatSessionService:
     ) -> tuple[ChatMessage, ...]:
         await self.get_session_for_user(session_id, user_id)
         return await self.repository.read_messages(session_id)
+
+    async def list_model_calls_for_user(
+        self, session_id: str, user_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatModelCall, ...]:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_model_calls(session_id, limit=limit, offset=offset)
+
+    async def get_model_call_for_user(
+        self, session_id: str, call_id: str, user_id: str
+    ) -> ChatModelCall | None:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_model_call(session_id, call_id)
 
     async def get_pending_approval_for_user(
         self,
@@ -570,11 +624,13 @@ class ChatSessionService:
         await flush_snapshot()
         writer = asyncio.create_task(save_updates())
         try:
+            model_call_observer = _RepositoryModelCallObserver(self.repository)
             arguments = {
                 "context": self._context(session), "previous_messages": previous_messages,
                 "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
                 "text_delta_callback": emit_text_delta, "progress_callback": emit_progress,
                 "response_started_callback": start_response,
+                "model_call_observer": model_call_observer,
             }
             if claimed_call is not None:
                 result = await self.runner.resume_claimed_call(**arguments, claimed_call=claimed_call)

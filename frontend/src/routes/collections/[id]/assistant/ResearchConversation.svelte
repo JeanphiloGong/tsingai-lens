@@ -12,6 +12,8 @@
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
+		fetchChatModelCall,
+		fetchChatModelCalls,
 		fetchChatTree,
 		appendChatProgress,
 		readPendingChatSourceContexts,
@@ -24,6 +26,7 @@
 		type ChatFeedbackState,
 		type ChatMessageFeedback,
 		type ChatMessage,
+		type ChatModelCall,
 		type ChatProgress,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
@@ -41,6 +44,7 @@
 	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
+	import ModelCallInspector from './ModelCallInspector.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
@@ -111,6 +115,10 @@
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
+	let inspectedModelCall: ChatModelCall | null = null;
+	let modelCallLoading = false;
+	let modelCallError = '';
+	let modelCallController: AbortController | null = null;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -133,15 +141,57 @@
 
 	let destroyed = false;
 
-	onDestroy(() => {
+		onDestroy(() => {
 		destroyed = true;
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
 		sessionController?.abort();
 		updatesController?.abort();
+		modelCallController?.abort();
 		treeController?.abort();
 		clearTimeout(treeTimer);
 	});
+
+	async function inspectModelCall(messageId: string) {
+		if (!session || modelCallLoading) return;
+		modelCallController?.abort();
+		const controller = new AbortController();
+		modelCallController = controller;
+		modelCallLoading = true;
+		modelCallError = '';
+		inspectedModelCall = null;
+		try {
+			const listed = await fetchChatModelCalls(session.session_id, { signal: controller.signal });
+			const summary = [...listed.items]
+				.reverse()
+				.find((item) => item.response_message_id === messageId);
+			if (!summary) {
+				modelCallError = $t('researchAgent.modelCall.unavailable');
+				return;
+			}
+			inspectedModelCall = await fetchChatModelCall(
+				session.session_id,
+				summary.call_id,
+				controller.signal
+			);
+		} catch (err) {
+			if (controller.signal.aborted) return;
+			modelCallError = errorMessage(err);
+		} finally {
+			if (modelCallController === controller) {
+				modelCallLoading = false;
+				modelCallController = null;
+			}
+		}
+	}
+
+	function closeModelCallInspector() {
+		modelCallController?.abort();
+		modelCallController = null;
+		modelCallLoading = false;
+		inspectedModelCall = null;
+		modelCallError = '';
+	}
 
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
 		return (
@@ -369,6 +419,7 @@
 		sessionController?.abort();
 		updatesController?.abort();
 		updatesController = null;
+		closeModelCallInspector();
 		responseSnapshot = null;
 		sessionController = null;
 		session = null;
@@ -1227,6 +1278,7 @@
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
 			onFeedback={saveFeedback}
+			onInspectModelCall={inspectModelCall}
 			streamingText={checkpointId ? '' : streamingText}
 			responseSnapshot={checkpointId ? null : responseSnapshot}
 			pendingApproval={checkpointId ? null : pendingApproval}
@@ -1242,6 +1294,16 @@
 			ready={Boolean(session) && !branchDraft}
 			onSend={sendMessage}
 			{decide}
+		/>
+		<ModelCallInspector
+			call={inspectedModelCall}
+			loading={modelCallLoading}
+			error={modelCallError}
+			onRetry={() => {
+				const messageId = inspectedModelCall?.response_message_id;
+				if (messageId) void inspectModelCall(messageId);
+			}}
+			onClose={closeModelCallInspector}
 		/>
 		{#if checkpointId}
 			<div class="checkpoint-bar" role="status">

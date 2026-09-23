@@ -26,6 +26,9 @@ from controllers.schemas.chat.session import (
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
+    ChatModelCallListResponse,
+    ChatModelCallResponse,
+    ChatModelCallSummaryResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionResponse,
@@ -92,6 +95,52 @@ async def create_chat_session(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatSessionResponse.model_validate(session.to_record())
+
+
+@router.get(
+    "/{session_id}/model-calls",
+    response_model=ChatModelCallListResponse,
+    summary="List exact provider calls for one owned Chat session",
+)
+async def list_chat_model_calls(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ChatModelCallListResponse:
+    try:
+        calls = await request.app.state.chat_session_service.list_model_calls_for_user(
+            session_id, await current_user_id(request), limit=limit, offset=offset,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatModelCallListResponse(
+        items=[ChatModelCallSummaryResponse.model_validate(vars(call)) for call in calls],
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/{session_id}/model-calls/{call_id}",
+    response_model=ChatModelCallResponse,
+    summary="Read one exact provider request for an owned Chat session",
+)
+async def get_chat_model_call(
+    session_id: str, call_id: str, request: Request
+) -> ChatModelCallResponse:
+    try:
+        call = await request.app.state.chat_session_service.get_model_call_for_user(
+            session_id, call_id, await current_user_id(request),
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    if call is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "chat_model_call_not_found", "call_id": call_id},
+        )
+    return ChatModelCallResponse.model_validate(vars(call))
 
 
 @router.get(

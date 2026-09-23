@@ -156,6 +156,35 @@ export type ChatResponseSnapshot = {
 	warnings: string[];
 };
 
+export type ChatModelCallStatus =
+	| 'recorded'
+	| 'provider_succeeded'
+	| 'provider_failed'
+	| 'response_invalid'
+	| 'cancelled';
+
+export type ChatModelCallSummary = {
+	call_id: string;
+	session_id: string;
+	trigger_message_id: string | null;
+	response_message_id: string | null;
+	purpose: 'decision' | 'compaction' | 'finalization';
+	model: string;
+	request_digest: string;
+	status: ChatModelCallStatus;
+	started_at: string;
+	finished_at: string | null;
+	error_code: string | null;
+	provider_confirmed: boolean;
+	prompt_tokens: number | null;
+	completion_tokens: number | null;
+	total_tokens: number | null;
+};
+
+export type ChatModelCall = ChatModelCallSummary & {
+	request: Record<string, unknown>;
+};
+
 export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
 export type ChatFeedbackInput = {
 	rating: 'helpful' | 'not_helpful' | null;
@@ -292,6 +321,31 @@ export async function fetchChatTrajectory(sessionId: string, signal?: AbortSigna
 		signal,
 		method: 'GET'
 	})) as ChatTrajectory;
+}
+
+export async function fetchChatModelCalls(
+	sessionId: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+): Promise<{ items: ChatModelCallSummary[]; limit: number; offset: number }> {
+	const query = new URLSearchParams({
+		limit: String(options.limit ?? 50),
+		offset: String(options.offset ?? 0)
+	});
+	return (await requestJson(`${chatSessionPath(sessionId)}/model-calls?${query}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatModelCallSummary[]; limit: number; offset: number };
+}
+
+export async function fetchChatModelCall(
+	sessionId: string,
+	callId: string,
+	signal?: AbortSignal
+): Promise<ChatModelCall> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/model-calls/${encodeURIComponent(callId)}`,
+		{ signal, method: 'GET' }
+	)) as ChatModelCall;
 }
 
 export async function setChatMessageFeedback(

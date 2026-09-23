@@ -22,11 +22,17 @@ from domain.chat import (
 )
 from domain.chat.feedback import ChatMessageFeedback
 from domain.chat.permissions import change_permission, permission_record, permits_automatic
-from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
+from application.chat.model_calls import ModelCallOutcome
+from application.repositories.chat_repository import (
+    ChatModelCall,
+    ChatResponseSnapshot,
+    ChatSessionBusyError,
+)
 from infra.persistence.postgres.models.chat import (
     ChatMessageFeedbackRow,
     ChatMessageRow,
     ChatSessionRow,
+    ChatModelCallRow,
     ChatToolCallRow,
 )
 
@@ -111,6 +117,87 @@ class PostgresChatRepository:
             await database.execute(update(ChatSessionRow).where(
                 ChatSessionRow.session_id == session_id,
             ).values(response_snapshot=payload))
+
+    async def start_model_call(self, call: ChatModelCall) -> ChatModelCall:
+        async with self.session_factory.begin() as database:
+            session = await database.get(ChatSessionRow, call.session_id)
+            if session is None:
+                raise FileNotFoundError(f"chat session not found: {call.session_id}")
+            existing = await database.get(ChatModelCallRow, call.call_id, with_for_update=True)
+            if existing is not None:
+                if (
+                    existing.session_id != call.session_id
+                    or existing.request_digest != call.request_digest
+                    or existing.request != call.request
+                ):
+                    raise ValueError("model call identity cannot be reassigned")
+                return _model_call_record(existing)
+            row = ChatModelCallRow(
+                call_id=call.call_id,
+                session_id=call.session_id,
+                trigger_message_id=call.trigger_message_id,
+                response_message_id=call.response_message_id,
+                purpose=call.purpose,
+                model=call.model,
+                request=dict(call.request),
+                request_digest=call.request_digest,
+                status=call.status,
+                started_at=_datetime(call.started_at),
+                finished_at=_optional_datetime(call.finished_at),
+                error_code=call.error_code,
+                provider_confirmed=call.provider_confirmed,
+                prompt_tokens=call.prompt_tokens,
+                completion_tokens=call.completion_tokens,
+                total_tokens=call.total_tokens,
+            )
+            database.add(row)
+            await database.flush()
+            return _model_call_record(row)
+
+    async def finish_model_call(
+        self, *, session_id: str, call_id: str, outcome: ModelCallOutcome
+    ) -> ChatModelCall:
+        async with self.session_factory.begin() as database:
+            row = await database.get(ChatModelCallRow, call_id, with_for_update=True)
+            if row is None or row.session_id != session_id:
+                raise FileNotFoundError(f"chat model call not found: {call_id}")
+            if row.finished_at is not None:
+                if row.status != outcome.status:
+                    raise ValueError("model call outcome cannot be reassigned")
+                return _model_call_record(row)
+            row.status = outcome.status
+            row.finished_at = _datetime(outcome.finished_at)
+            row.error_code = outcome.error_code
+            row.provider_confirmed = outcome.status == "provider_succeeded"
+            row.prompt_tokens = outcome.prompt_tokens
+            row.completion_tokens = outcome.completion_tokens
+            row.total_tokens = outcome.total_tokens
+            await database.flush()
+            return _model_call_record(row)
+
+    async def read_model_calls(
+        self, session_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatModelCall, ...]:
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        async with self.session_factory() as database:
+            rows = await database.scalars(
+                select(ChatModelCallRow)
+                .where(ChatModelCallRow.session_id == session_id)
+                .order_by(ChatModelCallRow.started_at, ChatModelCallRow.call_id)
+                .offset(offset)
+                .limit(limit)
+            )
+            return tuple(_model_call_record(row) for row in rows)
+
+    async def read_model_call(
+        self, session_id: str, call_id: str
+    ) -> ChatModelCall | None:
+        async with self.session_factory() as database:
+            row = await database.get(ChatModelCallRow, call_id)
+            if row is None or row.session_id != session_id:
+                return None
+            return _model_call_record(row)
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
         root_id = session.root_session_id or session.session_id
@@ -611,6 +698,27 @@ def _feedback_record(row: ChatMessageFeedbackRow) -> ChatMessageFeedback:
         response_digest=row.response_digest,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+    )
+
+
+def _model_call_record(row: ChatModelCallRow) -> ChatModelCall:
+    return ChatModelCall(
+        call_id=row.call_id,
+        session_id=row.session_id,
+        trigger_message_id=row.trigger_message_id,
+        response_message_id=row.response_message_id,
+        purpose=row.purpose,
+        model=row.model,
+        request=dict(row.request),
+        request_digest=row.request_digest,
+        status=row.status,
+        started_at=_iso(row.started_at),
+        finished_at=_optional_iso(row.finished_at),
+        error_code=row.error_code,
+        provider_confirmed=row.provider_confirmed,
+        prompt_tokens=row.prompt_tokens,
+        completion_tokens=row.completion_tokens,
+        total_tokens=row.total_tokens,
     )
 
 

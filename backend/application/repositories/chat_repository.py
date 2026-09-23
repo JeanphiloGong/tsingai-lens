@@ -6,11 +6,34 @@ from contextlib import AbstractAsyncContextManager
 
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 from domain.chat.feedback import ChatMessageFeedback
+from application.chat.model_calls import ModelCallOutcome, ModelCallPurpose, ModelCallStatus
 
 
 class ChatSessionBusyError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("the research response is still running; retry when it finishes")
+
+
+@dataclass(frozen=True)
+class ChatModelCall:
+    """A durable record of one exact provider submission attempt."""
+
+    call_id: str
+    session_id: str
+    trigger_message_id: str | None
+    response_message_id: str | None
+    purpose: ModelCallPurpose
+    model: str
+    request: dict[str, Any]
+    request_digest: str
+    status: ModelCallStatus = "recorded"
+    started_at: str = ""
+    finished_at: str | None = None
+    error_code: str | None = None
+    provider_confirmed: bool = False
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +68,20 @@ class ChatRepository(Protocol):
     async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None: ...
 
     async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None: ...
+
+    async def start_model_call(self, call: ChatModelCall) -> ChatModelCall: ...
+
+    async def finish_model_call(
+        self, *, session_id: str, call_id: str, outcome: ModelCallOutcome
+    ) -> ChatModelCall: ...
+
+    async def read_model_calls(
+        self, session_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatModelCall, ...]: ...
+
+    async def read_model_call(
+        self, session_id: str, call_id: str
+    ) -> ChatModelCall | None: ...
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]: ...
 

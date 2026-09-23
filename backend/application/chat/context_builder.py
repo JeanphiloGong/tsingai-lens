@@ -24,6 +24,12 @@ class ChatModelContext:
     compacting: bool = False
     max_context_tokens: int = 65_536
     prior_reading_summary: str = ""
+    # Runtime-only metadata. It is never sent to the provider or persisted as
+    # part of the scientific conversation.
+    model_call_observer: Any | None = None
+    model_call_purpose: str = "decision"
+    model_call_response_message_id: str | None = None
+    model_call_session_id: str | None = None
 
     def provider_messages(self, system_prompt: str) -> list[dict[str, Any]]:
         messages = [{"role": "system", "content": system_prompt}]

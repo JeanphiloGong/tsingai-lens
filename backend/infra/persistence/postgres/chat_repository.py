@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.chat import (
+    ChatCorrectionCase,
     ChatMessage,
     ChatSession,
     ChatToolCall,
@@ -29,6 +30,7 @@ from application.repositories.chat_repository import (
     ChatSessionBusyError,
 )
 from infra.persistence.postgres.models.chat import (
+    ChatCorrectionCaseRow,
     ChatMessageFeedbackRow,
     ChatMessageRow,
     ChatSessionRow,
@@ -198,6 +200,73 @@ class PostgresChatRepository:
             if row is None or row.session_id != session_id:
                 return None
             return _model_call_record(row)
+
+    async def save_correction_case(
+        self, case: ChatCorrectionCase
+    ) -> ChatCorrectionCase:
+        async with self.session_factory.begin() as database:
+            session = await database.get(ChatSessionRow, case.session_id)
+            if session is None:
+                raise FileNotFoundError(f"chat session not found: {case.session_id}")
+            existing = await database.get(ChatCorrectionCaseRow, case.case_id, with_for_update=True)
+            if existing is not None:
+                saved = _correction_case_record(existing)
+                if saved.to_record() != case.to_record():
+                    raise ValueError("correction case identity cannot be reassigned")
+                return saved
+            duplicate = await database.scalar(
+                select(ChatCorrectionCaseRow).where(
+                    ChatCorrectionCaseRow.session_id == case.session_id,
+                    ChatCorrectionCaseRow.original_message_id == case.original_message_id,
+                    ChatCorrectionCaseRow.feedback_message_id == case.feedback_message_id,
+                    ChatCorrectionCaseRow.corrected_message_id == case.corrected_message_id,
+                )
+            )
+            if duplicate is not None:
+                saved = _correction_case_record(duplicate)
+                if saved.to_record() != case.to_record():
+                    raise ValueError("correction case identity already exists")
+                return saved
+            row = ChatCorrectionCaseRow(
+                case_id=case.case_id,
+                session_id=case.session_id,
+                original_message_id=case.original_message_id,
+                feedback_message_id=case.feedback_message_id,
+                corrected_message_id=case.corrected_message_id,
+                original_model_call_id=case.original_model_call_id,
+                corrected_model_call_id=case.corrected_model_call_id,
+                status=case.status.value,
+                trace_digest=case.trace_digest,
+                created_at=_datetime(case.created_at),
+                updated_at=_datetime(case.updated_at),
+            )
+            database.add(row)
+            await database.flush()
+            return _correction_case_record(row)
+
+    async def read_correction_cases(
+        self, session_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatCorrectionCase, ...]:
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        async with self.session_factory() as database:
+            rows = await database.scalars(
+                select(ChatCorrectionCaseRow)
+                .where(ChatCorrectionCaseRow.session_id == session_id)
+                .order_by(ChatCorrectionCaseRow.created_at, ChatCorrectionCaseRow.case_id)
+                .offset(offset)
+                .limit(limit)
+            )
+            return tuple(_correction_case_record(row) for row in rows)
+
+    async def read_correction_case(
+        self, session_id: str, case_id: str
+    ) -> ChatCorrectionCase | None:
+        async with self.session_factory() as database:
+            row = await database.get(ChatCorrectionCaseRow, case_id)
+            if row is None or row.session_id != session_id:
+                return None
+            return _correction_case_record(row)
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
         root_id = session.root_session_id or session.session_id
@@ -719,6 +788,22 @@ def _model_call_record(row: ChatModelCallRow) -> ChatModelCall:
         prompt_tokens=row.prompt_tokens,
         completion_tokens=row.completion_tokens,
         total_tokens=row.total_tokens,
+    )
+
+
+def _correction_case_record(row: ChatCorrectionCaseRow) -> ChatCorrectionCase:
+    return ChatCorrectionCase(
+        case_id=row.case_id,
+        session_id=row.session_id,
+        original_message_id=row.original_message_id,
+        feedback_message_id=row.feedback_message_id,
+        corrected_message_id=row.corrected_message_id,
+        original_model_call_id=row.original_model_call_id,
+        corrected_model_call_id=row.corrected_model_call_id,
+        status=row.status,
+        trace_digest=row.trace_digest,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
     )
 
 

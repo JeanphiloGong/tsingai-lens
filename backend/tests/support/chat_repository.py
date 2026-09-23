@@ -9,7 +9,13 @@ from application.repositories.chat_repository import (
     ChatResponseSnapshot,
     ChatSessionBusyError,
 )
-from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
+from domain.chat import (
+    ChatCorrectionCase,
+    ChatMessage,
+    ChatSession,
+    ChatToolCall,
+    ChatToolResult,
+)
 from domain.chat.permissions import change_permission, permission_record, permits_automatic
 
 
@@ -24,6 +30,7 @@ class MemoryChatRepository:
         self.active_sessions: set[str] = set()
         self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
         self.model_calls: dict[str, ChatModelCall] = {}
+        self.correction_cases: dict[str, ChatCorrectionCase] = {}
         self.permissions = {}
         self.proposed_revisions = {}
 
@@ -115,6 +122,43 @@ class MemoryChatRepository:
     async def read_model_call(self, session_id: str, call_id: str) -> ChatModelCall | None:
         call = self.model_calls.get(call_id)
         return call if call is not None and call.session_id == session_id else None
+
+    async def save_correction_case(self, case: ChatCorrectionCase) -> ChatCorrectionCase:
+        if case.session_id not in self.sessions:
+            raise FileNotFoundError(f"chat session not found: {case.session_id}")
+        existing = self.correction_cases.get(case.case_id)
+        if existing is not None:
+            if existing.to_record() != case.to_record():
+                raise ValueError("correction case identity cannot be reassigned")
+            return existing
+        for existing in self.correction_cases.values():
+            if (
+                existing.session_id == case.session_id
+                and existing.original_message_id == case.original_message_id
+                and existing.feedback_message_id == case.feedback_message_id
+                and existing.corrected_message_id == case.corrected_message_id
+            ):
+                if existing.to_record() != case.to_record():
+                    raise ValueError("correction case identity already exists")
+                return existing
+        self.correction_cases[case.case_id] = case
+        return case
+
+    async def read_correction_cases(
+        self, session_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatCorrectionCase, ...]:
+        cases = sorted(
+            (case for case in self.correction_cases.values() if case.session_id == session_id),
+            key=lambda case: (case.created_at, case.case_id),
+        )
+        start = max(0, int(offset))
+        return tuple(cases[start : start + max(1, min(int(limit), 200))])
+
+    async def read_correction_case(
+        self, session_id: str, case_id: str
+    ) -> ChatCorrectionCase | None:
+        case = self.correction_cases.get(case_id)
+        return case if case is not None and case.session_id == session_id else None
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
         return (session,)

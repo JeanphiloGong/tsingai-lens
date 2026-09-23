@@ -93,6 +93,66 @@ class ChatModelCallRow(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class ChatCorrectionCaseRow(Base):
+    """An explicit link over an unchanged Chat trajectory."""
+
+    __tablename__ = "chat_correction_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('linked', 'unresolved')",
+            name="correction_case_status_valid",
+        ),
+        CheckConstraint(
+            "length(trace_digest) = 64",
+            name="correction_case_digest_length",
+        ),
+        CheckConstraint(
+            "(status = 'linked' AND corrected_message_id IS NOT NULL AND "
+            "corrected_model_call_id IS NOT NULL) OR "
+            "(status = 'unresolved' AND corrected_message_id IS NULL AND "
+            "corrected_model_call_id IS NULL)",
+            name="correction_case_completion_consistent",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "original_message_id",
+            "feedback_message_id",
+            "corrected_message_id",
+            name="uq_chat_correction_case_identity",
+        ),
+    )
+
+    case_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    original_message_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    feedback_message_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    corrected_message_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
+    original_model_call_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("chat_model_calls.call_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    corrected_model_call_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("chat_model_calls.call_id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    trace_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ChatMessageRow(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (
@@ -233,6 +293,7 @@ class ChatToolCallRow(Base):
 
 
 __all__ = [
+    "ChatCorrectionCaseRow",
     "ChatModelCallRow",
     "ChatMessageFeedbackRow",
     "ChatMessageRow",

@@ -14,6 +14,8 @@
 		fetchChatTrajectory,
 		fetchChatModelCall,
 		fetchChatModelCalls,
+		fetchChatCorrectionCases,
+		createChatCorrectionCase,
 		fetchChatTree,
 		appendChatProgress,
 		readPendingChatSourceContexts,
@@ -27,6 +29,7 @@
 		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatModelCall,
+		type ChatCorrectionCase,
 		type ChatProgress,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
@@ -45,6 +48,7 @@
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
 	import ModelCallInspector from './ModelCallInspector.svelte';
+	import CorrectionCasePanel from './CorrectionCasePanel.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
@@ -56,7 +60,8 @@
 		Clock3,
 		CircleAlert,
 		GitBranch,
-		ArrowRight
+		ArrowRight,
+		Link2
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -119,6 +124,11 @@
 	let modelCallLoading = false;
 	let modelCallError = '';
 	let modelCallController: AbortController | null = null;
+	let correctionCases: ChatCorrectionCase[] = [];
+	let correctionPanelOpen = false;
+	let correctionSaving = false;
+	let correctionError = '';
+	let correctionController: AbortController | null = null;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -148,6 +158,7 @@
 		sessionController?.abort();
 		updatesController?.abort();
 		modelCallController?.abort();
+		correctionController?.abort();
 		treeController?.abort();
 		clearTimeout(treeTimer);
 	});
@@ -191,6 +202,59 @@
 		modelCallLoading = false;
 		inspectedModelCall = null;
 		modelCallError = '';
+	}
+
+	async function loadCorrectionCases(activeSession: ChatSession | null = session) {
+		if (!activeSession) {
+			correctionCases = [];
+			return;
+		}
+		correctionController?.abort();
+		const controller = new AbortController();
+		correctionController = controller;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		try {
+			const result = await fetchChatCorrectionCases(activeSession.session_id, {
+				signal: controller.signal
+			});
+			if (!isCurrentSession(generation, ownerCollectionId) || correctionController !== controller) return;
+			correctionCases = result.items;
+		} catch (err) {
+			if (!controller.signal.aborted && isCurrentSession(generation, ownerCollectionId))
+				correctionError = errorMessage(err);
+		} finally {
+			if (correctionController === controller) correctionController = null;
+		}
+	}
+
+	async function saveCorrectionCase(input: {
+		original_message_id: string;
+		feedback_message_id: string;
+		corrected_message_id?: string | null;
+	}): Promise<boolean> {
+		if (!session || correctionSaving) return false;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		correctionSaving = true;
+		correctionError = '';
+		try {
+			const saved = await createChatCorrectionCase(session.session_id, input, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId)) return false;
+			correctionCases = [
+				...correctionCases.filter((item) => item.case_id !== saved.case_id),
+				saved
+			];
+			correctionPanelOpen = false;
+			notice = $t('researchAgent.correctionCase.saved');
+			return true;
+		} catch (err) {
+			if (!isCurrentSession(generation, ownerCollectionId)) return false;
+			correctionError = errorMessage(err);
+			return false;
+		} finally {
+			if (isCurrentSession(generation, ownerCollectionId)) correctionSaving = false;
+		}
 	}
 
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
@@ -420,6 +484,12 @@
 		updatesController?.abort();
 		updatesController = null;
 		closeModelCallInspector();
+		correctionController?.abort();
+		correctionController = null;
+		correctionCases = [];
+		correctionPanelOpen = false;
+		correctionSaving = false;
+		correctionError = '';
 		responseSnapshot = null;
 		sessionController = null;
 		session = null;
@@ -481,6 +551,9 @@
 				acceptTrajectory(trajectory);
 			}
 			session = nextSession;
+			// Case history is auxiliary UI state. Do not hold the message composer
+			// hostage to a slow or unavailable correction endpoint.
+			void loadCorrectionCases(nextSession);
 			const savedCheckpoint = window.localStorage.getItem(
 				`${sessionStorageKey()}:checkpoint:${session.session_id}`
 			);
@@ -819,6 +892,7 @@
 			responseSnapshot = null;
 			streamingText = '';
 			acceptTrajectory(trajectory);
+			await loadCorrectionCases(branch);
 			storeSessionId(branch.session_id);
 			upsertHistory(branch, content ?? message.content);
 			revising = false;
@@ -1213,6 +1287,14 @@
 					disabled={!session || sessionNavigationDisabled}
 					onClick={openTree}><GitBranch size={17} /></IconButton
 				>
+				<IconButton
+					label={$t('researchAgent.correctionCase.open')}
+					disabled={!session || sessionNavigationDisabled}
+					onClick={() => {
+						correctionError = '';
+						correctionPanelOpen = true;
+					}}><Link2 size={17} /></IconButton
+				>
 			</div>
 			{#if showHistory}
 				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
@@ -1253,6 +1335,16 @@
 
 		{#if session}
 			{#key session.session_id}<OperationPermissions sessionId={session.session_id} />{/key}
+			<div class="correction-toolbar">
+				<button
+					type="button"
+					disabled={sessionNavigationDisabled}
+					on:click={() => {
+						correctionError = '';
+						correctionPanelOpen = true;
+					}}><Link2 size={14} />{$t('researchAgent.correctionCase.open')}</button
+				>
+			</div>
 		{/if}
 		{#if error}
 			<div class="status status-error" role="alert">
@@ -1305,6 +1397,19 @@
 			}}
 			onClose={closeModelCallInspector}
 		/>
+		{#if correctionPanelOpen && session}
+			<CorrectionCasePanel
+				messages={messages}
+				cases={correctionCases}
+				saving={correctionSaving}
+				error={correctionError}
+				onSave={saveCorrectionCase}
+				onClose={() => {
+					correctionPanelOpen = false;
+					correctionError = '';
+				}}
+			/>
+		{/if}
 		{#if checkpointId}
 			<div class="checkpoint-bar" role="status">
 				<GitBranch size={15} />
@@ -1408,6 +1513,30 @@
 {/if}
 
 <style>
+	.correction-toolbar {
+		display: flex;
+		justify-content: flex-end;
+		width: min(100%, 936px);
+		margin: 0 auto 4px;
+		padding: 0 18px;
+		box-sizing: border-box;
+	}
+	.correction-toolbar button {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 30px;
+		padding: 0 9px;
+		border: 1px solid var(--border-default);
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.correction-toolbar button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
 	.checkpoint-bar {
 		display: flex;
 		align-items: center;

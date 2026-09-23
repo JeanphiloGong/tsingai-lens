@@ -262,6 +262,33 @@ class ChatModelCallListResponse(BaseModel):
     offset: int
 
 
+class ChatCorrectionCaseCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    original_message_id: str = Field(min_length=1, max_length=128)
+    feedback_message_id: str = Field(min_length=1, max_length=128)
+    corrected_message_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ChatCorrectionCaseResponse(BaseModel):
+    case_id: str
+    session_id: str
+    original_message_id: str
+    feedback_message_id: str
+    corrected_message_id: str | None
+    original_model_call_id: str
+    corrected_model_call_id: str | None
+    status: Literal["linked", "unresolved"]
+    trace_digest: str
+    created_at: str
+    updated_at: str
+
+
+class ChatCorrectionCaseListResponse(BaseModel):
+    items: list[ChatCorrectionCaseResponse] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None

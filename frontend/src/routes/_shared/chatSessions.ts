@@ -185,6 +185,22 @@ export type ChatModelCall = ChatModelCallSummary & {
 	request: Record<string, unknown>;
 };
 
+export type ChatCorrectionCaseStatus = 'linked' | 'unresolved';
+
+export type ChatCorrectionCase = {
+	case_id: string;
+	session_id: string;
+	original_message_id: string;
+	feedback_message_id: string;
+	corrected_message_id: string | null;
+	original_model_call_id: string;
+	corrected_model_call_id: string | null;
+	status: ChatCorrectionCaseStatus;
+	trace_digest: string;
+	created_at: string;
+	updated_at: string;
+};
+
 export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
 export type ChatFeedbackInput = {
 	rating: 'helpful' | 'not_helpful' | null;
@@ -347,6 +363,47 @@ export async function fetchChatModelCall(
 		`${chatSessionPath(sessionId)}/model-calls/${encodeURIComponent(callId)}`,
 		{ signal, method: 'GET' }
 	)) as ChatModelCall;
+}
+
+export async function fetchChatCorrectionCases(
+	sessionId: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+): Promise<{ items: ChatCorrectionCase[]; limit: number; offset: number }> {
+	const query = new URLSearchParams({
+		limit: String(options.limit ?? 50),
+		offset: String(options.offset ?? 0)
+	});
+	return (await requestJson(`${chatSessionPath(sessionId)}/correction-cases?${query}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatCorrectionCase[]; limit: number; offset: number };
+}
+
+export async function fetchChatCorrectionCase(
+	sessionId: string,
+	caseId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionCase> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-cases/${encodeURIComponent(caseId)}`,
+		{ signal, method: 'GET' }
+	)) as ChatCorrectionCase;
+}
+
+export async function createChatCorrectionCase(
+	sessionId: string,
+	input: {
+		original_message_id: string;
+		feedback_message_id: string;
+		corrected_message_id?: string | null;
+	},
+	signal?: AbortSignal
+): Promise<ChatCorrectionCase> {
+	return (await requestJson(`${chatSessionPath(sessionId)}/correction-cases`, {
+		signal,
+		method: 'POST',
+		body: JSON.stringify(input)
+	})) as ChatCorrectionCase;
 }
 
 export async function setChatMessageFeedback(

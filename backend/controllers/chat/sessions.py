@@ -29,6 +29,9 @@ from controllers.schemas.chat.session import (
     ChatModelCallListResponse,
     ChatModelCallResponse,
     ChatModelCallSummaryResponse,
+    ChatCorrectionCaseCreateRequest,
+    ChatCorrectionCaseListResponse,
+    ChatCorrectionCaseResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionResponse,
@@ -141,6 +144,81 @@ async def get_chat_model_call(
             detail={"code": "chat_model_call_not_found", "call_id": call_id},
         )
     return ChatModelCallResponse.model_validate(vars(call))
+
+
+@router.post(
+    "/{session_id}/correction-cases",
+    response_model=ChatCorrectionCaseResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Link an explicit Chat correction sequence",
+)
+async def create_chat_correction_case(
+    session_id: str,
+    payload: ChatCorrectionCaseCreateRequest,
+    request: Request,
+) -> ChatCorrectionCaseResponse:
+    try:
+        case = await request.app.state.chat_session_service.link_correction_case_for_user(
+            session_id,
+            await current_user_id(request),
+            original_message_id=payload.original_message_id,
+            feedback_message_id=payload.feedback_message_id,
+            corrected_message_id=payload.corrected_message_id,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "chat_correction_case_invalid", "message": str(exc)},
+        ) from exc
+    return ChatCorrectionCaseResponse.model_validate(case.to_record())
+
+
+@router.get(
+    "/{session_id}/correction-cases",
+    response_model=ChatCorrectionCaseListResponse,
+    summary="List explicit correction links for an owned Chat session",
+)
+async def list_chat_correction_cases(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ChatCorrectionCaseListResponse:
+    try:
+        cases = await request.app.state.chat_session_service.list_correction_cases_for_user(
+            session_id, await current_user_id(request), limit=limit, offset=offset,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatCorrectionCaseListResponse(
+        items=[ChatCorrectionCaseResponse.model_validate(case.to_record()) for case in cases],
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/{session_id}/correction-cases/{case_id}",
+    response_model=ChatCorrectionCaseResponse,
+    summary="Read one explicit correction link",
+)
+async def get_chat_correction_case(
+    session_id: str, case_id: str, request: Request
+) -> ChatCorrectionCaseResponse:
+    try:
+        case = await request.app.state.chat_session_service.get_correction_case_for_user(
+            session_id, case_id, await current_user_id(request),
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    if case is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "chat_correction_case_not_found", "case_id": case_id},
+        )
+    return ChatCorrectionCaseResponse.model_validate(case.to_record())
 
 
 @router.get(

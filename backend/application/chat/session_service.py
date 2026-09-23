@@ -21,6 +21,8 @@ from application.core.objectives.evidence_authoring_service import (
     resolve_canonical_objective_source,
 )
 from domain.chat import (
+    ChatCorrectionCase,
+    ChatCorrectionCaseStatus,
     ChatMessage,
     ChatResourceRef,
     ChatSession,
@@ -174,6 +176,177 @@ class ChatSessionService:
     ) -> ChatModelCall | None:
         await self.get_session_for_user(session_id, user_id)
         return await self.repository.read_model_call(session_id, call_id)
+
+    async def list_correction_cases_for_user(
+        self, session_id: str, user_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatCorrectionCase, ...]:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_correction_cases(
+            session_id, limit=limit, offset=offset
+        )
+
+    async def get_correction_case_for_user(
+        self, session_id: str, case_id: str, user_id: str
+    ) -> ChatCorrectionCase | None:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_correction_case(session_id, case_id)
+
+    async def link_correction_case_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        original_message_id: str,
+        feedback_message_id: str,
+        corrected_message_id: str | None = None,
+    ) -> ChatCorrectionCase:
+        """Persist an explicit answer -> challenge -> answer reference.
+
+        The validator reads the append-only trajectory again instead of trusting
+        browser-provided roles or a guessed latest answer. Model calls are
+        selected only by their persisted response association and successful
+        provider outcome.
+        """
+
+        session = await self.get_session_for_user(session_id, user_id)
+        original_message_id = original_message_id.strip()
+        feedback_message_id = feedback_message_id.strip()
+        corrected_message_id = corrected_message_id.strip() if corrected_message_id else None
+        message_ids = [original_message_id, feedback_message_id]
+        if corrected_message_id:
+            message_ids.append(corrected_message_id)
+        if len(set(message_ids)) != len(message_ids):
+            raise ValueError("correction case messages must be distinct")
+        messages = await self.repository.read_messages(session_id)
+        by_id = {message.message_id: message for message in messages}
+        selected = {
+            "original": by_id.get(original_message_id),
+            "feedback": by_id.get(feedback_message_id),
+            "corrected": by_id.get(corrected_message_id) if corrected_message_id else None,
+        }
+        if selected["original"] is None or selected["feedback"] is None:
+            raise ValueError("correction case messages must belong to this session")
+        if corrected_message_id and selected["corrected"] is None:
+            raise ValueError("correction case messages must belong to this session")
+        original = selected["original"]
+        feedback = selected["feedback"]
+        corrected = selected["corrected"]
+        assert original is not None and feedback is not None
+        for message in (original, feedback, corrected):
+            if message is not None and message.session_id != session_id:
+                raise ValueError("correction case cannot cross Chat sessions")
+        positions = {message.message_id: index for index, message in enumerate(messages)}
+        original_position = positions[original.message_id]
+        feedback_position = positions[feedback.message_id]
+        if original_position >= feedback_position:
+            raise ValueError("feedback must follow the disputed answer")
+        corrected_position = positions[corrected.message_id] if corrected is not None else None
+        if corrected_position is not None and feedback_position >= corrected_position:
+            raise ValueError("corrected answer must follow the challenge")
+        if original.role.value != "assistant" or not original.content.strip() or original.tool_calls:
+            raise ValueError("original message must be a final assistant answer")
+        if feedback.role.value != "user" or not feedback.content.strip():
+            raise ValueError("feedback message must be a user challenge")
+        if corrected is not None and (
+            corrected.role.value != "assistant" or not corrected.content.strip() or corrected.tool_calls
+        ):
+            raise ValueError("corrected message must be a final assistant answer")
+        if any(
+            message.role.value == "user"
+            for message in messages[original_position + 1 : feedback_position]
+        ):
+            raise ValueError("feedback must be the first user message after the disputed answer")
+        if corrected_position is not None and any(
+            message.role.value == "user"
+            for message in messages[feedback_position + 1 : corrected_position]
+        ):
+            raise ValueError("corrected answer must respond to the selected challenge")
+        if any(
+            message.role.value == "assistant" and message.content.strip() and not message.tool_calls
+            for message in messages[original_position + 1 : feedback_position]
+        ):
+            raise ValueError("the selected answer is not the last final answer before feedback")
+        if corrected_position is not None and any(
+            message.role.value == "assistant" and message.content.strip() and not message.tool_calls
+            for message in messages[feedback_position + 1 : corrected_position]
+        ):
+            raise ValueError("the selected correction is not the first final answer after feedback")
+
+        calls = await self.repository.read_model_calls(session_id, limit=200, offset=0)
+
+        def successful_call(message: ChatMessage) -> ChatModelCall:
+            candidates = [
+                call
+                for call in calls
+                if call.response_message_id == message.message_id
+                and call.status == "provider_succeeded"
+                and call.provider_confirmed
+            ]
+            if not candidates:
+                raise ValueError("correction message has no successful model call")
+            return sorted(candidates, key=lambda call: (call.started_at, call.call_id))[-1]
+
+        original_call = successful_call(original)
+        corrected_call = successful_call(corrected) if corrected is not None else None
+        if original_call.session_id != session.session_id or (
+            corrected_call is not None and corrected_call.session_id != session.session_id
+        ):
+            raise ValueError("correction model calls must belong to this session")
+        status = (
+            ChatCorrectionCaseStatus.LINKED
+            if corrected is not None
+            else ChatCorrectionCaseStatus.UNRESOLVED
+        )
+        identity = {
+            "session_id": session.session_id,
+            "original_message_id": original.message_id,
+            "feedback_message_id": feedback.message_id,
+            "corrected_message_id": corrected.message_id if corrected is not None else None,
+        }
+        case_id = "case_" + sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:40]
+        existing = await self.repository.read_correction_case(session_id, case_id)
+        if existing is not None:
+            return existing
+        trace_end = corrected_position + 1 if corrected_position is not None else feedback_position + 1
+        trace = {
+            "identity": identity,
+            "status": status.value,
+            "messages": [message.to_record() for message in messages[original_position:trace_end]],
+            "model_calls": [
+                {
+                    "call_id": original_call.call_id,
+                    "request_digest": original_call.request_digest,
+                    "status": original_call.status,
+                },
+                *([
+                    {
+                        "call_id": corrected_call.call_id,
+                        "request_digest": corrected_call.request_digest,
+                        "status": corrected_call.status,
+                    }
+                ] if corrected_call is not None else []),
+            ],
+        }
+        trace_digest = sha256(
+            json.dumps(trace, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        now = _now_iso()
+        case = ChatCorrectionCase(
+            case_id=case_id,
+            session_id=session.session_id,
+            original_message_id=original.message_id,
+            feedback_message_id=feedback.message_id,
+            corrected_message_id=corrected.message_id if corrected is not None else None,
+            original_model_call_id=original_call.call_id,
+            corrected_model_call_id=corrected_call.call_id if corrected_call is not None else None,
+            status=status,
+            trace_digest=trace_digest,
+            created_at=now,
+            updated_at=now,
+        )
+        return await self.repository.save_correction_case(case)
 
     async def get_pending_approval_for_user(
         self,

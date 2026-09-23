@@ -4,7 +4,13 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from contextlib import AbstractAsyncContextManager
 
-from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
+from domain.chat import (
+    ChatCorrectionCase,
+    ChatMessage,
+    ChatSession,
+    ChatToolCall,
+    ChatToolResult,
+)
 from domain.chat.feedback import ChatMessageFeedback
 from application.chat.model_calls import ModelCallOutcome, ModelCallPurpose, ModelCallStatus
 
@@ -82,6 +88,18 @@ class ChatRepository(Protocol):
     async def read_model_call(
         self, session_id: str, call_id: str
     ) -> ChatModelCall | None: ...
+
+    async def save_correction_case(
+        self, case: ChatCorrectionCase
+    ) -> ChatCorrectionCase: ...
+
+    async def read_correction_cases(
+        self, session_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatCorrectionCase, ...]: ...
+
+    async def read_correction_case(
+        self, session_id: str, case_id: str
+    ) -> ChatCorrectionCase | None: ...
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]: ...
 

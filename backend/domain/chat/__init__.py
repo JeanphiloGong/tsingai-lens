@@ -1,3 +1,4 @@
+from domain.chat.correction_case import ChatCorrectionCase, ChatCorrectionCaseStatus
 from domain.chat.message import ChatMessage, ChatMessageRole, ChatToolRequest
 from domain.chat.resource_ref import ChatResourceRef
 from domain.chat.session import ChatSession
@@ -13,6 +14,8 @@ from domain.chat.tool_call import (
 )
 
 __all__ = [
+    "ChatCorrectionCase",
+    "ChatCorrectionCaseStatus",
     "ChatMessage",
     "ChatMessageRole",
     "ChatToolRequest",

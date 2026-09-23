@@ -347,6 +347,81 @@ class ChatCorrectionReviewStatusResponse(BaseModel):
     latest: ChatCorrectionReviewResponse | None = None
 
 
+class ChatCorrectionDatasetSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+    sample_id: str = Field(min_length=1, max_length=64)
+    split: Literal["train", "eval"]
+
+
+class ChatCorrectionDatasetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str = Field(min_length=1, max_length=64)
+    items: list[ChatCorrectionDatasetSelectionRequest] = Field(default_factory=list, max_length=2000)
+    paper_families: dict[str, str] = Field(default_factory=dict, max_length=5000)
+
+
+class ChatCorrectionDatasetRowResponse(BaseModel):
+    row_id: str
+    sample_id: str
+    case_id: str
+    session_id: str
+    collection_id: str
+    model_call_id: str
+    input: dict[str, Any]
+    observations: list[dict[str, Any]]
+    target: str
+    review_id: str
+    review_digest: str
+    source_refs: list[dict[str, Any]]
+    paper_families: list[dict[str, str]]
+    session_tree_id: str
+    split: Literal["train", "eval"]
+    content_digest: str
+
+
+class ChatCorrectionDatasetExclusionResponse(BaseModel):
+    sample_id: str
+    session_id: str
+    case_id: str | None
+    reason: Literal[
+        "invalid_sample",
+        "stale",
+        "withdrawn",
+        "insufficient",
+        "rejected",
+        "unresolved",
+        "missing_source",
+        "missing_paper_family",
+        "partition_conflict",
+        "conflicting_assignment",
+    ]
+    detail: str
+
+
+class ChatCorrectionDatasetResponse(BaseModel):
+    schema_version: str
+    dataset_id: str
+    owner_id: str
+    collection_id: str
+    provenance: dict[str, Any]
+    provenance_digest: str
+    rows: list[ChatCorrectionDatasetRowResponse] = Field(default_factory=list)
+    exclusions: list[ChatCorrectionDatasetExclusionResponse] = Field(default_factory=list)
+    digest: str
+    created_at: str
+    row_count: int
+    excluded_count: int
+
+
+class ChatCorrectionDatasetListResponse(BaseModel):
+    items: list[ChatCorrectionDatasetResponse] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None

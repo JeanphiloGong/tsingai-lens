@@ -14,6 +14,9 @@ from infra.persistence.postgres.models.chat_correction import (
     ChatCorrectionReviewRow,
     ChatCorrectionSampleRow,
 )
+from infra.persistence.postgres.models.chat_correction_dataset import (
+    ChatCorrectionDatasetManifestRow,
+)
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
@@ -40,6 +43,7 @@ __all__ = [
     "ChatToolCallRow",
     "ChatCorrectionReviewRow",
     "ChatCorrectionSampleRow",
+    "ChatCorrectionDatasetManifestRow",
     "Collection",
     "Document",
     "DocumentPreparationRow",

@@ -1108,6 +1108,28 @@ append-only; stale content, missing support, missing Source references for an
 accept, and withdrawn samples cannot be accepted. This data is separate from
 Chat usefulness feedback and the Objective Finding dataset.
 
+### Chat Correction Datasets
+
+- `POST /api/v1/chat-correction-datasets`
+- `GET /api/v1/chat-correction-datasets?collection_id={collection_id}`
+- `GET /api/v1/chat-correction-datasets/{dataset_id}`
+- `GET /api/v1/chat-correction-datasets/{dataset_id}/jsonl`
+
+These owner-only endpoints freeze currently accepted P3 samples into an
+immutable manifest. The create request names owned Chat sessions and sample
+IDs, assigns `train` or `eval`, and supplies an explicit document-to-paper-
+family inventory. A row preserves the exact model request, ordered Chat/tool
+observations, corrected target, review digest, Source identities, paper family,
+session tree, split, and content digest. Samples that are stale, withdrawn,
+rejected, insufficient, unresolved, or missing Source/family evidence remain in
+the manifest's exclusion report. A paper family or conversation tree cannot
+span both partitions. Reading a saved manifest verifies its canonical digest;
+it does not rewrite historical snapshots after a later review withdrawal.
+
+The JSONL response starts with a manifest provenance record, then accepted
+sample rows and excluded records. This export is separate from the Objective
+Finding dataset and does not schedule training or alter online Chat behavior.
+
 ### Documents And Source Verification
 
 - `GET /api/v1/collections/{collection_id}/documents/profiles`

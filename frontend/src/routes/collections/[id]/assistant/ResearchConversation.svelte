@@ -50,6 +50,7 @@
 	import ModelCallInspector from './ModelCallInspector.svelte';
 	import CorrectionCasePanel from './CorrectionCasePanel.svelte';
 	import CorrectionReviewPage from './CorrectionReviewPage.svelte';
+	import ChatCorrectionDatasetPage from './ChatCorrectionDatasetPage.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
@@ -62,7 +63,8 @@
 		CircleAlert,
 		GitBranch,
 		ArrowRight,
-		Link2
+		Link2,
+		Archive
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -131,6 +133,7 @@
 	let correctionError = '';
 	let correctionController: AbortController | null = null;
 	let reviewCase: ChatCorrectionCase | null = null;
+	let datasetPageOpen = false;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -491,6 +494,7 @@
 		correctionCases = [];
 		correctionPanelOpen = false;
 		reviewCase = null;
+		datasetPageOpen = false;
 		correctionSaving = false;
 		correctionError = '';
 		responseSnapshot = null;
@@ -1347,6 +1351,12 @@
 						correctionPanelOpen = true;
 					}}><Link2 size={14} />{$t('researchAgent.correctionCase.open')}</button
 				>
+				<button
+					type="button"
+					disabled={sessionNavigationDisabled}
+					on:click={() => (datasetPageOpen = true)}
+				><Archive size={14} />{$t('researchAgent.correctionDataset.open')}</button
+				>
 			</div>
 		{/if}
 		{#if error}
@@ -1422,6 +1432,13 @@
 				sessionId={session.session_id}
 				caseItem={reviewCase}
 				onClose={() => (reviewCase = null)}
+			/>
+		{/if}
+		{#if datasetPageOpen && session}
+			<ChatCorrectionDatasetPage
+				collectionId={session.collection_id}
+				sessionId={session.session_id}
+				onClose={() => (datasetPageOpen = false)}
 			/>
 		{/if}
 		{#if checkpointId}

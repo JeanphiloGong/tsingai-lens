@@ -24,6 +24,14 @@ from domain.evaluation.chat_correction_sample import (
     canonical_json,
     sample_digest,
 )
+from domain.evaluation.chat_correction_dataset import (
+    ChatCorrectionDatasetExclusion,
+    ChatCorrectionDatasetExclusionReason,
+    ChatCorrectionDatasetManifest,
+    ChatCorrectionDatasetRow,
+    ChatCorrectionDatasetSelection,
+    ChatCorrectionDatasetSplit,
+)
 
 __all__ = [
     "EVALUATION_FAILURE_TYPES",
@@ -46,4 +54,10 @@ __all__ = [
     "ChatCorrectionSample",
     "canonical_json",
     "sample_digest",
+    "ChatCorrectionDatasetExclusion",
+    "ChatCorrectionDatasetExclusionReason",
+    "ChatCorrectionDatasetManifest",
+    "ChatCorrectionDatasetRow",
+    "ChatCorrectionDatasetSelection",
+    "ChatCorrectionDatasetSplit",
 ]

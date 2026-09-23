@@ -1,4 +1,4 @@
-import { buildApiUrl, requestJson, throwApiError } from './api';
+import { buildApiUrl, downloadBlob, requestJson, throwApiError } from './api';
 
 export type ChatResourceRef = {
 	resource_type: string;
@@ -217,6 +217,66 @@ export type ChatCorrectionSample = {
 };
 
 export type ChatCorrectionReviewDecision = 'accept' | 'reject' | 'insufficient' | 'withdraw';
+
+export type ChatCorrectionDatasetSplit = 'train' | 'eval';
+
+export type ChatCorrectionDatasetSelection = {
+	session_id: string;
+	sample_id: string;
+	split: ChatCorrectionDatasetSplit;
+};
+
+export type ChatCorrectionDatasetRow = {
+	row_id: string;
+	sample_id: string;
+	case_id: string;
+	session_id: string;
+	collection_id: string;
+	model_call_id: string;
+	input: Record<string, unknown>;
+	observations: Record<string, unknown>[];
+	target: string;
+	review_id: string;
+	review_digest: string;
+	source_refs: Record<string, unknown>[];
+	paper_families: { document_id: string; family_id: string }[];
+	session_tree_id: string;
+	split: ChatCorrectionDatasetSplit;
+	content_digest: string;
+};
+
+export type ChatCorrectionDatasetExclusion = {
+	sample_id: string;
+	session_id: string;
+	case_id: string | null;
+	reason:
+		| 'invalid_sample'
+		| 'stale'
+		| 'withdrawn'
+		| 'insufficient'
+		| 'rejected'
+		| 'unresolved'
+		| 'missing_source'
+		| 'missing_paper_family'
+		| 'partition_conflict'
+		| 'conflicting_assignment';
+	detail: string;
+};
+
+export type ChatCorrectionDataset = {
+	schema_version: string;
+	dataset_id: string;
+	owner_id: string;
+	collection_id: string;
+	provenance: Record<string, unknown>;
+	provenance_digest: string;
+	rows: ChatCorrectionDatasetRow[];
+	exclusions: ChatCorrectionDatasetExclusion[];
+	digest: string;
+	created_at: string;
+	row_count: number;
+	excluded_count: number;
+};
 
 export type ChatCorrectionReview = {
 	review_id: string;
@@ -464,6 +524,20 @@ export async function fetchChatCorrectionSample(
 	)) as ChatCorrectionSample;
 }
 
+export async function fetchChatCorrectionSamples(
+	sessionId: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+): Promise<{ items: ChatCorrectionSample[]; limit: number; offset: number }> {
+	const query = new URLSearchParams({
+		limit: String(options.limit ?? 200),
+		offset: String(options.offset ?? 0)
+	});
+	return (await requestJson(`${chatSessionPath(sessionId)}/correction-samples?${query}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatCorrectionSample[]; limit: number; offset: number };
+}
+
 export async function fetchChatCorrectionReviews(
 	sessionId: string,
 	sampleId: string,
@@ -500,6 +574,50 @@ export async function fetchChatCorrectionReviewStatus(
 		`${chatSessionPath(sessionId)}/correction-samples/${encodeURIComponent(sampleId)}/review-status`,
 		{ signal, method: 'GET' }
 	)) as ChatCorrectionReviewStatus;
+}
+
+export async function createChatCorrectionDataset(input: {
+	collection_id: string;
+	items: ChatCorrectionDatasetSelection[];
+	paper_families: Record<string, string>;
+}, signal?: AbortSignal): Promise<ChatCorrectionDataset> {
+	return (await requestJson('/chat-correction-datasets', {
+		signal,
+		method: 'POST',
+		body: JSON.stringify(input)
+	})) as ChatCorrectionDataset;
+}
+
+export async function fetchChatCorrectionDatasets(
+	collectionId?: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+): Promise<{ items: ChatCorrectionDataset[]; limit: number; offset: number }> {
+	const query = new URLSearchParams({
+		limit: String(options.limit ?? 50),
+		offset: String(options.offset ?? 0)
+	});
+	if (collectionId) query.set('collection_id', collectionId);
+	return (await requestJson(`/chat-correction-datasets?${query}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatCorrectionDataset[]; limit: number; offset: number };
+}
+
+export async function fetchChatCorrectionDataset(
+	datasetId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionDataset> {
+	return (await requestJson(`/chat-correction-datasets/${encodeURIComponent(datasetId)}`, {
+		signal,
+		method: 'GET'
+	})) as ChatCorrectionDataset;
+}
+
+export async function downloadChatCorrectionDataset(datasetId: string) {
+	await downloadBlob(
+		`/chat-correction-datasets/${encodeURIComponent(datasetId)}/jsonl`,
+		`${datasetId}.jsonl`
+	);
 }
 
 export async function setChatMessageFeedback(

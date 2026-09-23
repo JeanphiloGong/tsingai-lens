@@ -78,6 +78,35 @@ class ChatCorrectionReviewService:
             raise ChatCorrectionSampleNotFoundError(f"correction sample not found: {sample_id}")
         return await self.repository.list_reviews(session_id, sample_id)
 
+    async def current_sample_for_user(
+        self, session_id: str, sample_id: str, user_id: str
+    ) -> ChatCorrectionSample:
+        """Rebuild a stored sample from the current owned Chat trajectory.
+
+        Dataset freezing uses this public boundary so it can distinguish a
+        stale snapshot from the immutable bytes that were originally stored.
+        """
+
+        session = await self.chat_session_service.get_session_for_user(session_id, user_id)
+        sample = await self.repository.read_sample(session_id, sample_id)
+        if sample is None:
+            raise ChatCorrectionSampleNotFoundError(f"correction sample not found: {sample_id}")
+        case = await self.chat_session_service.repository.read_correction_case(
+            session_id, sample.case_id
+        )
+        if case is None:
+            raise ChatCorrectionReviewStaleError("the correction case was removed")
+        return await self._rebuild_sample(session, case)
+
+    async def effective_review_for_user(
+        self, session_id: str, sample_id: str, user_id: str
+    ) -> ChatCorrectionReview | None:
+        await self.chat_session_service.get_session_for_user(session_id, user_id)
+        sample = await self.repository.read_sample(session_id, sample_id)
+        if sample is None:
+            raise ChatCorrectionSampleNotFoundError(f"correction sample not found: {sample_id}")
+        return _effective_review(await self.repository.list_reviews(session_id, sample_id))
+
     async def review_sample_for_user(
         self,
         session_id: str,

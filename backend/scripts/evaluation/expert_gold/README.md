@@ -52,6 +52,27 @@ Evaluate prediction against gold:
 `evaluate_gold_vs_prediction.py`, and `objective_probe_checks.py` remain the
 generic Core evaluation utilities.
 
+### Paper-Local Multi-Experiment Gold
+
+The tracked P004 sidecar is a compact, source-grounded annotation for
+paper-local experiment reconstruction. It is intentionally separate from the
+runtime `PaperExperiment` persistence shape: the sidecar records the paper's
+measurement series, relation-level provenance, unknowns, expected
+Finding/abstention decisions, and a source-preserving revision. It does not
+claim that the paper contains three independent manufacturing runs.
+
+Validate it from the repository root with:
+
+```bash
+backend/.venv/bin/python \
+  backend/scripts/evaluation/expert_gold/validate_multi_experiment_gold.py \
+  --input backend/tests/fixtures/expert_gold/p004_multi_experiment --json
+```
+
+The validator must report zero errors before the sidecar is used for an
+assembly or agent evaluation. The source PDF is not committed; replay uses
+the SHA-256 and semantic locators in `manifest.json` and `sources.json`.
+
 ## Objective Finding Benchmark
 
 Run the canonical Objective benchmark:

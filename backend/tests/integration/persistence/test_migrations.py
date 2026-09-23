@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260923_0061"
+HEAD_REVISION = "20260923_0062"
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:

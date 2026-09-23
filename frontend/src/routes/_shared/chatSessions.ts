@@ -201,6 +201,42 @@ export type ChatCorrectionCase = {
 	updated_at: string;
 };
 
+export type ChatCorrectionSample = {
+	sample_id: string;
+	case_id: string;
+	session_id: string;
+	collection_id: string;
+	model_call_id: string;
+	input: Record<string, unknown>;
+	observations: Record<string, unknown>[];
+	target: string;
+	source_refs: Record<string, unknown>[];
+	digest: string;
+	created_at: string;
+	updated_at: string;
+};
+
+export type ChatCorrectionReviewDecision = 'accept' | 'reject' | 'insufficient' | 'withdraw';
+
+export type ChatCorrectionReview = {
+	review_id: string;
+	sample_id: string;
+	session_id: string;
+	sample_digest: string;
+	decision: ChatCorrectionReviewDecision;
+	reviewer_id: string;
+	reason: string | null;
+	support_message_ids: string[];
+	seq: number;
+	created_at: string;
+};
+
+export type ChatCorrectionReviewStatus = {
+	state: 'pending' | ChatCorrectionReviewDecision | 'stale';
+	sample_digest: string;
+	latest: ChatCorrectionReview | null;
+};
+
 export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
 export type ChatFeedbackInput = {
 	rating: 'helpful' | 'not_helpful' | null;
@@ -404,6 +440,66 @@ export async function createChatCorrectionCase(
 		method: 'POST',
 		body: JSON.stringify(input)
 	})) as ChatCorrectionCase;
+}
+
+export async function createChatCorrectionSample(
+	sessionId: string,
+	caseId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionSample> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-cases/${encodeURIComponent(caseId)}/sample`,
+		{ signal, method: 'POST' }
+	)) as ChatCorrectionSample;
+}
+
+export async function fetchChatCorrectionSample(
+	sessionId: string,
+	sampleId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionSample> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-samples/${encodeURIComponent(sampleId)}`,
+		{ signal, method: 'GET' }
+	)) as ChatCorrectionSample;
+}
+
+export async function fetchChatCorrectionReviews(
+	sessionId: string,
+	sampleId: string,
+	signal?: AbortSignal
+): Promise<{ items: ChatCorrectionReview[] }> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-samples/${encodeURIComponent(sampleId)}/reviews`,
+		{ signal, method: 'GET' }
+	)) as { items: ChatCorrectionReview[] };
+}
+
+export async function createChatCorrectionReview(
+	sessionId: string,
+	sampleId: string,
+	input: {
+		decision: ChatCorrectionReviewDecision;
+		reason?: string | null;
+		support_message_ids?: string[];
+	},
+	signal?: AbortSignal
+): Promise<ChatCorrectionReview> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-samples/${encodeURIComponent(sampleId)}/reviews`,
+		{ signal, method: 'POST', body: JSON.stringify(input) }
+	)) as ChatCorrectionReview;
+}
+
+export async function fetchChatCorrectionReviewStatus(
+	sessionId: string,
+	sampleId: string,
+	signal?: AbortSignal
+): Promise<ChatCorrectionReviewStatus> {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/correction-samples/${encodeURIComponent(sampleId)}/review-status`,
+		{ signal, method: 'GET' }
+	)) as ChatCorrectionReviewStatus;
 }
 
 export async function setChatMessageFeedback(

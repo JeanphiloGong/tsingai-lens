@@ -49,6 +49,7 @@
 	import ResearchSidebar from './ResearchSidebar.svelte';
 	import ModelCallInspector from './ModelCallInspector.svelte';
 	import CorrectionCasePanel from './CorrectionCasePanel.svelte';
+	import CorrectionReviewPage from './CorrectionReviewPage.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
@@ -129,6 +130,7 @@
 	let correctionSaving = false;
 	let correctionError = '';
 	let correctionController: AbortController | null = null;
+	let reviewCase: ChatCorrectionCase | null = null;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -488,6 +490,7 @@
 		correctionController = null;
 		correctionCases = [];
 		correctionPanelOpen = false;
+		reviewCase = null;
 		correctionSaving = false;
 		correctionError = '';
 		responseSnapshot = null;
@@ -1404,10 +1407,21 @@
 				saving={correctionSaving}
 				error={correctionError}
 				onSave={saveCorrectionCase}
+				onReview={(item) => {
+					reviewCase = item;
+					correctionPanelOpen = false;
+				}}
 				onClose={() => {
 					correctionPanelOpen = false;
 					correctionError = '';
 				}}
+			/>
+		{/if}
+		{#if reviewCase && session}
+			<CorrectionReviewPage
+				sessionId={session.session_id}
+				caseItem={reviewCase}
+				onClose={() => (reviewCase = null)}
 			/>
 		{/if}
 		{#if checkpointId}

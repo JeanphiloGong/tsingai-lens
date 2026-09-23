@@ -289,6 +289,64 @@ class ChatCorrectionCaseListResponse(BaseModel):
     offset: int
 
 
+class ChatCorrectionSampleResponse(BaseModel):
+    sample_id: str
+    case_id: str
+    session_id: str
+    collection_id: str
+    model_call_id: str
+    input: dict[str, Any]
+    observations: list[dict[str, Any]]
+    target: str
+    source_refs: list[dict[str, Any]]
+    digest: str
+    created_at: str
+    updated_at: str
+
+
+class ChatCorrectionSampleListResponse(BaseModel):
+    items: list[ChatCorrectionSampleResponse] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
+class ChatCorrectionReviewCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["accept", "reject", "insufficient", "withdraw"]
+    reason: str | None = Field(default=None, max_length=4000)
+    support_message_ids: list[str] = Field(default_factory=list, max_length=32)
+
+
+class ChatCorrectionReviewResponse(BaseModel):
+    review_id: str
+    sample_id: str
+    session_id: str
+    sample_digest: str
+    decision: Literal["accept", "reject", "insufficient", "withdraw"]
+    reviewer_id: str
+    reason: str | None
+    support_message_ids: list[str]
+    seq: int
+    created_at: str
+
+
+class ChatCorrectionReviewListResponse(BaseModel):
+    items: list[ChatCorrectionReviewResponse] = Field(default_factory=list)
+
+
+class ChatCorrectionReviewStatusResponse(BaseModel):
+    state: Literal[
+        "pending",
+        "accept",
+        "reject",
+        "insufficient",
+        "withdraw",
+        "stale",
+    ]
+    sample_digest: str
+    latest: ChatCorrectionReviewResponse | None = None
+
+
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None

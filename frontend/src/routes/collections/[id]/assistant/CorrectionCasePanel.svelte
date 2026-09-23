@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Link2, Save, X } from '@lucide/svelte';
+	import { ClipboardCheck, Link2, Save, X } from '@lucide/svelte';
 	import type { ChatCorrectionCase, ChatMessage } from '../../../_shared/chatSessions';
 import { t } from '../../../_shared/i18n';
 
@@ -13,6 +13,7 @@ import { t } from '../../../_shared/i18n';
 		corrected_message_id?: string | null;
 	}) => Promise<boolean> = async () => false;
 	export let onClose: () => void = () => {};
+	export let onReview: (item: ChatCorrectionCase) => void = () => {};
 
 	$: answers = messages.filter(
 		(message) => message.role === 'assistant' && message.content.trim() && !message.tool_calls.length
@@ -94,6 +95,11 @@ import { t } from '../../../_shared/i18n';
 						<Link2 size={14} />
 						<span>{item.status === 'linked' ? $t('researchAgent.correctionCase.statusLinked') : $t('researchAgent.correctionCase.statusUnresolved')}</span>
 						<code>{item.case_id.slice(-8)}</code>
+						{#if item.status === 'linked'}
+							<button type="button" class="review-button" on:click={() => onReview(item)}>
+								<ClipboardCheck size={14} />{$t('researchAgent.correctionReview.open')}
+							</button>
+						{/if}
 					</div>
 				{/each}
 			{/if}
@@ -209,6 +215,18 @@ import { t } from '../../../_shared/i18n';
 		margin-left: auto;
 		color: var(--text-tertiary);
 		font-size: 11px;
+	}
+	.review-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 28px;
+		padding: 0 7px;
+		border: 1px solid var(--border-default);
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 11px;
+		cursor: pointer;
 	}
 	.muted {
 		margin: 0;

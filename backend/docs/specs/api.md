@@ -1092,6 +1092,22 @@ the request must include at least one of `title`, `content`, `status`, or
 `structured_plan`. The service creates a new immutable plan revision; it does
 not mutate the historical revision addressed by `plan_id`.
 
+### Chat Correction Review
+
+- `POST /api/v1/chat-sessions/{session_id}/correction-cases/{case_id}/sample`
+- `GET /api/v1/chat-sessions/{session_id}/correction-samples`
+- `GET /api/v1/chat-sessions/{session_id}/correction-samples/{sample_id}`
+- `GET /api/v1/chat-sessions/{session_id}/correction-samples/{sample_id}/reviews`
+- `POST /api/v1/chat-sessions/{session_id}/correction-samples/{sample_id}/reviews`
+- `GET /api/v1/chat-sessions/{session_id}/correction-samples/{sample_id}/review-status`
+
+These owner-scoped endpoints freeze and review a linked Chat correction. The
+sample contains the exact P1 model request, ordered tool observations, final
+corrected answer, and Source references under one digest. Review records are
+append-only; stale content, missing support, missing Source references for an
+accept, and withdrawn samples cannot be accepted. This data is separate from
+Chat usefulness feedback and the Objective Finding dataset.
+
 ### Documents And Source Verification
 
 - `GET /api/v1/collections/{collection_id}/documents/profiles`

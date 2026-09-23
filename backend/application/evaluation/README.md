@@ -17,6 +17,9 @@ prepare Source documents, discover Objectives, or run Objective analyses.
 - `finding_review_import_service.py`
   Validates human accept, reject, correct, or skip decisions and writes them
   through `FindingFeedbackService`.
+- `chat_correction_review_service.py`
+  Rebuilds P2 Chat correction cases into exact-input samples and records
+  owner-scoped, append-only review decisions with digest and Source checks.
 
 ## Identity Contract
 

@@ -16,6 +16,10 @@ from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
+from application.evaluation.chat_correction_review_service import (
+    ChatCorrectionReviewStaleError,
+    ChatCorrectionSampleNotFoundError,
+)
 from application.repositories.chat_repository import ChatSessionBusyError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
@@ -32,6 +36,12 @@ from controllers.schemas.chat.session import (
     ChatCorrectionCaseCreateRequest,
     ChatCorrectionCaseListResponse,
     ChatCorrectionCaseResponse,
+    ChatCorrectionReviewCreateRequest,
+    ChatCorrectionReviewListResponse,
+    ChatCorrectionReviewResponse,
+    ChatCorrectionReviewStatusResponse,
+    ChatCorrectionSampleListResponse,
+    ChatCorrectionSampleResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionResponse,
@@ -219,6 +229,164 @@ async def get_chat_correction_case(
             detail={"code": "chat_correction_case_not_found", "case_id": case_id},
         )
     return ChatCorrectionCaseResponse.model_validate(case.to_record())
+
+
+def _chat_correction_review_service(request: Request):
+    service = getattr(request.app.state, "chat_correction_review_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "chat_correction_review_unavailable",
+                "message": "Chat correction review storage is unavailable.",
+            },
+        )
+    return service
+
+
+@router.get(
+    "/{session_id}/correction-samples",
+    response_model=ChatCorrectionSampleListResponse,
+    summary="List reviewed Chat correction samples for an owned session",
+)
+async def list_chat_correction_samples(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ChatCorrectionSampleListResponse:
+    service = _chat_correction_review_service(request)
+    try:
+        samples = await service.list_samples_for_user(
+            session_id, await current_user_id(request), limit=limit, offset=offset
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatCorrectionSampleListResponse(
+        items=[ChatCorrectionSampleResponse.model_validate(item.to_record()) for item in samples],
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/{session_id}/correction-cases/{case_id}/sample",
+    response_model=ChatCorrectionSampleResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Freeze one linked Chat correction case for review",
+)
+async def create_chat_correction_sample(
+    session_id: str, case_id: str, request: Request
+) -> ChatCorrectionSampleResponse:
+    service = _chat_correction_review_service(request)
+    try:
+        sample = await service.create_sample_for_user(
+            session_id, case_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatCorrectionSampleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "chat_correction_sample_not_found", "message": str(exc)}) from exc
+    except ChatCorrectionReviewStaleError as exc:
+        raise HTTPException(status_code=409, detail={"code": "chat_correction_sample_stale", "message": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "chat_correction_sample_invalid", "message": str(exc)}) from exc
+    return ChatCorrectionSampleResponse.model_validate(sample.to_record())
+
+
+@router.get(
+    "/{session_id}/correction-samples/{sample_id}",
+    response_model=ChatCorrectionSampleResponse,
+    summary="Read one owned Chat correction sample",
+)
+async def get_chat_correction_sample(
+    session_id: str, sample_id: str, request: Request
+) -> ChatCorrectionSampleResponse:
+    service = _chat_correction_review_service(request)
+    try:
+        sample = await service.get_sample_for_user(
+            session_id, sample_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    if sample is None:
+        raise HTTPException(status_code=404, detail={"code": "chat_correction_sample_not_found", "sample_id": sample_id})
+    return ChatCorrectionSampleResponse.model_validate(sample.to_record())
+
+
+@router.get(
+    "/{session_id}/correction-samples/{sample_id}/reviews",
+    response_model=ChatCorrectionReviewListResponse,
+    summary="List append-only Chat correction reviews",
+)
+async def list_chat_correction_reviews(
+    session_id: str, sample_id: str, request: Request
+) -> ChatCorrectionReviewListResponse:
+    service = _chat_correction_review_service(request)
+    try:
+        reviews = await service.list_reviews_for_user(
+            session_id, sample_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatCorrectionSampleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "chat_correction_sample_not_found", "message": str(exc)}) from exc
+    return ChatCorrectionReviewListResponse(
+        items=[ChatCorrectionReviewResponse.model_validate(item.to_record()) for item in reviews]
+    )
+
+
+@router.post(
+    "/{session_id}/correction-samples/{sample_id}/reviews",
+    response_model=ChatCorrectionReviewResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record an owner Chat correction review decision",
+)
+async def review_chat_correction_sample(
+    session_id: str,
+    sample_id: str,
+    payload: ChatCorrectionReviewCreateRequest,
+    request: Request,
+) -> ChatCorrectionReviewResponse:
+    service = _chat_correction_review_service(request)
+    try:
+        review = await service.review_sample_for_user(
+            session_id,
+            sample_id,
+            await current_user_id(request),
+            decision=payload.decision,
+            reason=payload.reason,
+            support_message_ids=payload.support_message_ids,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatCorrectionSampleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "chat_correction_sample_not_found", "message": str(exc)}) from exc
+    except ChatCorrectionReviewStaleError as exc:
+        raise HTTPException(status_code=409, detail={"code": "chat_correction_sample_stale", "message": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "chat_correction_review_invalid", "message": str(exc)}) from exc
+    return ChatCorrectionReviewResponse.model_validate(review.to_record())
+
+
+@router.get(
+    "/{session_id}/correction-samples/{sample_id}/review-status",
+    response_model=ChatCorrectionReviewStatusResponse,
+    summary="Read the current Chat correction review status",
+)
+async def get_chat_correction_review_status(
+    session_id: str, sample_id: str, request: Request
+) -> ChatCorrectionReviewStatusResponse:
+    service = _chat_correction_review_service(request)
+    try:
+        value = await service.status_for_user(
+            session_id, sample_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatCorrectionSampleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "chat_correction_sample_not_found", "message": str(exc)}) from exc
+    return ChatCorrectionReviewStatusResponse.model_validate(value)
 
 
 @router.get(

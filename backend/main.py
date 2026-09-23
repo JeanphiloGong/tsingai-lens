@@ -79,9 +79,8 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveEvidenceAnalysisService,
 )
 from application.pipeline import PipelineRunService
-from application.evaluation import (
-    FindingFeedbackService,
-)
+from application.evaluation import FindingFeedbackService
+from application.evaluation.chat_correction_review_service import ChatCorrectionReviewService
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.source.collection_service import CollectionService
@@ -102,6 +101,9 @@ from controllers.goal import experiment_plans
 from controllers.goal import intake as goals
 from controllers.source import collections, pipeline_runs, references
 from application.repositories.finding_review_repository import FindingReviewRepository
+from application.repositories.chat_correction_review_repository import (
+    ChatCorrectionReviewRepository,
+)
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.repositories.document_profile_repository import (
     DocumentProfileRepository,
@@ -124,6 +126,9 @@ from infra.persistence.postgres.collection_repository import (
 )
 from infra.persistence.postgres.finding_review_repository import (
     PostgresFindingReviewRepository,
+)
+from infra.persistence.postgres.chat_correction_review_repository import (
+    PostgresChatCorrectionReviewRepository,
 )
 from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
@@ -218,6 +223,7 @@ class ApplicationOverrides:
     paper_map_repository: PaperMapRepository | None = None
     objective_repository: ObjectiveRepository | None = None
     finding_review_repository: FindingReviewRepository | None = None
+    chat_correction_review_repository: ChatCorrectionReviewRepository | None = None
     experiment_plan_repository: ExperimentPlanRepository | None = None
     chat_repository: ChatRepository | None = None
     chat_session_service: ChatSessionService | None = None
@@ -267,6 +273,7 @@ class ApplicationRuntime:
     chat_session_service: ChatSessionService
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
+    chat_correction_review_service: ChatCorrectionReviewService | None
 
     async def close(self) -> None:
         if self.database_engine is not None:
@@ -553,6 +560,18 @@ async def build_application_runtime(
         else:
             chat_session_service = overrides.chat_session_service
 
+        correction_review_repository = overrides.chat_correction_review_repository
+        if correction_review_repository is None and session_factory is not None:
+            correction_review_repository = PostgresChatCorrectionReviewRepository(session_factory)
+        correction_review_service = (
+            ChatCorrectionReviewService(
+                chat_session_service=chat_session_service,
+                repository=correction_review_repository,
+            )
+            if correction_review_repository is not None
+            else None
+        )
+
         return ApplicationRuntime(
             database_engine=database_engine,
             auth_session_service=auth_session_service,
@@ -578,6 +597,7 @@ async def build_application_runtime(
             chat_session_service=chat_session_service,
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
+            chat_correction_review_service=correction_review_service,
         )
     except BaseException:
         if database_engine is not None:
@@ -614,6 +634,7 @@ def install_application_runtime(
     application.state.chat_session_service = runtime.chat_session_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
     application.state.objective_analysis_service = runtime.objective_analysis_service
+    application.state.chat_correction_review_service = runtime.chat_correction_review_service
 
 
 def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
@@ -761,6 +782,7 @@ def create_app(
     paper_map_repository: PaperMapRepository | None = None,
     objective_repository: ObjectiveRepository | None = None,
     finding_review_repository: FindingReviewRepository | None = None,
+    chat_correction_review_repository: ChatCorrectionReviewRepository | None = None,
     experiment_plan_repository: ExperimentPlanRepository | None = None,
     chat_repository: ChatRepository | None = None,
     chat_session_service: ChatSessionService | None = None,
@@ -774,6 +796,7 @@ def create_app(
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
         finding_review_repository=finding_review_repository,
+        chat_correction_review_repository=chat_correction_review_repository,
         experiment_plan_repository=experiment_plan_repository,
         chat_repository=chat_repository,
         chat_session_service=chat_session_service,

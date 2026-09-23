@@ -3,8 +3,12 @@ type Translate = (key: string, vars?: Record<string, string | number>) => string
 
 export function capabilityName(toolName: string | null, translate: Translate) {
 	switch (toolName) {
+		case 'discover_research_tools':
+			return translate('researchAgent.capability.discoverResearchTools');
 		case 'get_collection_context':
 			return translate('researchAgent.capability.collection');
+		case 'browse_collection_papers':
+			return translate('researchAgent.capability.browseCollectionPapers');
 		case 'search_sources':
 			return translate('researchAgent.capability.searchSources');
 		case 'read_source':
@@ -49,6 +53,10 @@ export function capabilityName(toolName: string | null, translate: Translate) {
 			return translate('researchAgent.capability.researchPlanDraft');
 		case 'create_research_plan':
 			return translate('researchAgent.capability.researchPlanAuthoring');
+		case 'inspect_research_plans':
+			return translate('researchAgent.capability.inspectResearchPlans');
+		case 'revise_research_plan':
+			return translate('researchAgent.capability.reviseResearchPlan');
 		case 'start_objective_analysis':
 			return translate('researchAgent.capability.startObjectiveAnalysis');
 		case 'inspect_objective_analysis':

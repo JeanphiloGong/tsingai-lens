@@ -20,8 +20,7 @@ it('keeps actual document and passage visible without a generated research plan'
 			cycle_index: 2,
 			selected_capability_names: ['read_source'],
 			requested_tool_count: 2,
-			executed_tool_count: 1,
-			research_plan: { steps: [{ id: 'inspect_sources', status: 'in_progress' }] }
+			executed_tool_count: 1
 		},
 		readings: [reading]
 	});
@@ -32,7 +31,7 @@ it('keeps actual document and passage visible without a generated research plan'
 	await expect
 		.element(screen.getByText(/1 \/ 2 research actions|已完成 1 \/ 2 个研究动作/))
 		.toBeVisible();
-	await expect.element(screen.getByText(/Inspect linked Sources|检查关联原文/)).toBeVisible();
+	expect(screen.container.querySelector('.progress-plan')).toBeNull();
 	await expect
 		.element(screen.getByRole('link', { name: /Open source location|打开原文位置/ }))
 		.toHaveAttribute('href', reading.href);

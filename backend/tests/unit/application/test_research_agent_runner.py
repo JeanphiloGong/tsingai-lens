@@ -2636,7 +2636,7 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
     assert result.status is AgentRunStatus.COMPLETED
     assert any(event["phase"] == "tools" for event in progress_events)
     assert any(event["executed_tool_count"] > 0 for event in progress_events)
-    assert all(event.get("research_plan") is None for event in progress_events)
+    assert all("research_plan" not in event for event in progress_events)
     assert any(call.name == "read_source" and call.status is ToolCallStatus.SUCCEEDED
                for call in result.tool_calls)
 
@@ -2694,7 +2694,7 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    assert all(event.get("research_plan") is None for event in events)
+    assert all("research_plan" not in event for event in events)
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 

@@ -19,12 +19,8 @@
 	);
 	$: actionSummary = actionNames.join(' · ');
 	$: actionCounts = getChatProgressActions(progress);
-	$: activePlanStep = progress.research_plan?.steps.find((step) => step.status === 'in_progress');
 	function progressLabel(value: ChatProgress) {
 		return $t(`researchAgent.progress.${value.phase}`, { cycle: value.cycle_index ?? 0 });
-	}
-	function planStepLabel(id: string) {
-		return $t(`researchAgent.progress.plan.steps.${id}`);
 	}
 </script>
 
@@ -45,13 +41,12 @@
 			>{formatChatElapsed(progress.elapsed_ms)}<ChevronDown size={14} /></span
 		>
 	</button>
-	{#if actionSummary || actionCounts || activePlanStep}
+	{#if actionSummary || actionCounts}
 		<div class="progress-details" aria-label={$t('researchAgent.progress.detailsLabel')}>
 			{#if actionSummary}<span class="progress-action"
 					>{$t('researchAgent.progress.currentAction', { action: actionSummary })}</span
 				>{/if}
 			{#if actionCounts}<span>{$t('researchAgent.progress.actions', actionCounts)}</span>{/if}
-			{#if activePlanStep}<span class="progress-plan">{planStepLabel(activePlanStep.id)}</span>{/if}
 		</div>
 	{/if}
 	{#each readings as reading (reading.toolCallId)}
@@ -141,9 +136,6 @@
 	.progress-action {
 		color: var(--text-primary);
 		font-weight: 600;
-	}
-	.progress-plan {
-		color: var(--brand-primary);
 	}
 	.progress-dot {
 		width: 6px;

@@ -11,16 +11,46 @@ interface Translations {
 
 const translations: Record<Language, Translations> = {
 	en: {
-		agentReview: { details: 'Exact action details', statement: 'Proposed conclusion', question: 'Research question', reported_result: 'Reported result', authoring_note: 'Reason for revision', limitations: 'Scope and remaining uncertainties', source_excerpt: 'Original passage', passage: 'View passage', permissions: 'Permissions' },
+		agentReview: {
+			details: 'Exact action details',
+			statement: 'Proposed conclusion',
+			question: 'Research question',
+			reported_result: 'Reported result',
+			authoring_note: 'Reason for revision',
+			limitations: 'Scope and remaining uncertainties',
+			source_excerpt: 'Original passage',
+			passage: 'View passage',
+			permissions: 'Permissions'
+		},
 		agentPermission: {
-			title: 'Agent permissions', mode: 'Mode', read_only: 'Read and suggest', confirm: 'Confirm each write', auto: 'Authorized automatic execution',
-			loading: 'Loading', actions: 'Allowed in this session and collection', hours: 'Valid for (hours)', expires: 'Expires',
-			unsaved: 'Changes are not applied yet.', selectAction: 'Select at least one action to enable automatic execution.',
-			save: 'Apply permissions', revoke: 'Revoke automatic execution', reload: 'Reload settings',
+			title: 'Agent permissions',
+			mode: 'Mode',
+			read_only: 'Read and suggest',
+			confirm: 'Confirm each write',
+			auto: 'Authorized automatic execution',
+			loading: 'Loading',
+			actions: 'Allowed in this session and collection',
+			hours: 'Valid for (hours)',
+			expires: 'Expires',
+			unsaved: 'Changes are not applied yet.',
+			selectAction: 'Select at least one action to enable automatic execution.',
+			allActions: 'Authorize all available write actions',
+			automaticScope:
+				'This grants execution authority for the selected writes only; reads and drafts remain automatic.',
+			save: 'Apply permissions',
+			revoke: 'Revoke automatic execution',
+			reload: 'Reload settings',
+			start_research_process: 'Start literature preparation',
+			create_objective_candidate: 'Create a research question candidate',
+			confirm_objective: 'Confirm a research question',
+			start_objective_analysis: 'Start evidence analysis',
 			create_evidence_version: 'Create Evidence and publish an analysis version',
 			create_finding_version: 'Create Finding and publish an analysis version',
-			record_finding_feedback: 'Save Finding feedback', curate_finding: 'Save expert Finding review',
-			create_research_plan: 'Save a research plan', revise_research_plan: 'Save a plan revision'
+			record_finding_feedback: 'Save Finding feedback',
+			curate_finding: 'Save expert Finding review',
+			publish_agent_objective_analysis: 'Publish Agent-authored analysis',
+			create_research_plan: 'Save a research plan',
+			revise_research_plan: 'Save a plan revision'
 		},
 		brand: {
 			title: 'Lens',
@@ -334,7 +364,7 @@ const translations: Record<Language, Translations> = {
 				draft: 'Unsent revision',
 				resume: 'Send revision'
 			},
-				feedback: {
+			feedback: {
 				helpful: 'Helpful',
 				notHelpful: 'Not helpful',
 				edit: 'Edit feedback',
@@ -352,22 +382,22 @@ const translations: Record<Language, Translations> = {
 					incomplete: 'Incomplete answer',
 					unclear: 'Unclear explanation',
 					other: 'Other'
-					}
-				},
-				modelCall: {
-					eyebrow: 'Traceable execution',
-					title: 'Exact model request',
-					close: 'Close request details',
-					loading: 'Loading the saved request...',
-					unavailable: 'This historical answer has no saved provider request.',
-					retry: 'Retry request lookup',
-					recorded: 'Recorded before provider submission',
-					providerSucceeded: 'Provider response received',
-					providerFailed: 'Provider request failed',
-					responseInvalid: 'Provider response could not be parsed',
-					cancelled: 'Request cancelled'
-				},
-				sending: 'Sending...',
+				}
+			},
+			modelCall: {
+				eyebrow: 'Traceable execution',
+				title: 'Exact model request',
+				close: 'Close request details',
+				loading: 'Loading the saved request...',
+				unavailable: 'This historical answer has no saved provider request.',
+				retry: 'Retry request lookup',
+				recorded: 'Recorded before provider submission',
+				providerSucceeded: 'Provider response received',
+				providerFailed: 'Provider request failed',
+				responseInvalid: 'Provider response could not be parsed',
+				cancelled: 'Request cancelled'
+			},
+			sending: 'Sending...',
 			progress: {
 				starting: 'Starting research...',
 				model: 'Planning research step {cycle}...',
@@ -398,18 +428,7 @@ const translations: Record<Language, Translations> = {
 				},
 				sourcePage: 'Page {page}',
 				currentPaper: 'Current paper',
-				searchQuery: 'Search: {query}',
-				plan: {
-					title: 'Research plan',
-					status: { pending: 'Waiting', in_progress: 'In progress', completed: 'Completed', blocked: 'Blocked' },
-					steps: {
-						inspect_finding: 'Inspect published Finding',
-						inspect_sources: 'Inspect linked Sources',
-						validate_claim: 'Validate the claim',
-						draft_finding: 'Prepare Finding draft',
-						approval: 'Await researcher approval'
-					}
-				}
+				searchQuery: 'Search: {query}'
 			},
 			upload: {
 				add: 'Add papers',
@@ -473,7 +492,9 @@ const translations: Record<Language, Translations> = {
 				statusQueued: 'In progress',
 				statusPending: 'Prepared',
 				statusFailed: 'Needs attention',
+				discoverResearchTools: 'Select research actions',
 				collection: 'Collection context',
+				browseCollectionPapers: 'Browse collection papers',
 				searchSources: 'Search paper Sources',
 				readSource: 'Read exact Source',
 				inspectTable: 'Inspect complete table',
@@ -499,6 +520,8 @@ const translations: Record<Language, Translations> = {
 				previewResearchScope: 'Preview relevant paper scope',
 				researchPlanDraft: 'Research plan draft',
 				researchPlanAuthoring: 'Save research plan',
+				inspectResearchPlans: 'Review saved research plans',
+				reviseResearchPlan: 'Revise saved research plan',
 				startObjectiveAnalysis: 'Research question evidence analysis',
 				inspectObjectiveAnalysis: 'Research question analysis progress',
 				objectiveQuality: 'Objective quality assessment',
@@ -2828,15 +2851,45 @@ const translations: Record<Language, Translations> = {
 		}
 	},
 	zh: {
-		agentReview: { details: '查看完整操作详情', statement: '拟议结论', question: '研究问题', reported_result: '实验结果', authoring_note: '修订理由', limitations: '适用范围与待核查项', source_excerpt: '原文依据', passage: '查看原文片段', permissions: '操作权限' },
+		agentReview: {
+			details: '查看完整操作详情',
+			statement: '拟议结论',
+			question: '研究问题',
+			reported_result: '实验结果',
+			authoring_note: '修订理由',
+			limitations: '适用范围与待核查项',
+			source_excerpt: '原文依据',
+			passage: '查看原文片段',
+			permissions: '操作权限'
+		},
 		agentPermission: {
-			title: 'Agent 操作权限', mode: '模式', read_only: '只读与建议', confirm: '逐次确认', auto: '授权自动执行',
-			loading: '加载中', actions: '仅授权当前会话与论文集合', hours: '有效时间（小时）', expires: '到期时间',
-			unsaved: '权限修改尚未应用。', selectAction: '至少选择一个动作后，才能启用自动执行。',
-			save: '应用权限', revoke: '撤销自动执行', reload: '重新加载设置',
-			create_evidence_version: '创建 Evidence 并发布分析版本', create_finding_version: '创建 Finding 并发布分析版本',
-			record_finding_feedback: '保存结论反馈', curate_finding: '保存专家修订',
-			create_research_plan: '保存研究计划', revise_research_plan: '保存计划修订'
+			title: 'Agent 操作权限',
+			mode: '模式',
+			read_only: '只读与建议',
+			confirm: '逐次确认',
+			auto: '授权自动执行',
+			loading: '加载中',
+			actions: '仅授权当前会话与论文集合',
+			hours: '有效时间（小时）',
+			expires: '到期时间',
+			unsaved: '权限修改尚未应用。',
+			selectAction: '至少选择一个动作后，才能启用自动执行。',
+			allActions: '授权全部可用写入动作',
+			automaticScope: '这里只授予所选写入动作的执行权限；读取和草稿仍会自动执行。',
+			save: '应用权限',
+			revoke: '撤销自动执行',
+			reload: '重新加载设置',
+			start_research_process: '启动文献准备',
+			create_objective_candidate: '创建研究问题候选',
+			confirm_objective: '确认研究问题',
+			start_objective_analysis: '启动证据分析',
+			create_evidence_version: '创建 Evidence 并发布分析版本',
+			create_finding_version: '创建 Finding 并发布分析版本',
+			record_finding_feedback: '保存结论反馈',
+			curate_finding: '保存专家修订',
+			publish_agent_objective_analysis: '发布 Agent 分析',
+			create_research_plan: '保存研究计划',
+			revise_research_plan: '保存计划修订'
 		},
 		brand: {
 			title: 'Lens',
@@ -3141,7 +3194,7 @@ const translations: Record<Language, Translations> = {
 				draft: '尚未发送的修改',
 				resume: '发送修改'
 			},
-				feedback: {
+			feedback: {
 				helpful: '有帮助',
 				notHelpful: '没有帮助',
 				edit: '编辑评价',
@@ -3159,22 +3212,22 @@ const translations: Record<Language, Translations> = {
 					incomplete: '回答不完整',
 					unclear: '表达不清楚',
 					other: '其他'
-					}
-				},
-				modelCall: {
-					eyebrow: '可追溯执行',
-					title: '模型实际请求',
-					close: '关闭请求详情',
-					loading: '正在读取已保存请求...',
-					unavailable: '这条历史回答没有可回看的模型请求。',
-					retry: '重试读取请求',
-					recorded: '已在发送前记录',
-					providerSucceeded: '已收到模型响应',
-					providerFailed: '模型请求失败',
-					responseInvalid: '模型响应无法解析',
-					cancelled: '请求已取消'
-				},
-				sending: '发送中...',
+				}
+			},
+			modelCall: {
+				eyebrow: '可追溯执行',
+				title: '模型实际请求',
+				close: '关闭请求详情',
+				loading: '正在读取已保存请求...',
+				unavailable: '这条历史回答没有可回看的模型请求。',
+				retry: '重试读取请求',
+				recorded: '已在发送前记录',
+				providerSucceeded: '已收到模型响应',
+				providerFailed: '模型请求失败',
+				responseInvalid: '模型响应无法解析',
+				cancelled: '请求已取消'
+			},
+			sending: '发送中...',
 			progress: {
 				starting: '正在开始研究...',
 				model: '正在规划第 {cycle} 个研究步骤...',
@@ -3196,18 +3249,7 @@ const translations: Record<Language, Translations> = {
 				sourceKind: { passage: '原文片段', table: '表格', search: '原文检索', outline: '文档章节' },
 				sourcePage: '第 {page} 页',
 				currentPaper: '当前论文',
-				searchQuery: '检索：{query}',
-				plan: {
-					title: '研究计划',
-					status: { pending: '待处理', in_progress: '进行中', completed: '已完成', blocked: '已阻塞' },
-					steps: {
-						inspect_finding: '检查已发布结论',
-						inspect_sources: '检查关联原文',
-						validate_claim: '核对结论依据',
-						draft_finding: '形成结论草案',
-						approval: '等待研究者确认'
-					}
-				}
+				searchQuery: '检索：{query}'
 			},
 			upload: {
 				add: '添加论文',
@@ -3270,7 +3312,9 @@ const translations: Record<Language, Translations> = {
 				statusQueued: '进行中',
 				statusPending: '已准备',
 				statusFailed: '需要处理',
+				discoverResearchTools: '选择研究动作',
 				collection: '集合上下文',
+				browseCollectionPapers: '浏览集合论文',
 				searchSources: '搜索论文原文',
 				readSource: '读取精确 Source',
 				inspectTable: '查看完整表格',
@@ -3296,6 +3340,8 @@ const translations: Record<Language, Translations> = {
 				previewResearchScope: '预览相关论文范围',
 				researchPlanDraft: '研究方案草稿',
 				researchPlanAuthoring: '保存研究方案',
+				inspectResearchPlans: '查看已保存的研究方案',
+				reviseResearchPlan: '修订已保存的研究方案',
 				startObjectiveAnalysis: '研究问题证据分析',
 				inspectObjectiveAnalysis: '研究问题分析进度',
 				objectiveQuality: '研究目标质量评估',

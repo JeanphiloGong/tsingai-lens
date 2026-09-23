@@ -90,8 +90,8 @@ export type ChatTree = {
 };
 
 export type ChatToolCall = {
-    decision_basis?: 'explicit' | 'scope_grant';
-    authorization_revision?: number | null;
+	decision_basis?: 'explicit' | 'scope_grant';
+	authorization_revision?: number | null;
 	tool_call_id: string;
 	session_id: string;
 	assistant_message_id: string;
@@ -218,9 +218,6 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
-	research_plan?: {
-		steps: Array<{ id: string; status: 'pending' | 'in_progress' | 'completed' | 'blocked' }>;
-	};
 };
 
 export function formatChatElapsed(elapsedMs?: number) {
@@ -283,15 +280,19 @@ export type ChatPermission = {
 };
 
 export async function fetchChatPermission(sessionId: string) {
-	return await requestJson(`${chatSessionPath(sessionId)}/permissions`) as ChatPermission;
+	return (await requestJson(`${chatSessionPath(sessionId)}/permissions`)) as ChatPermission;
 }
 
 export async function updateChatPermission(sessionId: string, permission: ChatPermission) {
-	return await requestJson(`${chatSessionPath(sessionId)}/permissions`, {
+	return (await requestJson(`${chatSessionPath(sessionId)}/permissions`, {
 		method: 'PUT',
-		body: JSON.stringify({ mode: permission.mode, actions: permission.actions,
-			expires_at: permission.expires_at, expected_revision: permission.revision })
-	}) as ChatPermission;
+		body: JSON.stringify({
+			mode: permission.mode,
+			actions: permission.actions,
+			expires_at: permission.expires_at,
+			expected_revision: permission.revision
+		})
+	})) as ChatPermission;
 }
 
 export async function branchChatMessage(

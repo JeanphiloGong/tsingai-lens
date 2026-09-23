@@ -171,6 +171,7 @@ class _RunProgress:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     unreported_model_calls: int = 0
+    requested_tool_calls: int = 0
     executed_tool_calls: int = 0
     seen_observations: set[str] = field(default_factory=set)
     consecutive_no_progress: int = 0
@@ -303,7 +304,7 @@ class _RunProgress:
         }
 
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
-              requested_count: int = 0, new_resources: int = 0,
+              new_resources: int = 0,
               termination_reason: str | None = None, final_answer: bool = False,
               retry_attempt: int | None = None, retry_reason: str | None = None,
               http_status: int | None = None, retry_delay_ms: int | None = None) -> None:
@@ -312,7 +313,8 @@ class _RunProgress:
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
             "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
             "total_tokens": self.model_tokens, "unreported_model_calls": self.unreported_model_calls,
-            "requested_tool_count": requested_count, "executed_tool_count": self.executed_tool_calls,
+            "requested_tool_count": self.requested_tool_calls,
+            "executed_tool_count": self.executed_tool_calls,
             "new_resource_reference_count": new_resources,
             "observation_digest_changed": self.consecutive_no_progress == 0,
             "elapsed_ms": round((monotonic() - self.started_at) * 1000),
@@ -320,7 +322,6 @@ class _RunProgress:
                                       if self.limits.max_tool_calls is not None else None),
             "remaining_token_budget": (max(0, self.limits.max_model_tokens - self.model_tokens)
                                        if self.limits.max_model_tokens is not None else None),
-            "research_plan": None,
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
@@ -419,6 +420,15 @@ class ResearchAgentRunner:
     ) -> AgentRunResult:
         progress = _RunProgress(self.limits, progress_callback=progress_callback,
                                 response_started_callback=response_started_callback)
+        requested_count, executed_count = self._active_turn_action_counts(previous_messages)
+        progress.requested_tool_calls = requested_count
+        progress.executed_tool_calls = executed_count
+        if not any(
+            request.tool_call_id == claimed_call.tool_call_id
+            for message in previous_messages
+            for request in message.tool_calls
+        ):
+            progress.requested_tool_calls += 1
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
         inherited_completed_writes = capability_policy.completed_write_names(messages)
@@ -582,8 +592,6 @@ class ResearchAgentRunner:
                         ),
                         tool_specs, progress, text_delta_callback,
                     )
-                    progress.trace(context, phase="model", capability_names=tool_names,
-                                   requested_count=len(turn.tool_calls))
                 except ModelResponseError as exc:
                     if exc.reason == "model_allowance_exhausted":
                         return await self._finalize_with_current_evidence(
@@ -697,6 +705,7 @@ class ResearchAgentRunner:
                 break
 
             if not turn.tool_calls:
+                progress.trace(context, phase="model", capability_names=tool_names)
                 reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
                 messages.append(self._assistant(context, turn.content, progress))
                 await self._checkpoint(checkpoint, messages, calls, results)
@@ -714,6 +723,8 @@ class ResearchAgentRunner:
                 allowed_names=set(tool_names),
                 progress=progress,
             )
+            progress.requested_tool_calls += len(requested)
+            progress.trace(context, phase="model", capability_names=tool_names)
             batch_start = len(calls)
             calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -773,7 +784,7 @@ class ResearchAgentRunner:
                 prior_no_progress + 1 if not progress_increased else 0
             )
             await self._checkpoint(checkpoint, messages, calls, results)
-            progress.trace(context, phase="tools", capability_names=tool_names, requested_count=len(requested),
+            progress.trace(context, phase="tools", capability_names=tool_names,
                            new_resources=len(progress.resource_refs) - old_resource_count,
                            termination_reason=stop_reason.value if stop_reason else None)
             if stop_reason:
@@ -1324,6 +1335,32 @@ class ResearchAgentRunner:
         if all(handler.spec.parallel_safe for _, handler in requested):
             return tuple(await gather(*(bounded(call, handler) for call, handler in requested)))
         return tuple([await bounded(call, handler) for call, handler in requested])
+
+
+    @staticmethod
+    def _active_turn_action_counts(
+        messages: tuple[ChatMessage, ...] | list[ChatMessage],
+    ) -> tuple[int, int]:
+        last_user_index = max(
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.role is ChatMessageRole.USER
+            ),
+            default=len(messages),
+        )
+        active = messages[last_user_index:]
+        requested_ids = {
+            request.tool_call_id
+            for message in active
+            for request in message.tool_calls
+        }
+        completed_ids = {
+            message.tool_result.tool_call_id
+            for message in active
+            if message.tool_result is not None
+        }
+        return len(requested_ids), len(requested_ids & completed_ids)
 
 
     @staticmethod

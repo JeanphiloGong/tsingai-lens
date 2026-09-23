@@ -31,7 +31,8 @@ user message -> bounded model decision -> capability call
 
 Read capabilities may inspect canonical collection resources. Write
 capabilities stop for exact user approval by default. Session permissions can
-deny writes or authorize enumerated actions until expiry. ChatSessionService
+deny writes or authorize any currently registered write action selected by the
+user until expiry. ChatSessionService
 claims every automatic write in the repository before resuming the same Runner;
 it never sends write calls through the parallel read executor. Revocation and
 claim share the session row lock. Chat never owns a second Objective,

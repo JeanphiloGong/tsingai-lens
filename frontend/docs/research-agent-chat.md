@@ -23,8 +23,9 @@ Collection screening stays separate from Source reading, and deriving a new
 Objective requires an explicit request. A Core write remains paused until the
 user approves the exact persisted arguments by default. The session permission
 control offers read-only, per-call confirmation, and expiring automatic grants
-for explicitly selected revision/review/plan actions. Granting Evidence or
-Finding creation includes publishing its new analysis version. The control
+for any currently registered write action selected by the researcher. A
+select-all control can authorize the complete current write-action set.
+Granting Evidence or Finding creation includes publishing its new analysis version. The control
 uses GET/PUT on the session's `/permissions` endpoint and an optimistic revision;
 conflicts require reload, never an automatic overwrite. Revoking during a turn
 blocks the next unclaimed write, not an operation already running. New sessions
@@ -580,9 +581,10 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 ### Write approval
 
 For `start_research_process`, `create_objective_candidate`,
-`confirm_objective`, `start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
-`create_finding_version`, `create_evidence_version`,
-`publish_agent_objective_analysis`, and `create_research_plan`, the page renders the exact persisted
+`confirm_objective`, `start_objective_analysis`, `record_finding_feedback`,
+`curate_finding`, `create_finding_version`, `create_evidence_version`,
+`publish_agent_objective_analysis`, `create_research_plan`, and
+`revise_research_plan`, the page renders the exact persisted
 arguments and exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
 separate Evidence-to-conclusion decision that publishes a new immutable

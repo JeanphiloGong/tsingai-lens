@@ -13,6 +13,7 @@
 	let mode: ChatPermission['mode'] = 'confirm';
 	let actions: string[] = [];
 	let hours = 1;
+	let loadedHours = 1;
 	let busy = false;
 	let error = '';
 	let disclosure: HTMLDetailsElement;
@@ -20,23 +21,46 @@
 		permission &&
 		(mode !== permission.mode ||
 			actions.length !== (permission?.actions.length ?? 0) ||
-			actions.some((action) => !(permission?.actions ?? []).includes(action)))
+			actions.some((action) => !(permission?.actions ?? []).includes(action)) ||
+			(mode === 'auto' && hours !== loadedHours))
 	);
 	$: autoSelectionValid = mode !== 'auto' || actions.length > 0;
 	const available = [
+		'start_research_process',
+		'create_objective_candidate',
+		'confirm_objective',
+		'start_objective_analysis',
 		'create_evidence_version',
 		'create_finding_version',
 		'record_finding_feedback',
 		'curate_finding',
+		'publish_agent_objective_analysis',
 		'create_research_plan',
 		'revise_research_plan'
 	];
+	$: allActionsSelected = available.every((action) => actions.includes(action));
+	function hoursUntil(expiresAt: string | null) {
+		if (!expiresAt) return 1;
+		const remaining = (Date.parse(expiresAt) - Date.now()) / 3600000;
+		if (!Number.isFinite(remaining) || remaining <= 0) return 1;
+		return Math.min(24, Math.max(1, Math.ceil(remaining)));
+	}
+	function hasLiveExpiry(expiresAt: string | null) {
+		if (!expiresAt) return false;
+		const timestamp = Date.parse(expiresAt);
+		return Number.isFinite(timestamp) && timestamp > Date.now();
+	}
+	function applyPermission(next: ChatPermission) {
+		permission = next;
+		mode = next.mode;
+		actions = [...next.actions];
+		hours = hoursUntil(next.expires_at);
+		loadedHours = hours;
+	}
 	async function load() {
 		busy = true;
 		try {
-			permission = await fetchChatPermission(sessionId);
-			mode = permission.mode;
-			actions = [...permission.actions];
+			applyPermission(await fetchChatPermission(sessionId));
 			error = '';
 		} catch (cause) {
 			error = errorMessage(cause);
@@ -50,15 +74,21 @@
 		busy = true;
 		try {
 			const nextMode = revoke ? 'confirm' : mode;
-			permission = await updateChatPermission(sessionId, {
+			const expiresAt =
+				nextMode !== 'auto'
+					? null
+					: permission.mode === 'auto' &&
+						  hasLiveExpiry(permission.expires_at) &&
+						  hours === loadedHours
+						? permission.expires_at
+						: new Date(Date.now() + hours * 3600000).toISOString();
+			const updated = await updateChatPermission(sessionId, {
 				...permission,
 				mode: nextMode,
 				actions: nextMode === 'auto' ? actions : [],
-				expires_at:
-					nextMode === 'auto' ? new Date(Date.now() + hours * 3600000).toISOString() : null
+				expires_at: expiresAt
 			});
-			mode = permission.mode;
-			actions = [...permission.actions];
+			applyPermission(updated);
 			error = '';
 		} catch (cause) {
 			error = errorMessage(cause);
@@ -99,6 +129,13 @@
 				{#if mode === 'auto'}
 					<fieldset disabled={busy}>
 						<legend>{$t('agentPermission.actions')}</legend>
+						<label class="select-all"
+							><input
+								type="checkbox"
+								checked={allActionsSelected}
+								on:change={() => (actions = allActionsSelected ? [] : [...available])}
+							/>{$t('agentPermission.allActions')}</label
+						>
 						{#each available as action (action)}
 							<label
 								><input type="checkbox" bind:group={actions} value={action} />{$t(
@@ -114,6 +151,7 @@
 								bind:value={hours}
 							/></label
 						>
+						<p class="permission-hint">{$t('agentPermission.automaticScope')}</p>
 					</fieldset>
 					{#if !autoSelectionValid}<p class="permission-hint" role="status">
 							{$t('agentPermission.selectAction')}
@@ -205,6 +243,11 @@
 	fieldset {
 		border: 0;
 		padding: 0;
+	}
+	.select-all {
+		padding-bottom: 8px;
+		border-bottom: 1px solid var(--border-default);
+		font-weight: 700;
 	}
 	select,
 	input[type='number'] {

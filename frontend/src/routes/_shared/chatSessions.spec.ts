@@ -116,6 +116,12 @@ describe('chat progress presentation helpers', () => {
 		expect(getChatProgressActions(progress)).toEqual({ completed: 8, total: 12 });
 	});
 
+	it('treats requested and executed action counts as cumulative turn totals', () => {
+		expect(
+			getChatProgressActions({ phase: 'tools', requested_tool_count: 3, executed_tool_count: 3 })
+		).toEqual({ completed: 3, total: 3 });
+	});
+
 	it('does not render an action count when the stream has no usable total', () => {
 		expect(getChatProgressActions({ phase: 'model', executed_tool_count: 2 })).toBeNull();
 		expect(

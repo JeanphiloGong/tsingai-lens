@@ -14,6 +14,7 @@ from application.chat import (
     ResearchAgentRunner,
     ToolSpec,
 )
+from application.chat.agent_runner import AgentRunLimits, _RunProgress
 from domain.chat import ToolRisk
 
 
@@ -72,3 +73,19 @@ async def test_cycle_trace_records_the_actual_terminal_outcome(ending, caplog) -
     assert entries[-1]["executed_tool_count"] == 0
     assert "private-provider-detail" not in caplog.text
     assert "private-request-argument" not in caplog.text
+
+
+def test_progress_trace_reports_cumulative_requested_actions_without_dead_plan_state() -> None:
+    events: list[dict[str, object]] = []
+    progress = _RunProgress(AgentRunLimits(), progress_callback=events.append)
+    context = AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1")
+
+    progress.requested_tool_calls += 2
+    progress.trace(context, phase="tools")
+    progress.executed_tool_calls = 1
+    progress.requested_tool_calls += 1
+    progress.trace(context, phase="tools")
+
+    assert [event["requested_tool_count"] for event in events] == [2, 3]
+    assert [event["executed_tool_count"] for event in events] == [0, 1]
+    assert all("research_plan" not in event for event in events)

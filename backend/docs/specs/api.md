@@ -150,12 +150,14 @@ Session operation permissions are exposed by authenticated
 to `confirm`; revision conflicts and invalid grants return `409`, inaccessible
 sessions return `404`. The model cannot call this settings endpoint.
 
-Automatic grants cover only the six enumerated revision/review/plan actions in
-`domain/chat/permissions.py`. Evidence and Finding version creation publish a
-new analysis version; there is no separate save-only permission. Other writes
-still require exact confirmation. Calls record `decision_basis` (`explicit` or
-`scope_grant`) and `authorization_revision`. Existing approval descriptions in
-this document describe the default confirm mode.
+Automatic grants can cover every currently registered write action listed in
+`domain/chat/permissions.py`, including research-process and Objective actions,
+Evidence/Finding publication, review annotations, and research-plan changes.
+Evidence and Finding version creation publish a new analysis version; there is no
+separate save-only permission. The user selects the exact actions and expiry in
+the session permission control, while the default mode still requires exact
+confirmation. Calls record `decision_basis` (`explicit` or `scope_grant`) and
+`authorization_revision`.
 
 Revocation and acquiring execution authority lock the same session row. A
 revocation completed first prevents a new claim; an already claimed operation

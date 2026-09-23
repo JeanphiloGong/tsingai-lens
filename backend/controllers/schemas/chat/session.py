@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain.chat import ToolPermissionMode
+from domain.chat.permissions import AUTO_ACTIONS
 
 
 class ChatSessionCreateRequest(BaseModel):
@@ -19,7 +20,7 @@ class ChatSessionCreateRequest(BaseModel):
 class ChatPermissionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["read_only", "confirm", "auto"]
-    actions: list[str] = Field(default_factory=list, max_length=6)
+    actions: list[str] = Field(default_factory=list, max_length=len(AUTO_ACTIONS))
     expires_at: str | None = None
     expected_revision: int = Field(ge=0)
 

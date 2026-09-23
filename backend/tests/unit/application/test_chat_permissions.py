@@ -2,9 +2,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner, ToolSpec
+from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner, ToolSpec, intent_policy
 from application.chat.session_service import ChatSessionService
 from domain.chat import ToolRisk
+from domain.chat.permissions import AUTO_ACTIONS, change_permission, permits_automatic
 from tests.support.chat_repository import MemoryChatRepository
 from tests.unit.application.test_chat_session_service import _CollectionService, _WriteCapability, _Question, _SourceArtifactRepository
 from tests.unit.application.test_research_agent_runner import _Model
@@ -137,3 +138,31 @@ async def test_permission_controller_enforces_owner_and_revision():
     assert forbidden.value.status_code == 404
     fresh = await service.create_session(collection_id="col-1", user_id="user-1")
     assert (await get_chat_permission(fresh.session_id, _request(service)))["mode"] == "confirm"
+
+
+def test_automatic_permission_covers_every_registered_write_action() -> None:
+    expected = {
+        "start_research_process",
+        "create_objective_candidate",
+        "confirm_objective",
+        "start_objective_analysis",
+        "record_finding_feedback",
+        "curate_finding",
+        "create_finding_version",
+        "create_evidence_version",
+        "publish_agent_objective_analysis",
+        "create_research_plan",
+        "revise_research_plan",
+    }
+    assert AUTO_ACTIONS == intent_policy.WRITE_CAPABILITIES == expected
+    permission = change_permission(
+        None,
+        mode="auto",
+        actions=sorted(expected),
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        expected_revision=0,
+    )
+    assert all(
+        permits_automatic(permission, action, now=datetime.now(timezone.utc).isoformat())
+        for action in expected
+    )

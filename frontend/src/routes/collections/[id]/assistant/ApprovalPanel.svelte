@@ -6,8 +6,17 @@
 	export let call: ChatToolCall;
 	export let deciding = false;
 	export let onDecide: (decision: 'approved' | 'rejected') => void;
-	const reviewFields = ['statement', 'question', 'reported_result', 'authoring_note', 'limitations', 'source_excerpt'];
-	$: review = reviewFields.filter((key) => call.arguments[key] != null && formatValue(call.arguments[key]) !== '');
+	const reviewFields = [
+		'statement',
+		'question',
+		'reported_result',
+		'authoring_note',
+		'limitations',
+		'source_excerpt'
+	];
+	$: review = reviewFields.filter(
+		(key) => call.arguments[key] != null && formatValue(call.arguments[key]) !== ''
+	);
 	function approvalArguments(call: ChatToolCall) {
 		return Object.entries(call.arguments).filter(([key]) => !review.includes(key));
 	}
@@ -92,7 +101,7 @@
 	</header>
 	{#if review.length}
 		<div class="review-content">
-			{#each review as key}
+			{#each review as key (key)}
 				<div class:source={key === 'source_excerpt'}>
 					<h4>{$t(`agentReview.${key}`)}</h4>
 					<p>{formatValue(call.arguments[key])}</p>
@@ -102,15 +111,15 @@
 	{/if}
 	{#if approvalArguments(call).length}
 		<details class="exact-arguments" open={!review.length}>
-		<summary><ChevronDown size={14} />{$t('agentReview.details')}</summary>
-		<dl>
-			{#each approvalArguments(call) as [key, value] (key)}
-				<div>
-					<dt>{key.replaceAll('_', ' ')}</dt>
-					<dd>{formatValue(value)}</dd>
-				</div>
-			{/each}
-		</dl>
+			<summary><ChevronDown size={14} />{$t('agentReview.details')}</summary>
+			<dl>
+				{#each approvalArguments(call) as [key, value] (key)}
+					<div>
+						<dt>{key.replaceAll('_', ' ')}</dt>
+						<dd>{formatValue(value)}</dd>
+					</div>
+				{/each}
+			</dl>
 		</details>
 	{/if}
 	<div class="approval-actions">
@@ -124,15 +133,52 @@
 </section>
 
 <style>
-	.approval h3 { display: flex; align-items: center; gap: 8px; }
-	.review-content { display: grid; gap: 16px; margin: 20px 0; }
-	.review-content p { margin-top: 6px; font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
-	.review-content h4 { margin: 0; color: var(--text-secondary); font-weight: 500; }
-	.review-content .source { border-left: 2px solid var(--border-strong); padding-left: 14px; color: var(--text-secondary); }
-	.exact-arguments { margin-top: 16px; }
-	.exact-arguments summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--text-secondary); list-style: none; }
-	.exact-arguments summary::-webkit-details-marker { display: none; }
-	.exact-arguments summary:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 4px; }
+	.approval h3 {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.review-content {
+		display: grid;
+		gap: 16px;
+		margin: 20px 0;
+	}
+	.review-content p {
+		margin-top: 6px;
+		font-size: 14px;
+		line-height: 1.7;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.review-content h4 {
+		margin: 0;
+		color: var(--text-secondary);
+		font-weight: 500;
+	}
+	.review-content .source {
+		border-left: 2px solid var(--border-strong);
+		padding-left: 14px;
+		color: var(--text-secondary);
+	}
+	.exact-arguments {
+		margin-top: 16px;
+	}
+	.exact-arguments summary {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		cursor: pointer;
+		font-size: 12px;
+		color: var(--text-secondary);
+		list-style: none;
+	}
+	.exact-arguments summary::-webkit-details-marker {
+		display: none;
+	}
+	.exact-arguments summary:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 4px;
+	}
 	.approve:hover:not(:disabled) {
 		border-color: var(--brand-primary-hover);
 		background: var(--brand-primary-hover);
@@ -279,7 +325,11 @@
 			grid-template-columns: 1fr;
 			flex-direction: column;
 		}
-		.approval-actions { flex-wrap: wrap; }
-		.approval-header-meta { justify-items: start; }
+		.approval-actions {
+			flex-wrap: wrap;
+		}
+		.approval-header-meta {
+			justify-items: start;
+		}
 	}
 </style>

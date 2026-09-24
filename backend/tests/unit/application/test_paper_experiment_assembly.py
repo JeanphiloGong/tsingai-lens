@@ -151,6 +151,33 @@ def test_assembly_does_not_bind_hardness_conditions_to_tensile_result() -> None:
     assert experiment.status == "incomplete"
 
 
+def test_different_outcomes_from_one_source_share_the_parent_experiment() -> None:
+    elongation = _observation("obs-elongation")
+    hardness = replace(
+        elongation,
+        observation_id="obs-hardness",
+        reported_result=replace(
+            elongation.reported_result,
+            outcome="hardness",
+            value=320,
+            unit="HV",
+            result_text="Hardness was 320 HV.",
+        ),
+    )
+
+    experiments = assemble_paper_experiments(
+        collection_id="col-1",
+        document_id="doc-1",
+        source_facts=(elongation, hardness),
+    )
+
+    assert len(experiments) == 1
+    assert {item.property_normalized for item in experiments[0].measurements} == {
+        "elongation",
+        "hardness",
+    }
+
+
 def test_derived_comparison_is_not_another_measured_result() -> None:
     baseline = _observation("obs-np")
     target = _observation("obs-p150")

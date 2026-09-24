@@ -50,31 +50,74 @@ class ConvertedPaperExperiment:
 
 
 def stable_experiment_id(experiment: LegacyPaperExperiment) -> str:
-    """Derive an Objective-independent identity from paper Source anchors."""
+    """Derive an Objective-independent identity from paper Source anchors.
+
+    Source coordinates alone are insufficient when one table contains multiple
+    explicitly labelled result series. Include the source-grounded context and
+    comparison shape, while omitting Objective and observation identities so a
+    reread can still resolve to the same paper-owned experiment.
+    """
 
     anchors = []
     for observation in experiment.source_observations:
+        context = observation.scientific_context.to_record()
+        canonical_context = {
+            section: sorted(
+                values,
+                key=lambda value: json.dumps(
+                    value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+                ),
+            )
+            for section, values in context.items()
+        }
         anchors.append(
             {
                 "document_id": observation.document_id,
                 "source_kind": observation.source_kind,
                 "source_ref": observation.source_ref,
-                "outcome": (
-                    observation.reported_result.outcome
-                    if observation.reported_result is not None
+                "observation_role": observation.observation_role,
+                "context": canonical_context,
+                "changed_variables": sorted(
+                    (item.to_record() for item in observation.changed_variables),
+                    key=lambda value: json.dumps(
+                        value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+                    ),
+                ),
+                "comparison": (
+                    observation.comparison.to_record()
+                    if observation.comparison is not None
                     else None
                 ),
             }
         )
     if not anchors:
         anchors = [
-            {"document_id": experiment.document_id, "source_id": value}
+            {
+                "document_id": experiment.document_id,
+                "study_id": experiment.study_id,
+                "source_id": value,
+            }
             for value in experiment.source_observation_ids
         ]
     if not anchors:
-        anchors = [{"document_id": experiment.document_id, "fallback": True}]
+        anchors = [
+            {
+                "document_id": experiment.document_id,
+                "study_id": experiment.study_id,
+                "fallback": True,
+            }
+        ]
+    canonical_anchors = {
+        json.dumps(
+            anchor,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ): anchor
+        for anchor in anchors
+    }
     identity = json.dumps(
-        sorted(anchors, key=lambda item: json.dumps(item, sort_keys=True)),
+        [canonical_anchors[key] for key in sorted(canonical_anchors)],
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),

@@ -187,8 +187,11 @@ def assemble_paper_experiments(
 
 def _experiment_series_key(observation: SourceObservation) -> tuple[Any, ...]:
     context = observation.scientific_context
-    # Scope by Source and outcome until the paper establishes a shared study.
-    # Non-identity sample attributes (state, orientation, treatment) stay boundaries.
+    # Scope by Source and explicit context until the paper establishes a shared
+    # study. A different outcome is another measurement in the same study, not
+    # permission to create a second experiment aggregate.
+    # Non-identity sample attributes (state, orientation, treatment) stay
+    # boundaries.
     fixed = tuple(
         sorted(
             (section, item.name, str(item.value), item.unit or "")
@@ -207,7 +210,6 @@ def _experiment_series_key(observation: SourceObservation) -> tuple[Any, ...]:
         observation.objective_id,
         observation.source_kind,
         observation.source_ref,
-        observation.reported_result.outcome if observation.reported_result else None,
         fixed,
     )
 

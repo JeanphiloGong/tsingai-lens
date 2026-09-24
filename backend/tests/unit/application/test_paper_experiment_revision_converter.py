@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from application.core.objectives.analysis.paper_experiment import (
     assemble_paper_experiment,
+    assemble_paper_experiments,
 )
 from application.core.objectives.analysis.paper_experiment_revision_converter import (
     convert_paper_experiment,
@@ -168,6 +169,49 @@ def test_identity_does_not_change_when_only_objective_context_changes() -> None:
     )
 
     assert stable_experiment_id(first_experiment) == stable_experiment_id(other_experiment)
+
+
+def test_identity_distinguishes_explicit_result_series_from_one_source() -> None:
+    built = _observation("built", value=72, label="as-built")
+    fabricated = _observation("fabricated", value=82, label="as-fabricated")
+    experiments = assemble_paper_experiments(
+        collection_id="collection-1",
+        document_id="paper-1",
+        source_facts=(built, fabricated),
+    )
+
+    assert len(experiments) == 2
+    assert len({stable_experiment_id(item) for item in experiments}) == 2
+
+
+def test_identity_does_not_change_when_same_series_gains_an_outcome() -> None:
+    elongation = _observation("elongation", value=72, label="as-built")
+    hardness = SourceObservation.from_mapping(
+        {
+            **elongation.to_record(),
+            "observation_id": "hardness",
+            "source_excerpt": "as-built: hardness 320 HV",
+            "reported_result": {
+                "outcome": "hardness",
+                "value": 320,
+                "unit": "HV",
+                "direction": "unknown",
+                "result_text": "as-built: hardness 320 HV",
+            },
+        }
+    )
+    initial = assemble_paper_experiment(
+        collection_id="collection-1",
+        document_id="paper-1",
+        source_facts=(elongation,),
+    )
+    enriched = assemble_paper_experiment(
+        collection_id="collection-1",
+        document_id="paper-1",
+        source_facts=(elongation, hardness),
+    )
+
+    assert stable_experiment_id(initial) == stable_experiment_id(enriched)
 
 
 def test_conversion_keeps_missing_bindings_as_partial_revision() -> None:

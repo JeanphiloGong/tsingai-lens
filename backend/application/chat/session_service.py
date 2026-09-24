@@ -513,9 +513,7 @@ class ChatSessionService:
         )
         saved = await self.repository.save_feedback(feedback)
         if self.analysis_job_repository is not None:
-            idempotency_key = ":".join(
-                (saved.feedback_id, saved.updated_at, saved.response_digest)
-            )
+            idempotency_key = saved.analysis_version_key
             try:
                 await self.analysis_job_repository.enqueue_feedback_analysis(
                     feedback_id=saved.feedback_id,

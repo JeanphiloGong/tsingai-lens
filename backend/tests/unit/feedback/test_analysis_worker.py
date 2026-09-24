@@ -82,11 +82,14 @@ class _Jobs:
 
 
 class _Cases:
-    def __init__(self):
+    def __init__(self, *, fail_on_save: bool = False):
         self.results = []
         self.cases = []
+        self.fail_on_save = fail_on_save
 
     async def save_analysis_result(self, result):
+        if self.fail_on_save:
+            raise RuntimeError("database unavailable")
         self.results.append(result)
         return result
 
@@ -95,14 +98,14 @@ class _Cases:
         return self.cases[-1]
 
 
-def _job(feedback_id: str) -> AnalysisJob:
+def _job(feedback_id: str, *, idempotency_key: str | None = None) -> AnalysisJob:
     return AnalysisJob(
         job_id="job-1",
         job_type="feedback_analysis",
         payload_version=1,
         payload={"feedback_id": feedback_id},
         status="pending",
-        idempotency_key="feedback-version-1",
+        idempotency_key=idempotency_key or "feedback-version-1",
         available_at="2026-09-24T00:00:00+00:00",
         created_at="2026-09-24T00:00:00+00:00",
         updated_at="2026-09-24T00:00:00+00:00",
@@ -121,7 +124,7 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
         now="2026-09-24T00:00:03+00:00",
     )
     chat.feedback = feedback
-    jobs = _Jobs(_job(feedback.feedback_id))
+    jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases()
     before = (chat.question, chat.answer)
     result = await FeedbackAnalysisWorker(
@@ -151,6 +154,57 @@ async def test_worker_cancels_withdrawn_feedback_without_case() -> None:
     assert jobs.finished == ("cancelled", "feedback_withdrawn")
     assert cases.results == []
     assert cases.cases == []
+
+
+async def test_worker_cancels_a_superseded_feedback_version() -> None:
+    chat = _Chat(feedback=None)
+    feedback = ChatMessageFeedback.for_answer(
+        message=chat.answer,
+        feedback_id="feedback-1",
+        user_id="user-1",
+        rating="not_helpful",
+        reason="incorrect",
+        comment="The caption contains the missing information.",
+        now="2026-09-24T00:00:03+00:00",
+    )
+    chat.feedback = feedback
+    jobs = _Jobs(_job(feedback.feedback_id, idempotency_key="older-version"))
+    cases = _Cases()
+
+    result = await FeedbackAnalysisWorker(
+        job_repository=jobs,
+        case_repository=cases,
+        handler=FeedbackAnalysisHandler(chat_repository=chat),
+    ).run_once()
+
+    assert result.status == "cancelled"
+    assert jobs.finished == ("cancelled", "feedback_version_superseded")
+    assert cases.results == []
+
+
+async def test_worker_marks_persistence_failure_as_failed() -> None:
+    chat = _Chat(feedback=None)
+    feedback = ChatMessageFeedback.for_answer(
+        message=chat.answer,
+        feedback_id="feedback-1",
+        user_id="user-1",
+        rating="not_helpful",
+        reason="incorrect",
+        comment="The caption contains the missing information.",
+        now="2026-09-24T00:00:03+00:00",
+    )
+    chat.feedback = feedback
+    jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
+    cases = _Cases(fail_on_save=True)
+
+    result = await FeedbackAnalysisWorker(
+        job_repository=jobs,
+        case_repository=cases,
+        handler=FeedbackAnalysisHandler(chat_repository=chat),
+    ).run_once()
+
+    assert result.status == "failed"
+    assert jobs.finished == ("failed", "feedback_analysis_persistence_failed")
 
 
 async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:

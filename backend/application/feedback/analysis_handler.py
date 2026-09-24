@@ -19,6 +19,10 @@ class AnalysisInputError(ValueError):
     """The feedback version cannot be analysed without inventing context."""
 
 
+class FeedbackVersionSupersededError(AnalysisInputError):
+    """A newer persisted feedback version superseded this job."""
+
+
 @dataclass(frozen=True)
 class FeedbackAnalysisDraft:
     problem_type: FeedbackProblemType
@@ -105,6 +109,8 @@ class FeedbackAnalysisHandler:
         feedback = await self.chat_repository.read_feedback_by_id(feedback_id)
         if feedback is None:
             raise AnalysisInputError("feedback_withdrawn")
+        if job.idempotency_key != feedback.analysis_version_key:
+            raise FeedbackVersionSupersededError("feedback_version_superseded")
         session = await self.chat_repository.read_session(feedback.session_id)
         answer = await self.chat_repository.read_message(feedback.message_id)
         if session is None or answer is None or answer.session_id != feedback.session_id:
@@ -120,6 +126,13 @@ class FeedbackAnalysisHandler:
             messages=messages,
             coverage=coverage,
         )
+        # The engine may be slow enough for the user to edit the feedback while
+        # it runs. Re-read the mutable source before creating a durable result.
+        current_feedback = await self.chat_repository.read_feedback_by_id(feedback_id)
+        if current_feedback is None:
+            raise AnalysisInputError("feedback_withdrawn")
+        if current_feedback.analysis_version_key != job.idempotency_key:
+            raise FeedbackVersionSupersededError("feedback_version_superseded")
         input_payload = {
             "feedback": {
                 "feedback_id": feedback.feedback_id,
@@ -145,8 +158,10 @@ class FeedbackAnalysisHandler:
             problem_type=draft.problem_type,
             confidence=draft.confidence,
             related_message_ids=tuple(
-                message.message_id for message in messages
-                if message.message_id in {feedback.message_id, answer.message_id}
+                message.message_id
+                for message in messages
+                if message.created_at <= answer.created_at
+                and message.role in {ChatMessageRole.USER, ChatMessageRole.ASSISTANT}
             ),
             suggested_evidence=draft.suggested_evidence,
             suggested_target=draft.suggested_target,
@@ -207,6 +222,7 @@ def _coverage_from_messages(
 
 __all__ = [
     "AnalysisInputError",
+    "FeedbackVersionSupersededError",
     "FeedbackAnalysisDraft",
     "FeedbackAnalysisEngine",
     "FeedbackAnalysisHandler",

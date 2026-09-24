@@ -265,8 +265,10 @@ class _RevisionRepository:
     def __init__(self):
         self.records: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
         self.next_id = 1
+        self.transaction_handles: list[object | None] = []
 
-    async def read_latest_revision(self, experiment_id):
+    async def read_latest_revision(self, experiment_id, *, transaction=None):
+        self.transaction_handles.append(transaction)
         values = [
             record
             for (identity, _), record in self.records.items()
@@ -274,7 +276,10 @@ class _RevisionRepository:
         ]
         return max(values, key=lambda item: item.revision.experiment_version) if values else None
 
-    async def add_revision(self, revision, *, created_by=None, created_at=None):
+    async def add_revision(
+        self, revision, *, created_by=None, created_at=None, transaction=None
+    ):
+        self.transaction_handles.append(transaction)
         key = (revision.experiment_id, revision.experiment_version)
         existing = self.records.get(key)
         if existing is not None:
@@ -295,15 +300,20 @@ class _RevisionRepository:
 class _SelectionRepository:
     def __init__(self):
         self.records: dict[str, ObjectiveExperimentSelection] = {}
+        self.transaction_handles: list[object | None] = []
 
-    async def add_selection(self, collection_id, selection, *, revision_id):
+    async def add_selection(
+        self, collection_id, selection, *, revision_id, transaction=None
+    ):
+        self.transaction_handles.append(transaction)
         existing = self.records.get(selection.selection_id)
         if existing is not None and existing != selection:
             raise ValueError("selection conflict")
         self.records[selection.selection_id] = selection
         return selection
 
-    async def read_selection(self, collection_id, selection_id):
+    async def read_selection(self, collection_id, selection_id, *, transaction=None):
+        self.transaction_handles.append(transaction)
         return self.records.get(selection_id)
 
     async def list_selections(self, collection_id, objective_id, analysis_version):
@@ -317,15 +327,18 @@ class _SelectionRepository:
 class _GroupRepository:
     def __init__(self):
         self.records: dict[str, ComparisonGroup] = {}
+        self.transaction_handles: list[object | None] = []
 
-    async def add_group(self, collection_id, group):
+    async def add_group(self, collection_id, group, *, transaction=None):
+        self.transaction_handles.append(transaction)
         existing = self.records.get(group.group_id)
         if existing is not None and existing != group:
             raise ValueError("group conflict")
         self.records[group.group_id] = group
         return group
 
-    async def read_group(self, collection_id, group_id):
+    async def read_group(self, collection_id, group_id, *, transaction=None):
+        self.transaction_handles.append(transaction)
         return self.records.get(group_id)
 
     async def list_groups(self, collection_id, objective_id, analysis_version):
@@ -339,8 +352,10 @@ class _GroupRepository:
 class _FindingRepository:
     def __init__(self):
         self.records: dict[str, Finding] = {}
+        self.transaction_handles: list[object | None] = []
 
-    async def add_finding(self, finding):
+    async def add_finding(self, finding, *, transaction=None):
+        self.transaction_handles.append(transaction)
         existing = self.records.get(finding.finding_id)
         if existing is not None:
             if existing == finding:
@@ -403,6 +418,29 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     assert len(findings.records) == 1
     assert findings.records["finding-1"].selection_ids
     assert findings.records["finding-1"].paper_contributions == ()
+
+
+async def test_writer_passes_one_transaction_to_every_graph_repository():
+    writer, revisions, selections, groups, findings = _writer()
+    transaction = object()
+
+    await writer.write(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiments=(_experiment("paper-a", 72, "NP"),),
+        findings=(_finding(documents=("paper-a",), evidence_ids=("paper-a-result",)),),
+        transaction=transaction,
+    )
+
+    handles = (
+        revisions.transaction_handles
+        + selections.transaction_handles
+        + groups.transaction_handles
+        + findings.transaction_handles
+    )
+    assert handles
+    assert all(handle is transaction for handle in handles)
 
 
 async def test_writer_can_fix_experiment_selections_before_finding_synthesis():

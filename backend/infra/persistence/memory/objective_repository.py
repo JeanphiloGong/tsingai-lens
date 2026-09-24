@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from application.repositories.objective_repository import StoredObjective
+from application.repositories.transaction import RepositoryTransaction
 
 from domain.core import (
     Finding,
@@ -465,6 +466,7 @@ class MemoryObjectiveRepository:
         contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id, analysis_version)
         analysis = self._require_analysis(*key)

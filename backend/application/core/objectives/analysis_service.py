@@ -10,7 +10,8 @@ from asyncio import (
     run_coroutine_threadsafe,
     to_thread,
 )
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import replace
 import logging
 from time import perf_counter
@@ -44,6 +45,10 @@ from application.core.objectives.objective_analysis_service import (
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from domain.core import ObjectiveAnalysis, ResearchObjective
 from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.transaction import (
+    RepositoryTransaction,
+    RepositoryTransactionFactory,
+)
 from infra.llm.usage import capture_llm_usage
 
 
@@ -54,6 +59,19 @@ _ANALYSIS_MAX_CONCURRENCY = 4
 
 
 _EVIDENCE_REVIEW_GAP_LIMIT = 200
+
+
+@asynccontextmanager
+async def _analysis_transaction(
+    factory: RepositoryTransactionFactory | None,
+) -> AsyncIterator[RepositoryTransaction | None]:
+    """Keep experiment records and Objective publication in one write scope."""
+
+    if factory is None:
+        yield None
+        return
+    async with factory.begin() as transaction:
+        yield transaction
 
 
 def _evidence_review_summary(
@@ -195,6 +213,8 @@ class ObjectiveAnalysisService:
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
         experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
+        experiment_analysis_transaction_factory: RepositoryTransactionFactory
+        | None = None,
         experiment_compatibility_projection: ExperimentCompatibilityProjection
         | None = None,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
@@ -207,6 +227,9 @@ class ObjectiveAnalysisService:
         self.objective_input_service = objective_input_service
         self.document_profile_service = document_profile_service
         self.experiment_analysis_writer = experiment_analysis_writer
+        self.experiment_analysis_transaction_factory = (
+            experiment_analysis_transaction_factory
+        )
         self.experiment_compatibility_projection = experiment_compatibility_projection
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
@@ -770,21 +793,36 @@ class ObjectiveAnalysisService:
                 raise RuntimeError(
                     "experiment analysis writer does not implement native publication"
                 )
-            native_result = await native_writer(
-                collection_id=collection_id,
-                objective=objective,
-                analysis=claimed,
-                experiments=artifacts.experiments,
-            )
-            abstention_reason, abstention_note = _experiment_abstention(native_result)
-            objective, completed = await self.objective_repository.publish_experiment_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-                contributions=artifacts.contributions,
-                abstention_reason=abstention_reason,
-                abstention_note=abstention_note,
-            )
+            async with _analysis_transaction(
+                self.experiment_analysis_transaction_factory
+            ) as transaction:
+                writer_kwargs: dict[str, Any] = {
+                    "collection_id": collection_id,
+                    "objective": objective,
+                    "analysis": claimed,
+                    "experiments": artifacts.experiments,
+                }
+                if transaction is not None:
+                    writer_kwargs["transaction"] = transaction
+                native_result = await native_writer(**writer_kwargs)
+                abstention_reason, abstention_note = _experiment_abstention(
+                    native_result
+                )
+                publish_kwargs: dict[str, Any] = {
+                    "contributions": artifacts.contributions,
+                    "abstention_reason": abstention_reason,
+                    "abstention_note": abstention_note,
+                }
+                if transaction is not None:
+                    publish_kwargs["transaction"] = transaction
+                objective, completed = (
+                    await self.objective_repository.publish_experiment_analysis(
+                        collection_id,
+                        objective_id,
+                        analysis_version,
+                        **publish_kwargs,
+                    )
+                )
             return await self._result(collection_id, objective.objective_id, analysis=completed)
         except Exception as exc:  # noqa: BLE001
             record_analysis_failure(

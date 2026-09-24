@@ -11,6 +11,7 @@ from application.repositories.experiment_finding_repository import (
 from application.repositories.objective_experiment_selection_repository import (
     ObjectiveExperimentSelectionRepository,
 )
+from application.repositories.transaction import RepositoryTransaction
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
@@ -36,7 +37,12 @@ class ExperimentFindingPublisher:
         self.group_repository = group_repository
         self.finding_repository = finding_repository
 
-    async def publish(self, finding: Finding) -> PublishedExperimentFinding:
+    async def publish(
+        self,
+        finding: Finding,
+        *,
+        transaction: RepositoryTransaction | None = None,
+    ) -> PublishedExperimentFinding:
         if finding.paper_contributions:
             raise ValueError("experiment-backed Finding cannot use legacy evidence")
         if not finding.selection_ids:
@@ -44,10 +50,17 @@ class ExperimentFindingPublisher:
 
         selections: list[ObjectiveExperimentSelection] = []
         for selection_id in finding.selection_ids:
-            selection = await self.selection_repository.read_selection(
-                finding.collection_id,
-                selection_id,
-            )
+            if transaction is None:
+                selection = await self.selection_repository.read_selection(
+                    finding.collection_id,
+                    selection_id,
+                )
+            else:
+                selection = await self.selection_repository.read_selection(
+                    finding.collection_id,
+                    selection_id,
+                    transaction=transaction,
+                )
             if selection is None:
                 raise ValueError(f"unknown experiment selection: {selection_id}")
             if (
@@ -60,10 +73,17 @@ class ExperimentFindingPublisher:
 
         groups: list[ComparisonGroup] = []
         for group_id in finding.comparison_group_ids:
-            group = await self.group_repository.read_group(
-                finding.collection_id,
-                group_id,
-            )
+            if transaction is None:
+                group = await self.group_repository.read_group(
+                    finding.collection_id,
+                    group_id,
+                )
+            else:
+                group = await self.group_repository.read_group(
+                    finding.collection_id,
+                    group_id,
+                    transaction=transaction,
+                )
             if group is None:
                 raise ValueError(f"unknown comparison group: {group_id}")
             if (
@@ -85,7 +105,13 @@ class ExperimentFindingPublisher:
         if len(experiment_ids) > 1 and finding.synthesis_status == "single_study":
             raise ValueError("multiple experiments cannot use single_study status")
 
-        stored = await self.finding_repository.add_finding(finding)
+        if transaction is None:
+            stored = await self.finding_repository.add_finding(finding)
+        else:
+            stored = await self.finding_repository.add_finding(
+                finding,
+                transaction=transaction,
+            )
         return PublishedExperimentFinding(
             finding=stored,
             selections=tuple(selections),

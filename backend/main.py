@@ -135,6 +135,7 @@ from application.repositories.objective_experiment_selection_repository import (
 )
 from application.repositories.comparison_group_repository import ComparisonGroupRepository
 from application.repositories.experiment_finding_repository import ExperimentFindingRepository
+from application.repositories.transaction import RepositoryTransactionFactory
 from infra.llm.chat_model import OpenAIChatModel
 from infra.persistence.database import (
     DatabaseSettings,
@@ -180,6 +181,9 @@ from infra.persistence.postgres.comparison_group_repository import (
 )
 from infra.persistence.postgres.experiment_finding_repository import (
     PostgresExperimentFindingRepository,
+)
+from infra.persistence.postgres.experiment_analysis_transaction import (
+    PostgresExperimentAnalysisTransactionFactory,
 )
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
@@ -280,6 +284,7 @@ class ApplicationOverrides:
     comparison_group_repository: ComparisonGroupRepository | None = None
     experiment_finding_repository: ExperimentFindingRepository | None = None
     experiment_analysis_writer: ExperimentAnalysisWriter | None = None
+    experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None
     experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None
 
     def requires_database(self) -> bool:
@@ -334,6 +339,7 @@ class ApplicationRuntime:
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
     experiment_analysis_writer: ExperimentAnalysisWriter | None
+    experiment_analysis_transaction_factory: RepositoryTransactionFactory | None
     experiment_compatibility_projection: ExperimentCompatibilityProjection | None
     experiment_query_service: ExperimentQueryService | None
 
@@ -419,6 +425,13 @@ async def build_application_runtime(
             )
 
         experiment_analysis_writer = overrides.experiment_analysis_writer
+        experiment_analysis_transaction_factory = (
+            overrides.experiment_analysis_transaction_factory
+        )
+        if experiment_analysis_transaction_factory is None and session_factory is not None:
+            experiment_analysis_transaction_factory = (
+                PostgresExperimentAnalysisTransactionFactory(session_factory)
+            )
         if (
             experiment_analysis_writer is None
             and paper_experiment_repository is not None
@@ -604,6 +617,9 @@ async def build_application_runtime(
             objective_input_service=objective_input_service,
             document_profile_service=document_profile_service,
             experiment_analysis_writer=experiment_analysis_writer,
+            experiment_analysis_transaction_factory=(
+                experiment_analysis_transaction_factory
+            ),
             experiment_compatibility_projection=experiment_compatibility_projection,
         )
         experiment_query_service = None
@@ -796,6 +812,9 @@ async def build_application_runtime(
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
             experiment_analysis_writer=experiment_analysis_writer,
+            experiment_analysis_transaction_factory=(
+                experiment_analysis_transaction_factory
+            ),
             experiment_compatibility_projection=experiment_compatibility_projection,
             experiment_query_service=experiment_query_service,
         )
@@ -1011,6 +1030,7 @@ def create_app(
     comparison_group_repository: ComparisonGroupRepository | None = None,
     experiment_finding_repository: ExperimentFindingRepository | None = None,
     experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
+    experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None,
     experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None,
 ) -> FastAPI:
     overrides = ApplicationOverrides(
@@ -1036,6 +1056,7 @@ def create_app(
         comparison_group_repository=comparison_group_repository,
         experiment_finding_repository=experiment_finding_repository,
         experiment_analysis_writer=experiment_analysis_writer,
+        experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
         experiment_compatibility_projection=experiment_compatibility_projection,
     )
     app = FastAPI(

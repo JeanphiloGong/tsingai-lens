@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from application.repositories.objective_repository import StoredObjective
+from application.repositories.transaction import RepositoryTransaction
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -28,6 +29,7 @@ from infra.persistence.postgres.models.objective import (
 )
 from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.transaction import database_session_scope
 
 
 class PostgresObjectiveRepository:
@@ -539,6 +541,7 @@ class PostgresObjectiveRepository:
         contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         """Publish the Objective lifecycle after experiment records are written.
 
@@ -547,7 +550,9 @@ class PostgresObjectiveRepository:
         analysis state and deliberately does not copy legacy Evidence payloads.
         """
 
-        async with self.session_factory.begin() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=True
+        ) as session:
             analysis_row = await self._locked_analysis(
                 session,
                 collection_id,

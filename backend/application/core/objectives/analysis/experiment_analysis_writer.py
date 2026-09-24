@@ -39,6 +39,7 @@ from application.repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
 )
+from application.repositories.transaction import RepositoryTransaction
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
@@ -48,6 +49,19 @@ from domain.core.research_objective import (
     ResearchObjective,
 )
 from domain.core.research_process import PaperExperiment as LegacyPaperExperiment
+
+
+async def _repository_call(
+    method: Any,
+    *args: Any,
+    transaction: RepositoryTransaction | None,
+    **kwargs: Any,
+) -> Any:
+    """Pass the opaque transaction only to production adapters that support it."""
+
+    if transaction is not None:
+        kwargs["transaction"] = transaction
+    return await method(*args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -127,6 +141,7 @@ class ExperimentAnalysisWriter:
         findings: Sequence[Finding],
         source_fingerprints: Mapping[str, str] | None = None,
         created_by: str | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Write revisions, selections, optional groups, and Findings.
 
@@ -143,6 +158,7 @@ class ExperimentAnalysisWriter:
             experiments=experiments,
             source_fingerprints=source_fingerprints,
             created_by=created_by,
+            transaction=transaction,
         )
 
         groups: list[ComparisonGroup] = []
@@ -175,7 +191,12 @@ class ExperimentAnalysisWriter:
                         selected,
                         collection_id=collection_id,
                     )
-                    group = await self.group_repository.add_group(collection_id, group)
+                    group = await _repository_call(
+                        self.group_repository.add_group,
+                        collection_id,
+                        group,
+                        transaction=transaction,
+                    )
                     group_by_selection_key[key] = group
                     groups.append(group)
                 group_ids = (group.group_id,)
@@ -186,7 +207,10 @@ class ExperimentAnalysisWriter:
                 comparison_group_ids=group_ids,
                 experiment_count=len(experiment_ids),
             )
-            published = await self.finding_publisher.publish(converted_finding)
+            published = await self.finding_publisher.publish(
+                converted_finding,
+                transaction=transaction,
+            )
             published_findings.append(published.finding)
 
         return ExperimentAnalysisWriteResult(
@@ -206,6 +230,7 @@ class ExperimentAnalysisWriter:
         experiments: Sequence[LegacyPaperExperiment],
         source_fingerprints: Mapping[str, str] | None = None,
         created_by: str | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> ExperimentSelectionWriteResult:
         """Persist experiment facts and selections without publishing Findings.
 
@@ -221,6 +246,7 @@ class ExperimentAnalysisWriter:
             experiments=experiments,
             source_fingerprints=source_fingerprints,
             created_by=created_by,
+            transaction=transaction,
         )
         return prepared.result
 
@@ -233,6 +259,7 @@ class ExperimentAnalysisWriter:
         experiments: Sequence[LegacyPaperExperiment],
         source_fingerprints: Mapping[str, str] | None = None,
         created_by: str | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Persist and publish analysis without consuming legacy Findings."""
 
@@ -243,6 +270,7 @@ class ExperimentAnalysisWriter:
             experiments=experiments,
             source_fingerprints=source_fingerprints,
             created_by=created_by,
+            transaction=transaction,
         )
         synthesis = self.finding_synthesis_service.synthesize(
             collection_id=collection_id,
@@ -254,11 +282,19 @@ class ExperimentAnalysisWriter:
         groups: list[ComparisonGroup] = []
         for group in synthesis.groups:
             groups.append(
-                await self.group_repository.add_group(collection_id, group)
+                await _repository_call(
+                    self.group_repository.add_group,
+                    collection_id,
+                    group,
+                    transaction=transaction,
+                )
             )
         findings: list[Finding] = []
         for finding in synthesis.findings:
-            published = await self.finding_publisher.publish(finding)
+            published = await self.finding_publisher.publish(
+                finding,
+                transaction=transaction,
+            )
             findings.append(published.finding)
         return ExperimentAnalysisWriteResult(
             revisions=prepared.result.revisions,
@@ -276,6 +312,7 @@ class ExperimentAnalysisWriter:
         experiments: Sequence[LegacyPaperExperiment],
         source_fingerprints: Mapping[str, str] | None,
         created_by: str | None,
+        transaction: RepositoryTransaction | None,
     ) -> _PreparedExperimentSelections:
         if objective.collection_id != collection_id:
             raise ValueError("experiment analysis objective belongs to another collection")
@@ -311,6 +348,7 @@ class ExperimentAnalysisWriter:
                 objective=objective,
                 analysis_version=analysis.analysis_version,
                 created_by=created_by,
+                transaction=transaction,
             )
             contexts.append(context)
             revisions.append(context.stored)
@@ -337,10 +375,13 @@ class ExperimentAnalysisWriter:
         objective: ResearchObjective,
         analysis_version: int,
         created_by: str | None,
+        transaction: RepositoryTransaction | None,
     ) -> tuple[_ExperimentContext, tuple[ObjectiveExperimentSelection, ...]]:
         experiment_id = stable_experiment_id(experiment)
-        latest = await self.paper_experiment_repository.read_latest_revision(
-            experiment_id
+        latest = await _repository_call(
+            self.paper_experiment_repository.read_latest_revision,
+            experiment_id,
+            transaction=transaction,
         )
         current_version = latest.revision.experiment_version if latest is not None else 1
         converted = convert_paper_experiment(
@@ -360,9 +401,11 @@ class ExperimentAnalysisWriter:
                     experiment_version=current_version,
                     experiment_id=experiment_id,
                 )
-            stored = await self.paper_experiment_repository.add_revision(
+            stored = await _repository_call(
+                self.paper_experiment_repository.add_revision,
                 converted.revision,
                 created_by=created_by,
+                transaction=transaction,
             )
 
         selections_by_outcome: dict[
@@ -407,10 +450,12 @@ class ExperimentAnalysisWriter:
                     ),
                 ),
             )
-            stored_selection = await self.selection_repository.add_selection(
+            stored_selection = await _repository_call(
+                self.selection_repository.add_selection,
                 collection_id,
                 selection,
                 revision_id=stored.revision_id,
+                transaction=transaction,
             )
             selections.append(stored_selection)
             selections_by_outcome.setdefault(

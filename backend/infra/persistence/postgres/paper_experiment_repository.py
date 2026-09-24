@@ -14,6 +14,7 @@ from application.repositories.paper_experiment_repository import (
     PaperExperimentRevisionConflictError,
     StoredPaperExperimentRevision,
 )
+from application.repositories.transaction import RepositoryTransaction
 from domain.core.paper_experiment import PaperExperimentRevision
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentComparisonMeasurementRow,
@@ -24,6 +25,7 @@ from infra.persistence.postgres.models.paper_experiment import (
     PaperExperimentRow,
     ReportedInterpretationRow,
 )
+from infra.persistence.postgres.transaction import database_session_scope
 
 
 class PostgresPaperExperimentRepository:
@@ -41,8 +43,11 @@ class PostgresPaperExperimentRepository:
         *,
         created_by: str | None = None,
         created_at: datetime | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> StoredPaperExperimentRevision:
-        async with self.session_factory.begin() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=True
+        ) as session:
             return await _add_revision(
                 session,
                 revision,
@@ -54,8 +59,12 @@ class PostgresPaperExperimentRepository:
         self,
         experiment_id: str,
         experiment_version: int,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> StoredPaperExperimentRevision | None:
-        async with self.session_factory() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
             row = await session.scalar(
                 select(PaperExperimentRow).where(
                     PaperExperimentRow.experiment_id == experiment_id,
@@ -67,16 +76,24 @@ class PostgresPaperExperimentRepository:
     async def read_revision_by_id(
         self,
         revision_id: int,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> StoredPaperExperimentRevision | None:
-        async with self.session_factory() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
             row = await session.get(PaperExperimentRow, revision_id)
             return await _stored_revision(session, row) if row is not None else None
 
     async def read_latest_revision(
         self,
         experiment_id: str,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> StoredPaperExperimentRevision | None:
-        async with self.session_factory() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
             row = await session.scalar(
                 select(PaperExperimentRow)
                 .where(PaperExperimentRow.experiment_id == experiment_id)
@@ -88,8 +105,12 @@ class PostgresPaperExperimentRepository:
     async def list_latest_for_document(
         self,
         document_id: str,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> tuple[StoredPaperExperimentRevision, ...]:
-        async with self.session_factory() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
             rows = tuple(
                 await session.scalars(
                     select(PaperExperimentRow)

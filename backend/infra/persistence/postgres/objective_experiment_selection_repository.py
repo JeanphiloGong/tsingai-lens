@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from application.repositories.objective_experiment_selection_repository import (
     ObjectiveExperimentSelectionRepository,
 )
+from application.repositories.transaction import RepositoryTransaction
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from infra.persistence.postgres.models.objective_experiment_selection import (
@@ -21,6 +22,7 @@ from infra.persistence.postgres.models.paper_experiment import (
     ExperimentMeasurementResultRow,
     PaperExperimentRow,
 )
+from infra.persistence.postgres.transaction import database_session_scope
 
 
 class PostgresObjectiveExperimentSelectionRepository(
@@ -37,8 +39,11 @@ class PostgresObjectiveExperimentSelectionRepository(
         selection: ObjectiveExperimentSelection,
         *,
         revision_id: int,
+        transaction: RepositoryTransaction | None = None,
     ) -> ObjectiveExperimentSelection:
-        async with self.session_factory.begin() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=True
+        ) as session:
             return await _add_selection(
                 session,
                 collection_id,
@@ -50,8 +55,12 @@ class PostgresObjectiveExperimentSelectionRepository(
         self,
         collection_id: str,
         selection_id: str,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> ObjectiveExperimentSelection | None:
-        async with self.session_factory() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
             row = await session.scalar(
                 select(ObjectiveExperimentSelectionRow).where(
                     ObjectiveExperimentSelectionRow.collection_id == collection_id,
@@ -65,8 +74,12 @@ class PostgresObjectiveExperimentSelectionRepository(
         collection_id: str,
         objective_id: str,
         analysis_version: int,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> tuple[ObjectiveExperimentSelection, ...]:
-        async with self.session_factory() as session:
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
             rows = tuple(
                 await session.scalars(
                     select(ObjectiveExperimentSelectionRow)

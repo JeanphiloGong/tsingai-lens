@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from application.repositories.transaction import RepositoryTransaction
+
 from domain.core.research_objective import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -155,6 +157,7 @@ class ObjectiveRepository(Protocol):
         contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
+        transaction: RepositoryTransaction | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
     async def publish_authored_analysis(

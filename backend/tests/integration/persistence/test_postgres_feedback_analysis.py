@@ -12,6 +12,10 @@ from domain.feedback.correction_signal import (
     CORRECTION_SIGNAL_JOB_TYPE,
     correction_signal_idempotency_key,
 )
+from domain.feedback.tool_failure import (
+    TOOL_FAILURE_JOB_TYPE,
+    tool_failure_idempotency_key,
+)
 
 
 pytestmark = pytest.mark.anyio
@@ -199,3 +203,56 @@ async def test_correction_signal_pending_job_can_be_cancelled_by_trigger(
     assert saved is not None
     assert saved.status == "cancelled"
     assert saved.error_code == "correction_signal_withdrawn"
+
+
+async def test_tool_failure_enqueue_is_idempotent_and_claim_is_type_scoped(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    digest = "c" * 64
+    kwargs = {
+        "session_id": "session-tool-failure",
+        "tool_call_id": "call-tool-failure",
+        "assistant_message_id": "assistant-tool-failure",
+        "result_message_id": "tool-result-failure",
+        "result_digest": digest,
+        "idempotency_key": tool_failure_idempotency_key(
+            session_id="session-tool-failure",
+            tool_call_id="call-tool-failure",
+            assistant_message_id="assistant-tool-failure",
+            result_message_id="tool-result-failure",
+            result_digest=digest,
+        ),
+        "now": BASE_TIME.isoformat(),
+    }
+    first = await repository.enqueue_tool_failure_analysis(**kwargs)
+    second = await repository.enqueue_tool_failure_analysis(**kwargs)
+    feedback = await repository.enqueue_feedback_analysis(
+        feedback_id="feedback-waits",
+        idempotency_key="feedback-waits-key",
+        now=BASE_TIME.isoformat(),
+    )
+
+    assert first.job_id == second.job_id
+    assert first.job_type == TOOL_FAILURE_JOB_TYPE
+    assert first.payload_version == 1
+    assert first.payload == {
+        "session_id": "session-tool-failure",
+        "tool_call_id": "call-tool-failure",
+        "assistant_message_id": "assistant-tool-failure",
+        "result_message_id": "tool-result-failure",
+        "result_digest": digest,
+    }
+    claimed = await repository.claim_next_tool_failure_analysis_job(
+        (BASE_TIME + timedelta(seconds=1)).isoformat()
+    )
+    assert claimed is not None
+    assert claimed.job_id == first.job_id
+    assert claimed.job_type == TOOL_FAILURE_JOB_TYPE
+    assert (await repository.read_job(feedback.job_id)).status == "pending"
+
+    feedback_claimed = await repository.claim_next_feedback_analysis_job(
+        (BASE_TIME + timedelta(seconds=1)).isoformat()
+    )
+    assert feedback_claimed is not None
+    assert feedback_claimed.job_id == feedback.job_id

@@ -113,7 +113,35 @@ class ToolFailureAnalysisHandler:
             raise AnalysisInputError("tool_failure_cross_session")
         if assistant.role is not ChatMessageRole.ASSISTANT or result_message.role is not ChatMessageRole.TOOL:
             raise AnalysisInputError("tool_failure_message_invalid")
+        positions = {message.message_id: index for index, message in enumerate(messages)}
+        assistant_position = positions.get(assistant.message_id)
+        result_position = positions.get(result_message.message_id)
+        if (
+            assistant_position is None
+            or result_position is None
+            or assistant_position >= result_position
+            or any(
+                message.role is ChatMessageRole.USER
+                for message in messages[assistant_position + 1 : result_position]
+            )
+        ):
+            raise AnalysisInputError("tool_failure_order_invalid")
         if call.assistant_message_id != assistant.message_id:
+            raise AnalysisInputError("tool_failure_identity_mismatch")
+        request = next(
+            (
+                item
+                for item in assistant.tool_calls
+                if item.tool_call_id == call.tool_call_id
+            ),
+            None,
+        )
+        if (
+            request is None
+            or request.name != call.name
+            or dict(request.arguments) != dict(call.arguments)
+            or request.position != call.position
+        ):
             raise AnalysisInputError("tool_failure_identity_mismatch")
         if result_message.tool_call_id != call.tool_call_id or result_message.tool_result is None:
             raise AnalysisInputError("tool_failure_identity_mismatch")
@@ -146,11 +174,7 @@ class ToolFailureAnalysisHandler:
         )
         answer = _following_answer(messages, result_message)
         answer_message_id = answer.message_id if answer is not None else assistant.message_id
-        related = tuple(
-            message.message_id
-            for message in messages
-            if message.created_at <= result_message.created_at
-        )
+        related = tuple(message.message_id for message in messages[: result_position + 1])
         input_payload = {
             "signal": signal.to_record(),
             "call": {
@@ -252,14 +276,16 @@ def _following_answer(messages: tuple[ChatMessage, ...], result_message: ChatMes
         index = next(index for index, message in enumerate(messages) if message.message_id == result_message.message_id)
     except StopIteration:
         return None
-    return next(
-        (
-            message
-            for message in messages[index + 1 :]
-            if message.role is ChatMessageRole.ASSISTANT and message.content and not message.tool_calls
-        ),
-        None,
-    )
+    for message in messages[index + 1 :]:
+        if message.role is ChatMessageRole.USER:
+            return None
+        if (
+            message.role is ChatMessageRole.ASSISTANT
+            and message.content
+            and not message.tool_calls
+        ):
+            return message
+    return None
 
 
 __all__ = [

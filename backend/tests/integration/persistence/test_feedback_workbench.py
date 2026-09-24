@@ -14,9 +14,27 @@ from application.feedback.dataset_snapshot_service import (
     jsonl_bytes_for_rows,
 )
 from application.feedback.feedback_case_service import FeedbackCaseService
+from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
+from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
 from application.repositories.auth_repository import AuthUserRecord
 from application.source.collection_service import CollectionService
-from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
+from domain.chat import (
+    ChatMessage,
+    ChatResourceRef,
+    ChatSession,
+    ChatSourceContext,
+    ChatToolCall,
+    ChatToolRequest,
+    ChatToolResult,
+    ToolResultStatus,
+    ToolRisk,
+)
+from domain.feedback.tool_failure import (
+    TOOL_FAILURE_JOB_TYPE,
+    tool_failure_idempotency_key,
+    tool_failure_signal_id,
+    tool_result_digest,
+)
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
 from infra.persistence.postgres.analysis_job_repository import (
@@ -349,3 +367,148 @@ async def test_withdrawn_feedback_cancels_pending_job_without_creating_a_case(
         handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
     )
     assert await worker.run_once() is None
+
+
+async def test_tool_failure_worker_persists_an_independent_case_projection(
+    feedback_chain,
+):
+    chain = feedback_chain
+    request = ChatToolRequest(
+        tool_call_id="feedback-chain-tool-call",
+        name="inspect_document_sources",
+        arguments={"document_id": "doc-b", "source_ref": "source-b-caption"},
+        position=0,
+    )
+    assistant_request = ChatMessage.assistant_tool_calls(
+        message_id="feedback-chain-tool-assistant",
+        session_id=SESSION_ID,
+        content="",
+        tool_calls=(request,),
+        created_at="2026-09-24T10:00:03+00:00",
+    )
+    call = ChatToolCall.requested(
+        tool_call_id=request.tool_call_id,
+        session_id=SESSION_ID,
+        assistant_message_id=assistant_request.message_id,
+        name=request.name,
+        arguments=request.arguments,
+        risk=ToolRisk.READ,
+        position=request.position,
+    ).start("2026-09-24T10:00:03+00:00").fail(
+        "source_unavailable", "2026-09-24T10:00:04+00:00"
+    )
+    failed_result = ChatToolResult(
+        tool_call_id=call.tool_call_id,
+        status=ToolResultStatus.FAILED,
+        error_code="source_unavailable",
+        error_message="The selected source is unavailable.",
+    )
+    tool_message = ChatMessage.from_tool_result(
+        message_id="feedback-chain-tool-result",
+        session_id=SESSION_ID,
+        result=failed_result,
+        created_at="2026-09-24T10:00:04+00:00",
+    )
+    final_answer = ChatMessage.assistant(
+        message_id="feedback-chain-tool-answer",
+        session_id=SESSION_ID,
+        content="I could not inspect Paper B because the source was unavailable.",
+        created_at="2026-09-24T10:00:05+00:00",
+    )
+    trajectory = (
+        chain.question,
+        chain.answer,
+        assistant_request,
+        tool_message,
+        final_answer,
+    )
+    await chain.chat.save_trajectory(
+        session=chain.session.update(
+            user_id=USER_ID,
+            collection_id=COLLECTION_ID,
+            updated_at="2026-09-24T10:00:05+00:00",
+        ),
+        messages=trajectory,
+        tool_calls=(call,),
+        tool_results=(failed_result,),
+    )
+
+    result_digest = tool_result_digest(failed_result.to_record())
+    enqueue_kwargs = {
+        "session_id": SESSION_ID,
+        "tool_call_id": call.tool_call_id,
+        "assistant_message_id": assistant_request.message_id,
+        "result_message_id": tool_message.message_id,
+        "result_digest": result_digest,
+        "idempotency_key": tool_failure_idempotency_key(
+            session_id=SESSION_ID,
+            tool_call_id=call.tool_call_id,
+            assistant_message_id=assistant_request.message_id,
+            result_message_id=tool_message.message_id,
+            result_digest=result_digest,
+        ),
+        "now": NOW,
+    }
+    first_job = await chain.jobs.enqueue_tool_failure_analysis(**enqueue_kwargs)
+    duplicate_job = await chain.jobs.enqueue_tool_failure_analysis(**enqueue_kwargs)
+    assert duplicate_job.job_id == first_job.job_id
+    assert first_job.job_type == TOOL_FAILURE_JOB_TYPE
+
+    worker = ToolFailureAnalysisWorker(
+        job_repository=chain.jobs,
+        case_repository=chain.cases,
+        handler=ToolFailureAnalysisHandler(chat_repository=chain.chat),
+    )
+    terminal_job = await worker.run_once()
+    assert terminal_job is not None
+    assert terminal_job.status == "succeeded"
+    assert terminal_job.result_id is not None
+    assert await chain.jobs.read_job(first_job.job_id) == terminal_job
+
+    saved_results = await chain.cases.read_tool_failure_analysis_results(
+        (terminal_job.result_id,)
+    )
+    assert len(saved_results) == 1
+    saved_result = saved_results[0]
+    assert saved_result.job_id == first_job.job_id
+    assert saved_result.tool_call_id == call.tool_call_id
+    assert saved_result.result_message_id == tool_message.message_id
+    assert saved_result.problem_type == "tool_failure"
+    assert saved_result.suggested_target is None
+    assert saved_result.evidence_coverage.coverage_status == "failed"
+
+    stored_cases = await chain.cases.list_cases(
+        collection_id=COLLECTION_ID,
+        problem_type="tool_failure",
+    )
+    assert len(stored_cases) == 1
+    case = stored_cases[0]
+    assert case.anchor_message_id == final_answer.message_id
+    assert case.analysis_result_ids == ()
+    assert case.tool_failure_analysis_result_ids == (terminal_job.result_id,)
+    assert case.source_signal_ids == (
+        tool_failure_signal_id(call.tool_call_id, tool_message.message_id),
+    )
+    assert case.context_snapshot["answer_message_id"] == final_answer.message_id
+
+    summaries = await chain.case_service.list_for_user(
+        user_id=USER_ID,
+        collection_id=COLLECTION_ID,
+        problem_type="tool_failure",
+    )
+    assert len(summaries) == 1
+    assert summaries[0].case_id == case.case_id
+    assert summaries[0].problem_type == "tool_failure"
+
+    detail = await chain.case_service.read_for_user(case.case_id, USER_ID)
+    assert detail["answer"] == final_answer.content
+    assert detail["source_signals"][0]["signal_type"] == "tool_failure"
+    assert detail["source_signals"][0]["error_code"] == "source_unavailable"
+    assert detail["analysis"]["problem_type"] == "tool_failure"
+    assert detail["analysis"]["tool_call_id"] == call.tool_call_id
+    assert detail["analysis"]["suggested_target"] is None
+    assert detail["coverage_status"] == "failed"
+    assert detail["annotation"] is None
+
+    assert await worker.run_once() is None
+    assert await chain.chat.read_messages(SESSION_ID) == trajectory

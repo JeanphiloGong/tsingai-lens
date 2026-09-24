@@ -218,3 +218,76 @@ async def test_handler_rejects_changed_result_digest():
     changed = replace(job, payload={**job.payload, "result_digest": "f" * 64})
     with pytest.raises(ValueError, match="identity_mismatch"):
         await ToolFailureAnalysisHandler(chat_repository=_Chat(messages, call, session)).handle(changed)
+
+
+async def test_handler_rejects_tool_result_persisted_before_its_assistant_request():
+    session, messages, call, job = _fixture()
+    reordered = (messages[1], messages[0], messages[2])
+
+    with pytest.raises(ValueError, match="order_invalid"):
+        await ToolFailureAnalysisHandler(
+            chat_repository=_Chat(reordered, call, session)
+        ).handle(job)
+
+
+async def test_handler_rejects_a_user_message_between_request_and_tool_result():
+    session, messages, call, job = _fixture()
+    follow_up = ChatMessage.user(
+        message_id="user-interruption",
+        session_id=session.session_id,
+        content="Please answer this separate question.",
+        created_at="2026-09-25T00:00:01.500000+00:00",
+    )
+    interrupted = (messages[0], follow_up, messages[1], messages[2])
+
+    with pytest.raises(ValueError, match="order_invalid"):
+        await ToolFailureAnalysisHandler(
+            chat_repository=_Chat(interrupted, call, session)
+        ).handle(job)
+
+
+async def test_handler_rejects_a_persisted_call_that_is_missing_from_assistant_requests():
+    session, messages, call, job = _fixture()
+    mismatched_request = ChatToolRequest(
+        tool_call_id=call.tool_call_id,
+        name="different_tool",
+        arguments={"document_id": "doc-1"},
+        position=0,
+    )
+    assistant = ChatMessage.assistant_tool_calls(
+        message_id=messages[0].message_id,
+        session_id=session.session_id,
+        content="",
+        tool_calls=(mismatched_request,),
+        created_at=messages[0].created_at,
+    )
+    mismatched = (assistant, messages[1], messages[2])
+
+    with pytest.raises(ValueError, match="identity_mismatch"):
+        await ToolFailureAnalysisHandler(
+            chat_repository=_Chat(mismatched, call, session)
+        ).handle(job)
+
+
+async def test_handler_does_not_attach_an_answer_from_a_later_user_turn():
+    session, messages, call, job = _fixture()
+    later_user = ChatMessage.user(
+        message_id="later-user",
+        session_id=session.session_id,
+        content="Start another turn.",
+        created_at="2026-09-25T00:00:04+00:00",
+    )
+    later_answer = ChatMessage.assistant(
+        message_id="later-answer",
+        session_id=session.session_id,
+        content="The later turn answer.",
+        created_at="2026-09-25T00:00:05+00:00",
+    )
+    result, snapshot, _ = await ToolFailureAnalysisHandler(
+        chat_repository=_Chat(
+            (*messages[:2], later_user, later_answer), call, session
+        )
+    ).handle(job)
+
+    assert result.related_message_ids == (messages[0].message_id, messages[1].message_id)
+    assert snapshot["answer_message_id"] == messages[0].message_id

@@ -201,6 +201,8 @@ class FeedbackCaseService:
             raise ValueError("feedback_case_annotation_required")
         if annotation.annotation_digest != expected_annotation_digest:
             raise ValueError("feedback_case_stale")
+        if decision == "accept":
+            await self._validate_review_acceptance(case, annotation)
         reader = getattr(self.case_repository, "read_review_decisions", None)
         previous = await reader(case.case_id) if reader is not None else ()
         timestamp = now or datetime.now(timezone.utc).isoformat()
@@ -222,6 +224,35 @@ class FeedbackCaseService:
             expected_annotation_digest=expected_annotation_digest,
             now=timestamp,
         )
+
+    async def _validate_review_acceptance(
+        self, case: FeedbackCase, annotation: FeedbackAnnotation
+    ) -> None:
+        """Reject an approval that cannot produce any declared dataset row.
+
+        Snapshot creation repeats these checks against the frozen read set. The
+        review boundary also performs them so an ``accept`` record cannot claim
+        that an unusable SFT or preference sample was admitted.
+        """
+        uses = set(annotation.dataset_uses)
+        if not uses:
+            raise ValueError("review_dataset_use_missing")
+        needs_target = bool(uses & {"sft", "preference"})
+        if needs_target and not annotation.target:
+            raise ValueError("review_target_missing")
+        if needs_target and not annotation.support_source_refs:
+            raise ValueError("review_support_source_missing")
+        if "preference" not in uses:
+            return
+        messages = await self.chat_repository.read_messages(case.session_id)
+        answer = next(
+            (message for message in messages if message.message_id == case.anchor_message_id),
+            None,
+        )
+        if answer is None or answer.role is not ChatMessageRole.ASSISTANT:
+            raise ValueError("review_anchor_answer_missing")
+        if annotation.target.strip() == answer.content.strip():
+            raise ValueError("review_preference_pair_missing")
 
     async def list_reviews_for_user(
         self, *, case_id: str, user_id: str

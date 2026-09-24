@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from application.feedback.feedback_case_service import FeedbackCaseService
@@ -56,6 +58,11 @@ class _Cases:
     async def append_review_decision(self, decision, *, expected_annotation_digest, now):
         if expected_annotation_digest != self.annotation.annotation_digest:
             raise ValueError("feedback_case_stale")
+        if decision.decision == "withdraw":
+            if self.case.status != "accepted":
+                raise ValueError("feedback_case_not_withdrawable")
+        elif self.case.status != "ready_for_review":
+            raise ValueError("feedback_case_not_reviewable")
         actual = ReviewDecision(
             decision_id=decision.decision_id, case_id=decision.case_id,
             annotation_digest=decision.annotation_digest, decision=decision.decision,
@@ -96,3 +103,121 @@ async def test_review_requires_current_annotation_digest() -> None:
     service, _, _ = _fixture()
     with pytest.raises(ValueError, match="feedback_case_stale"):
         await service.submit_review_for_user(case_id="case-1", user_id="user-1", expected_annotation_digest="b" * 64, decision="accept", reason="stale")
+
+
+async def test_accept_requires_a_declared_dataset_use() -> None:
+    service, repo, annotation = _fixture()
+    empty = FeedbackAnnotation.build(
+        annotation_id=annotation.annotation_id, case_id=annotation.case_id,
+        version=annotation.version, problem_type=annotation.problem_type,
+        severity=annotation.severity, target=annotation.target,
+        support_source_refs=annotation.support_source_refs, dataset_uses=(),
+        reason=annotation.reason, created_by=annotation.created_by,
+        created_at=annotation.created_at,
+    )
+    repo.annotation = empty
+    repo.case = FeedbackCase(**{**repo.case.to_record(), "annotation_digest": empty.annotation_digest})
+    with pytest.raises(ValueError, match="review_dataset_use_missing"):
+        await service.submit_review_for_user(
+            case_id="case-1", user_id="user-1",
+            expected_annotation_digest=empty.annotation_digest,
+            decision="accept", reason="nothing selected",
+        )
+
+
+async def test_preference_accept_requires_a_distinct_corrected_answer() -> None:
+    service, repo, annotation = _fixture()
+    preference = FeedbackAnnotation.build(
+        annotation_id=annotation.annotation_id, case_id=annotation.case_id,
+        version=annotation.version, problem_type=annotation.problem_type,
+        severity=annotation.severity, target="Answer",
+        support_source_refs=("source-ref",), dataset_uses=("preference",),
+        reason=annotation.reason, created_by=annotation.created_by,
+        created_at=annotation.created_at,
+    )
+    repo.annotation = preference
+    repo.case = FeedbackCase(**{**repo.case.to_record(), "annotation_digest": preference.annotation_digest})
+    with pytest.raises(ValueError, match="review_preference_pair_missing"):
+        await service.submit_review_for_user(
+            case_id="case-1", user_id="user-1",
+            expected_annotation_digest=preference.annotation_digest,
+            decision="accept", reason="chosen answer is unchanged",
+        )
+
+
+async def test_review_history_keeps_old_digest_when_new_annotation_is_reviewed() -> None:
+    service, repo, first = _fixture()
+    rejected = await service.submit_review_for_user(
+        case_id="case-1", user_id="user-1",
+        expected_annotation_digest=first.annotation_digest,
+        decision="reject", reason="needs a clearer source explanation",
+        now="2026-09-24T00:05:00+00:00",
+    )
+    second = FeedbackAnnotation.build(
+        annotation_id="annotation-2", case_id=first.case_id, version=2,
+        problem_type=first.problem_type, severity="critical", target=None,
+        support_source_refs=(), dataset_uses=("evaluation",),
+        reason="The source omission is now explicit.", created_by="user-1",
+        created_at="2026-09-24T00:06:00+00:00",
+    )
+    repo.annotation = second
+    repo.case = FeedbackCase(**{
+        **repo.case.to_record(), "status": "ready_for_review",
+        "annotation_digest": second.annotation_digest,
+    })
+    accepted = await service.submit_review_for_user(
+        case_id="case-1", user_id="user-1",
+        expected_annotation_digest=second.annotation_digest,
+        decision="accept", reason="updated evidence checked",
+        now="2026-09-24T00:07:00+00:00",
+    )
+    assert rejected.seq == 1
+    assert accepted.seq == 2
+    assert rejected.annotation_digest != accepted.annotation_digest
+    assert tuple(item.decision for item in repo.decisions) == ("reject", "accept")
+
+
+async def test_concurrent_accepts_have_one_history_winner() -> None:
+    service, repo, annotation = _fixture()
+    original_append = repo.append_review_decision
+    gate = asyncio.Event()
+    entered = 0
+
+    async def racing_append(decision, *, expected_annotation_digest, now):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            gate.set()
+        await gate.wait()
+        return await original_append(
+            decision, expected_annotation_digest=expected_annotation_digest, now=now
+        )
+
+    repo.append_review_decision = racing_append  # type: ignore[method-assign]
+
+    async def submit(reason: str):
+        try:
+            return await service.submit_review_for_user(
+                case_id="case-1", user_id="user-1",
+                expected_annotation_digest=annotation.annotation_digest,
+                decision="accept", reason=reason,
+            )
+        except ValueError as exc:
+            return exc
+
+    first, second = await asyncio.gather(submit("first"), submit("second"))
+    winners = [item for item in (first, second) if isinstance(item, ReviewDecision)]
+    failures = [item for item in (first, second) if isinstance(item, ValueError)]
+    assert len(winners) == 1
+    assert len(failures) == 1
+    assert str(failures[0]) == "feedback_case_not_reviewable"
+    assert repo.case.status == "accepted"
+
+
+def test_review_digest_must_be_hex_sha256() -> None:
+    with pytest.raises(ValueError, match="review annotation digest must be sha256"):
+        ReviewDecision(
+            decision_id="review-1", case_id="case-1", annotation_digest="z" * 64,
+            decision="accept", reason="checked", created_by="user-1", seq=1,
+            created_at="2026-09-24T00:00:00+00:00",
+        )

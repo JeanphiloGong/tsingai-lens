@@ -386,7 +386,7 @@
 						</section>
 					{/if}
 
-					{#if selected.annotation && selected.current_annotation_digest}
+					{#if selected.annotation && selected.current_annotation_digest && (selected.status === 'ready_for_review' || selected.status === 'accepted')}
 						<section class="detail-section review-panel">
 							<div class="section-heading"><h3>{$t('feedbackWorkbench.reviewTitle')}</h3><span>{$t('feedbackWorkbench.reviewHint')}</span></div>
 							{#if reviewError}<div class="inline-error" role="alert"><AlertTriangle size={15} />{reviewError}</div>{/if}

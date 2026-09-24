@@ -271,6 +271,22 @@ class PostgresFeedbackCaseRepository:
                 raise ValueError("feedback_case_stale")
             if case.annotation_digest != decision.annotation_digest:
                 raise ValueError("feedback_case_stale")
+            existing_decision = await session.get(
+                FeedbackReviewDecisionRow,
+                decision.decision_id,
+                with_for_update=True,
+            )
+            if existing_decision is not None:
+                same_identity = (
+                    existing_decision.case_id == decision.case_id
+                    and existing_decision.annotation_digest == decision.annotation_digest
+                    and existing_decision.decision == decision.decision
+                    and existing_decision.reason == decision.reason
+                    and existing_decision.created_by == decision.created_by
+                )
+                if not same_identity:
+                    raise ValueError("review_decision_identity_conflict")
+                return _review_decision(existing_decision)
             annotation = await session.scalar(
                 select(FeedbackAnnotationRow)
                 .where(
@@ -281,6 +297,15 @@ class PostgresFeedbackCaseRepository:
             )
             if annotation is None:
                 raise ValueError("feedback_case_annotation_required")
+            if decision.decision == "accept":
+                uses = set(annotation.dataset_uses or ())
+                if not uses:
+                    raise ValueError("review_dataset_use_missing")
+                if uses & {"sft", "preference"}:
+                    if not annotation.target:
+                        raise ValueError("review_target_missing")
+                    if not (annotation.support_source_refs or ()):
+                        raise ValueError("review_support_source_missing")
             if decision.decision == "withdraw":
                 if case.status != "accepted":
                     raise ValueError("feedback_case_not_withdrawable")

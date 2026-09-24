@@ -158,6 +158,52 @@ class _ParentObjectiveRepository:
         return ()
 
 
+class _ParentExperimentProjection:
+    def __init__(self, repository: _ParentObjectiveRepository) -> None:
+        self.finding = repository.finding
+        self.evidence = repository.evidence
+        self.contribution = repository.contribution
+
+    async def read_finding(
+        self, collection_id, objective_id, analysis_version, finding_id
+    ):
+        assert (collection_id, objective_id, analysis_version, finding_id) == (
+            "col-1",
+            "objective-parent",
+            3,
+            "finding-1",
+        )
+        return self.finding
+
+    async def list_evidence(
+        self,
+        collection_id,
+        objective_id,
+        analysis_version,
+        *,
+        finding_id=None,
+        offset=0,
+        limit=500,
+    ):
+        assert finding_id is None
+        records = (
+            (self.evidence,)
+            if (collection_id, objective_id, analysis_version)
+            == ("col-1", "objective-parent", 3)
+            else ()
+        )
+        return records[offset : offset + limit], len(records)
+
+    async def list_contributions(self, collection_id, objective_id, analysis_version):
+        if (collection_id, objective_id, analysis_version) == (
+            "col-1",
+            "objective-parent",
+            3,
+        ):
+            return (self.contribution,)
+        return ()
+
+
 def _context() -> CapabilityExecutionContext:
     return CapabilityExecutionContext(
         session_id="chat-1",
@@ -458,6 +504,45 @@ async def test_service_persists_derived_candidate_against_published_parent() -> 
                 "reason": repository.contribution.evidence_disposition_reason,
             },
         },
+    )
+
+
+async def test_derived_objective_reads_parent_basis_from_experiment_projection() -> None:
+    repository = _ParentObjectiveRepository()
+    projection = _ParentExperimentProjection(repository)
+
+    async def reject_legacy_read(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("legacy scientific-fact repository was read")
+
+    repository.read_finding = reject_legacy_read
+    repository.list_evidence = reject_legacy_read
+    repository.list_contributions = reject_legacy_read
+    service = ObjectiveAuthoringService(
+        collection_service=_CollectionService(),
+        objective_repository=repository,
+        experiment_projection=projection,
+    )
+
+    created = await service.create_chat_assisted_candidate(
+        collection_id="col-1",
+        user_id="user-1",
+        tool_call_id="call-experiment-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=["Ti-6Al-4V"],
+        variables=["preheating"],
+        outcomes=["fatigue life"],
+        mechanisms=[],
+        constraints=[],
+        requested_comparator=None,
+        seed_document_ids=[],
+        excluded_document_ids=[],
+        parent_objective_id="objective-parent",
+        parent_analysis_version=3,
+        derivation_basis=_all_lineage_with_untrusted_snapshots(),
+    )
+
+    assert created.derivation_basis[0]["snapshot"]["statement"].startswith(
+        "Canonical Finding"
     )
 
 

@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from hashlib import sha1, sha256
 from typing import Any, Mapping
 
-from domain.core import Finding, ObjectiveEvidence
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
+from domain.core import Finding, ObjectiveEvidence, PaperContribution
 from domain.evaluation import FindingCuration, FindingFeedback
 from application.repositories.finding_review_repository import FindingReviewRepository
 from application.repositories.objective_repository import ObjectiveRepository
@@ -26,9 +29,11 @@ class FindingFeedbackService:
         *,
         review_repository: FindingReviewRepository,
         objective_repository: ObjectiveRepository,
+        experiment_projection: ExperimentCompatibilityProjection | None = None,
     ) -> None:
         self.review_repository = review_repository
         self.objective_repository = objective_repository
+        self.experiment_projection = experiment_projection
 
     async def record_feedback(
         self,
@@ -173,7 +178,7 @@ class FindingFeedbackService:
         evidence = await self._finding_evidence(published)
         candidate.validate_sources(
             evidence,
-            await self.objective_repository.list_contributions(
+            await self._list_contributions(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -411,13 +416,23 @@ class FindingFeedbackService:
         result: list[Finding] = []
         offset = 0
         while True:
-            page, total = await self.objective_repository.list_findings(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=offset,
-                limit=_FINDING_PAGE_SIZE,
-            )
+            if self.experiment_projection is not None:
+                records, total = await self.experiment_projection.list_findings(
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    offset=offset,
+                    limit=_FINDING_PAGE_SIZE,
+                )
+                page = tuple(Finding.from_mapping(item) for item in records)
+            else:
+                page, total = await self.objective_repository.list_findings(
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    offset=offset,
+                    limit=_FINDING_PAGE_SIZE,
+                )
             result.extend(page)
             offset += len(page)
             if offset >= total:
@@ -431,14 +446,25 @@ class FindingFeedbackService:
         result: list[ObjectiveEvidence] = []
         offset = 0
         while True:
-            page, total = await self.objective_repository.list_evidence(
-                finding.collection_id,
-                finding.objective_id,
-                finding.analysis_version,
-                finding_id=finding.finding_id,
-                offset=offset,
-                limit=_EVIDENCE_PAGE_SIZE,
-            )
+            if self.experiment_projection is not None:
+                records, total = await self.experiment_projection.list_evidence(
+                    finding.collection_id,
+                    finding.objective_id,
+                    finding.analysis_version,
+                    finding_id=finding.finding_id,
+                    offset=offset,
+                    limit=_EVIDENCE_PAGE_SIZE,
+                )
+                page = tuple(ObjectiveEvidence.from_mapping(item) for item in records)
+            else:
+                page, total = await self.objective_repository.list_evidence(
+                    finding.collection_id,
+                    finding.objective_id,
+                    finding.analysis_version,
+                    finding_id=finding.finding_id,
+                    offset=offset,
+                    limit=_EVIDENCE_PAGE_SIZE,
+                )
             result.extend(page)
             offset += len(page)
             if offset >= total:
@@ -462,15 +488,43 @@ class FindingFeedbackService:
             )
         if objective.published_analysis_version != analysis_version:
             raise ValueError("review must reference the published analysis version")
-        finding = await self.objective_repository.read_finding(
-            collection_id,
-            objective_id,
-            analysis_version,
-            finding_id,
-        )
+        if self.experiment_projection is not None:
+            record = await self.experiment_projection.read_finding(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id,
+            )
+            finding = Finding.from_mapping(record) if record is not None else None
+        else:
+            finding = await self.objective_repository.read_finding(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id,
+            )
         if finding is None:
             raise ValueError("finding is not present in the published analysis")
         return finding
+
+    async def _list_contributions(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[PaperContribution, ...]:
+        if self.experiment_projection is not None:
+            records = await self.experiment_projection.list_contributions(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            return tuple(PaperContribution.from_mapping(item) for item in records)
+        return await self.objective_repository.list_contributions(
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
 
 
 def _dataset_status(

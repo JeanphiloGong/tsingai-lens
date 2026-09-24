@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
 from application.source.collection_service import CollectionService
 from domain.evaluation import (
     EvaluationPredictionItem,
@@ -31,10 +34,12 @@ class EvaluationPredictionSnapshotService:
         collection_service: CollectionService,
         objective_repository: ObjectiveRepository,
         evaluation_repository: EvaluationRepository,
+        experiment_projection: ExperimentCompatibilityProjection | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
         self.evaluation_repository = evaluation_repository
+        self.experiment_projection = experiment_projection
 
     async def create_core_snapshot(
         self,
@@ -79,7 +84,7 @@ class EvaluationPredictionSnapshotService:
             published_analysis_count += 1
             finding_offset = 0
             while True:
-                findings, finding_total = await self.objective_repository.list_findings(
+                findings, finding_total = await self._list_findings(
                     collection_id,
                     objective.objective_id,
                     analysis_version,
@@ -89,15 +94,16 @@ class EvaluationPredictionSnapshotService:
                 if not findings:
                     break
                 for finding in findings:
+                    finding_id = str(_field(finding, "finding_id") or "")
                     evidence_records: list[Any] = []
                     evidence_offset = 0
                     while True:
                         evidence_page, evidence_total = (
-                            await self.objective_repository.list_evidence(
+                            await self._list_evidence(
                                 collection_id,
                                 objective.objective_id,
                                 analysis_version,
-                                finding_id=finding.finding_id,
+                                finding_id=finding_id,
                                 offset=evidence_offset,
                                 limit=500,
                             )
@@ -113,29 +119,37 @@ class EvaluationPredictionSnapshotService:
                             (
                                 objective.objective_id,
                                 analysis_version,
-                                evidence.evidence_id,
+                                str(_field(evidence, "evidence_id") or ""),
                             )
                         )
-                    contributing_documents = finding.contributing_document_ids
+                    contributing_documents = tuple(
+                        str(item.get("document_id") or "")
+                        for item in (_field(finding, "paper_contributions") or ())
+                        if isinstance(item, Mapping) and item.get("document_id")
+                    )
                     item_key = (
                         f"{objective.objective_id}:v{analysis_version}:"
-                        f"{finding.finding_id}"
+                        f"{finding_id}"
                     )
-                    payload = finding.to_record()
+                    payload = _record(finding)
                     payload["evidence"] = [
-                        evidence.to_record() for evidence in evidence_records
+                        _record(evidence) for evidence in evidence_records
                     ]
                     source_refs = tuple(
                         {
-                            "evidence_id": evidence.evidence_id,
-                            "document_id": evidence.document_id,
-                            "source_kind": evidence.source_kind,
-                            "source_ref": evidence.source_ref,
-                            "source_excerpt": evidence.source_excerpt,
-                            "page_numbers": list(evidence.page_numbers),
+                            "evidence_id": _field(evidence, "evidence_id"),
+                            "document_id": _field(evidence, "document_id"),
+                            "source_kind": _field(evidence, "source_kind"),
+                            "source_ref": _field(evidence, "source_ref"),
+                            "source_excerpt": _field(evidence, "source_excerpt"),
+                            "page_numbers": list(
+                                _field(evidence, "page_numbers") or ()
+                            ),
                             "related_source_refs": [
                                 dict(locator)
-                                for locator in evidence.related_source_refs
+                                for locator in (
+                                    _field(evidence, "related_source_refs") or ()
+                                )
                             ],
                         }
                         for evidence in evidence_records
@@ -152,7 +166,7 @@ class EvaluationPredictionSnapshotService:
                             item_key=item_key,
                             payload=payload,
                             source_refs=source_refs,
-                            confidence=finding.certainty,
+                            confidence=float(_field(finding, "certainty") or 0),
                         )
                     )
                 finding_offset += len(findings)
@@ -163,6 +177,71 @@ class EvaluationPredictionSnapshotService:
             "objective_findings": len(items),
             "objective_evidence": len(exported_evidence_keys),
         }
+
+    async def _list_findings(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        offset: int,
+        limit: int,
+    ) -> tuple[tuple[Any, ...], int]:
+        if self.experiment_projection is not None:
+            return await self.experiment_projection.list_findings(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=offset,
+                limit=limit,
+            )
+        return await self.objective_repository.list_findings(
+            collection_id,
+            objective_id,
+            analysis_version,
+            offset=offset,
+            limit=limit,
+        )
+
+    async def _list_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        finding_id: str,
+        offset: int,
+        limit: int,
+    ) -> tuple[tuple[Any, ...], int]:
+        if self.experiment_projection is not None:
+            return await self.experiment_projection.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id=finding_id,
+                offset=offset,
+                limit=limit,
+            )
+        return await self.objective_repository.list_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=offset,
+            limit=limit,
+        )
+
+
+def _field(record: Any, name: str) -> Any:
+    if isinstance(record, Mapping):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def _record(record: Any) -> dict[str, Any]:
+    if isinstance(record, Mapping):
+        return dict(record)
+    return record.to_record()
 
 def _timestamp_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")

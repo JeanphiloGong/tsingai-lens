@@ -462,6 +462,7 @@ async def build_application_runtime(
         objective_authoring_service = ObjectiveAuthoringService(
             collection_service=collection_service,
             objective_repository=objective_repository,
+            experiment_projection=experiment_compatibility_projection,
         )
         document_preparation_service = DocumentPreparationService(
             collection_service=collection_service,
@@ -473,6 +474,7 @@ async def build_application_runtime(
         finding_feedback_service = FindingFeedbackService(
             review_repository=finding_review_repository,
             objective_repository=objective_repository,
+            experiment_projection=experiment_compatibility_projection,
         )
         experiment_plan_service = ExperimentPlanService(
             repository=experiment_plan_repository,

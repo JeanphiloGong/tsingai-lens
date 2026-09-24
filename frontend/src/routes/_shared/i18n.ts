@@ -2869,6 +2869,7 @@ const translations: Record<Language, Translations> = {
 			title: 'Feedback workbench',
 			lede: 'Review what the model saw before deciding what needs a human label.',
 			refresh: 'Refresh cases',
+			datasets: 'Dataset exports',
 			listLabel: 'Feedback cases',
 			filterLabel: 'Filter cases',
 			filterPlaceholder: 'Filter by issue or answer',
@@ -2970,6 +2971,23 @@ const translations: Record<Language, Translations> = {
 				,reviewReject: 'Reject'
 				,reviewWithdraw: 'Withdraw acceptance'
 				,reviewHistory: 'Review history'
+		},
+		datasetSnapshots: {
+			eyebrow: 'Dataset release', title: 'Dataset snapshots',
+			lede: 'Freeze reviewed cases into a reproducible export. Later edits do not change an existing snapshot.',
+			back: 'Back to feedback workbench', refresh: 'Refresh datasets', step: 'Release a fixed set',
+			chooseCases: 'Choose accepted cases', datasetType: 'Dataset use',
+			type: { evaluation: 'Evaluation', sft: 'Supervised training', preference: 'Preference comparison' },
+			typeHelp: { evaluation: 'Keeps the question, reference, evidence, and review criteria.', sft: 'Requires a reviewed target and supporting sources.', preference: 'Uses the reviewed target as chosen and the original answer as rejected.' },
+			loading: 'Loading accepted cases…', noAccepted: 'No accepted cases are ready.', noAcceptedDetail: 'Complete annotation and review for a case before selecting it here.',
+			untitledCase: 'Untitled case', noDocuments: 'No paper scope recorded', splitFor: 'Split for {case}',
+			paperFamilies: 'Paper families', paperFamiliesHint: 'Cases sharing a family cannot cross train and eval.',
+			freeze: 'Freeze snapshot', saving: 'Freezing…', freezeNote: 'The server rechecks review, source, and split rules before freezing. Nothing changes in Chat.',
+			created: 'Snapshot created with {count} rows.', historyEyebrow: 'Immutable exports', history: 'Snapshot history',
+			noSnapshots: 'No snapshots yet', noSnapshotsDetail: 'Frozen exports will appear here with their exclusion counts and digest.',
+			rows: 'rows', excluded: 'Excluded', empty: 'Empty', download: 'Download JSONL', downloading: 'Preparing…',
+			viewDetails: 'View exclusions', hideDetails: 'Hide exclusions', loadingDetails: 'Loading exclusions…',
+			exclusionReasons: 'Excluded selections', noExclusions: 'No selections were excluded.'
 		},
 		error: {
 			unexpected: 'Unexpected error.',
@@ -5713,6 +5731,7 @@ const translations: Record<Language, Translations> = {
 			title: '反馈工作台',
 			lede: '先核对模型实际看到的内容，再决定是否需要人工标注。',
 			refresh: '刷新案例',
+			datasets: '数据集导出',
 			listLabel: '反馈案例',
 			filterLabel: '筛选案例',
 			filterPlaceholder: '按问题或回答筛选',
@@ -5814,6 +5833,23 @@ const translations: Record<Language, Translations> = {
 				,reviewReject: '拒绝'
 				,reviewWithdraw: '撤回接受'
 				,reviewHistory: '审核历史'
+		},
+		datasetSnapshots: {
+			eyebrow: '数据集发布', title: '数据集快照',
+			lede: '把已审核案例冻结为可复现的导出文件。之后的修改不会改变已有快照。',
+			back: '返回反馈工作台', refresh: '刷新数据集', step: '发布固定数据集',
+			chooseCases: '选择已接受案例', datasetType: '数据用途',
+			type: { evaluation: '评测', sft: '监督训练', preference: '偏好比较' },
+			typeHelp: { evaluation: '保留问题、参考目标、证据和审核标准。', sft: '必须有已审核目标和支持性 Source。', preference: '使用已审核目标作为 chosen，原回答作为 rejected。' },
+			loading: '正在加载已接受案例…', noAccepted: '当前没有可发布的已接受案例。', noAcceptedDetail: '先完成案例标注和审核，再从这里选择。',
+			untitledCase: '未命名案例', noDocuments: '没有记录文献范围', splitFor: '为 {case} 选择分区',
+			paperFamilies: '论文家族', paperFamiliesHint: '同一家族不能同时出现在 train 和 eval。',
+			freeze: '冻结快照', saving: '正在冻结…', freezeNote: '服务端会再次检查审核、来源和分区规则；不会修改 Chat。',
+			created: '快照已创建，包含 {count} 行。', historyEyebrow: '不可变导出', history: '快照历史',
+			noSnapshots: '还没有快照', noSnapshotsDetail: '冻结后的导出会显示在这里，包括排除数量和摘要。',
+			rows: '行', excluded: '已排除', empty: '空快照', download: '下载 JSONL', downloading: '准备下载…',
+			viewDetails: '查看排除原因', hideDetails: '收起排除原因', loadingDetails: '正在加载排除原因…',
+			exclusionReasons: '被排除的选择', noExclusions: '没有被排除的选择。'
 		},
 		error: {
 			unexpected: '发生未知错误。',

@@ -317,6 +317,70 @@ class FeedbackReviewDecisionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class FeedbackDatasetSnapshotRow(Base):
+    """Immutable manifest and rows exported from reviewed feedback cases."""
+
+    __tablename__ = "feedback_dataset_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "dataset_type IN ('evaluation', 'sft', 'preference')",
+            name="feedback_dataset_type_valid",
+        ),
+        CheckConstraint(
+            "length(manifest_digest) = 64",
+            name="feedback_dataset_manifest_digest_length",
+        ),
+        CheckConstraint(
+            "length(provenance_digest) = 64",
+            name="feedback_dataset_provenance_digest_length",
+        ),
+        CheckConstraint(
+            "length(content_digest) = 64",
+            name="feedback_dataset_content_digest_length",
+        ),
+        CheckConstraint("row_count >= 0", name="feedback_dataset_row_count_non_negative"),
+        CheckConstraint(
+            "excluded_count >= 0",
+            name="feedback_dataset_excluded_count_non_negative",
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "manifest_digest",
+            name="uq_feedback_dataset_owner_manifest",
+        ),
+        Index("ix_feedback_dataset_collection_created", "collection_id", "created_at"),
+    )
+
+    dataset_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("auth_users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    collection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    dataset_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    rows: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    exclusions: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    provenance: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    manifest: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    excluded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 __all__ = [
     "AnalysisJobRow",
     "ChatModelCallRow",
@@ -324,4 +388,5 @@ __all__ = [
     "FeedbackCaseRow",
     "FeedbackAnnotationRow",
     "FeedbackReviewDecisionRow",
+    "FeedbackDatasetSnapshotRow",
 ]

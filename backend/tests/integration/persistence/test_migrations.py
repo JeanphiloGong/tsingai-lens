@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260924_0073"
+HEAD_REVISION = "20260924_0074"
 
 
 def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
@@ -49,6 +49,7 @@ def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
         at_head = set(inspect(connection).get_table_names())
         assert retired.isdisjoint(at_head)
         assert "chat_model_calls" in at_head
+        assert "feedback_dataset_snapshots" in at_head
         command.downgrade(config, "20260923_0064")
         after_downgrade = set(inspect(connection).get_table_names())
         assert retired <= after_downgrade
@@ -57,6 +58,7 @@ def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
         final = set(inspect(connection).get_table_names())
         assert retired.isdisjoint(final)
         assert "chat_model_calls" in final
+        assert "feedback_dataset_snapshots" in final
     engine.dispose()
 
 

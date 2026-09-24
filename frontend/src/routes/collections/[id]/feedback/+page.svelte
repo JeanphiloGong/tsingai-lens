@@ -213,24 +213,27 @@
 	<title>{$t('feedbackWorkbench.title')} | Lens</title>
 </svelte:head>
 
-<section class="workbench" aria-labelledby="feedback-title">
-	<header class="workbench-header">
-		<div>
+	<section class="workbench" aria-labelledby="feedback-title">
+		<header class="workbench-header">
+			<div>
 			<p class="eyebrow">{$t('feedbackWorkbench.eyebrow')}</p>
 			<h1 id="feedback-title">{$t('feedbackWorkbench.title')}</h1>
 			<p class="lede">{$t('feedbackWorkbench.lede')}</p>
-		</div>
-		<button
-			class="icon-button"
-			type="button"
-			title={$t('feedbackWorkbench.refresh')}
-			aria-label={$t('feedbackWorkbench.refresh')}
-			on:click={loadCases}
-			disabled={loading}
-		>
-			<span class:spin={loading}><RefreshCw size={17} /></span>
-		</button>
-	</header>
+			</div>
+			<div class="header-actions">
+				<a class="dataset-link" href={`/collections/${collectionId}/feedback/datasets`}>{$t('feedbackWorkbench.datasets')}</a>
+				<button
+					class="icon-button"
+					type="button"
+					title={$t('feedbackWorkbench.refresh')}
+					aria-label={$t('feedbackWorkbench.refresh')}
+					on:click={loadCases}
+					disabled={loading}
+				>
+					<span class:spin={loading}><RefreshCw size={17} /></span>
+				</button>
+			</div>
+		</header>
 
 	{#if error}
 		<div class="notice notice--error" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>
@@ -406,6 +409,9 @@
 <style>
 	.workbench { padding: 4px 0 48px; }
 	.workbench-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+	.header-actions { display: flex; align-items: center; gap: 10px; }
+	.dataset-link { padding: 8px 11px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-primary); background: var(--surface-raised); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+	.dataset-link:hover { border-color: var(--accent-primary); }
 	.eyebrow { margin: 0 0 4px; color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 	h1, h2, h3, p { margin-top: 0; }
 	h1 { margin-bottom: 6px; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; letter-spacing: 0; }

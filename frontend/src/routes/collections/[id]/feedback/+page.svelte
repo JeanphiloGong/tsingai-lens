@@ -1,0 +1,362 @@
+<script lang="ts">
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import {
+		AlertTriangle,
+		CheckCircle2,
+		ChevronRight,
+		FileText,
+		RefreshCw,
+		Search,
+		XCircle
+	} from '@lucide/svelte';
+	import { errorMessage } from '../../../_shared/api';
+	import { t } from '../../../_shared/i18n';
+	import {
+		fetchFeedbackCase,
+		fetchFeedbackCases,
+		type FeedbackCaseDetail,
+		type FeedbackCaseSummary
+	} from '../../../_shared/feedbackCases';
+
+	let cases: FeedbackCaseSummary[] = [];
+	let selected: FeedbackCaseDetail | null = null;
+	let loading = true;
+	let detailLoading = false;
+	let error = '';
+	let filter = '';
+	let activeStatus = 'all';
+
+	$: collectionId = $page.params.id ?? '';
+	$: visibleCases = cases.filter((item) => {
+		const matchesStatus = activeStatus === 'all' || item.status === activeStatus;
+		const haystack = [
+			item.problem_type ?? '',
+			item.question_preview,
+			item.answer_preview,
+			...item.document_titles
+		]
+			.join(' ')
+			.toLowerCase();
+		return matchesStatus && haystack.includes(filter.trim().toLowerCase());
+	});
+
+	onMount(() => {
+		void loadCases();
+	});
+
+	async function loadCases() {
+		if (!collectionId) return;
+		loading = true;
+		error = '';
+		try {
+			const response = await fetchFeedbackCases(collectionId);
+			cases = response.items;
+			if (selected && !cases.some((item) => item.case_id === selected?.case_id)) selected = null;
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function openCase(item: FeedbackCaseSummary) {
+		detailLoading = true;
+		error = '';
+		try {
+			selected = await fetchFeedbackCase(collectionId, item.case_id);
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			detailLoading = false;
+		}
+	}
+
+	function formatDate(value: string) {
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+	}
+
+	function label(value: string | null | undefined) {
+		return value ? value.replaceAll('_', ' ') : $t('feedbackWorkbench.unknown');
+	}
+
+	function statusLabel(value: string) {
+		const key =
+			{
+				detected: 'statusDetected',
+				collecting_context: 'statusCollectingContext',
+				needs_annotation: 'statusNeedsAnnotation',
+				ready_for_review: 'statusReadyForReview',
+				insufficient: 'statusInsufficient',
+				accepted: 'statusAccepted',
+				rejected: 'statusRejected',
+				withdrawn: 'statusWithdrawn'
+			}[value] ?? 'unknown';
+		return $t(`feedbackWorkbench.${key}`);
+	}
+
+	function coverageLabel(value: string) {
+		const key =
+			{
+				complete: 'coverageComplete',
+				partial: 'coveragePartial',
+				failed: 'coverageFailed',
+				unknown: 'coverageUnknown'
+			}[value] ?? 'coverageUnknown';
+		return $t(`feedbackWorkbench.${key}`);
+	}
+
+	function sourceTitle(source: Record<string, unknown>) {
+		return String(source.document_title ?? source.title ?? $t('feedbackWorkbench.source'));
+	}
+
+	function sourceLocator(source: Record<string, unknown>) {
+		return [source.source_ref, source.heading_path, source.page ? `p. ${source.page}` : '']
+			.filter(Boolean)
+			.join(' · ');
+	}
+
+	function claimText(claim: Record<string, unknown>) {
+		return String(claim.claim ?? claim.statement ?? claim.text ?? $t('feedbackWorkbench.unknown'));
+	}
+</script>
+
+<svelte:head>
+	<title>{$t('feedbackWorkbench.title')} | Lens</title>
+</svelte:head>
+
+<section class="workbench" aria-labelledby="feedback-title">
+	<header class="workbench-header">
+		<div>
+			<p class="eyebrow">{$t('feedbackWorkbench.eyebrow')}</p>
+			<h1 id="feedback-title">{$t('feedbackWorkbench.title')}</h1>
+			<p class="lede">{$t('feedbackWorkbench.lede')}</p>
+		</div>
+		<button
+			class="icon-button"
+			type="button"
+			title={$t('feedbackWorkbench.refresh')}
+			aria-label={$t('feedbackWorkbench.refresh')}
+			on:click={loadCases}
+			disabled={loading}
+		>
+			<span class:spin={loading}><RefreshCw size={17} /></span>
+		</button>
+	</header>
+
+	{#if error}
+		<div class="notice notice--error" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>
+	{/if}
+
+	<div class="workbench-grid">
+		<aside class="case-list" aria-label={$t('feedbackWorkbench.listLabel')}>
+			<div class="list-toolbar">
+				<label class="search-box">
+					<Search size={16} />
+					<span class="sr-only">{$t('feedbackWorkbench.filterLabel')}</span>
+					<input bind:value={filter} placeholder={$t('feedbackWorkbench.filterPlaceholder')} />
+				</label>
+				<select bind:value={activeStatus} aria-label={$t('feedbackWorkbench.statusLabel')}>
+					<option value="all">{$t('feedbackWorkbench.allCases')}</option>
+					<option value="detected">{statusLabel('detected')}</option>
+					<option value="collecting_context">{statusLabel('collecting_context')}</option>
+					<option value="needs_annotation">{statusLabel('needs_annotation')}</option>
+					<option value="ready_for_review">{statusLabel('ready_for_review')}</option>
+					<option value="insufficient">{statusLabel('insufficient')}</option>
+					<option value="accepted">{statusLabel('accepted')}</option>
+					<option value="rejected">{statusLabel('rejected')}</option>
+					<option value="withdrawn">{statusLabel('withdrawn')}</option>
+				</select>
+			</div>
+
+			{#if loading}
+				<div class="empty-state"><span class="loader"></span><p>{$t('feedbackWorkbench.loadingCases')}</p></div>
+			{:else if !visibleCases.length}
+				<div class="empty-state">
+					<CheckCircle2 size={24} />
+					<strong>{$t('feedbackWorkbench.noMatching')}</strong>
+					<p>{$t('feedbackWorkbench.noMatchingDetail')}</p>
+				</div>
+			{:else}
+				<div class="case-items">
+					{#each visibleCases as item (item.case_id)}
+						<button
+							class:selected={selected?.case_id === item.case_id}
+							class="case-item"
+							type="button"
+							on:click={() => openCase(item)}
+						>
+							<div class="case-item__topline">
+								<span class="case-type">{label(item.problem_type)}</span>
+								<ChevronRight size={16} />
+							</div>
+							<strong>{item.question_preview || item.answer_preview || $t('feedbackWorkbench.unknown')}</strong>
+							{#if item.document_titles.length}
+								<span class="case-item__documents">{item.document_titles.join(' · ')}</span>
+							{/if}
+							<div class="case-item__meta">
+								<span class="status-dot"></span>
+								<span>{statusLabel(item.status)}</span>
+								{#if item.confidence !== null}<span>{Math.round(item.confidence * 100)}% {$t('feedbackWorkbench.confidence').toLowerCase()}</span>{/if}
+							</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</aside>
+
+		<main class="case-detail" aria-live="polite">
+			{#if detailLoading}
+				<div class="empty-state"><span class="loader"></span><p>{$t('feedbackWorkbench.loadingDetails')}</p></div>
+			{:else if !selected}
+				<div class="detail-placeholder">
+					<div class="placeholder-icon"><FileText size={26} /></div>
+					<h2>{$t('feedbackWorkbench.chooseCase')}</h2>
+					<p>{$t('feedbackWorkbench.chooseCaseDetail')}</p>
+				</div>
+			{:else}
+				<div class="detail-header">
+					<div>
+						<div class="detail-kicker"><span class="status-pill">{statusLabel(selected.status)}</span><span>{formatDate(selected.updated_at)}</span></div>
+						<h2>{$t('feedbackWorkbench.caseReview')}</h2>
+					</div>
+				</div>
+
+				<section class="prompt-answer">
+					<div><span class="section-label">{$t('feedbackWorkbench.question')}</span><p>{selected.question || $t('feedbackWorkbench.noQuestion')}</p></div>
+					<div><span class="section-label">{$t('feedbackWorkbench.answer')}</span><p>{selected.answer || $t('feedbackWorkbench.noAnswer')}</p></div>
+				</section>
+
+				{#if selected.source_signals.length}
+					<section class="detail-section">
+						<div class="section-heading"><h3>{$t('feedbackWorkbench.feedbackSignal')}</h3><span>{selected.source_signals.length} {selected.source_signals.length === 1 ? $t('feedbackWorkbench.record') : $t('feedbackWorkbench.records')}</span></div>
+						{#each selected.source_signals as signal}
+							<div class="signal"><span class:signal--negative={signal.rating === 'not_helpful'}>{signal.rating === 'not_helpful' ? $t('feedbackWorkbench.notHelpful') : $t('feedbackWorkbench.helpful')}</span><strong>{label(signal.reason)}</strong>{#if signal.comment}<p>{signal.comment}</p>{/if}</div>
+						{/each}
+					</section>
+				{/if}
+
+				<section class="detail-section">
+					<div class="section-heading"><h3>{$t('feedbackWorkbench.requestedScope')}</h3><span>{selected.requested_scope.length}</span></div>
+					{#if selected.requested_scope.length}
+						<div class="scope-list">{#each selected.requested_scope as source}<span class="scope-chip">{sourceTitle(source)}</span>{/each}</div>
+					{:else}<p class="muted">{$t('feedbackWorkbench.noRequestedScope')}</p>{/if}
+				</section>
+
+				<section class="detail-section">
+					<div class="section-heading"><h3>{$t('feedbackWorkbench.sourceCoverage')}</h3><span class="coverage-badge coverage-badge--{selected.coverage_status}">{coverageLabel(selected.coverage_status)}</span></div>
+					{#if selected.inspected_sources.length}
+						<div class="source-list">
+							{#each selected.inspected_sources as source}
+								<article class="source-row"><div class="source-icon"><FileText size={16} /></div><div><strong>{sourceTitle(source)}</strong><span>{sourceLocator(source)}</span>{#if source.quote}<p>{String(source.quote)}</p>{:else}<p class="muted">{$t('feedbackWorkbench.noQuote')}</p>{/if}</div></article>
+							{/each}
+						</div>
+					{:else}<p class="muted">{$t('feedbackWorkbench.inspectedNone')}</p>{/if}
+				</section>
+
+				{#if selected.omitted_candidates.length}
+					<section class="detail-section detail-section--warning"><div class="section-heading"><h3>{$t('feedbackWorkbench.omittedCandidates')}</h3><span>{selected.omitted_candidates.length}</span></div>{#each selected.omitted_candidates as source}<div class="omitted"><XCircle size={16} /><span>{sourceTitle(source)}{sourceLocator(source) ? ` · ${sourceLocator(source)}` : ''}</span></div>{/each}</section>
+				{/if}
+
+				<section class="detail-section">
+					<div class="section-heading"><h3>{$t('feedbackWorkbench.claimSupport')}</h3><span>{selected.claim_support.length}</span></div>
+					{#if selected.claim_support.length}{#each selected.claim_support as claim}<div class="support-row"><strong>{claimText(claim)}</strong><span>{String(claim.source_ref ?? claim.source ?? '')}</span></div>{/each}{:else}<p class="muted">{$t('feedbackWorkbench.noClaimSupport')}</p>{/if}
+				</section>
+
+				<section class="detail-section">
+					<div class="section-heading"><h3>{$t('feedbackWorkbench.gaps')}</h3><span>{selected.gaps.length}</span></div>
+					{#if selected.gaps.length}<ul class="gap-list">{#each selected.gaps as gap}<li>{gap}</li>{/each}</ul>{:else}<p class="muted">{$t('feedbackWorkbench.noGaps')}</p>{/if}
+				</section>
+
+				<section class="detail-section analysis-panel">
+					<div class="section-heading"><h3>{$t('feedbackWorkbench.aiSuggestion')}</h3><span>{$t('feedbackWorkbench.candidateOnly')}</span></div>
+					{#if selected.analysis}
+						<div class="analysis-grid"><div><span class="section-label">{$t('feedbackWorkbench.possibleIssue')}</span><strong>{label(selected.analysis.problem_type)}</strong></div><div><span class="section-label">{$t('feedbackWorkbench.confidence')}</span><strong>{Math.round(selected.analysis.confidence * 100)}%</strong></div></div>
+					{:else}<p class="muted">{$t('feedbackWorkbench.analysisCollecting')}</p>{/if}
+					{#if selected.technical_error}<p class="technical-note">{$t('feedbackWorkbench.statusFailed')}: {$t('feedbackWorkbench.statusHelp')}</p>{/if}
+				</section>
+			{/if}
+		</main>
+	</div>
+</section>
+
+<style>
+	.workbench { padding: 4px 0 48px; }
+	.workbench-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+	.eyebrow { margin: 0 0 4px; color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+	h1, h2, h3, p { margin-top: 0; }
+	h1 { margin-bottom: 6px; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; letter-spacing: 0; }
+	.lede { margin-bottom: 0; color: var(--text-secondary); font-size: 14px; }
+	.icon-button { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); cursor: pointer; }
+	.icon-button:hover { border-color: var(--brand-border); color: var(--brand-primary); }
+	.icon-button:disabled { opacity: .55; cursor: default; }
+	.spin { animation: spin 1s linear infinite; }
+	@keyframes spin { to { transform: rotate(360deg); } }
+	.notice { display: flex; align-items: center; gap: 8px; padding: 12px 14px; margin-bottom: 16px; border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger-text); border-radius: 8px; font-size: 13px; }
+	.workbench-grid { display: grid; grid-template-columns: minmax(260px, 330px) minmax(0, 1fr); gap: 18px; align-items: start; }
+	.case-list, .case-detail { min-width: 0; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); box-shadow: var(--shadow-xs); }
+	.case-list { overflow: hidden; }
+	.list-toolbar { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--border-default); background: var(--bg-subtle); }
+	.search-box { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); }
+	.search-box input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 13px; }
+	select { width: 100%; padding: 8px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-card); font-size: 13px; }
+	.case-items { display: grid; }
+	.case-item { display: block; width: 100%; padding: 14px; border: 0; border-bottom: 1px solid var(--border-default); background: transparent; text-align: left; cursor: pointer; color: var(--text-primary); }
+	.case-item:last-child { border-bottom: 0; }
+	.case-item:hover, .case-item.selected { background: var(--brand-soft); }
+	.case-item__topline, .case-item__meta, .detail-kicker, .section-heading, .analysis-grid { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+	.case-type { color: var(--brand-primary); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+	.case-item strong { display: block; overflow: hidden; margin: 8px 0 5px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+	.case-item__documents { display: block; overflow: hidden; color: var(--text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+	.case-item__meta { justify-content: flex-start; margin-top: 9px; color: var(--text-secondary); font-size: 11px; }
+	.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning-text); }
+	.empty-state, .detail-placeholder { display: grid; place-items: center; gap: 8px; min-height: 220px; padding: 28px; color: var(--text-secondary); text-align: center; }
+	.empty-state strong, .empty-state p, .detail-placeholder h2, .detail-placeholder p { margin: 0; }
+	:global(.empty-state svg) { color: var(--success-text); }
+	.loader { width: 22px; height: 22px; border: 2px solid var(--border-default); border-top-color: var(--brand-primary); border-radius: 50%; animation: spin .8s linear infinite; }
+	.detail-placeholder { min-height: 520px; }
+	.placeholder-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; color: var(--brand-primary); background: var(--brand-soft); }
+	.detail-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-default); }
+	.detail-header h2 { margin: 8px 0 0; font-size: 22px; }
+	.detail-kicker { justify-content: flex-start; color: var(--text-secondary); font-size: 12px; }
+	.status-pill { padding: 4px 8px; border-radius: 999px; color: var(--warning-text); background: var(--warning-bg); font-weight: 700; }
+	.prompt-answer { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 20px 24px; background: var(--bg-subtle); border-bottom: 1px solid var(--border-default); }
+	.prompt-answer p { margin: 6px 0 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+	.section-label { display: block; color: var(--text-secondary); font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+	.detail-section { padding: 20px 24px; border-bottom: 1px solid var(--border-default); }
+	.detail-section:last-child { border-bottom: 0; }
+	.section-heading { margin-bottom: 12px; }
+	.section-heading h3 { margin: 0; font-size: 15px; }
+	.section-heading > span { color: var(--text-secondary); font-size: 12px; }
+	.signal { display: flex; align-items: baseline; flex-wrap: wrap; gap: 9px; padding: 10px 0; border-top: 1px solid var(--border-default); font-size: 13px; }
+	.signal > span { color: var(--success-text); font-weight: 700; }
+	.signal > span.signal--negative { color: var(--danger-text); }
+	.signal p { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary); }
+	.scope-list { display: flex; flex-wrap: wrap; gap: 8px; }
+	.scope-chip { padding: 6px 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
+	.coverage-badge { color: var(--text-secondary) !important; }
+	.coverage-badge--complete { color: var(--success-text) !important; }
+	.coverage-badge--partial { color: var(--warning-text) !important; }
+	.coverage-badge--failed { color: var(--danger-text) !important; }
+	.source-list { display: grid; gap: 10px; }
+	.source-row { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); }
+	.source-icon { display: grid; place-items: center; width: 28px; height: 28px; color: var(--brand-primary); }
+	.source-row strong, .source-row span { display: block; }
+	.source-row strong { font-size: 13px; }
+	.source-row span { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
+	.source-row p { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
+	.support-row { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--border-default); font-size: 13px; }
+	.support-row span { color: var(--text-secondary); font-size: 11px; }
+	.gap-list { margin: 0; padding-left: 18px; color: var(--warning-text); font-size: 13px; line-height: 1.6; }
+	.muted { margin: 0; color: var(--text-secondary); font-size: 13px; }
+	.detail-section--warning { background: color-mix(in srgb, var(--warning-bg) 35%, transparent); }
+	.omitted { display: flex; align-items: center; gap: 8px; padding: 7px 0; color: var(--warning-text); font-size: 13px; }
+	.analysis-panel { background: var(--brand-soft); }
+	.analysis-grid { justify-content: flex-start; gap: 44px; }
+	.analysis-grid strong { display: block; margin-top: 5px; font-size: 14px; text-transform: capitalize; }
+	.technical-note { margin: 16px 0 0; color: var(--danger-text); font-size: 12px; line-height: 1.5; }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
+	@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } }
+</style>

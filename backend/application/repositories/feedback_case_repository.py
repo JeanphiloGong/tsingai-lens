@@ -22,13 +22,18 @@ class FeedbackCaseRepository(Protocol):
 
     async def read_case(self, case_id: str) -> FeedbackCase | None: ...
 
+    async def read_analysis_results(
+        self, result_ids: tuple[str, ...]
+    ) -> tuple[AnalysisResult, ...]: ...
+
     async def list_cases(
         self,
         *,
         collection_id: str | None = None,
+        collection_ids: tuple[str, ...] | None = None,
         status: str | None = None,
         problem_type: str | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> tuple[FeedbackCase, ...]: ...
 

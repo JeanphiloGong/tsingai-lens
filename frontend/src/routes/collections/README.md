@@ -141,6 +141,13 @@ This node owns the Collection route family.
   automatic grant and can authorize the complete current write-action set. Existing
   sessions keep their own permission record and must be changed from the
   conversation control.
+- `collections/[id]/feedback/+page.svelte`
+  Read-only feedback workbench. It lists server-generated cases for the current
+  Collection, shows the question, answer, feedback signal, inspected Sources,
+  omitted candidates, and AI candidate analysis, and keeps loading, empty,
+  incomplete, and technical-error states explicit. Opening a case performs no
+  annotation, review, or dataset write; those actions belong to later versions
+  of the feedback-workbench contract.
 
 ## Objective Interaction
 

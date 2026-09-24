@@ -161,6 +161,12 @@
 		{$t('collection.tabs.assistant')}
 	</a>
 	<a
+		href={resolve('/collections/[id]/feedback', { id: collectionId })}
+		class={tabClass(`/collections/${collectionId}/feedback`)}
+	>
+		{$t('collection.tabs.feedback')}
+	</a>
+	<a
 		href={resolve('/collections/[id]/settings', { id: collectionId })}
 		class={tabClass(`/collections/${collectionId}/settings`)}
 	>

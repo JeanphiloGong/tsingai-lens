@@ -91,20 +91,40 @@ class PostgresFeedbackCaseRepository:
             row = await session.get(FeedbackCaseRow, case_id)
             return _case(row) if row is not None else None
 
+    async def read_analysis_results(
+        self, result_ids: tuple[str, ...]
+    ) -> tuple[AnalysisResult, ...]:
+        ids = tuple(dict.fromkeys(str(value) for value in result_ids if value))
+        if not ids:
+            return ()
+        async with self.session_factory() as session:
+            rows = await session.scalars(
+                select(FeedbackAnalysisResultRow).where(
+                    FeedbackAnalysisResultRow.result_id.in_(ids)
+                )
+            )
+            by_id = {row.result_id: _result(row) for row in rows}
+            return tuple(by_id[value] for value in ids if value in by_id)
+
     async def list_cases(
         self,
         *,
         collection_id: str | None = None,
+        collection_ids: tuple[str, ...] | None = None,
         status: str | None = None,
         problem_type: str | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> tuple[FeedbackCase, ...]:
-        if limit < 0 or offset < 0:
+        if limit is not None and limit < 0 or offset < 0:
             raise ValueError("limit and offset must be non-negative")
         statement = select(FeedbackCaseRow)
         if collection_id is not None:
             statement = statement.where(FeedbackCaseRow.collection_id == collection_id)
+        elif collection_ids is not None:
+            if not collection_ids:
+                return ()
+            statement = statement.where(FeedbackCaseRow.collection_id.in_(collection_ids))
         if status is not None:
             statement = statement.where(FeedbackCaseRow.status == status)
         statement = statement.order_by(
@@ -124,21 +144,29 @@ class PostgresFeedbackCaseRepository:
                     result_rows = await session.scalars(
                         select(FeedbackAnalysisResultRow).where(
                             FeedbackAnalysisResultRow.result_id.in_(result_ids),
-                            FeedbackAnalysisResultRow.problem_type == problem_type,
                         )
                     )
-                    matching_result_ids = {
-                        result_row.result_id for result_row in result_rows
+                    by_case_result = {
+                        result_row.result_id: result_row for result_row in result_rows
                     }
+                    for row in rows:
+                        latest = max(
+                            (
+                                by_case_result[result_id]
+                                for result_id in (row.analysis_result_ids or ())
+                                if result_id in by_case_result
+                            ),
+                            key=lambda item: (item.created_at, item.result_id),
+                            default=None,
+                        )
+                        if latest is not None and latest.problem_type == problem_type:
+                            matching_result_ids.add(latest.result_id)
                 rows = [
                     row
                     for row in rows
-                    if any(
-                        result_id in matching_result_ids
-                        for result_id in (row.analysis_result_ids or ())
-                    )
+                    if any(result_id in matching_result_ids for result_id in (row.analysis_result_ids or ()))
                 ]
-            rows = rows[offset : offset + limit]
+            rows = rows[offset:] if limit is None else rows[offset : offset + limit]
             return tuple(_case(row) for row in rows)
 
 

@@ -96,6 +96,7 @@ from application.evaluation import (
     FindingFeedbackService,
 )
 from application.feedback import FeedbackAnalysisHandler, FeedbackAnalysisWorker
+from application.feedback.feedback_case_service import FeedbackCaseService
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.source.collection_service import CollectionService
@@ -107,6 +108,7 @@ from application.source.source_import_service import SourceImportService
 from config import DATA_DIR
 from controllers import auth
 from controllers.chat import sessions as chat_sessions
+from controllers import feedback_cases
 from controllers.core import (
     documents,
     finding_review,
@@ -264,6 +266,7 @@ class ApplicationOverrides:
     chat_session_service: ChatSessionService | None = None
     analysis_job_repository: AnalysisJobRepository | None = None
     feedback_case_repository: FeedbackCaseRepository | None = None
+    feedback_case_service: FeedbackCaseService | None = None
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None
     paper_experiment_repository: PaperExperimentRepository | None = None
     objective_experiment_selection_repository: (
@@ -319,6 +322,7 @@ class ApplicationRuntime:
     chat_session_service: ChatSessionService
     analysis_job_repository: AnalysisJobRepository | None
     feedback_case_repository: FeedbackCaseRepository | None
+    feedback_case_service: FeedbackCaseService | None
     feedback_analysis_worker: FeedbackAnalysisWorker | None
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
@@ -476,6 +480,18 @@ async def build_application_runtime(
                 job_repository=analysis_job_repository,
                 case_repository=feedback_case_repository,
                 handler=FeedbackAnalysisHandler(chat_repository=chat_repository),
+            )
+
+        feedback_case_service = overrides.feedback_case_service
+        if (
+            feedback_case_service is None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            feedback_case_service = FeedbackCaseService(
+                case_repository=feedback_case_repository,
+                chat_repository=chat_repository,
+                collection_service=collection_service,
             )
 
         # Services share the resolved objects above; no service locator is used.
@@ -740,6 +756,7 @@ async def build_application_runtime(
             chat_session_service=chat_session_service,
             analysis_job_repository=analysis_job_repository,
             feedback_case_repository=feedback_case_repository,
+            feedback_case_service=feedback_case_service,
             feedback_analysis_worker=feedback_analysis_worker,
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
@@ -782,6 +799,7 @@ def install_application_runtime(
     application.state.chat_session_service = runtime.chat_session_service
     application.state.analysis_job_repository = runtime.analysis_job_repository
     application.state.feedback_case_repository = runtime.feedback_case_repository
+    application.state.feedback_case_service = runtime.feedback_case_service
     application.state.feedback_analysis_worker = runtime.feedback_analysis_worker
     application.state.experiment_plan_service = runtime.experiment_plan_service
     application.state.objective_analysis_service = runtime.objective_analysis_service
@@ -921,6 +939,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(feedback_cases.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(pipeline_runs.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
@@ -943,6 +962,7 @@ def create_app(
     chat_session_service: ChatSessionService | None = None,
     analysis_job_repository: AnalysisJobRepository | None = None,
     feedback_case_repository: FeedbackCaseRepository | None = None,
+    feedback_case_service: FeedbackCaseService | None = None,
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None,
     paper_experiment_repository: PaperExperimentRepository | None = None,
     objective_experiment_selection_repository: (
@@ -967,6 +987,7 @@ def create_app(
         chat_session_service=chat_session_service,
         analysis_job_repository=analysis_job_repository,
         feedback_case_repository=feedback_case_repository,
+        feedback_case_service=feedback_case_service,
         feedback_analysis_worker=feedback_analysis_worker,
         paper_experiment_repository=paper_experiment_repository,
         objective_experiment_selection_repository=objective_experiment_selection_repository,

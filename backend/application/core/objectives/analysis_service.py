@@ -21,6 +21,9 @@ from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
     record_analysis_failure,
 )
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriter,
+)
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.finding_summary import (
@@ -191,6 +194,7 @@ class ObjectiveAnalysisService:
         evidence_analysis_service: ObjectiveEvidenceAnalysisService,
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
+        experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
         task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
@@ -200,6 +204,7 @@ class ObjectiveAnalysisService:
         self.evidence_analysis_service = evidence_analysis_service
         self.objective_input_service = objective_input_service
         self.document_profile_service = document_profile_service
+        self.experiment_analysis_writer = experiment_analysis_writer
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
@@ -659,6 +664,14 @@ class ObjectiveAnalysisService:
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )
+            if self.experiment_analysis_writer is not None:
+                await self.experiment_analysis_writer.write(
+                    collection_id=collection_id,
+                    objective=objective,
+                    analysis=claimed,
+                    experiments=artifacts.experiments,
+                    findings=artifacts.findings,
+                )
             abstention_reason, abstention_note = _scientific_abstention(artifacts)
             objective, completed = await self.objective_repository.publish_analysis(
                 collection_id,

@@ -54,6 +54,12 @@ from application.core.document_profiles.service import (
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriter,
+)
+from application.core.objectives.analysis.experiment_finding_publisher import (
+    ExperimentFindingPublisher,
+)
 from application.core.objectives.analysis.experiment_query_service import (
     ExperimentQueryService,
 )
@@ -249,6 +255,7 @@ class ApplicationOverrides:
     ) = None
     comparison_group_repository: ComparisonGroupRepository | None = None
     experiment_finding_repository: ExperimentFindingRepository | None = None
+    experiment_analysis_writer: ExperimentAnalysisWriter | None = None
 
     def requires_database(self) -> bool:
         required_dependencies = (
@@ -295,6 +302,7 @@ class ApplicationRuntime:
     chat_session_service: ChatSessionService
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
+    experiment_analysis_writer: ExperimentAnalysisWriter | None
     experiment_query_service: ExperimentQueryService | None
 
     async def close(self) -> None:
@@ -376,6 +384,26 @@ async def build_application_runtime(
             experiment_finding_repository = (
                 experiment_finding_repository
                 or PostgresExperimentFindingRepository(session_factory)
+            )
+
+        experiment_analysis_writer = overrides.experiment_analysis_writer
+        if (
+            experiment_analysis_writer is None
+            and paper_experiment_repository is not None
+            and objective_experiment_selection_repository is not None
+            and comparison_group_repository is not None
+            and experiment_finding_repository is not None
+        ):
+            experiment_analysis_writer = ExperimentAnalysisWriter(
+                paper_experiment_repository=paper_experiment_repository,
+                selection_repository=objective_experiment_selection_repository,
+                group_repository=comparison_group_repository,
+                finding_publisher=ExperimentFindingPublisher(
+                    selection_repository=objective_experiment_selection_repository,
+                    group_repository=comparison_group_repository,
+                    finding_repository=experiment_finding_repository,
+                ),
+                finding_repository=experiment_finding_repository,
             )
         finding_review_repository = (
             overrides.finding_review_repository
@@ -465,6 +493,7 @@ async def build_application_runtime(
             evidence_analysis_service=evidence_analysis_service,
             objective_input_service=objective_input_service,
             document_profile_service=document_profile_service,
+            experiment_analysis_writer=experiment_analysis_writer,
         )
         experiment_query_service = None
         if (
@@ -643,6 +672,7 @@ async def build_application_runtime(
             chat_session_service=chat_session_service,
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
+            experiment_analysis_writer=experiment_analysis_writer,
             experiment_query_service=experiment_query_service,
         )
     except BaseException:
@@ -680,6 +710,7 @@ def install_application_runtime(
     application.state.chat_session_service = runtime.chat_session_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
     application.state.objective_analysis_service = runtime.objective_analysis_service
+    application.state.experiment_analysis_writer = runtime.experiment_analysis_writer
     application.state.experiment_query_service = runtime.experiment_query_service
 
 
@@ -838,6 +869,7 @@ def create_app(
     ) = None,
     comparison_group_repository: ComparisonGroupRepository | None = None,
     experiment_finding_repository: ExperimentFindingRepository | None = None,
+    experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
 ) -> FastAPI:
     overrides = ApplicationOverrides(
         auth_session_service=auth_session_service,
@@ -855,6 +887,7 @@ def create_app(
         objective_experiment_selection_repository=objective_experiment_selection_repository,
         comparison_group_repository=comparison_group_repository,
         experiment_finding_repository=experiment_finding_repository,
+        experiment_analysis_writer=experiment_analysis_writer,
     )
     app = FastAPI(
         title="TsingAI-Lens API",

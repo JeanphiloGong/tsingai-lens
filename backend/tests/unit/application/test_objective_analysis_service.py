@@ -587,7 +587,19 @@ class DiagnosticsRecordingObjectiveEvidenceAnalysisService(FakeObjectiveEvidence
         )
 
 
-def _service(*, repository=None, analyzer=None):
+class RecordingExperimentAnalysisWriter:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[dict] = []
+
+    async def write(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace()
+
+
+def _service(*, repository=None, analyzer=None, experiment_analysis_writer=None):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeObjectiveEvidenceAnalysisService()
     inputs = FakeObjectiveInputService()
@@ -596,6 +608,7 @@ def _service(*, repository=None, analyzer=None):
         evidence_analysis_service=analyzer,
         objective_input_service=inputs,
         document_profile_service=inputs.document_profile_service,
+        experiment_analysis_writer=experiment_analysis_writer,
     )
     return service, repository, analyzer
 
@@ -615,6 +628,41 @@ async def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["paper_contributions"] == _artifacts(1).contributions
     assert result["warnings"] == []
     assert repository.published_calls == 1
+
+
+async def test_objective_analysis_writes_experiment_records_before_legacy_publication() -> None:
+    writer = RecordingExperimentAnalysisWriter()
+    service, repository, _analyzer = _service(
+        experiment_analysis_writer=writer,
+    )
+
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "succeeded"
+    assert repository.published_calls == 1
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["collection_id"] == "collection-1"
+    assert call["objective"].objective_id == repository.objective.objective_id
+    assert call["objective"].collection_id == repository.objective.collection_id
+    assert call["analysis"].analysis_version == 1
+    assert call["experiments"] == _artifacts(1).experiments
+    assert call["findings"] == _artifacts(1).findings
+
+
+async def test_experiment_write_failure_prevents_successful_analysis_publication() -> None:
+    writer = RecordingExperimentAnalysisWriter(error=RuntimeError("experiment write failed"))
+    service, repository, _analyzer = _service(
+        experiment_analysis_writer=writer,
+    )
+
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "failed"
+    assert repository.published_calls == 0
+    assert len(writer.calls) == 1
 
 
 async def test_analysis_view_reads_one_typed_objective_snapshot() -> None:

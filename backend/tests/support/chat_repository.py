@@ -3,7 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
-from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
+from application.repositories.chat_repository import ChatModelCall, ChatResponseSnapshot, ChatSessionBusyError
+from domain.chat.model_call import ModelCallOutcome
+from domain.chat.feedback import ChatMessageFeedback
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 from domain.chat.permissions import change_permission, permission_record, permits_automatic
 
@@ -20,6 +22,8 @@ class MemoryChatRepository:
         self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
         self.permissions = {}
         self.proposed_revisions = {}
+        self.feedback: dict[str, ChatMessageFeedback] = {}
+        self.model_calls: dict[str, ChatModelCall] = {}
 
     async def read_permission(self, session_id, user_id):
         session = self.sessions.get(session_id)
@@ -79,8 +83,73 @@ class MemoryChatRepository:
     async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
         return self.messages.get(session_id, ())
 
+    async def read_message(self, message_id: str) -> ChatMessage | None:
+        for messages in self.messages.values():
+            for message in messages:
+                if message.message_id == message_id:
+                    return message
+        return None
+
     async def read_feedback(self, session_id: str, user_id: str) -> tuple:
-        return ()
+        return tuple(
+            item for item in self.feedback.values()
+            if item.session_id == session_id and item.user_id == user_id
+        )
+
+    async def read_feedback_by_id(self, feedback_id: str):
+        return self.feedback.get(feedback_id)
+
+    async def save_feedback(self, feedback: ChatMessageFeedback):
+        existing = next(
+            (
+                item for item in self.feedback.values()
+                if item.user_id == feedback.user_id and item.message_id == feedback.message_id
+            ),
+            None,
+        )
+        if existing is not None:
+            self.feedback.pop(existing.feedback_id, None)
+            feedback = replace(
+                feedback, feedback_id=existing.feedback_id, created_at=existing.created_at
+            )
+        self.feedback[feedback.feedback_id] = feedback
+        return feedback
+
+    async def delete_feedback(self, *, session_id: str, message_id: str, user_id: str) -> None:
+        for key, item in tuple(self.feedback.items()):
+            if (item.session_id, item.message_id, item.user_id) == (session_id, message_id, user_id):
+                self.feedback.pop(key, None)
+
+    async def start_model_call(self, call: ChatModelCall):
+        existing = self.model_calls.get(call.call_id)
+        if existing is not None and existing.request_digest != call.request_digest:
+            raise ValueError("model call identity cannot be reassigned")
+        self.model_calls[call.call_id] = call
+        return call
+
+    async def finish_model_call(self, *, session_id: str, call_id: str, outcome: ModelCallOutcome):
+        call = self.model_calls.get(call_id)
+        if call is None or call.session_id != session_id:
+            raise FileNotFoundError("chat model call not found")
+        self.model_calls[call_id] = replace(
+            call,
+            status=outcome.status,
+            finished_at=outcome.finished_at,
+            error_code=outcome.error_code,
+            provider_confirmed=outcome.status == "provider_succeeded",
+            prompt_tokens=outcome.prompt_tokens,
+            completion_tokens=outcome.completion_tokens,
+            total_tokens=outcome.total_tokens,
+        )
+        return self.model_calls[call_id]
+
+    async def read_model_calls(self, session_id: str, *, limit: int = 50, offset: int = 0):
+        values = [item for item in self.model_calls.values() if item.session_id == session_id]
+        return tuple(values[offset:offset + limit])
+
+    async def read_model_call(self, session_id: str, call_id: str):
+        item = self.model_calls.get(call_id)
+        return item if item is not None and item.session_id == session_id else None
 
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         return self.calls.get(tool_call_id)

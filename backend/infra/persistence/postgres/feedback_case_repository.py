@@ -1,0 +1,256 @@
+"""PostgreSQL persistence for feedback analysis results and workbench cases."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from domain.feedback.analysis_result import AnalysisResult
+from domain.feedback.feedback_case import FeedbackCase
+from infra.persistence.postgres.models.feedback import (
+    FeedbackAnalysisResultRow,
+    FeedbackCaseRow,
+)
+
+
+class PostgresFeedbackCaseRepository:
+    backend_name = "postgresql"
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self.session_factory = session_factory
+
+    async def save_analysis_result(self, result: AnalysisResult) -> AnalysisResult:
+        async with self.session_factory.begin() as session:
+            row = await _save_result_row(session, result)
+            await session.flush()
+            return _result(row)
+
+    async def upsert_case_from_analysis(
+        self,
+        result: AnalysisResult,
+        *,
+        context_snapshot: dict[str, Any],
+        source_signal_ids: tuple[str, ...] = (),
+        now: str,
+    ) -> FeedbackCase:
+        timestamp = _datetime(now)
+        signals = _ordered_unique(source_signal_ids or (result.feedback_id,))
+        async with self.session_factory.begin() as session:
+            # Keep this method usable when a caller has not separately persisted
+            # the result, while preserving the same result identity and payload.
+            await _save_result_row(session, result)
+            row = await session.scalar(
+                select(FeedbackCaseRow)
+                .where(
+                    FeedbackCaseRow.session_id == result.session_id,
+                    FeedbackCaseRow.anchor_message_id == result.anchor_message_id,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                row = FeedbackCaseRow(
+                    case_id=f"case_{uuid4().hex[:32]}",
+                    collection_id=result.collection_id,
+                    session_id=result.session_id,
+                    anchor_message_id=result.anchor_message_id,
+                    source_signal_ids=list(signals),
+                    analysis_result_ids=[result.result_id],
+                    context_snapshot=deepcopy(context_snapshot),
+                    status="needs_annotation",
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    annotation_digest=None,
+                )
+                session.add(row)
+            else:
+                if row.collection_id != result.collection_id:
+                    raise ValueError("feedback case identity cannot change collection")
+                row.source_signal_ids = list(
+                    _ordered_unique(tuple(row.source_signal_ids or ()) + signals)
+                )
+                row.analysis_result_ids = list(
+                    _ordered_unique(
+                        tuple(row.analysis_result_ids or ()) + (result.result_id,)
+                    )
+                )
+                if context_snapshot:
+                    row.context_snapshot = deepcopy(context_snapshot)
+                if row.status not in {"accepted", "withdrawn"}:
+                    row.status = "needs_annotation"
+                row.updated_at = timestamp
+            await session.flush()
+            return _case(row)
+
+    async def read_case(self, case_id: str) -> FeedbackCase | None:
+        async with self.session_factory() as session:
+            row = await session.get(FeedbackCaseRow, case_id)
+            return _case(row) if row is not None else None
+
+    async def list_cases(
+        self,
+        *,
+        collection_id: str | None = None,
+        status: str | None = None,
+        problem_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[FeedbackCase, ...]:
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        statement = select(FeedbackCaseRow)
+        if collection_id is not None:
+            statement = statement.where(FeedbackCaseRow.collection_id == collection_id)
+        if status is not None:
+            statement = statement.where(FeedbackCaseRow.status == status)
+        statement = statement.order_by(
+            FeedbackCaseRow.created_at,
+            FeedbackCaseRow.case_id,
+        )
+        async with self.session_factory() as session:
+            rows = list(await session.scalars(statement))
+            if problem_type is not None and rows:
+                result_ids = {
+                    result_id
+                    for row in rows
+                    for result_id in (row.analysis_result_ids or ())
+                }
+                matching_result_ids: set[str] = set()
+                if result_ids:
+                    result_rows = await session.scalars(
+                        select(FeedbackAnalysisResultRow).where(
+                            FeedbackAnalysisResultRow.result_id.in_(result_ids),
+                            FeedbackAnalysisResultRow.problem_type == problem_type,
+                        )
+                    )
+                    matching_result_ids = {
+                        result_row.result_id for result_row in result_rows
+                    }
+                rows = [
+                    row
+                    for row in rows
+                    if any(
+                        result_id in matching_result_ids
+                        for result_id in (row.analysis_result_ids or ())
+                    )
+                ]
+            rows = rows[offset : offset + limit]
+            return tuple(_case(row) for row in rows)
+
+
+async def _save_result_row(
+    session: AsyncSession, result: AnalysisResult
+) -> FeedbackAnalysisResultRow:
+    row = await session.get(FeedbackAnalysisResultRow, result.result_id)
+    by_job = await session.scalar(
+        select(FeedbackAnalysisResultRow).where(
+            FeedbackAnalysisResultRow.job_id == result.job_id
+        )
+    )
+    if row is not None and row.job_id != result.job_id:
+        raise ValueError("analysis result identity cannot be reassigned")
+    if by_job is not None and by_job.result_id != result.result_id:
+        raise ValueError("analysis job already has another result")
+    existing = row or by_job
+    if existing is not None:
+        identity = (
+            existing.job_id,
+            existing.feedback_id,
+            existing.session_id,
+            existing.collection_id,
+            existing.anchor_message_id,
+        )
+        requested_identity = (
+            result.job_id,
+            result.feedback_id,
+            result.session_id,
+            result.collection_id,
+            result.anchor_message_id,
+        )
+        if identity != requested_identity:
+            raise ValueError("analysis result identity cannot be reassigned")
+    if row is None:
+        row = by_job or FeedbackAnalysisResultRow(result_id=result.result_id)
+        if by_job is None:
+            session.add(row)
+    row.job_id = result.job_id
+    row.feedback_id = result.feedback_id
+    row.session_id = result.session_id
+    row.collection_id = result.collection_id
+    row.anchor_message_id = result.anchor_message_id
+    row.problem_type = result.problem_type
+    row.confidence = result.confidence
+    row.related_message_ids = list(result.related_message_ids)
+    row.suggested_evidence = list(result.suggested_evidence)
+    row.suggested_target = result.suggested_target
+    row.evidence_coverage = result.evidence_coverage.to_record()
+    row.model = result.model
+    row.input_digest = result.input_digest
+    row.created_at = _datetime(result.created_at)
+    return row
+
+
+def _result(row: FeedbackAnalysisResultRow) -> AnalysisResult:
+    from domain.feedback.evidence_coverage import EvidenceCoverage
+
+    return AnalysisResult(
+        result_id=row.result_id,
+        job_id=row.job_id,
+        feedback_id=row.feedback_id,
+        session_id=row.session_id,
+        collection_id=row.collection_id,
+        anchor_message_id=row.anchor_message_id,
+        problem_type=row.problem_type,
+        confidence=float(row.confidence),
+        related_message_ids=tuple(row.related_message_ids or ()),
+        suggested_evidence=tuple(row.suggested_evidence or ()),
+        suggested_target=row.suggested_target,
+        evidence_coverage=EvidenceCoverage.from_record(row.evidence_coverage),
+        model=row.model,
+        input_digest=row.input_digest,
+        created_at=_iso(row.created_at),
+    )
+
+
+def _case(row: FeedbackCaseRow) -> FeedbackCase:
+    return FeedbackCase(
+        case_id=row.case_id,
+        collection_id=row.collection_id,
+        session_id=row.session_id,
+        anchor_message_id=row.anchor_message_id,
+        source_signal_ids=tuple(row.source_signal_ids or ()),
+        analysis_result_ids=tuple(row.analysis_result_ids or ()),
+        context_snapshot=deepcopy(row.context_snapshot or {}),
+        status=row.status,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+        annotation_digest=row.annotation_digest,
+    )
+
+
+def _ordered_unique(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(str(value) for value in values if value))
+
+
+def _datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value)
+        parsed = datetime.fromisoformat(
+            f"{text[:-1]}+00:00" if text.endswith("Z") else text
+        )
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _iso(value: datetime) -> str:
+    return _datetime(value).isoformat()
+
+
+__all__ = ["PostgresFeedbackCaseRepository"]

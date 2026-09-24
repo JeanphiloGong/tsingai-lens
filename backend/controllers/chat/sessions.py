@@ -13,6 +13,7 @@ from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatBranchAlreadyStartedError,
     ChatMessageNotFoundError,
+    ChatFeedbackAnalysisEnqueueError,
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
@@ -26,6 +27,8 @@ from controllers.schemas.chat.session import (
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
+    ChatModelCallResponse,
+    ChatModelCallSummaryResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionResponse,
@@ -40,6 +43,25 @@ from domain.chat import ChatSourceContext, ToolPermissionMode
 
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
+
+
+def _model_call_summary(call: Any) -> ChatModelCallSummaryResponse:
+    return ChatModelCallSummaryResponse.model_validate({
+        key: getattr(call, key)
+        for key in (
+            "call_id", "session_id", "trigger_message_id", "response_message_id",
+            "purpose", "model", "request_digest", "status", "started_at", "finished_at",
+            "error_code", "provider_confirmed", "prompt_tokens", "completion_tokens",
+            "total_tokens",
+        )
+    })
+
+
+def _model_call_detail(call: Any) -> ChatModelCallResponse:
+    return ChatModelCallResponse.model_validate({
+        **_model_call_summary(call).model_dump(),
+        "request": dict(call.request),
+    })
 
 
 @router.get("/{session_id}/permissions", response_model=ChatPermissionResponse)
@@ -166,6 +188,53 @@ async def list_chat_messages(
     return _trajectory_response(trajectory)
 
 
+@router.get(
+    "/{session_id}/model-calls",
+    response_model=dict,
+    summary="List exact provider calls for an owned Chat session",
+)
+async def list_chat_model_calls(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    try:
+        calls = await request.app.state.chat_session_service.list_model_calls_for_user(
+            session_id, await current_user_id(request), limit=limit, offset=offset,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "items": [_model_call_summary(call).model_dump() for call in calls],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/{session_id}/model-calls/{call_id}",
+    response_model=ChatModelCallResponse,
+    summary="Read one exact provider call for an owned Chat session",
+)
+async def get_chat_model_call(
+    session_id: str, call_id: str, request: Request,
+) -> ChatModelCallResponse:
+    try:
+        call = await request.app.state.chat_session_service.get_model_call_for_user(
+            session_id, call_id, await current_user_id(request),
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if call is None:
+        raise HTTPException(status_code=404, detail="chat model call not found")
+    return _model_call_detail(call)
+
+
 @router.get("/{session_id}/events", summary="Resume updates for one owned Research Agent response")
 async def stream_chat_updates(
     session_id: str, request: Request, response_id: str = Query(min_length=1, max_length=128),
@@ -225,6 +294,12 @@ async def set_chat_message_feedback(
     except ChatMessageNotFoundError as exc:
         raise HTTPException(status_code=404, detail={
             "code": "chat_message_not_found", "message": str(exc),
+        }) from exc
+    except ChatFeedbackAnalysisEnqueueError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "feedback_analysis_enqueue_failed",
+            "message": str(exc),
+            "feedback_id": exc.feedback_id,
         }) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -8,6 +8,12 @@ from infra.persistence.postgres.models.chat import (
     ChatSessionRow,
     ChatToolCallRow,
 )
+from infra.persistence.postgres.models.feedback import (
+    AnalysisJobRow,
+    ChatModelCallRow,
+    FeedbackAnalysisResultRow,
+    FeedbackCaseRow,
+)
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
@@ -49,6 +55,8 @@ from infra.persistence.postgres.models.experiment_finding import (
 __all__ = [
     "AuthSession",
     "AuthUser",
+    "AnalysisJobRow",
+    "ChatModelCallRow",
     "ChatMessageRow",
     "ChatMessageFeedbackRow",
     "ChatSessionRow",
@@ -69,6 +77,8 @@ __all__ = [
     "ExperimentMeasurementResultRow",
     "ExperimentTestConditionRow",
     "ExperimentalVariantRow",
+    "FeedbackAnalysisResultRow",
+    "FeedbackCaseRow",
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",

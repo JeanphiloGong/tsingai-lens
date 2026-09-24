@@ -21,6 +21,7 @@ from application.chat import (
 )
 from application.chat.session_service import (
     ChatApprovalPendingError,
+    ChatFeedbackAnalysisEnqueueError,
     ChatSessionNotFoundError,
     ChatSessionService,
     ChatSourceContextError,
@@ -285,6 +286,56 @@ async def test_chat_session_service_persists_ordinary_conversation() -> None:
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
     with pytest.raises(ChatSessionNotFoundError):
         await service.get_session_for_user(session.session_id, "user-2")
+
+
+class _FailingAnalysisJobs:
+    async def enqueue_feedback_analysis(self, **kwargs):
+        raise RuntimeError("database unavailable")
+
+
+async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable() -> None:
+    repository = _Repository()
+    service = ChatSessionService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceArtifactRepository(),
+        repository=repository,
+        runner=ResearchAgentRunner(
+            model=_Model(ModelTurn(content="answer")),
+            capabilities=CapabilityRegistry(()),
+        ),
+        analysis_job_repository=_FailingAnalysisJobs(),
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    await repository.save_trajectory(
+        session=session,
+        messages=(
+            ChatMessage.user(
+                message_id="question-1",
+                session_id=session.session_id,
+                content="question",
+                created_at="2026-09-24T00:00:00+00:00",
+            ),
+            ChatMessage.assistant(
+                message_id="answer-1",
+                session_id=session.session_id,
+                content="answer",
+                created_at="2026-09-24T00:00:01+00:00",
+            ),
+        ),
+        tool_calls=(),
+        tool_results=(),
+    )
+
+    with pytest.raises(ChatFeedbackAnalysisEnqueueError):
+        await service.set_message_feedback_for_user(
+            session.session_id,
+            "answer-1",
+            "user-1",
+            rating="not_helpful",
+            reason="incorrect",
+        )
+
+    assert len(repository.feedback) == 1
 
 
 async def test_chat_session_service_persists_selected_source_with_user_message() -> None:

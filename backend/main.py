@@ -16,6 +16,7 @@ from application.chat import (
     ResearchAgentRunner,
     AgentRunLimits,
 )
+from application.chat.session_service import RepositoryModelCallObserver
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
     BrowseCollectionPapersCapability,
@@ -94,6 +95,7 @@ from application.pipeline import PipelineRunService
 from application.evaluation import (
     FindingFeedbackService,
 )
+from application.feedback import FeedbackAnalysisHandler, FeedbackAnalysisWorker
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.source.collection_service import CollectionService
@@ -122,6 +124,8 @@ from application.repositories.document_profile_repository import (
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.experiment_plan_repository import ExperimentPlanRepository
 from application.repositories.chat_repository import ChatRepository
+from application.repositories.analysis_job_repository import AnalysisJobRepository
+from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.repositories.objective_repository import ObjectiveRepository
 from application.repositories.paper_experiment_repository import PaperExperimentRepository
 from application.repositories.objective_experiment_selection_repository import (
@@ -138,6 +142,12 @@ from infra.persistence.database import (
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
+from infra.persistence.postgres.analysis_job_repository import (
+    PostgresAnalysisJobRepository,
+)
+from infra.persistence.postgres.feedback_case_repository import (
+    PostgresFeedbackCaseRepository,
+)
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
@@ -252,6 +262,9 @@ class ApplicationOverrides:
     experiment_plan_repository: ExperimentPlanRepository | None = None
     chat_repository: ChatRepository | None = None
     chat_session_service: ChatSessionService | None = None
+    analysis_job_repository: AnalysisJobRepository | None = None
+    feedback_case_repository: FeedbackCaseRepository | None = None
+    feedback_analysis_worker: FeedbackAnalysisWorker | None = None
     paper_experiment_repository: PaperExperimentRepository | None = None
     objective_experiment_selection_repository: (
         ObjectiveExperimentSelectionRepository | None
@@ -304,6 +317,9 @@ class ApplicationRuntime:
     objective_authoring_service: ObjectiveAuthoringService
     goal_service: GoalService
     chat_session_service: ChatSessionService
+    analysis_job_repository: AnalysisJobRepository | None
+    feedback_case_repository: FeedbackCaseRepository | None
+    feedback_analysis_worker: FeedbackAnalysisWorker | None
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
     experiment_analysis_writer: ExperimentAnalysisWriter | None
@@ -437,6 +453,30 @@ async def build_application_runtime(
             if overrides.chat_session_service is None
             else None
         )
+        analysis_job_repository = overrides.analysis_job_repository
+        feedback_case_repository = overrides.feedback_case_repository
+        if session_factory is not None:
+            analysis_job_repository = (
+                analysis_job_repository
+                or PostgresAnalysisJobRepository(session_factory)
+            )
+            feedback_case_repository = (
+                feedback_case_repository
+                or PostgresFeedbackCaseRepository(session_factory)
+            )
+
+        feedback_analysis_worker = overrides.feedback_analysis_worker
+        if (
+            feedback_analysis_worker is None
+            and analysis_job_repository is not None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            feedback_analysis_worker = FeedbackAnalysisWorker(
+                job_repository=analysis_job_repository,
+                case_repository=feedback_case_repository,
+                handler=FeedbackAnalysisHandler(chat_repository=chat_repository),
+            )
 
         # Services share the resolved objects above; no service locator is used.
         document_profile_service = DocumentProfileService(
@@ -537,6 +577,12 @@ async def build_application_runtime(
                 collection_service=collection_service,
                 source_artifact_repository=source_artifact_repository,
                 repository=chat_repository,
+                analysis_job_repository=analysis_job_repository,
+                model_call_observer=(
+                    RepositoryModelCallObserver(chat_repository)
+                    if chat_repository is not None
+                    else None
+                ),
                 runner=ResearchAgentRunner(
                     model=chat_model,
                     limits=_parse_agent_run_limits(),
@@ -692,6 +738,9 @@ async def build_application_runtime(
             objective_authoring_service=objective_authoring_service,
             goal_service=goal_service,
             chat_session_service=chat_session_service,
+            analysis_job_repository=analysis_job_repository,
+            feedback_case_repository=feedback_case_repository,
+            feedback_analysis_worker=feedback_analysis_worker,
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
             experiment_analysis_writer=experiment_analysis_writer,
@@ -731,6 +780,9 @@ def install_application_runtime(
     application.state.objective_authoring_service = runtime.objective_authoring_service
     application.state.goal_service = runtime.goal_service
     application.state.chat_session_service = runtime.chat_session_service
+    application.state.analysis_job_repository = runtime.analysis_job_repository
+    application.state.feedback_case_repository = runtime.feedback_case_repository
+    application.state.feedback_analysis_worker = runtime.feedback_analysis_worker
     application.state.experiment_plan_service = runtime.experiment_plan_service
     application.state.objective_analysis_service = runtime.objective_analysis_service
     application.state.experiment_analysis_writer = runtime.experiment_analysis_writer
@@ -889,6 +941,9 @@ def create_app(
     experiment_plan_repository: ExperimentPlanRepository | None = None,
     chat_repository: ChatRepository | None = None,
     chat_session_service: ChatSessionService | None = None,
+    analysis_job_repository: AnalysisJobRepository | None = None,
+    feedback_case_repository: FeedbackCaseRepository | None = None,
+    feedback_analysis_worker: FeedbackAnalysisWorker | None = None,
     paper_experiment_repository: PaperExperimentRepository | None = None,
     objective_experiment_selection_repository: (
         ObjectiveExperimentSelectionRepository | None
@@ -910,6 +965,9 @@ def create_app(
         experiment_plan_repository=experiment_plan_repository,
         chat_repository=chat_repository,
         chat_session_service=chat_session_service,
+        analysis_job_repository=analysis_job_repository,
+        feedback_case_repository=feedback_case_repository,
+        feedback_analysis_worker=feedback_analysis_worker,
         paper_experiment_repository=paper_experiment_repository,
         objective_experiment_selection_repository=objective_experiment_selection_repository,
         comparison_group_repository=comparison_group_repository,

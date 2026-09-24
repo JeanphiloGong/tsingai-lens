@@ -6,11 +6,32 @@ from contextlib import AbstractAsyncContextManager
 
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 from domain.chat.feedback import ChatMessageFeedback
+from domain.chat.model_call import ModelCallOutcome, ModelCallPurpose, ModelCallStatus
 
 
 class ChatSessionBusyError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("the research response is still running; retry when it finishes")
+
+
+@dataclass(frozen=True)
+class ChatModelCall:
+    call_id: str
+    session_id: str
+    trigger_message_id: str | None
+    response_message_id: str | None
+    purpose: ModelCallPurpose
+    model: str
+    request: dict[str, Any]
+    request_digest: str
+    started_at: str
+    status: ModelCallStatus = "recorded"
+    finished_at: str | None = None
+    error_code: str | None = None
+    provider_confirmed: bool = False
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -62,11 +83,27 @@ class ChatRepository(Protocol):
 
     async def read_message(self, message_id: str) -> ChatMessage | None: ...
 
+    async def read_feedback_by_id(self, feedback_id: str) -> ChatMessageFeedback | None: ...
+
     async def read_feedback(
         self, session_id: str, user_id: str
     ) -> tuple[ChatMessageFeedback, ...]: ...
 
     async def save_feedback(self, feedback: ChatMessageFeedback) -> ChatMessageFeedback: ...
+
+    async def start_model_call(self, call: ChatModelCall) -> ChatModelCall: ...
+
+    async def finish_model_call(
+        self, *, session_id: str, call_id: str, outcome: ModelCallOutcome
+    ) -> ChatModelCall: ...
+
+    async def read_model_calls(
+        self, session_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatModelCall, ...]: ...
+
+    async def read_model_call(
+        self, session_id: str, call_id: str
+    ) -> ChatModelCall | None: ...
 
     async def delete_feedback(
         self, *, session_id: str, message_id: str, user_id: str

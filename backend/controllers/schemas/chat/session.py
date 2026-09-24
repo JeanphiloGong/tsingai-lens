@@ -117,6 +117,30 @@ class ChatMessageResponse(BaseModel):
     source_contexts: list[ChatSourceContextPayload] = Field(default_factory=list)
 
 
+class ChatModelCallSummaryResponse(BaseModel):
+    call_id: str
+    session_id: str
+    trigger_message_id: str | None
+    response_message_id: str | None
+    purpose: Literal["decision", "compaction", "finalization"]
+    model: str
+    request_digest: str
+    status: Literal[
+        "recorded", "provider_succeeded", "provider_failed", "response_invalid", "cancelled"
+    ]
+    started_at: str
+    finished_at: str | None = None
+    error_code: str | None = None
+    provider_confirmed: bool
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+class ChatModelCallResponse(ChatModelCallSummaryResponse):
+    request: dict[str, Any]
+
+
 class ChatToolCallResponse(BaseModel):
     tool_call_id: str
     session_id: str

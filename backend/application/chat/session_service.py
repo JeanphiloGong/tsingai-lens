@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
+import json
 import logging
 from typing import Any
 from urllib.parse import urlencode
@@ -32,6 +33,9 @@ from domain.chat import (
 )
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.chat_repository import ChatRepository, ChatResponseSnapshot, ChatSessionBusyError
+from application.repositories.chat_repository import ChatModelCall
+from application.repositories.analysis_job_repository import AnalysisJobRepository
+from domain.chat.model_call import ModelCallInput, ModelCallOutcome, ModelCallObserver
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 from domain.chat.permissions import permits_automatic
 
@@ -45,10 +49,54 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class RepositoryModelCallObserver:
+    """Persist provider-call facts before and after the SDK submission."""
+
+    def __init__(self, repository: ChatRepository) -> None:
+        self.repository = repository
+        self._sessions: dict[str, str] = {}
+
+    async def start(self, call: ModelCallInput) -> str:
+        request = json.loads(json.dumps(call.request, ensure_ascii=False, separators=(",", ":")))
+        call_id = f"model_call_{uuid4().hex}"
+        digest = sha256(
+            json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        await self.repository.start_model_call(ChatModelCall(
+            call_id=call_id,
+            session_id=call.session_id,
+            trigger_message_id=call.trigger_message_id,
+            response_message_id=call.response_message_id,
+            purpose=call.purpose,
+            model=str(request.get("model") or "unknown"),
+            request=request,
+            request_digest=digest,
+            started_at=_now_iso(),
+        ))
+        self._sessions[call_id] = call.session_id
+        return call_id
+
+    async def finish(self, call_id: str, outcome: ModelCallOutcome) -> None:
+        session_id = self._sessions.get(call_id)
+        if session_id is None:
+            raise FileNotFoundError(f"chat model call not found: {call_id}")
+        await self.repository.finish_model_call(
+            session_id=session_id, call_id=call_id, outcome=outcome,
+        )
+
+
 class ChatSessionNotFoundError(FileNotFoundError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(f"chat session not found: {session_id}")
+
+
+class ChatFeedbackAnalysisEnqueueError(RuntimeError):
+    """Feedback is durable, but its asynchronous analysis could not be queued."""
+
+    def __init__(self, feedback_id: str) -> None:
+        self.feedback_id = feedback_id
+        super().__init__("feedback was saved; analysis can be retried")
 
 
 class ChatSourceContextError(ValueError):
@@ -79,11 +127,15 @@ class ChatSessionService:
         source_artifact_repository: SourceArtifactRepository,
         repository: ChatRepository,
         runner: ResearchAgentRunner,
+        analysis_job_repository: AnalysisJobRepository | None = None,
+        model_call_observer: ModelCallObserver | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository
         self.repository = repository
         self.runner = runner
+        self.analysis_job_repository = analysis_job_repository
+        self.model_call_observer = model_call_observer
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
 
     async def create_session(
@@ -182,6 +234,18 @@ class ChatSessionService:
     ) -> tuple[ChatMessage, ...]:
         await self.get_session_for_user(session_id, user_id)
         return await self.repository.read_messages(session_id)
+
+    async def list_model_calls_for_user(
+        self, session_id: str, user_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatModelCall, ...]:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_model_calls(session_id, limit=limit, offset=offset)
+
+    async def get_model_call_for_user(
+        self, session_id: str, call_id: str, user_id: str
+    ) -> ChatModelCall | None:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_model_call(session_id, call_id)
 
     async def get_pending_approval_for_user(
         self,
@@ -418,9 +482,25 @@ class ChatSessionService:
         if rating is None:
             if reason is not None or comment is not None:
                 raise ValueError("withdrawn feedback cannot have a reason or comment")
+            current_feedback = next(
+                (
+                    item
+                    for item in await self.repository.read_feedback(session_id, user_id)
+                    if item.message_id == message_id
+                ),
+                None,
+            )
             await self.repository.delete_feedback(
                 session_id=session_id, message_id=message_id, user_id=user_id
             )
+            if current_feedback is not None and self.analysis_job_repository is not None:
+                try:
+                    await self.analysis_job_repository.cancel_feedback_analysis_jobs(
+                        feedback_id=current_feedback.feedback_id,
+                        finished_at=_now_iso(),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("feedback analysis cancellation failed after withdrawal")
             return None
         feedback = ChatMessageFeedback.for_answer(
             message=message,
@@ -431,7 +511,23 @@ class ChatSessionService:
             comment=comment,
             now=_now_iso(),
         )
-        return await self.repository.save_feedback(feedback)
+        saved = await self.repository.save_feedback(feedback)
+        if self.analysis_job_repository is not None:
+            idempotency_key = ":".join(
+                (saved.feedback_id, saved.updated_at, saved.response_digest)
+            )
+            try:
+                await self.analysis_job_repository.enqueue_feedback_analysis(
+                    feedback_id=saved.feedback_id,
+                    idempotency_key=idempotency_key,
+                    now=_now_iso(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("feedback analysis enqueue failed feedback_id=%s", saved.feedback_id)
+                # Keep the feedback visible while making the lost asynchronous
+                # hand-off explicit to the caller.
+                raise ChatFeedbackAnalysisEnqueueError(saved.feedback_id) from exc
+        return saved
 
     async def post_message_for_user(
         self,
@@ -643,6 +739,7 @@ class ChatSessionService:
                 "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
                 "text_delta_callback": emit_text_delta, "progress_callback": emit_progress,
                 "response_started_callback": start_response,
+                "model_call_observer": self.model_call_observer,
             }
             if claimed_call is not None:
                 result = await self.runner.resume_claimed_call(**arguments, claimed_call=claimed_call)

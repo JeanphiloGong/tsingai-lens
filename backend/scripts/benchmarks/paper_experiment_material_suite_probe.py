@@ -61,7 +61,7 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
@@ -356,7 +356,7 @@ def _run_case(
                 source_facts=extracted,
                 objectives=(objective,),
                 document_contexts=(
-                    ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
+                    ObjectiveExperimentAnalysisService._document_contexts_for_experiments(
                         blocks_by_document_id=blocks,
                         tables_by_document_id=tables,
                         figures_by_document_id=figures,

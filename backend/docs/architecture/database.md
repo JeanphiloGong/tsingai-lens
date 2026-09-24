@@ -222,7 +222,7 @@ record.
 
 ### 6. Objective Analysis, Evidence, and Findings
 
-`ObjectiveEvidenceAnalysisService` and the experiment analysis writer implement
+`ObjectiveExperimentAnalysisService` and the experiment analysis writer implement
 the evidence-first comparison flow: frame each selected paper, route exact
 Sources, extract and ground facts, reconstruct within-paper experiments, select
 the results needed by the Objective, compare only compatible selections, and

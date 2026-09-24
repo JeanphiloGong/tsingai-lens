@@ -24,7 +24,7 @@ Use the following entry points when modifying the Core workflow:
 | Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `ObjectiveAuthoringService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
 | Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
-| Generate analysis artifacts | `ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` | per-paper PaperExperiment inputs |
+| Reconstruct experiments | `ObjectiveExperimentAnalysisService.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
 | Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
 
 Paper Map construction is intentionally split by responsibility:

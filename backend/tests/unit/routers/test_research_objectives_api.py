@@ -495,7 +495,7 @@ def _client(
     app.state.objective_analysis_service = service or _Service()
     scope_and_discovery = discovery_service or _DiscoveryService()
     app.state.objective_discovery_service = scope_and_discovery
-    app.state.evidence_analysis_service = scope_and_discovery
+    app.state.experiment_analysis_service = scope_and_discovery
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 

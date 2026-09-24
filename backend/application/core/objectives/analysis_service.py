@@ -38,8 +38,8 @@ from application.core.objectives.finding_summary import (
     summarize_finding_evidence,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveAnalysisArtifacts,
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisArtifacts,
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from domain.core import ObjectiveAnalysis, ResearchObjective
@@ -141,58 +141,6 @@ def _record_dict(record: Any) -> dict[str, Any]:
     return record.to_record()
 
 
-def _scientific_abstention(
-    artifacts: ObjectiveAnalysisArtifacts,
-) -> tuple[str | None, str | None]:
-    """Explain a successful analysis with evidence but no defensible Finding.
-
-    A researcher distinguishes a paper that reports an observation from a
-    comparison that supports an attributed conclusion.  Preserve that
-    distinction in the published analysis instead of exposing ``findings=[]``
-    as if the analysis had no useful result or had silently failed.
-    """
-
-    if artifacts.findings:
-        return None, None
-
-    evidence = tuple(artifacts.evidence_records)
-    status_counts: dict[str, int] = {}
-    for record in evidence:
-        status = record.evidence_status
-        status_counts[status] = status_counts.get(status, 0) + 1
-    status_note = "; ".join(
-        f"{status}={count}" for status, count in sorted(status_counts.items())
-    ) or "none"
-
-    if not evidence:
-        return (
-            "no_grounded_evidence",
-            "No source-backed Evidence was retained, so the Objective cannot support a scientific conclusion.",
-        )
-
-    reported_results = tuple(
-        record
-        for record in evidence
-        if record.selection_status == "extracted" and record.reported_result is not None
-    )
-    if reported_results:
-        return (
-            "insufficient_evidence",
-            f"{len(reported_results)} source-backed result(s) were retained, but none satisfied the comparison conditions for a Finding. Evidence status counts: {status_note}.",
-        )
-
-    if all(record.evidence_status == "extraction_failed" for record in evidence):
-        return (
-            "no_grounded_evidence",
-            f"{len(evidence)} Evidence item(s) were retained, but all failed technical extraction before a source-backed result could be established. Evidence status counts: {status_note}.",
-        )
-
-    return (
-        "no_comparable_evidence",
-        f"{len(evidence)} Evidence item(s) were retained, but none contained a source-backed reported result that could be compared for this Objective. Evidence status counts: {status_note}.",
-    )
-
-
 def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
     """Explain a successful experiment analysis with no published Finding."""
 
@@ -243,7 +191,7 @@ class ObjectiveAnalysisService:
         self,
         *,
         objective_repository: ObjectiveRepository,
-        evidence_analysis_service: ObjectiveEvidenceAnalysisService,
+        experiment_analysis_service: ObjectiveExperimentAnalysisService,
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
         experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
@@ -255,7 +203,7 @@ class ObjectiveAnalysisService:
         if max_concurrency < 1:
             raise ValueError("objective analysis concurrency must be positive")
         self.objective_repository = objective_repository
-        self.evidence_analysis_service = evidence_analysis_service
+        self.experiment_analysis_service = experiment_analysis_service
         self.objective_input_service = objective_input_service
         self.document_profile_service = document_profile_service
         self.experiment_analysis_writer = experiment_analysis_writer
@@ -772,10 +720,10 @@ class ObjectiveAnalysisService:
                 capture_llm_usage() as usage,
                 capture_analysis_diagnostics() as diagnostics,
             ):
-                artifacts: ObjectiveAnalysisArtifacts | None = None
+                artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
                 try:
                     artifacts = (
-                        await self.evidence_analysis_service.generate_objective_analysis_artifacts(
+                        await self.experiment_analysis_service.generate_experiment_analysis_artifacts(
                             collection_id,
                             claimed,
                             progress_callback=progress_callback,
@@ -891,7 +839,9 @@ class ObjectiveAnalysisService:
             logger.exception("Objective analysis crashed after service scheduling")
 
     @staticmethod
-    def _validate_artifacts(artifacts: ObjectiveAnalysisArtifacts) -> None:
+    def _validate_artifacts(
+        artifacts: ObjectiveExperimentAnalysisArtifacts,
+    ) -> None:
         if not artifacts.contributions:
             raise RuntimeError("objective analysis produced no paper contributions")
         relevant_contributions = tuple(

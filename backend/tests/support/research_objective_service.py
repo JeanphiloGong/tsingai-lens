@@ -10,7 +10,7 @@ from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from domain.core import (
     DocumentProfile,
@@ -43,7 +43,7 @@ def build_research_objective_service(
     *,
     collection_service,
     **kwargs,
-) -> ObjectiveEvidenceAnalysisService:
+) -> ObjectiveExperimentAnalysisService:
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
         kwargs.setdefault("objective_source_extractor", objective_judgments)
@@ -86,7 +86,7 @@ def build_research_objective_service(
             response_client=objective_judgments,
         ),
     )
-    return ObjectiveEvidenceAnalysisService(
+    return ObjectiveExperimentAnalysisService(
         collection_service=collection_service,
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
@@ -96,7 +96,7 @@ def build_research_objective_service(
 
 
 async def seed_document_profiles(
-    service: ObjectiveEvidenceAnalysisService,
+    service: ObjectiveExperimentAnalysisService,
     collection_id: str,
 ) -> None:
     documents = await service.objective_input_service.source_artifact_repository.read_collection_documents(
@@ -161,7 +161,7 @@ async def seed_document_profiles(
 
 
 async def queue_running_analysis(
-    service: ObjectiveEvidenceAnalysisService,
+    service: ObjectiveExperimentAnalysisService,
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:

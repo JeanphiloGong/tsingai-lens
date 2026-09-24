@@ -16,7 +16,7 @@ from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveAnalysisArtifacts,
+    ObjectiveExperimentAnalysisArtifacts,
 )
 from domain.core import (
     DocumentProfile,
@@ -208,8 +208,8 @@ def _native_finding(version: int) -> Finding:
     )
 
 
-def _artifacts(version: int) -> ObjectiveAnalysisArtifacts:
-    return ObjectiveAnalysisArtifacts(
+def _artifacts(version: int) -> ObjectiveExperimentAnalysisArtifacts:
+    return ObjectiveExperimentAnalysisArtifacts(
         contributions=(
             PaperContribution.from_mapping(
                 {
@@ -229,115 +229,8 @@ def _artifacts(version: int) -> ObjectiveAnalysisArtifacts:
                 }
             ),
         ),
-        evidence_records=(_evidence(version),),
-        findings=(_finding(version),),
+        experiments=(),
     )
-
-
-async def test_published_analysis_explains_scientific_abstention_for_incomplete_evidence() -> None:
-    """A reported result without a comparison is not an unexplained empty run."""
-
-    descriptive_evidence = replace(
-        _evidence(1),
-        evidence_id="descriptive-evidence",
-        source_ref="block-descriptive-evidence",
-        changed_variables=(),
-        comparison=None,
-        attribution_scope="descriptive_only",
-    )
-    contribution = replace(
-        _artifacts(1).contributions[0],
-        comparable_evidence_count=0,
-        evidence_disposition="no_comparable_evidence",
-        evidence_disposition_reason=(
-            "Selected sources produced no comparable direct result for this Objective."
-        ),
-        evidence_status_counts=(("descriptive", 1),),
-    )
-    artifacts = ObjectiveAnalysisArtifacts(
-        contributions=(contribution,),
-        evidence_records=(descriptive_evidence,),
-        findings=(),
-    )
-    service, _repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
-    )
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
-
-    assert result["analysis"].status == "succeeded"
-    assert result["analysis"].abstention_reason is None
-    assert result["evidence_review"]["total_evidence_count"] == 0
-    assert result["paper_contributions"]
-
-
-async def test_published_analysis_exposes_all_evidence_statuses_and_actionable_gaps() -> None:
-    """A missing Finding must not hide source-backed results or technical gaps."""
-
-    base = _evidence(1)
-    descriptive = replace(
-        base,
-        evidence_id="descriptive-evidence",
-        source_ref="block-descriptive",
-        changed_variables=(),
-        comparison=None,
-        attribution_scope="descriptive_only",
-    )
-    needs_context = replace(
-        base,
-        evidence_id="needs-context-evidence",
-        source_ref="block-context",
-        selection_status="candidate",
-        selection_reason="Target outcome mentioned but needs same-paper context.",
-        changed_variables=(),
-        comparison=None,
-        reported_result=None,
-        attribution_scope="not_attributable",
-        scientific_context=base.scientific_context.__class__(),
-        resolution_status="unresolved",
-        confidence=0.0,
-    )
-    failed = replace(
-        base,
-        evidence_id="failed-evidence",
-        source_ref="block-failed",
-        selection_status="failed",
-        selection_reason="Selected source requires extraction.",
-        failure_reason="StructuredOutputSaturatedError: output limit",
-        changed_variables=(),
-        comparison=None,
-        reported_result=None,
-        attribution_scope="not_attributable",
-        scientific_context=base.scientific_context.__class__(),
-        resolution_status="unknown",
-        confidence=0.0,
-    )
-    contribution = replace(
-        _artifacts(1).contributions[0],
-        comparable_evidence_count=1,
-        evidence_status_counts=(
-            ("comparable", 1),
-            ("descriptive", 1),
-            ("extraction_failed", 1),
-            ("needs_context", 1),
-        ),
-    )
-    artifacts = ObjectiveAnalysisArtifacts(
-        contributions=(contribution,),
-        evidence_records=(base, descriptive, needs_context, failed),
-        findings=(_finding(1),),
-    )
-    service, _repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
-    )
-
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
-
-    review = result["evidence_review"]
-    assert review["total_evidence_count"] == 0
-    assert review["gap_count"] == 0
-    assert result["analysis"].status == "succeeded"
 
 
 class FakeObjectiveRepository:
@@ -570,13 +463,13 @@ class FakeObjectiveInputService:
         )
 
 
-class FakeObjectiveEvidenceAnalysisService:
+class FakeObjectiveExperimentAnalysisService:
     def __init__(self, *, artifacts=None, error: Exception | None = None) -> None:
         self.artifacts = artifacts
         self.error = error
         self.calls = 0
 
-    async def generate_objective_analysis_artifacts(
+    async def generate_experiment_analysis_artifacts(
         self, collection_id, analysis, progress_callback=None
     ):
         self.calls += 1
@@ -596,8 +489,8 @@ class FakeObjectiveEvidenceAnalysisService:
         return self.artifacts or _artifacts(analysis.analysis_version)
 
 
-class UsageRecordingObjectiveEvidenceAnalysisService(FakeObjectiveEvidenceAnalysisService):
-    async def generate_objective_analysis_artifacts(
+class UsageRecordingObjectiveExperimentAnalysisService(FakeObjectiveExperimentAnalysisService):
+    async def generate_experiment_analysis_artifacts(
         self, collection_id, analysis, progress_callback=None
     ):
         record_llm_prompt_version("paper_framing", "paper_framing.v1")
@@ -612,15 +505,15 @@ class UsageRecordingObjectiveEvidenceAnalysisService(FakeObjectiveEvidenceAnalys
             ),
             requested_model="configured-model",
         )
-        return await super().generate_objective_analysis_artifacts(
+        return await super().generate_experiment_analysis_artifacts(
             collection_id,
             analysis,
             progress_callback=progress_callback,
         )
 
 
-class DiagnosticsRecordingObjectiveEvidenceAnalysisService(FakeObjectiveEvidenceAnalysisService):
-    async def generate_objective_analysis_artifacts(
+class DiagnosticsRecordingObjectiveExperimentAnalysisService(FakeObjectiveExperimentAnalysisService):
+    async def generate_experiment_analysis_artifacts(
         self, collection_id, analysis, progress_callback=None
     ):
         record_analysis_diagnostic(
@@ -630,7 +523,7 @@ class DiagnosticsRecordingObjectiveEvidenceAnalysisService(FakeObjectiveEvidence
                 "status": "verified",
             }
         )
-        return await super().generate_objective_analysis_artifacts(
+        return await super().generate_experiment_analysis_artifacts(
             collection_id,
             analysis,
             progress_callback=progress_callback,
@@ -697,7 +590,7 @@ def _service(
     experiment_compatibility_projection=None,
 ):
     repository = repository or FakeObjectiveRepository()
-    analyzer = analyzer or FakeObjectiveEvidenceAnalysisService()
+    analyzer = analyzer or FakeObjectiveExperimentAnalysisService()
     experiment_analysis_writer = (
         experiment_analysis_writer or NativeRecordingExperimentAnalysisWriter()
     )
@@ -706,7 +599,7 @@ def _service(
     inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=repository,
-        evidence_analysis_service=analyzer,
+        experiment_analysis_service=analyzer,
         objective_input_service=inputs,
         document_profile_service=inputs.document_profile_service,
         experiment_analysis_writer=experiment_analysis_writer,
@@ -964,32 +857,6 @@ async def test_analysis_view_reads_one_typed_objective_snapshot() -> None:
     assert repository.analysis_reads == 1
 
 
-async def test_objective_analysis_surfaces_authored_scientific_warnings() -> None:
-    evidence = replace(
-        _evidence(1),
-        warnings=("reported_result.unit='HV' is not grounded in SOURCE",),
-    )
-    finding = replace(
-        _finding(1),
-        warnings=("Finding statement contains an unverified material formula",),
-    )
-    artifacts = replace(
-        _artifacts(1),
-        evidence_records=(evidence,),
-        findings=(finding,),
-    )
-    service, _repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
-    )
-
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
-
-    assert result["warnings"] == []
-
-
 async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> None:
     repository = FakeObjectiveRepository(confirmation_status="candidate")
     service, _, _ = _service(repository=repository)
@@ -1019,7 +886,7 @@ async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> No
 
 async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start() -> None:
     repository = FakeObjectiveRepository()
-    analyzer = FakeObjectiveEvidenceAnalysisService()
+    analyzer = FakeObjectiveExperimentAnalysisService()
 
     def unavailable_task_factory(_coroutine):
         raise RuntimeError("event loop unavailable")
@@ -1027,7 +894,7 @@ async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start(
     inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=repository,
-        evidence_analysis_service=analyzer,
+        experiment_analysis_service=analyzer,
         objective_input_service=inputs,
         document_profile_service=inputs.document_profile_service,
         task_factory=unavailable_task_factory,
@@ -1050,7 +917,7 @@ async def test_start_analysis_enforces_the_service_concurrency_limit(
     inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=FakeObjectiveRepository(),
-        evidence_analysis_service=FakeObjectiveEvidenceAnalysisService(),
+        experiment_analysis_service=FakeObjectiveExperimentAnalysisService(),
         objective_input_service=inputs,
         document_profile_service=inputs.document_profile_service,
         max_concurrency=1,
@@ -1168,7 +1035,7 @@ async def test_objective_analysis_aggregates_persisted_contribution_warnings() -
 
 async def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None:
     service, _repository, _analyzer = _service(
-        analyzer=UsageRecordingObjectiveEvidenceAnalysisService()
+        analyzer=UsageRecordingObjectiveExperimentAnalysisService()
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
@@ -1191,7 +1058,7 @@ async def test_objective_analysis_persists_real_model_prompt_and_token_usage() -
 async def test_checkpoint_only_analysis_preserves_the_evidence_model_name() -> None:
     artifacts = replace(_artifacts(1), model_name="cached-evidence-model")
     service, _repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
+        analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts)
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
@@ -1206,7 +1073,7 @@ async def test_checkpoint_only_analysis_preserves_the_evidence_model_name() -> N
 async def test_objective_analysis_persists_internal_diagnostics_without_public_exposure(
 ) -> None:
     service, repository, _analyzer = _service(
-        analyzer=DiagnosticsRecordingObjectiveEvidenceAnalysisService()
+        analyzer=DiagnosticsRecordingObjectiveExperimentAnalysisService()
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
@@ -1229,7 +1096,7 @@ async def test_objective_analysis_persists_internal_diagnostics_without_public_e
 
 async def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
     service, repository, _analyzer = _service(
-        analyzer=DiagnosticsRecordingObjectiveEvidenceAnalysisService(
+        analyzer=DiagnosticsRecordingObjectiveExperimentAnalysisService(
             error=RuntimeError("analysis failed after table repair")
         )
     )
@@ -1339,9 +1206,9 @@ async def test_concurrent_progress_counts_only_unique_completed_papers() -> None
 
 
 async def test_empty_finding_output_publishes_scientific_abstention() -> None:
-    artifacts = replace(_artifacts(1), findings=())
+    artifacts = _artifacts(1)
     service, repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts),
+        analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts),
         experiment_analysis_writer=NativeRecordingExperimentAnalysisWriter(
             findings=(),
             selections=(SimpleNamespace(comparison_keys=("comparison-1",)),),
@@ -1381,13 +1248,12 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
             ),
         }
     )
-    artifacts = ObjectiveAnalysisArtifacts(
+    artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(contribution,),
-        evidence_records=(),
-        findings=(),
+        experiments=(),
     )
     service, repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts),
+        analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts),
         experiment_analysis_writer=NativeRecordingExperimentAnalysisWriter(
             findings=(),
             selections=(),
@@ -1413,7 +1279,7 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
 async def test_missing_paper_contributions_still_fails_without_publication() -> None:
     artifacts = replace(_artifacts(1), contributions=())
     service, repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
+        analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts)
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
@@ -1431,24 +1297,6 @@ async def test_missing_paper_contributions_still_fails_without_publication() -> 
 
 
 async def test_all_relevant_paper_extractions_failed_without_publication() -> None:
-    failed_evidence = ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "evidence_id": "failed-evidence-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-1",
-            "source_excerpt": "Source selected for inspection.",
-            "evidence_role": "irrelevant",
-            "selection_status": "failed",
-            "attribution_scope": "not_attributable",
-            "resolution_status": "unknown",
-            "failure_reason": "RuntimeError: model unavailable",
-            "confidence": 0.0,
-        }
-    )
     failed_contribution = PaperContribution.from_mapping(
         {
             "collection_id": "collection-1",
@@ -1470,13 +1318,12 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
             ),
         }
     )
-    artifacts = ObjectiveAnalysisArtifacts(
+    artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(failed_contribution,),
-        evidence_records=(failed_evidence,),
-        findings=(),
+        experiments=(),
     )
     service, repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
+        analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts)
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
@@ -1494,7 +1341,7 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
 
 
 async def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version() -> None:
-    analyzer = FakeObjectiveEvidenceAnalysisService(error=RuntimeError("model unavailable"))
+    analyzer = FakeObjectiveExperimentAnalysisService(error=RuntimeError("model unavailable"))
     service, repository, _analyzer = _service(analyzer=analyzer)
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
     failed = await service.execute_queued_analysis(
@@ -1538,7 +1385,7 @@ async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
 ) -> None:
     secret_marker = "private-provider-response-marker"
     service, repository, _ = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(error=exception_type(secret_marker))
+        analyzer=FakeObjectiveExperimentAnalysisService(error=exception_type(secret_marker))
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
     result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
@@ -1550,7 +1397,7 @@ async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
     stored = repository.analyses[1]
     failure = stored.diagnostics[-1]
     assert failure["error_type"] == exception_type.__name__
-    assert failure["frames"][-1]["function"] == "generate_objective_analysis_artifacts"
+    assert failure["frames"][-1]["function"] == "generate_experiment_analysis_artifacts"
     assert secret_marker not in str(stored.to_record())
     assert secret_marker not in str(stored.diagnostics)
     assert secret_marker not in caplog.text
@@ -1585,7 +1432,7 @@ async def test_historical_failure_is_safe_without_rewriting_published_or_stored_
 
 async def test_losing_worker_does_not_run_duplicate_analysis() -> None:
     repository = FakeObjectiveRepository(claimable=False)
-    analyzer = FakeObjectiveEvidenceAnalysisService()
+    analyzer = FakeObjectiveExperimentAnalysisService()
     service, _repository, _analyzer = _service(
         repository=repository, analyzer=analyzer
     )
@@ -1600,7 +1447,7 @@ async def test_losing_worker_does_not_run_duplicate_analysis() -> None:
 
 async def test_failed_retry_keeps_previous_published_findings_readable() -> None:
     repository = FakeObjectiveRepository(published=True)
-    analyzer = FakeObjectiveEvidenceAnalysisService(error=TimeoutError("provider timeout"))
+    analyzer = FakeObjectiveExperimentAnalysisService(error=TimeoutError("provider timeout"))
     service, _repository, _analyzer = _service(
         repository=repository, analyzer=analyzer
     )

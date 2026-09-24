@@ -47,9 +47,7 @@ from application.repositories.objective_repository import ObjectiveRepository
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.source.collection_service import CollectionService
 from domain.core import (
-    Finding,
     ObjectiveAnalysis,
-    ObjectiveEvidence,
     PaperContribution,
     PaperExperiment,
     PaperResearchMap,
@@ -165,22 +163,19 @@ def _transient_paper_contribution(
 
 
 @dataclass(frozen=True)
-class ObjectiveAnalysisArtifacts:
-    """Canonical values produced by one versioned Objective analysis run."""
+class ObjectiveExperimentAnalysisArtifacts:
+    """Experiment inputs and coverage produced by one Objective analysis run."""
 
     contributions: tuple[PaperContribution, ...]
-    evidence_records: tuple[ObjectiveEvidence, ...]
-    findings: tuple[Finding, ...]
+    experiments: tuple[PaperExperiment, ...]
     model_name: str | None = None
-    experiments: tuple[PaperExperiment, ...] = ()
 
 
 @dataclass(frozen=True)
-class PaperExperimentDocumentArtifacts:
+class DocumentExperimentArtifacts:
     """Source inspection result for one Objective and one document."""
 
     contribution: PaperContribution
-    evidence_records: tuple[ObjectiveEvidence, ...]
     experiments: tuple[PaperExperiment, ...] = ()
 
 
@@ -201,8 +196,8 @@ class ObjectiveScopeNotReadyError(RuntimeError):
         super().__init__(f"objective paper scope not ready: {collection_id}")
 
 
-class ObjectiveEvidenceAnalysisService:
-    """Generate source-grounded artifacts for one confirmed Objective."""
+class ObjectiveExperimentAnalysisService:
+    """Reconstruct source-grounded experiments for one confirmed Objective."""
 
     def __init__(
         self,
@@ -241,12 +236,12 @@ class ObjectiveEvidenceAnalysisService:
             raise ObjectiveScopeNotReadyError(collection_id)
         return screen_objective_scope(paper_maps, objective=objective)
 
-    async def generate_objective_analysis_artifacts(
+    async def generate_experiment_analysis_artifacts(
         self,
         collection_id: str,
         analysis: ObjectiveAnalysis,
         progress_callback: ProgressCallback | None = None,
-    ) -> ObjectiveAnalysisArtifacts:
+    ) -> ObjectiveExperimentAnalysisArtifacts:
         if analysis.collection_id != collection_id:
             raise ValueError("analysis belongs to another collection")
         active_objective = await self.objective_repository.read_objective(
@@ -293,7 +288,7 @@ class ObjectiveEvidenceAnalysisService:
 
         async def inspect_document(
             document_input: PreparedDocumentInput,
-        ) -> PaperExperimentDocumentArtifacts:
+        ) -> DocumentExperimentArtifacts:
             document_objective_inputs = self._objective_inputs_for_document(
                 collection_id,
                 objective_inputs,
@@ -316,7 +311,7 @@ class ObjectiveEvidenceAnalysisService:
             try:
                 async with extraction_limit:
                     artifacts = await to_thread(
-                        self._generate_document_evidence,
+                        self._reconstruct_document_experiments,
                         collection_id=collection_id,
                         analysis=analysis,
                         objective=active_objective,
@@ -339,14 +334,13 @@ class ObjectiveEvidenceAnalysisService:
                     document_input.document_id,
                     type(exc).__name__,
                 )
-                artifacts = PaperExperimentDocumentArtifacts(
+                artifacts = DocumentExperimentArtifacts(
                     contribution=self._failed_document_contribution(
                         collection_id=collection_id,
                         objective_id=active_objective.objective_id,
                         analysis_version=analysis.analysis_version,
                         document_id=document_input.document_id,
                     ),
-                    evidence_records=(),
                     experiments=(),
                 )
             await report_document_completed(document_input.document_id)
@@ -359,28 +353,21 @@ class ObjectiveEvidenceAnalysisService:
             )
         )
         contributions = tuple(item.contribution for item in document_artifacts)
-        evidence_records = tuple(
-            evidence
-            for item in document_artifacts
-            for evidence in item.evidence_records
-        )
         # Findings are synthesized only after immutable experiment revisions
         # and Objective selections have been written.  Keeping this stage
         # focused on Source reading prevents a second, legacy fact ledger from
         # becoming the source of the published conclusion.
-        return ObjectiveAnalysisArtifacts(
+        return ObjectiveExperimentAnalysisArtifacts(
             contributions=contributions,
-            evidence_records=(),
-            findings=(),
-            model_name=model_name,
             experiments=tuple(
                 experiment
                 for item in document_artifacts
                 for experiment in item.experiments
             ),
+            model_name=model_name,
         )
 
-    def _generate_document_evidence(
+    def _reconstruct_document_experiments(
         self,
         *,
         collection_id: str,
@@ -388,7 +375,7 @@ class ObjectiveEvidenceAnalysisService:
         objective: ResearchObjective,
         objective_inputs: ObjectiveAnalysisInputs,
         progress_callback: ProgressCallback | None,
-    ) -> PaperExperimentDocumentArtifacts:
+    ) -> DocumentExperimentArtifacts:
         screened_sources = screen_sources(
             collection_id=collection_id,
             source_screener=self._objective_source_screener,
@@ -431,11 +418,11 @@ class ObjectiveEvidenceAnalysisService:
             table_cells_by_document_id=objective_inputs["table_cells_by_document_id"],
             progress_callback=progress_callback,
         )
-        paper_evidence_drafts = reconstruct_paper_experiments(
+        experiment_observations = reconstruct_paper_experiments(
             collection_id=collection_id,
             source_facts=validated_source_facts,
             objectives=(objective,),
-            document_contexts=self._document_contexts_for_evidence(
+            document_contexts=self._document_contexts_for_experiments(
                 blocks_by_document_id=objective_inputs["blocks_by_document_id"],
                 tables_by_document_id=objective_inputs["tables_by_document_id"],
                 figures_by_document_id=objective_inputs["figures_by_document_id"],
@@ -444,7 +431,7 @@ class ObjectiveEvidenceAnalysisService:
         experiments = assemble_paper_experiments(
             collection_id=collection_id,
             document_id=objective_inputs["documents"][0].document_id,
-            source_facts=paper_evidence_drafts,
+            source_facts=experiment_observations,
         )
         frame = next(
             (
@@ -463,14 +450,13 @@ class ObjectiveEvidenceAnalysisService:
             audits=tuple(read_audits),
             experiments=experiments,
         )
-        return PaperExperimentDocumentArtifacts(
+        return DocumentExperimentArtifacts(
             contribution=contribution,
-            evidence_records=(),
             experiments=experiments,
         )
 
     @staticmethod
-    def _document_contexts_for_evidence(
+    def _document_contexts_for_experiments(
         *,
         blocks_by_document_id: Mapping[str, Sequence[SourceBlock]],
         tables_by_document_id: Mapping[str, Sequence[SourceTable]],
@@ -761,7 +747,8 @@ class ObjectiveEvidenceAnalysisService:
         }
 
 __all__ = [
-    "ObjectiveEvidenceAnalysisService",
-    "PaperExperimentDocumentArtifacts",
+    "DocumentExperimentArtifacts",
+    "ObjectiveExperimentAnalysisArtifacts",
+    "ObjectiveExperimentAnalysisService",
     "ResearchObjectivesNotReadyError",
 ]

@@ -21,7 +21,7 @@ async def test_corrected_fact_requires_finding_review_and_current_evidence():
     author, repository, _ = await _service()
     reader = ObjectiveAnalysisService(
         objective_repository=repository,
-        evidence_analysis_service=None,
+        experiment_analysis_service=None,
         objective_input_service=None,
         document_profile_service=None,
     )

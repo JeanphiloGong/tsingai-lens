@@ -86,7 +86,7 @@ from application.core.objectives.objective_authoring_service import (
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import PaperResearchMapService
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from application.pipeline import PipelineRunService
 from application.evaluation import (
@@ -320,7 +320,7 @@ class ApplicationRuntime:
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
     reference_workflow_service: SourceReferenceWorkflowService
-    evidence_analysis_service: ObjectiveEvidenceAnalysisService
+    experiment_analysis_service: ObjectiveExperimentAnalysisService
     objective_discovery_service: ObjectiveDiscoveryService
     objective_authoring_service: ObjectiveAuthoringService
     goal_service: GoalService
@@ -584,7 +584,7 @@ async def build_application_runtime(
             objective_repository=objective_repository,
             source_artifact_repository=source_artifact_repository,
         )
-        evidence_analysis_service = ObjectiveEvidenceAnalysisService(
+        experiment_analysis_service = ObjectiveExperimentAnalysisService(
             collection_service=collection_service,
             paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
@@ -600,7 +600,7 @@ async def build_application_runtime(
         goal_service = GoalService(collection_service)
         objective_analysis_service = ObjectiveAnalysisService(
             objective_repository=objective_repository,
-            evidence_analysis_service=evidence_analysis_service,
+            experiment_analysis_service=experiment_analysis_service,
             objective_input_service=objective_input_service,
             document_profile_service=document_profile_service,
             experiment_analysis_writer=experiment_analysis_writer,
@@ -782,7 +782,7 @@ async def build_application_runtime(
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
             reference_workflow_service=reference_workflow_service,
-            evidence_analysis_service=evidence_analysis_service,
+            experiment_analysis_service=experiment_analysis_service,
             objective_discovery_service=objective_discovery_service,
             objective_authoring_service=objective_authoring_service,
             goal_service=goal_service,
@@ -827,7 +827,7 @@ def install_application_runtime(
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service
     application.state.reference_workflow_service = runtime.reference_workflow_service
-    application.state.evidence_analysis_service = runtime.evidence_analysis_service
+    application.state.experiment_analysis_service = runtime.experiment_analysis_service
     application.state.objective_discovery_service = runtime.objective_discovery_service
     application.state.objective_authoring_service = runtime.objective_authoring_service
     application.state.goal_service = runtime.goal_service

@@ -98,7 +98,7 @@ async def preview_collection_objective_scope(
     request: Request,
 ) -> ObjectiveScopeResponse:
     try:
-        preview = await request.app.state.evidence_analysis_service.preview_objective_scope(
+        preview = await request.app.state.experiment_analysis_service.preview_objective_scope(
             collection_id,
             objective_id,
         )

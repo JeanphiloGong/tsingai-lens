@@ -41,7 +41,7 @@ from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from application.evaluation import FindingFeedbackService
 from application.goal.experiment_plan_service import ExperimentPlanService
@@ -352,7 +352,7 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
             document_analysis_version="document-profile.test",
         )
 
-    evidence_analysis_service = ObjectiveEvidenceAnalysisService(
+    experiment_analysis_service = ObjectiveExperimentAnalysisService(
         collection_service=collection_service,
         paper_map_repository=SimpleNamespace(),
         objective_repository=objective_repository,
@@ -364,7 +364,7 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
     )
     objective_analysis_service = ObjectiveAnalysisService(
         objective_repository=objective_repository,
-        evidence_analysis_service=evidence_analysis_service,
+        experiment_analysis_service=experiment_analysis_service,
         objective_input_service=SimpleNamespace(),
         document_profile_service=SimpleNamespace(),
     )

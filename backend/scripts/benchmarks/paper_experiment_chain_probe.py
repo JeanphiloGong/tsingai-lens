@@ -61,7 +61,7 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
@@ -318,7 +318,7 @@ def main() -> int:
                 source_facts=extracted,
                 objectives=(objective,),
                 document_contexts=(
-                    ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
+                    ObjectiveExperimentAnalysisService._document_contexts_for_experiments(
                         blocks_by_document_id=blocks_by_document_id,
                         tables_by_document_id=tables_by_document_id,
                         figures_by_document_id=figures_by_document_id,

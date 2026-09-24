@@ -29,8 +29,8 @@ from application.core.objectives.analysis.source_screening import (
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
-    PaperExperimentDocumentArtifacts,
+    DocumentExperimentArtifacts,
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
@@ -76,7 +76,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> None:
+def test_document_contexts_for_experiments_include_tables_and_figure_captions() -> None:
     table = SourceTable(
         table_id="table-mechanical",
         document_id="paper-1",
@@ -107,7 +107,7 @@ def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> 
         asset_sha256=None,
     )
 
-    contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
+    contexts = ObjectiveExperimentAnalysisService._document_contexts_for_experiments(
         **{
             "blocks_by_document_id": {
                 "paper-1": [
@@ -194,7 +194,7 @@ def test_table_context_can_complete_material_for_result_reconstruction() -> None
             "confidence": 0.9,
         }
     )
-    contexts = ObjectiveEvidenceAnalysisService._document_contexts_for_evidence(
+    contexts = ObjectiveExperimentAnalysisService._document_contexts_for_experiments(
         **{
             "blocks_by_document_id": {},
             "tables_by_document_id": {
@@ -1413,17 +1413,13 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         objective.objective_id,
     )
 
-    artifacts = await service.generate_objective_analysis_artifacts(
+    artifacts = await service.generate_experiment_analysis_artifacts(
         collection_id, analysis
     )
 
     assert extractor.frame_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
     assert artifacts.contributions[0].analysis_version == analysis.analysis_version
-    assert all(
-        evidence.analysis_version == analysis.analysis_version
-        for evidence in artifacts.evidence_records
-    )
 
 
 async def test_objective_analysis_does_not_invoke_a_route_model(
@@ -1510,8 +1506,7 @@ async def test_objective_analysis_does_not_invoke_a_route_model(
         objective.objective_id,
     )
 
-    failing_extractor = _ObjectiveExtractor()
-    artifacts = await service.generate_objective_analysis_artifacts(
+    artifacts = await service.generate_experiment_analysis_artifacts(
         collection_id, analysis
     )
 
@@ -1519,10 +1514,6 @@ async def test_objective_analysis_does_not_invoke_a_route_model(
     assert all(
         "deterministic evidence routing fallback" not in warning
         for warning in artifacts.contributions[0].warnings
-    )
-    assert all(
-        evidence.analysis_version == analysis.analysis_version
-        for evidence in artifacts.evidence_records
     )
 
 
@@ -1611,7 +1602,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
     )
     active_facts = await service.objective_repository.read(collection_id)
 
-    artifacts = await service.generate_objective_analysis_artifacts(
+    artifacts = await service.generate_experiment_analysis_artifacts(
         collection_id, analysis
     )
 
@@ -1731,7 +1722,7 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
         if document_id == "paper-2" and paper_2_failures_remaining:
             paper_2_failures_remaining -= 1
             raise RuntimeError("provider unavailable")
-        return PaperExperimentDocumentArtifacts(
+        return DocumentExperimentArtifacts(
             contribution=PaperContribution.from_mapping(
                 {
                     "collection_id": collection_id,
@@ -1752,16 +1743,15 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
                     ),
                 }
             ),
-            evidence_records=(),
         )
 
     monkeypatch.setattr(
         service,
-        "_generate_document_evidence",
+        "_reconstruct_document_experiments",
         extract_document,
         raising=False,
     )
-    generate_artifacts = service.generate_objective_analysis_artifacts
+    generate_artifacts = service.generate_experiment_analysis_artifacts
 
     async def capture_artifacts(*args, **kwargs):
         artifacts = await generate_artifacts(*args, **kwargs)
@@ -1770,12 +1760,12 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
 
     monkeypatch.setattr(
         service,
-        "generate_objective_analysis_artifacts",
+        "generate_experiment_analysis_artifacts",
         capture_artifacts,
     )
     analysis_service = ObjectiveAnalysisService(
         objective_repository=service.objective_repository,
-        evidence_analysis_service=service,
+        experiment_analysis_service=service,
         objective_input_service=service.objective_input_service,
         document_profile_service=service.objective_input_service.document_profile_service,
         experiment_analysis_writer=native_writer,

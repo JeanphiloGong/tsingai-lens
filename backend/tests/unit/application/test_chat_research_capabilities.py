@@ -63,7 +63,7 @@ from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from domain.core import (

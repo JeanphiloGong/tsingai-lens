@@ -6,10 +6,10 @@ Evidence. Technical failure is not a scientific conclusion.
 
 ## Start Here
 
-`ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` in
+`ObjectiveExperimentAnalysisService.generate_experiment_analysis_artifacts()` in
 [`../objective_analysis_service.py`](../objective_analysis_service.py) coordinates
 the selected papers and their source-grounded experiment drafts. Read
-`_generate_document_evidence()` there for the single-paper scientific sequence.
+`_reconstruct_document_experiments()` there for the single-paper scientific sequence.
 [`../analysis_service.py`](../analysis_service.py) separately owns scheduling,
 analysis versions, progress, and atomic publication.
 

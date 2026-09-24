@@ -35,6 +35,24 @@ Collection. An Objective selects experiment content through
   task states, and existing response semantics remain compatible unless a
   separate API change is approved.
 
+## Model authoring boundary
+
+The provider returns content only. Its Draft may use local
+`variant_key`, `test_key`, `measurement_key`, and `comparison_key` values to
+refer to records within that one response. It must not return formal
+`experiment_id`, component/database `id` values, `experiment_version`,
+`collection_id`, `objective_id`, any final `measurement_id`/`result_id`/
+`comparison_id` (including plural ID lists or other formal `*_id` fields),
+source-reference records, or
+`identity_status`/`binding_status`/`relation_status`.
+
+The application supplies the document and source context, resolves source
+labels, assigns or matches formal identities, creates database relations and
+unique constraints, computes or verifies statuses, and only then writes a
+`PaperExperiment` revision. A model response that contains one of these
+service-owned fields is rejected; it is never silently copied into a formal
+record.
+
 ## HTTP compatibility matrix
 
 The experiment migration is an internal replacement of the scientific state

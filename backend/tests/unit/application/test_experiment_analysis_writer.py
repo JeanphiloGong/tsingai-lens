@@ -32,14 +32,16 @@ def anyio_backend():
     return "asyncio"
 
 
-def _objective() -> ResearchObjective:
+def _objective(
+    *, variables: tuple[str, ...] = ("preheat",)
+) -> ResearchObjective:
     return ResearchObjective.from_mapping(
         {
             "collection_id": "collection-1",
             "objective_id": "objective-1",
             "question": "Does preheat change elongation?",
             "material_scope": ["316L"],
-            "variables": ["preheat"],
+            "variables": list(variables),
             "outcomes": ["elongation"],
             "confirmation_status": "confirmed",
         }
@@ -75,6 +77,12 @@ def _observation(
     document_id: str,
     value: float,
     label: str,
+    *,
+    derived_from: tuple[str, ...] = (),
+    comparison: dict | None = None,
+    changed_variables: tuple[dict, ...] = (),
+    direction: str = "increase",
+    attribution_scope: str = "association_only",
 ) -> SourceObservation:
     return SourceObservation.from_mapping(
         {
@@ -95,6 +103,10 @@ def _observation(
             ],
             "confidence": 0.9,
             "status": "validated",
+            "changed_variables": list(changed_variables),
+            "comparison": comparison,
+            "derived_from_observation_ids": list(derived_from),
+            "attribution_scope": attribution_scope,
             "scientific_context": {
                 "material": [{"name": "alloy", "value": "316L"}],
                 "sample": [{"name": "group", "value": label}],
@@ -105,7 +117,7 @@ def _observation(
                 "outcome": "elongation",
                 "value": value,
                 "unit": "%",
-                "direction": "increase",
+                "direction": direction,
                 "result_text": f"{label}: elongation {value}%",
             },
         }
@@ -118,6 +130,94 @@ def _experiment(document_id: str, value: float, label: str):
         collection_id="collection-1",
         document_id=document_id,
         source_facts=(observation,),
+    )
+
+
+def _comparison_experiment(document_id: str):
+    baseline_id = f"{document_id}-np"
+    target_id = f"{document_id}-p150"
+    baseline = _observation(baseline_id, document_id, 72, "NP", direction="unknown")
+    target = _observation(target_id, document_id, 82, "P150", direction="unknown")
+    comparison = _observation(
+        f"{document_id}-comparison",
+        document_id,
+        82,
+        "P150",
+        derived_from=(baseline_id, target_id),
+        comparison={
+            "baseline_label": "NP",
+            "target_label": "P150",
+            "axis_names": ["preheat"],
+            "comparable": True,
+        },
+        changed_variables=(
+            {
+                "name": "preheat",
+                "baseline_value": 0,
+                "target_value": 150,
+                "unit": "C",
+            },
+        ),
+        direction="increase",
+        attribution_scope="isolated_effect",
+    )
+    return assemble_paper_experiment(
+        collection_id="collection-1",
+        document_id=document_id,
+        source_facts=(baseline, target, comparison),
+    )
+
+
+def _multi_factor_comparison_experiment(document_id: str):
+    preheat = _comparison_experiment(document_id)
+    speed_baseline_id = f"{document_id}-s800"
+    speed_target_id = f"{document_id}-s1000"
+    speed_baseline = _observation(
+        speed_baseline_id,
+        document_id,
+        20,
+        "S800",
+        direction="unknown",
+    )
+    speed_target = _observation(
+        speed_target_id,
+        document_id,
+        18,
+        "S1000",
+        direction="unknown",
+    )
+    speed_comparison = _observation(
+        f"{document_id}-speed-comparison",
+        document_id,
+        18,
+        "S1000",
+        derived_from=(speed_baseline_id, speed_target_id),
+        comparison={
+            "baseline_label": "S800",
+            "target_label": "S1000",
+            "axis_names": ["scan speed"],
+            "comparable": True,
+        },
+        changed_variables=(
+            {
+                "name": "scan speed",
+                "baseline_value": 800,
+                "target_value": 1000,
+                "unit": "mm/s",
+            },
+        ),
+        direction="decrease",
+        attribution_scope="isolated_effect",
+    )
+    return assemble_paper_experiment(
+        collection_id="collection-1",
+        document_id=document_id,
+        source_facts=(
+            *preheat.source_observations,
+            speed_baseline,
+            speed_target,
+            speed_comparison,
+        ),
     )
 
 
@@ -323,6 +423,52 @@ async def test_writer_can_fix_experiment_selections_before_finding_synthesis():
     assert len(selections.records) == 1
     assert groups.records == {}
     assert findings.records == {}
+
+
+async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
+    writer, _, _, groups, findings = _writer()
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiments=(_comparison_experiment("paper-a"),),
+    )
+
+    assert result.groups == ()
+    assert groups.records == {}
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.selection_ids == (result.selections[0].selection_id,)
+    assert finding.factors == ("preheat",)
+    assert finding.direction == "increase"
+    assert finding.synthesis_status == "single_study"
+    assert finding.paper_contributions == ()
+    assert findings.records == {finding.finding_id: finding}
+
+
+async def test_writer_keeps_different_factor_sets_in_separate_selections():
+    writer, _, _, _, _ = _writer()
+
+    result = await writer.write_experiment_selections(
+        collection_id="collection-1",
+        objective=_objective(variables=("preheat", "scan speed")),
+        analysis=_analysis(),
+        experiments=(_multi_factor_comparison_experiment("paper-a"),),
+    )
+
+    revision = result.revisions[0].revision
+    comparisons = {item.comparison_key: item for item in revision.comparisons}
+    selected_factor_sets = {
+        tuple(
+            variable.name
+            for comparison_key in selection.comparison_keys
+            for variable in comparisons[comparison_key].changed_variables
+        )
+        for selection in result.selections
+    }
+    assert selected_factor_sets == {("preheat",), ("scan speed",)}
+    assert all(len(item.comparison_keys) == 1 for item in result.selections)
 
 
 async def test_writer_creates_conditional_group_for_cross_paper_finding():

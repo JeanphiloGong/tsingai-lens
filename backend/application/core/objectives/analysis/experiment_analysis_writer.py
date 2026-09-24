@@ -16,10 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from typing import Any, Mapping, Sequence
 
 from application.core.objectives.analysis.experiment_finding_publisher import (
     ExperimentFindingPublisher,
+)
+from application.core.objectives.analysis.experiment_finding_synthesis import (
+    ExperimentFindingSynthesisService,
 )
 from application.core.objectives.analysis.paper_experiment_revision_converter import (
     ConvertedPaperExperiment,
@@ -42,7 +46,7 @@ from application.repositories.paper_experiment_repository import (
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import ExperimentComparison, PaperExperimentRevision
 from domain.core.research_objective import (
     ObjectiveAnalysis,
     ResearchObjective,
@@ -73,7 +77,7 @@ class ExperimentSelectionWriteResult:
 class _ExperimentContext:
     stored: StoredPaperExperimentRevision
     converted: ConvertedPaperExperiment
-    selections_by_outcome: Mapping[str, ObjectiveExperimentSelection]
+    selections_by_outcome: Mapping[str, tuple[ObjectiveExperimentSelection, ...]]
     outcome_by_observation_id: Mapping[str, str]
 
 
@@ -82,6 +86,14 @@ class _PreparedExperimentSelections:
     result: ExperimentSelectionWriteResult
     contexts: tuple[_ExperimentContext, ...]
     selection_by_id: Mapping[str, ObjectiveExperimentSelection]
+
+
+@dataclass(frozen=True)
+class _SelectionSlice:
+    outcome: str
+    factor_key: tuple[str, ...]
+    measurement_keys: tuple[str, ...]
+    comparison_keys: tuple[str, ...]
 
 
 class ExperimentAnalysisWriter:
@@ -95,6 +107,7 @@ class ExperimentAnalysisWriter:
         group_repository: ComparisonGroupRepository,
         finding_publisher: ExperimentFindingPublisher,
         finding_repository: ExperimentFindingRepository | None = None,
+        finding_synthesis_service: ExperimentFindingSynthesisService | None = None,
     ) -> None:
         self.paper_experiment_repository = paper_experiment_repository
         self.selection_repository = selection_repository
@@ -104,6 +117,9 @@ class ExperimentAnalysisWriter:
         # want to inspect the concrete writer graph.  Publishing remains
         # delegated to ExperimentFindingPublisher so validation is centralized.
         self.finding_repository = finding_repository
+        self.finding_synthesis_service = (
+            finding_synthesis_service or ExperimentFindingSynthesisService()
+        )
 
     async def write(
         self,
@@ -212,6 +228,49 @@ class ExperimentAnalysisWriter:
         )
         return prepared.result
 
+    async def write_experiment_analysis(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        experiments: Sequence[LegacyPaperExperiment],
+        source_fingerprints: Mapping[str, str] | None = None,
+        created_by: str | None = None,
+    ) -> ExperimentAnalysisWriteResult:
+        """Persist and publish analysis without consuming legacy Findings."""
+
+        prepared = await self._write_experiment_selections(
+            collection_id=collection_id,
+            objective=objective,
+            analysis=analysis,
+            experiments=experiments,
+            source_fingerprints=source_fingerprints,
+            created_by=created_by,
+        )
+        synthesis = self.finding_synthesis_service.synthesize(
+            collection_id=collection_id,
+            objective=objective,
+            analysis_version=analysis.analysis_version,
+            revisions=tuple(item.revision for item in prepared.result.revisions),
+            selections=prepared.result.selections,
+        )
+        groups: list[ComparisonGroup] = []
+        for group in synthesis.groups:
+            groups.append(
+                await self.group_repository.add_group(collection_id, group)
+            )
+        findings: list[Finding] = []
+        for finding in synthesis.findings:
+            published = await self.finding_publisher.publish(finding)
+            findings.append(published.finding)
+        return ExperimentAnalysisWriteResult(
+            revisions=prepared.result.revisions,
+            selections=prepared.result.selections,
+            groups=tuple(groups),
+            findings=tuple(findings),
+        )
+
     async def _write_experiment_selections(
         self,
         *,
@@ -253,7 +312,7 @@ class ExperimentAnalysisWriter:
                 experiment,
                 source_fingerprint=fingerprint,
                 collection_id=collection_id,
-                objective_id=objective.objective_id,
+                objective=objective,
                 analysis_version=analysis.analysis_version,
                 created_by=created_by,
             )
@@ -279,7 +338,7 @@ class ExperimentAnalysisWriter:
         *,
         source_fingerprint: str,
         collection_id: str,
-        objective_id: str,
+        objective: ResearchObjective,
         analysis_version: int,
         created_by: str | None,
     ) -> tuple[_ExperimentContext, tuple[ObjectiveExperimentSelection, ...]]:
@@ -310,45 +369,46 @@ class ExperimentAnalysisWriter:
                 created_by=created_by,
             )
 
-        outcomes = _revision_outcomes(converted.revision)
-        selections_by_outcome: dict[str, ObjectiveExperimentSelection] = {}
+        selections_by_outcome: dict[
+            str, list[ObjectiveExperimentSelection]
+        ] = {}
         selections: list[ObjectiveExperimentSelection] = []
         unresolved = tuple(
             str(item.get("description") or "").strip()
             for item in converted.revision.unresolved_issues
             if str(item.get("description") or "").strip()
         )
-        for outcome in outcomes:
-            measurement_keys = tuple(
-                item.measurement_key
-                for item in converted.revision.measurements
-                if _same_term(item.outcome, outcome)
-            )
-            comparison_keys = tuple(
-                item.comparison_key
-                for item in converted.revision.comparisons
-                if _same_term(item.outcome, outcome)
-            )
+        for selection_slice in _selection_slices(converted.revision, objective):
+            factor_label = ", ".join(selection_slice.factor_key)
             selection = ObjectiveExperimentSelection(
                 selection_id=_stable_id(
                     "sel",
                     collection_id,
-                    objective_id,
+                    objective.objective_id,
                     analysis_version,
                     experiment_id,
                     converted.revision.experiment_version,
-                    outcome.casefold(),
+                    selection_slice.outcome.casefold(),
+                    selection_slice.factor_key,
                 ),
-                objective_id=objective_id,
+                objective_id=objective.objective_id,
                 analysis_version=analysis_version,
                 experiment_id=experiment_id,
                 experiment_version=converted.revision.experiment_version,
-                outcome=outcome,
-                measurement_keys=measurement_keys,
-                comparison_keys=comparison_keys,
+                outcome=selection_slice.outcome,
+                measurement_keys=selection_slice.measurement_keys,
+                comparison_keys=selection_slice.comparison_keys,
                 missing_context=unresolved,
                 reasons=(
                     "Fixed to the source-grounded PaperExperiment revision for this analysis.",
+                    (
+                        f"Selected comparisons for changed factors: {factor_label}."
+                        if factor_label
+                        else (
+                            "Selected reported measurements; no relevant comparison "
+                            "was recovered."
+                        )
+                    ),
                 ),
             )
             stored_selection = await self.selection_repository.add_selection(
@@ -357,7 +417,9 @@ class ExperimentAnalysisWriter:
                 revision_id=stored.revision_id,
             )
             selections.append(stored_selection)
-            selections_by_outcome[outcome.casefold()] = stored_selection
+            selections_by_outcome.setdefault(
+                selection_slice.outcome.casefold(), []
+            ).append(stored_selection)
 
         outcome_by_observation_id: dict[str, str] = {}
         for (
@@ -393,7 +455,9 @@ class ExperimentAnalysisWriter:
             _ExperimentContext(
                 stored=stored,
                 converted=converted,
-                selections_by_outcome=selections_by_outcome,
+                selections_by_outcome={
+                    key: tuple(items) for key, items in selections_by_outcome.items()
+                },
                 outcome_by_observation_id=outcome_by_observation_id,
             ),
             tuple(selections),
@@ -437,9 +501,11 @@ class ExperimentAnalysisWriter:
                     if _same_term(outcome, finding.outcome)
                 }
             for outcome in sorted(outcomes):
-                selection = context.selections_by_outcome.get(outcome.casefold())
-                if selection is not None and _same_term(selection.outcome, finding.outcome):
-                    selected.append(selection)
+                for selection in context.selections_by_outcome.get(
+                    outcome.casefold(), ()
+                ):
+                    if _same_term(selection.outcome, finding.outcome):
+                        selected.append(selection)
         unique: dict[str, ObjectiveExperimentSelection] = {
             item.selection_id: item for item in selected
         }
@@ -555,6 +621,79 @@ def _revision_outcomes(revision: PaperExperimentRevision) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _selection_slices(
+    revision: PaperExperimentRevision,
+    objective: ResearchObjective,
+) -> tuple[_SelectionSlice, ...]:
+    slices: list[_SelectionSlice] = []
+    for outcome in _revision_outcomes(revision):
+        if not any(_same_term(outcome, candidate) for candidate in objective.outcomes):
+            continue
+        comparisons_by_factor: dict[
+            tuple[str, ...], list[ExperimentComparison]
+        ] = {}
+        for comparison in revision.comparisons:
+            if not _same_term(comparison.outcome, outcome):
+                continue
+            factor_key = tuple(
+                sorted(
+                    {
+                        _normalized_term(item.name)
+                        for item in comparison.changed_variables
+                        if _normalized_term(item.name)
+                    }
+                )
+            )
+            if not factor_key or not any(
+                _term_matches(factor, objective_variable)
+                for factor in factor_key
+                for objective_variable in objective.variables
+            ):
+                continue
+            comparisons_by_factor.setdefault(factor_key, []).append(comparison)
+
+        if comparisons_by_factor:
+            for factor_key in sorted(comparisons_by_factor):
+                comparisons = comparisons_by_factor[factor_key]
+                measurement_keys = tuple(
+                    dict.fromkeys(
+                        key
+                        for comparison in comparisons
+                        for key in (
+                            *comparison.baseline_measurement_keys,
+                            *comparison.target_measurement_keys,
+                        )
+                    )
+                )
+                slices.append(
+                    _SelectionSlice(
+                        outcome=outcome,
+                        factor_key=factor_key,
+                        measurement_keys=measurement_keys,
+                        comparison_keys=tuple(
+                            item.comparison_key for item in comparisons
+                        ),
+                    )
+                )
+            continue
+
+        measurement_keys = tuple(
+            item.measurement_key
+            for item in revision.measurements
+            if _same_term(item.outcome, outcome)
+        )
+        if measurement_keys:
+            slices.append(
+                _SelectionSlice(
+                    outcome=outcome,
+                    factor_key=(),
+                    measurement_keys=measurement_keys,
+                    comparison_keys=(),
+                )
+            )
+    return tuple(slices)
+
+
 def _finding_source_ids(finding: Finding) -> tuple[str, ...]:
     values: list[str] = []
     for contribution in finding.paper_contributions:
@@ -566,7 +705,25 @@ def _finding_source_ids(finding: Finding) -> tuple[str, ...]:
 
 
 def _same_term(left: str, right: str) -> bool:
-    return str(left).strip().casefold() == str(right).strip().casefold()
+    return _normalized_term(left) == _normalized_term(right)
+
+
+def _term_matches(left: str, right: str) -> bool:
+    left_key = _normalized_term(left)
+    right_key = _normalized_term(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    left_tokens = set(left_key.split())
+    right_tokens = set(right_key.split())
+    return left_tokens <= right_tokens or right_tokens <= left_tokens
+
+
+def _normalized_term(value: Any) -> str:
+    return " ".join(
+        part for part in re.split(r"[_\W]+", str(value).casefold()) if part
+    )
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:

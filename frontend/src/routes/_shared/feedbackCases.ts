@@ -42,6 +42,7 @@ export type FeedbackCaseDetail = FeedbackCaseSummary & {
 	} | null;
 	annotation: Record<string, unknown> | null;
 	current_annotation_digest: string | null;
+	review_decisions: FeedbackReviewDecision[];
 	technical_error: string | null;
 	updated_at: string;
 };
@@ -70,6 +71,17 @@ export type FeedbackAnnotationInput = {
 	support_source_refs: string[];
 	dataset_uses: string[];
 	reason: string;
+};
+
+export type FeedbackReviewDecision = {
+	decision_id: string;
+	case_id: string;
+	annotation_digest: string;
+	decision: string;
+	reason: string | null;
+	created_by: string;
+	seq: number;
+	created_at: string;
 };
 
 type FeedbackCaseList = {
@@ -118,4 +130,22 @@ export async function saveFeedbackAnnotation(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input)
 	})) as FeedbackAnnotation;
+}
+
+export async function submitFeedbackReview(
+	collectionId: string,
+	caseId: string,
+	input: { expected_annotation_digest: string; decision: string; reason: string }
+) {
+	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/review', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(input)
+	})) as FeedbackReviewDecision;
+}
+
+export async function fetchFeedbackReviewDecisions(collectionId: string, caseId: string) {
+	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/review-decisions', {
+		method: 'GET'
+	})) as { items: FeedbackReviewDecision[] };
 }

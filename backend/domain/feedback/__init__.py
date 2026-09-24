@@ -8,6 +8,7 @@ from domain.feedback.analysis_result import (
 from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.feedback_case import FeedbackCase, FeedbackCaseStatus
 from domain.feedback.annotation import AnnotationSeverity, DatasetUse, FeedbackAnnotation
+from domain.feedback.review_decision import ReviewDecision, ReviewDecisionValue
 
 __all__ = [
     "AnalysisJob",
@@ -20,4 +21,6 @@ __all__ = [
     "FeedbackAnnotation",
     "AnnotationSeverity",
     "DatasetUse",
+    "ReviewDecision",
+    "ReviewDecisionValue",
 ]

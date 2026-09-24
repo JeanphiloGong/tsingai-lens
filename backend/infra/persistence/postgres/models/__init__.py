@@ -14,6 +14,7 @@ from infra.persistence.postgres.models.feedback import (
     FeedbackAnalysisResultRow,
     FeedbackAnnotationRow,
     FeedbackCaseRow,
+    FeedbackReviewDecisionRow,
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
@@ -81,6 +82,7 @@ __all__ = [
     "FeedbackAnalysisResultRow",
     "FeedbackAnnotationRow",
     "FeedbackCaseRow",
+    "FeedbackReviewDecisionRow",
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",

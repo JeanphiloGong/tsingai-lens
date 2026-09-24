@@ -2961,6 +2961,15 @@ const translations: Record<Language, Translations> = {
 				,severityMedium: 'Medium'
 				,severityHigh: 'High'
 				,severityCritical: 'Critical'
+				,reviewTitle: 'Review decision'
+				,reviewHint: 'This records eligibility for the selected uses.'
+				,reviewReason: 'Review reason'
+				,reviewReasonPlaceholder: 'Explain why this annotation should or should not be admitted.'
+				,reviewAccept: 'Accept'
+				,reviewInsufficient: 'Insufficient evidence'
+				,reviewReject: 'Reject'
+				,reviewWithdraw: 'Withdraw acceptance'
+				,reviewHistory: 'Review history'
 		},
 		error: {
 			unexpected: 'Unexpected error.',
@@ -5796,6 +5805,15 @@ const translations: Record<Language, Translations> = {
 				,severityMedium: '中'
 				,severityHigh: '高'
 				,severityCritical: '严重'
+				,reviewTitle: '审核决定'
+				,reviewHint: '这里记录当前标注是否可以用于选定的数据用途。'
+				,reviewReason: '审核理由'
+				,reviewReasonPlaceholder: '说明为什么应当或不应当接纳这条标注。'
+				,reviewAccept: '接受'
+				,reviewInsufficient: '依据不足'
+				,reviewReject: '拒绝'
+				,reviewWithdraw: '撤回接受'
+				,reviewHistory: '审核历史'
 		},
 		error: {
 			unexpected: '发生未知错误。',

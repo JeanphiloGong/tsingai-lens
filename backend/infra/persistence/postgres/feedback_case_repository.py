@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
+from domain.feedback.review_decision import ReviewDecision
 from infra.persistence.postgres.models.feedback import (
     FeedbackAnnotationRow,
     FeedbackAnalysisResultRow,
     FeedbackCaseRow,
+    FeedbackReviewDecisionRow,
 )
 
 
@@ -231,6 +234,79 @@ class PostgresFeedbackCaseRepository:
             await session.flush()
             return _annotation(row)
 
+    async def read_review_decisions(self, case_id: str) -> tuple[ReviewDecision, ...]:
+        async with self.session_factory() as session:
+            rows = await session.scalars(
+                select(FeedbackReviewDecisionRow)
+                .where(FeedbackReviewDecisionRow.case_id == case_id)
+                .order_by(FeedbackReviewDecisionRow.seq)
+            )
+            return tuple(_review_decision(row) for row in rows)
+
+    async def append_review_decision(
+        self,
+        decision: ReviewDecision,
+        *,
+        expected_annotation_digest: str,
+        now: str,
+    ) -> ReviewDecision:
+        timestamp = _datetime(now)
+        async with self.session_factory.begin() as session:
+            case = await session.scalar(
+                select(FeedbackCaseRow)
+                .where(FeedbackCaseRow.case_id == decision.case_id)
+                .with_for_update()
+            )
+            if case is None:
+                raise FileNotFoundError(f"feedback case not found: {decision.case_id}")
+            if case.annotation_digest != expected_annotation_digest:
+                raise ValueError("feedback_case_stale")
+            if case.annotation_digest != decision.annotation_digest:
+                raise ValueError("feedback_case_stale")
+            annotation = await session.scalar(
+                select(FeedbackAnnotationRow)
+                .where(
+                    FeedbackAnnotationRow.case_id == decision.case_id,
+                    FeedbackAnnotationRow.annotation_digest == decision.annotation_digest,
+                )
+                .limit(1)
+            )
+            if annotation is None:
+                raise ValueError("feedback_case_annotation_required")
+            if decision.decision == "withdraw":
+                if case.status != "accepted":
+                    raise ValueError("feedback_case_not_withdrawable")
+            elif case.status != "ready_for_review":
+                raise ValueError("feedback_case_not_reviewable")
+            max_seq = await session.scalar(
+                select(func.max(FeedbackReviewDecisionRow.seq)).where(
+                    FeedbackReviewDecisionRow.case_id == decision.case_id
+                )
+            )
+            actual_seq = int(max_seq or 0) + 1
+            if decision.seq != actual_seq:
+                decision = replace(decision, seq=actual_seq)
+            row = FeedbackReviewDecisionRow(
+                decision_id=decision.decision_id,
+                case_id=decision.case_id,
+                annotation_digest=decision.annotation_digest,
+                decision=decision.decision,
+                reason=decision.reason,
+                created_by=decision.created_by,
+                seq=actual_seq,
+                created_at=timestamp,
+            )
+            session.add(row)
+            case.status = {
+                "accept": "accepted",
+                "reject": "rejected",
+                "insufficient": "insufficient",
+                "withdraw": "withdrawn",
+            }[decision.decision]
+            case.updated_at = timestamp
+            await session.flush()
+            return _review_decision(row)
+
 
 async def _save_result_row(
     session: AsyncSession, result: AnalysisResult
@@ -337,6 +413,19 @@ def _annotation(row: FeedbackAnnotationRow) -> FeedbackAnnotation:
         created_by=row.created_by,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+    )
+
+
+def _review_decision(row: FeedbackReviewDecisionRow) -> ReviewDecision:
+    return ReviewDecision(
+        decision_id=row.decision_id,
+        case_id=row.case_id,
+        annotation_digest=row.annotation_digest,
+        decision=row.decision,
+        reason=row.reason,
+        created_by=row.created_by,
+        seq=row.seq,
+        created_at=_iso(row.created_at),
     )
 
 

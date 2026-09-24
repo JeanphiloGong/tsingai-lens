@@ -11,7 +11,7 @@ from application.repositories.chat_repository import ChatRepository
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.source.collection_service import CollectionService
 from domain.chat import ChatMessageRole
-from domain.feedback import AnalysisResult, FeedbackAnnotation, FeedbackCase
+from domain.feedback import AnalysisResult, FeedbackAnnotation, FeedbackCase, ReviewDecision
 
 
 @dataclass(frozen=True)
@@ -109,7 +109,9 @@ class FeedbackCaseService:
             if annotation_reader is not None
             else None
         )
-        return _detail(case, messages, results, feedback, annotation)
+        review_reader = getattr(self.case_repository, "read_review_decisions", None)
+        decisions = await review_reader(case.case_id) if review_reader is not None else ()
+        return _detail(case, messages, results, feedback, annotation, decisions)
 
     async def save_annotation_for_user(
         self,
@@ -173,6 +175,53 @@ class FeedbackCaseService:
     async def _read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
         reader = getattr(self.case_repository, "read_annotation", None)
         return await reader(case_id) if reader is not None else None
+
+    async def submit_review_for_user(
+        self,
+        *,
+        case_id: str,
+        user_id: str,
+        expected_annotation_digest: str,
+        decision: str,
+        reason: str | None,
+        now: str | None = None,
+    ) -> ReviewDecision:
+        case, _ = await self._authorized_case(case_id, user_id)
+        annotation = await self._read_annotation(case.case_id)
+        if annotation is None:
+            raise ValueError("feedback_case_annotation_required")
+        if annotation.annotation_digest != expected_annotation_digest:
+            raise ValueError("feedback_case_stale")
+        reader = getattr(self.case_repository, "read_review_decisions", None)
+        previous = await reader(case.case_id) if reader is not None else ()
+        timestamp = now or datetime.now(timezone.utc).isoformat()
+        review = ReviewDecision(
+            decision_id=f"review_{uuid4().hex[:32]}",
+            case_id=case.case_id,
+            annotation_digest=annotation.annotation_digest,
+            decision=decision,  # type: ignore[arg-type]
+            reason=reason,
+            created_by=user_id,
+            seq=len(previous) + 1,
+            created_at=timestamp,
+        )
+        appender = getattr(self.case_repository, "append_review_decision", None)
+        if appender is None:
+            raise RuntimeError("feedback review persistence is not configured")
+        return await appender(
+            review,
+            expected_annotation_digest=expected_annotation_digest,
+            now=timestamp,
+        )
+
+    async def list_reviews_for_user(
+        self, *, case_id: str, user_id: str
+    ) -> tuple[ReviewDecision, ...]:
+        case, _ = await self._authorized_case(case_id, user_id)
+        reader = getattr(self.case_repository, "read_review_decisions", None)
+        if reader is None:
+            return ()
+        return await reader(case.case_id)
 
     async def _authorized_collection_ids(
         self, user_id: str, collection_id: str | None
@@ -243,6 +292,7 @@ def _detail(
     results: tuple[AnalysisResult, ...],
     feedback: tuple[Any, ...],
     annotation: FeedbackAnnotation | None = None,
+    decisions: tuple[ReviewDecision, ...] = (),
 ) -> dict[str, Any]:
     latest = max(results, key=lambda item: (item.created_at, item.result_id), default=None)
     answer = next(
@@ -296,6 +346,7 @@ def _detail(
             else None
         ),
         "annotation": annotation.to_record() if annotation is not None else None,
+        "review_decisions": [item.to_record() for item in decisions],
         "current_annotation_digest": case.annotation_digest,
         "technical_error": case.context_snapshot.get("technical_error"),
         "created_at": case.created_at,

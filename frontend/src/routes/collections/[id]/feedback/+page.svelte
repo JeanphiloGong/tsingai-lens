@@ -16,6 +16,7 @@
 		fetchFeedbackCase,
 		fetchFeedbackCases,
 		saveFeedbackAnnotation,
+		submitFeedbackReview,
 		type FeedbackCaseDetail,
 		type FeedbackCaseSummary
 	} from '../../../_shared/feedbackCases';
@@ -30,6 +31,9 @@
 	let annotationSaving = false;
 	let annotationError = '';
 	let annotationSaved = false;
+	let reviewSaving = false;
+	let reviewError = '';
+	let reviewReason = '';
 	let annotationProblemType = 'source_missing';
 	let annotationSeverity = 'medium';
 	let annotationTarget = '';
@@ -97,6 +101,8 @@
 			: ['evaluation'];
 		annotationError = '';
 		annotationSaved = false;
+		reviewError = '';
+		reviewReason = '';
 	}
 
 	$: annotationSources = selected
@@ -130,6 +136,26 @@
 			annotationError = errorMessage(err);
 		} finally {
 			annotationSaving = false;
+		}
+	}
+
+	async function submitReview(decision: string) {
+		if (!selected || reviewSaving || !selected.current_annotation_digest) return;
+		reviewSaving = true;
+		reviewError = '';
+		try {
+			await submitFeedbackReview(collectionId, selected.case_id, {
+				expected_annotation_digest: selected.current_annotation_digest,
+				decision,
+				reason: reviewReason.trim()
+			});
+			selected = await fetchFeedbackCase(collectionId, selected.case_id);
+			loadAnnotationForm(selected);
+			await loadCases();
+		} catch (err) {
+			reviewError = errorMessage(err);
+		} finally {
+			reviewSaving = false;
 		}
 	}
 
@@ -356,6 +382,22 @@
 							<div class="annotation-actions"><span class="muted">{$t('feedbackWorkbench.annotationNoIds')}</span><button type="button" class="primary-button" on:click={saveAnnotation} disabled={annotationSaving || !annotationReason.trim()}>{annotationSaving ? $t('feedbackWorkbench.annotationSaving') : $t('feedbackWorkbench.annotationSave')}</button></div>
 						</section>
 					{/if}
+
+					{#if selected.annotation && selected.current_annotation_digest}
+						<section class="detail-section review-panel">
+							<div class="section-heading"><h3>{$t('feedbackWorkbench.reviewTitle')}</h3><span>{$t('feedbackWorkbench.reviewHint')}</span></div>
+							{#if reviewError}<div class="inline-error" role="alert"><AlertTriangle size={15} />{reviewError}</div>{/if}
+							<label class="field-block"><span class="field-label">{$t('feedbackWorkbench.reviewReason')}</span><textarea bind:value={reviewReason} rows="2" placeholder={$t('feedbackWorkbench.reviewReasonPlaceholder')}></textarea></label>
+							<div class="review-actions"><button type="button" class="review-button review-button--accept" on:click={() => submitReview('accept')} disabled={reviewSaving || !reviewReason.trim()}><CheckCircle2 size={15} />{$t('feedbackWorkbench.reviewAccept')}</button><button type="button" class="review-button" on:click={() => submitReview('insufficient')} disabled={reviewSaving || !reviewReason.trim()}>{$t('feedbackWorkbench.reviewInsufficient')}</button><button type="button" class="review-button review-button--reject" on:click={() => submitReview('reject')} disabled={reviewSaving || !reviewReason.trim()}><XCircle size={15} />{$t('feedbackWorkbench.reviewReject')}</button>{#if selected.status === 'accepted'}<button type="button" class="review-button" on:click={() => submitReview('withdraw')} disabled={reviewSaving || !reviewReason.trim()}>{$t('feedbackWorkbench.reviewWithdraw')}</button>{/if}</div>
+						</section>
+					{/if}
+
+					{#if selected.review_decisions?.length}
+						<section class="detail-section">
+							<div class="section-heading"><h3>{$t('feedbackWorkbench.reviewHistory')}</h3><span>{selected.review_decisions.length}</span></div>
+							<div class="review-history">{#each selected.review_decisions as review}<div class="review-history__row"><strong>{label(review.decision)}</strong><span>{formatDate(review.created_at)}</span><p>{review.reason}</p></div>{/each}</div>
+						</section>
+					{/if}
 				{/if}
 		</main>
 	</div>
@@ -453,6 +495,17 @@
 		.inline-error, .inline-success { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-radius: 6px; font-size: 12px; }
 		.inline-error { color: var(--danger-text); background: var(--danger-bg); }
 		.inline-success { color: var(--success-text); background: var(--success-bg); }
+		.review-panel { background: color-mix(in srgb, var(--brand-soft) 50%, var(--surface-card)); }
+		.review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+		.review-button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+		.review-button:hover { border-color: var(--brand-border); }
+		.review-button:disabled { opacity: .5; cursor: default; }
+		.review-button--accept { color: var(--success-text); }
+		.review-button--reject { color: var(--danger-text); }
+		.review-history { display: grid; gap: 8px; }
+		.review-history__row { display: grid; grid-template-columns: auto auto; gap: 4px 10px; padding: 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
+		.review-history__row span { color: var(--text-secondary); text-align: right; }
+		.review-history__row p { grid-column: 1 / -1; margin: 2px 0 0; color: var(--text-secondary); line-height: 1.45; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
 		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }

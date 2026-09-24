@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
+from domain.feedback.review_decision import ReviewDecision
 
 
 class FeedbackCaseRepository(Protocol):
@@ -47,6 +48,16 @@ class FeedbackCaseRepository(Protocol):
         expected_digest: str | None,
         now: str,
     ) -> FeedbackAnnotation: ...
+
+    async def read_review_decisions(self, case_id: str) -> tuple[ReviewDecision, ...]: ...
+
+    async def append_review_decision(
+        self,
+        decision: ReviewDecision,
+        *,
+        expected_annotation_digest: str,
+        now: str,
+    ) -> ReviewDecision: ...
 
 
 __all__ = ["FeedbackCaseRepository"]

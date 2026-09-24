@@ -47,6 +47,7 @@ class FeedbackCaseDetailResponse(BaseModel):
     analysis: dict[str, Any] | None = None
     annotation: dict[str, Any] | None = None
     current_annotation_digest: str | None = None
+    review_decisions: list[dict[str, Any]] = Field(default_factory=list)
     technical_error: str | None = None
     created_at: str
     updated_at: str
@@ -88,3 +89,24 @@ class FeedbackAnnotationResponse(BaseModel):
     created_by: str
     created_at: str
     updated_at: str
+
+
+class FeedbackReviewRequest(BaseModel):
+    expected_annotation_digest: str = Field(min_length=64, max_length=64)
+    decision: Literal["accept", "reject", "insufficient", "withdraw"]
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+class FeedbackReviewDecisionResponse(BaseModel):
+    decision_id: str
+    case_id: str
+    annotation_digest: str
+    decision: str
+    reason: str | None
+    created_by: str
+    seq: int
+    created_at: str
+
+
+class FeedbackReviewDecisionListResponse(BaseModel):
+    items: list[FeedbackReviewDecisionResponse]

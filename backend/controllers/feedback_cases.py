@@ -12,6 +12,9 @@ from controllers.schemas.feedback_cases import (
     FeedbackCaseDetailResponse,
     FeedbackCaseListResponse,
     FeedbackCaseSummaryResponse,
+    FeedbackReviewDecisionListResponse,
+    FeedbackReviewDecisionResponse,
+    FeedbackReviewRequest,
 )
 
 
@@ -107,6 +110,56 @@ async def save_feedback_annotation(
             detail={"code": code, "message": code.replace("_", " ")},
         ) from exc
     return FeedbackAnnotationResponse.model_validate(annotation.to_record())
+
+
+@router.post("/{case_id}/review", response_model=FeedbackReviewDecisionResponse)
+async def submit_feedback_review(
+    case_id: str,
+    payload: FeedbackReviewRequest,
+    request: Request,
+) -> FeedbackReviewDecisionResponse:
+    try:
+        decision = await _service(request).submit_review_for_user(
+            case_id=case_id,
+            user_id=await current_user_id(request),
+            expected_annotation_digest=payload.expected_annotation_digest,
+            decision=payload.decision,
+            reason=payload.reason,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        code = str(exc)
+        status = 409 if code in {
+            "feedback_case_stale",
+            "feedback_case_not_reviewable",
+            "feedback_case_not_withdrawable",
+        } else 422
+        raise HTTPException(
+            status_code=status,
+            detail={"code": code, "message": code.replace("_", " ")},
+        ) from exc
+    return FeedbackReviewDecisionResponse.model_validate(decision.to_record())
+
+
+@router.get(
+    "/{case_id}/review-decisions",
+    response_model=FeedbackReviewDecisionListResponse,
+)
+async def list_feedback_reviews(
+    case_id: str,
+    request: Request,
+) -> FeedbackReviewDecisionListResponse:
+    try:
+        decisions = await _service(request).list_reviews_for_user(
+            case_id=case_id,
+            user_id=await current_user_id(request),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FeedbackReviewDecisionListResponse(
+        items=[FeedbackReviewDecisionResponse.model_validate(item.to_record()) for item in decisions]
+    )
 
 
 __all__ = ["router"]

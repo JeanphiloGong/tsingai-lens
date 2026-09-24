@@ -126,7 +126,10 @@ class PostgresExperimentFindingRepository(ExperimentFindingRepository):
                     .order_by(ExperimentFindingRow.display_rank, ExperimentFindingRow.finding_id)
                 )
             )
-            return tuple(await _finding_record(session, row) for row in rows)
+            records: list[Finding] = []
+            for row in rows:
+                records.append(await _finding_record(session, row))
+            return tuple(records)
 
 
 async def _validate_context(

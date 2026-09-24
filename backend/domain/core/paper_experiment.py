@@ -171,7 +171,11 @@ class ExperimentalVariant:
                 item.to_record() for item in self.intervention_attributes
             ],
             "state": [item.to_record() for item in self.state],
-            "population_scope": dict(self.population_scope or {}),
+            "population_scope": (
+                dict(self.population_scope)
+                if self.population_scope is not None
+                else None
+            ),
             "source_refs": [item.to_record() for item in self.source_refs],
             "binding_source_refs": [item.to_record() for item in self.binding_source_refs],
             "binding_status": self.binding_status,
@@ -223,7 +227,11 @@ class ExperimentTestCondition:
             "test_key": self.test_key,
             "test_type": self.test_type,
             "parameters": [item.to_record() for item in self.parameters],
-            "population_scope": dict(self.population_scope or {}),
+            "population_scope": (
+                dict(self.population_scope)
+                if self.population_scope is not None
+                else None
+            ),
             "source_refs": [item.to_record() for item in self.source_refs],
             "binding_status": self.binding_status,
             "notes": list(self.notes),

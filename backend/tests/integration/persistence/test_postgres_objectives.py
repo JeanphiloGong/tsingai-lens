@@ -467,6 +467,7 @@ async def test_analysis_publish_preserves_manifest_and_source_backed_results(
 
     assert objective.published_analysis_version == analysis.analysis_version
     assert published.status == "succeeded"
+    assert published.scientific_record_source == "legacy_snapshot"
     assert published.document_inputs == _document_inputs()
     assert await objective_repository.read_published_analysis(
         COLLECTION_ID,
@@ -666,6 +667,7 @@ async def test_authored_finding_publishes_new_snapshot_without_mutating_source(
 
     assert result.finding is not None
     assert result.analysis.analysis_version == 2
+    assert result.analysis.scientific_record_source == "authored_snapshot"
     assert result.finding.origin == "hybrid"
     original = await objective_repository.read_finding(
         COLLECTION_ID, OBJECTIVE_ID, 1, "finding-strength"

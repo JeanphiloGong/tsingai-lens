@@ -254,6 +254,7 @@ class FindingAuthoringService:
                     else "human_authored"
                 )
             ),
+            scientific_record_source="authored_snapshot",
             source_analysis_version=source_analysis_version,
             created_by_user_id=created_by_user_id,
             created_by_tool_call_id=created_by_tool_call_id,

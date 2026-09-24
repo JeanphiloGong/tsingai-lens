@@ -78,20 +78,23 @@ def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
         command.upgrade(config, "20260923_0064")
         before = set(inspect(connection).get_table_names())
         assert retired <= before
-        command.upgrade(config, "head")
-        at_head = set(inspect(connection).get_table_names())
-        assert retired.isdisjoint(at_head)
-        assert "chat_model_calls" in at_head
-        assert "feedback_dataset_snapshots" in at_head
+        command.upgrade(config, "20260924_0074")
+        before_irreversible = set(inspect(connection).get_table_names())
+        assert retired.isdisjoint(before_irreversible)
+        assert "chat_model_calls" in before_irreversible
+        assert "feedback_dataset_snapshots" in before_irreversible
         command.downgrade(config, "20260923_0064")
         after_downgrade = set(inspect(connection).get_table_names())
         assert retired <= after_downgrade
         assert "chat_model_calls" in after_downgrade
+        command.upgrade(config, "20260924_0074")
         command.upgrade(config, "head")
         final = set(inspect(connection).get_table_names())
         assert retired.isdisjoint(final)
         assert "chat_model_calls" in final
         assert "feedback_dataset_snapshots" in final
+        with pytest.raises(RuntimeError, match="irreversible"):
+            command.downgrade(config, "20260924_0074")
     engine.dispose()
 
 
@@ -315,6 +318,114 @@ def test_legacy_objective_checkpoints_are_classified_with_sqlite_autoincrement(
         current = connection.execute(select(analyses)).mappings().one()
         assert "document_evidence_checkpoints" not in current["payload"]
         assert current["payload"]["other_metadata"] == {"preserve": True}
+        assert current["payload"]["scientific_record_source"] == "legacy_snapshot"
+        assert current["updated_at"] != now
+
+        with pytest.raises(RuntimeError, match="irreversible"):
+            command.downgrade(config, "20260924_0074")
+
+    engine.dispose()
+
+
+def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "legacy-objective-payload-shapes.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0074")
+        analyses = Table("objective_analyses", MetaData(), autoload_with=connection)
+        now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+        connection.execute(
+            analyses.insert(),
+            [
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "empty-checkpoint",
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "payload": {
+                        "document_evidence_checkpoints": {},
+                        "origin": "system_generated",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "malformed-payload",
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "payload": "legacy scalar payload",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "already-experiment-backed",
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "payload": {
+                        "origin": "system_generated",
+                        "scientific_record_source": "experiment_graph",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "authored-with-legacy-marker",
+                    "analysis_version": 2,
+                    "status": "succeeded",
+                    "payload": {
+                        "origin": "human_authored",
+                        "scientific_record_source": "legacy_snapshot",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            ],
+        )
+
+        command.upgrade(config, "head")
+        empty = connection.execute(
+            select(analyses).where(analyses.c.objective_id == "empty-checkpoint")
+        ).mappings().one()
+        malformed = connection.execute(
+            select(analyses).where(analyses.c.objective_id == "malformed-payload")
+        ).mappings().one()
+        already_experiment_backed = connection.execute(
+            select(analyses).where(
+                analyses.c.objective_id == "already-experiment-backed"
+            )
+        ).mappings().one()
+        authored = connection.execute(
+            select(analyses).where(
+                analyses.c.objective_id == "authored-with-legacy-marker"
+            )
+        ).mappings().one()
+
+        assert empty["payload"] == {
+            "origin": "system_generated",
+            "scientific_record_source": "legacy_snapshot",
+        }
+        assert malformed["payload"] == {
+            "legacy_payload": "legacy scalar payload",
+            "scientific_record_source": "legacy_snapshot",
+        }
+        assert already_experiment_backed["payload"] == {
+            "origin": "system_generated",
+            "scientific_record_source": "experiment_graph",
+        }
+        assert authored["payload"] == {
+            "origin": "human_authored",
+            "scientific_record_source": "authored_snapshot",
+        }
 
     engine.dispose()
 

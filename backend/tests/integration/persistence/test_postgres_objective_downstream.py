@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from domain.evaluation import FindingCuration, FindingFeedback
+from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
 from infra.persistence.postgres.finding_review_repository import (
     PostgresFindingReviewRepository,
 )
@@ -92,6 +93,59 @@ async def test_finding_review_round_trips_published_analysis_identity(
         analysis.analysis_version,
         finding.finding_id,
     ) == (curation,)
+
+
+async def test_finding_review_accepts_experiment_backed_finding_row(
+    objective_repository,
+) -> None:
+    analysis = await _publish_next_analysis(objective_repository)
+    finding = _finding(analysis.analysis_version)
+    async with objective_repository.session_factory.begin() as session:
+        session.add(
+            ExperimentFindingRow(
+                finding_id=finding.finding_id,
+                collection_id=COLLECTION_ID,
+                objective_id=OBJECTIVE_ID,
+                analysis_version=analysis.analysis_version,
+                statement=finding.statement,
+                factors_json=list(finding.factors),
+                outcome=finding.outcome,
+                direction=finding.direction,
+                assertion_strength=finding.assertion_strength,
+                attribution_scope=finding.attribution_scope,
+                synthesis_status=finding.synthesis_status,
+                certainty=finding.certainty,
+                display_rank=finding.display_rank,
+                mechanisms_json=[item.to_record() for item in finding.mechanisms],
+                scientific_context_json=finding.scientific_context.to_record(),
+                limitations_json=list(finding.limitations),
+                origin="system_generated",
+                source_analysis_version=None,
+                parent_finding_id=None,
+                created_by_user_id=None,
+                created_by_tool_call_id=None,
+                created_at=None,
+                warnings_json=list(finding.warnings),
+            )
+        )
+
+    reviews = PostgresFindingReviewRepository(objective_repository.session_factory)
+    feedback = await reviews.upsert_feedback(
+        FindingFeedback.from_mapping(
+            {
+                "feedback_id": "experiment-feedback-1",
+                "collection_id": COLLECTION_ID,
+                "objective_id": OBJECTIVE_ID,
+                "analysis_version": analysis.analysis_version,
+                "finding_id": finding.finding_id,
+                "review_status": "correct",
+                "issue_type": "none",
+                "reviewer": "experiment-reviewer",
+                "created_at": "2026-08-27T00:00:00+00:00",
+            }
+        )
+    )
+    assert feedback.finding_id == finding.finding_id
 
 
 async def test_publishing_new_analysis_preserves_prior_version_artifacts(

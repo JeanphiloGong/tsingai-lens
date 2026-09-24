@@ -215,6 +215,7 @@ async def test_publishes_agent_authored_evidence_without_automatic_analysis() ->
     assert result.analysis.status == "succeeded"
     assert result.analysis.analysis_version == 1
     assert result.analysis.origin == "agent_authored"
+    assert result.analysis.scientific_record_source == "authored_snapshot"
     assert result.analysis.created_by_user_id == "user-1"
     assert result.analysis.created_by_tool_call_id == "call-agent-analysis"
     assert result.analysis.pipeline_version == "agent-objective-analysis.v1"

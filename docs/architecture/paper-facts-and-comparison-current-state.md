@@ -107,10 +107,11 @@ standalone paper entity.
 - `ScientificComparison` carries the source-supported comparison content that
   can enter a revision, selection, and Finding decision.
 
-The internal status check is deliberately not another persisted
-`ExperimentComparison` workflow object. Source lineage lives on observations,
-the comparison row lives inside the immutable experiment revision, and the
-selection decides whether it can support a Finding.
+`ExperimentComparison` is a persisted child of the immutable experiment
+revision, not an independent workflow aggregate. Its source lineage and
+comparability status stay with the revision; the Selection decides whether the
+comparison can support a Finding. `PaperExperiment.comparison_status()` is a
+diagnostic helper for the same judgment and does not create a second record.
 
 ## Methods And Context
 
@@ -171,10 +172,6 @@ graph.
 - `MethodFact` was removed because the active chain never produced or consumed
   it; Methods information remains Source-grounded and binds to the actual sample,
   condition, result, or Evidence context.
-- `ExperimentComparison` was removed because its object fields were consumed
-  only to count an internal status. `PaperExperiment.comparison_status()` keeps
-  the judgment without introducing another public or persisted research object.
-
 Legacy JSON fields are ignored at the domain read boundary and are not emitted
 again. Historical migrations remain migration history and do not define the
 current runtime contract.

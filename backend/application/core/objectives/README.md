@@ -325,7 +325,8 @@ same papers + confirmed Objective
   -> same relevant-paper and Source recall
   -> source-local facts with complete lineage
   -> within-paper experiment binding
-  -> comparable / descriptive / abstained Evidence
+  -> selected experiment results and a comparable / descriptive / abstained
+     Evidence compatibility projection
   -> Finding, or an explicit no-defensible-comparison result
 ```
 

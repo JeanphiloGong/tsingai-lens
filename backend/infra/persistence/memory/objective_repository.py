@@ -284,6 +284,11 @@ class MemoryObjectiveRepository:
             progress_message="Objective analysis is queued.",
             created_at=datetime.now(timezone.utc),
             origin=origin,
+            scientific_record_source=(
+                "experiment_graph"
+                if origin == "system_generated"
+                else "authored_snapshot"
+            ),
             created_by_user_id=created_by_user_id,
             created_by_tool_call_id=created_by_tool_call_id,
         )
@@ -428,6 +433,14 @@ class MemoryObjectiveRepository:
             raise ValueError("objective evidence lacks owning paper contribution")
         for finding in findings:
             finding.validate_sources(evidence_records, contributions)
+        analysis = replace(
+            analysis,
+            scientific_record_source=(
+                "legacy_snapshot"
+                if analysis.origin == "system_generated"
+                else "authored_snapshot"
+            ),
+        )
         analysis = analysis.succeed(
             completed_at=datetime.now(timezone.utc),
             abstention_reason=abstention_reason,
@@ -463,6 +476,7 @@ class MemoryObjectiveRepository:
             raise ValueError("paper contributions must cover every analysis input")
         if any(item.key[:3] != key for item in contributions):
             raise ValueError("paper contribution belongs to another analysis")
+        analysis = replace(analysis, scientific_record_source="experiment_graph")
         analysis = analysis.succeed(
             completed_at=datetime.now(timezone.utc),
             abstention_reason=abstention_reason,

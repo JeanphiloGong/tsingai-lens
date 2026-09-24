@@ -124,6 +124,7 @@ async def test_creates_grounded_evidence_in_new_immutable_version() -> None:
     result = await service.create_version(**_draft())
 
     assert result.analysis.analysis_version == 2
+    assert result.analysis.scientific_record_source == "authored_snapshot"
     assert result.evidence.analysis_version == 2
     assert result.evidence.origin == "human_authored"
     assert result.evidence.source_analysis_version == 1

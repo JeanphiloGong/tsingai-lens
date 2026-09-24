@@ -765,11 +765,12 @@ async def test_analysis_queries_use_experiment_projection_without_changing_argum
     assert evidence["items"][0]["evidence_id"] == "projected-evidence"
 
 
-async def test_authored_analysis_keeps_legacy_snapshot_when_projection_is_available() -> None:
+async def test_authored_analysis_keeps_authored_snapshot_when_projection_is_available() -> None:
     repository = FakeObjectiveRepository(published=True)
     authored = replace(
         repository.analyses[1],
         origin="human_authored",
+        scientific_record_source="authored_snapshot",
         source_analysis_version=0,
         created_by_user_id="researcher-1",
     )
@@ -796,6 +797,54 @@ async def test_authored_analysis_keeps_legacy_snapshot_when_projection_is_availa
 
     assert findings["items"][0]["finding_id"] == "finding-1"
     assert evidence["items"][0]["evidence_id"] == "evidence-1"
+
+
+async def test_legacy_automatic_analysis_keeps_snapshot_when_projection_is_available() -> None:
+    repository = FakeObjectiveRepository(published=True)
+    repository.analyses[1] = replace(
+        repository.analyses[1],
+        scientific_record_source="legacy_snapshot",
+    )
+
+    class RejectingProjection:
+        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("legacy automatic analysis must not read the experiment projection")
+
+        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("legacy automatic analysis must not read the experiment projection")
+
+    service, _, _ = _service(
+        repository=repository,
+        experiment_compatibility_projection=RejectingProjection(),
+    )
+
+    findings = await service.list_findings(
+        "collection-1", "objective-1", analysis_version=1
+    )
+
+    assert findings["items"][0]["finding_id"] == "finding-1"
+
+
+async def test_experiment_abstention_still_reads_experiment_projection() -> None:
+    repository = FakeObjectiveRepository(published=True)
+    repository.analyses[1] = replace(
+        repository.analyses[1],
+        scientific_record_source="experiment_graph",
+        abstention_reason="no_grounded_evidence",
+        abstention_note="No source-grounded selection was recovered.",
+    )
+    repository.findings[1] = ()
+    projection = RecordingExperimentCompatibilityProjection()
+    service, _, _ = _service(
+        repository=repository,
+        experiment_compatibility_projection=projection,
+    )
+
+    findings = await service.list_findings(
+        "collection-1", "objective-1", analysis_version=1
+    )
+
+    assert findings["items"][0]["finding_id"] == "projected-finding"
 
 
 async def test_objective_analysis_publishes_one_complete_version() -> None:

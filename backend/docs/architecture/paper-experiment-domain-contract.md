@@ -153,6 +153,16 @@ Conversely, a proposal that omits a measurement whose variant and concrete test
 are already explicit is completed deterministically. A measurement with either
 binding missing remains unresolved rather than being attached by proximity.
 
+Older or weaker model calls may provide a useful scope label while omitting the
+scope enum or selector. The reconciliation service may recover a narrow,
+non-physical selector from an unambiguous label such as `selected 120 W / 100
+mm/s` or `wear comparison`, and must record that this was deterministic label
+normalization. It must not infer a split from a section name, table name,
+outcome, or test alone. If the label is not sufficient to form a selector, the
+proposal is collapsed into the parent and an unresolved audit item is retained.
+This keeps boundary-first output diagnostic while allowing historical traces to
+be replayed without asking the model to invent membership lists.
+
 Repeated source-local records are merged by a conservative semantic signature.
 When the same resolved variant/test/outcome/unit has different reported values,
 the revision retains one conflict record with both reports and their sources; it

@@ -103,6 +103,9 @@ OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
 OBJECTIVE_ANALYSIS_ORIGINS: Final[frozenset[str]] = frozenset(
     {"system_generated", "human_authored", "agent_authored", "hybrid"}
 )
+OBJECTIVE_ANALYSIS_RECORD_SOURCES: Final[frozenset[str]] = frozenset(
+    {"experiment_graph", "authored_snapshot", "legacy_snapshot"}
+)
 OBJECTIVE_ANALYSIS_ABSTENTION_REASONS: Final[frozenset[str]] = frozenset(
     {"no_comparable_evidence", "no_grounded_evidence", "insufficient_evidence"}
 )
@@ -1188,6 +1191,7 @@ class ObjectiveAnalysis:
     completed_at: datetime | None = None
     diagnostics: tuple[Mapping[str, Any], ...] = ()
     origin: str = "system_generated"
+    scientific_record_source: str = "experiment_graph"
     source_analysis_version: int | None = None
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
@@ -1211,7 +1215,16 @@ class ObjectiveAnalysis:
             raise ValueError(f"unsupported objective analysis status: {self.status}")
         if self.origin not in OBJECTIVE_ANALYSIS_ORIGINS:
             raise ValueError(f"unsupported objective analysis origin: {self.origin}")
+        if self.scientific_record_source not in OBJECTIVE_ANALYSIS_RECORD_SOURCES:
+            raise ValueError(
+                "unsupported objective analysis scientific record source: "
+                f"{self.scientific_record_source}"
+            )
         if self.origin == "system_generated":
+            if self.scientific_record_source == "authored_snapshot":
+                raise ValueError(
+                    "system-generated analysis cannot use authored_snapshot"
+                )
             if any(
                 value is not None
                 for value in (
@@ -1224,6 +1237,10 @@ class ObjectiveAnalysis:
                     "system-generated analysis cannot have authoring provenance"
                 )
         elif self.origin == "agent_authored":
+            if self.scientific_record_source != "authored_snapshot":
+                raise ValueError(
+                    "authored analysis requires authored_snapshot"
+                )
             if not _text(self.created_by_user_id) or not _text(
                 self.created_by_tool_call_id
             ):
@@ -1236,6 +1253,10 @@ class ObjectiveAnalysis:
             ):
                 raise ValueError("authored analysis source must be an older version")
         else:
+            if self.scientific_record_source != "authored_snapshot":
+                raise ValueError(
+                    "authored analysis requires authored_snapshot"
+                )
             if self.source_analysis_version is None:
                 raise ValueError("authored analysis requires source_analysis_version")
             if self.source_analysis_version >= self.analysis_version:
@@ -1285,10 +1306,23 @@ class ObjectiveAnalysis:
         proof that every analysis version is experiment-backed.
         """
 
-        return self.origin == "system_generated"
+        return (
+            self.origin == "system_generated"
+            and self.scientific_record_source == "experiment_graph"
+        )
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveAnalysis":
+        origin = _choice(
+            payload.get("origin"),
+            OBJECTIVE_ANALYSIS_ORIGINS,
+            "system_generated",
+        )
+        default_record_source = (
+            "experiment_graph"
+            if origin == "system_generated"
+            else "authored_snapshot"
+        )
         return cls(
             collection_id=_text(payload.get("collection_id")) or "",
             objective_id=_text(payload.get("objective_id")) or "",
@@ -1323,10 +1357,11 @@ class ObjectiveAnalysis:
                 for item in payload.get("diagnostics") or ()
                 if isinstance(item, Mapping)
             ),
-            origin=_choice(
-                payload.get("origin"),
-                OBJECTIVE_ANALYSIS_ORIGINS,
-                "system_generated",
+            origin=origin,
+            scientific_record_source=_choice(
+                payload.get("scientific_record_source"),
+                OBJECTIVE_ANALYSIS_RECORD_SOURCES,
+                default_record_source,
             ),
             source_analysis_version=_positive_int_or_none(
                 payload.get("source_analysis_version")
@@ -1439,6 +1474,7 @@ class ObjectiveAnalysis:
             "started_at": _datetime_record(self.started_at),
             "completed_at": _datetime_record(self.completed_at),
             "origin": self.origin,
+            "scientific_record_source": self.scientific_record_source,
             "source_analysis_version": self.source_analysis_version,
             "created_by_user_id": self.created_by_user_id,
             "created_by_tool_call_id": self.created_by_tool_call_id,

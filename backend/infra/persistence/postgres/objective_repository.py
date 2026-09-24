@@ -325,6 +325,11 @@ class PostgresObjectiveRepository:
                 progress_message="Objective analysis is queued.",
                 created_at=now,
                 origin=origin,
+                scientific_record_source=(
+                    "experiment_graph"
+                    if origin == "system_generated"
+                    else "authored_snapshot"
+                ),
                 created_by_user_id=created_by_user_id,
                 created_by_tool_call_id=created_by_tool_call_id,
             )
@@ -501,6 +506,14 @@ class PostgresObjectiveRepository:
 
             self._write_contributions(analysis_row, contributions)
             self._write_result_records(analysis_row, evidence_records, findings)
+            analysis = replace(
+                analysis,
+                scientific_record_source=(
+                    "legacy_snapshot"
+                    if analysis.origin == "system_generated"
+                    else "authored_snapshot"
+                ),
+            )
             analysis = analysis.succeed(
                 completed_at=datetime.now(timezone.utc),
                 abstention_reason=abstention_reason,
@@ -556,6 +569,10 @@ class PostgresObjectiveRepository:
             if any(item.key[:3] != (collection_id, objective_id, analysis_version) for item in contributions):
                 raise ValueError("paper contribution belongs to another analysis")
             self._write_contributions(analysis_row, contributions)
+            analysis = replace(
+                analysis,
+                scientific_record_source="experiment_graph",
+            )
             analysis = analysis.succeed(
                 completed_at=datetime.now(timezone.utc),
                 abstention_reason=abstention_reason,

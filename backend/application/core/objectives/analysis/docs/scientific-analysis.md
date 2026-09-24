@@ -426,9 +426,11 @@ these records, including ones not used by a Finding, with their exact Source and
 reason. A missing Finding therefore means a scientific abstention only when the
 status distribution and paper dispositions show why, not an unreported failure.
 
-An analysis that inspects its paper scope but finds no grounded Objective
-Evidence publishes an empty Finding set as a scientific abstention. This is not
-a provider failure. If every relevant paper instead ends in technical extraction
+An analysis that inspects its paper scope but finds no selected, compatible
+experiment result publishes an empty Finding set as a scientific abstention.
+The compatibility Evidence projection can still expose descriptive or
+non-comparable observations. This is not a provider failure. If every relevant
+paper instead ends in technical extraction
 failure, the analysis run fails and remains retryable. A partial technical
 failure may still publish surviving paper outcomes with explicit contribution
 warnings.

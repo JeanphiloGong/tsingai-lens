@@ -554,6 +554,12 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
 
 async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> None:
     repository = await _published_objective_repository()
+    analysis = await repository.read_analysis("col-gold", "obj-1", 1)
+    assert analysis is not None
+    repository._analyses[("col-gold", "obj-1", 1)] = replace(
+        analysis,
+        scientific_record_source="experiment_graph",
+    )
     finding = await repository.read_finding("col-gold", "obj-1", 1, "finding-1")
     evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
     contributions = await repository.list_contributions("col-gold", "obj-1", 1)
@@ -605,6 +611,7 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     repository._analyses[("col-gold", "obj-1", 1)] = replace(
         source,
         origin="human_authored",
+        scientific_record_source="authored_snapshot",
         source_analysis_version=0,
         created_by_user_id="researcher-1",
     )

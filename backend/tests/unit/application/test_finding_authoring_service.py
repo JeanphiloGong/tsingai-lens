@@ -56,6 +56,7 @@ async def test_creates_new_manual_finding_version_from_published_evidence() -> N
 
     assert result.analysis.analysis_version == 2
     assert result.analysis.origin == "hybrid"
+    assert result.analysis.scientific_record_source == "authored_snapshot"
     assert result.analysis.source_analysis_version == 1
     assert result.finding is not None
     assert result.finding.analysis_version == 2

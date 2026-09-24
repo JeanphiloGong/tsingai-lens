@@ -396,6 +396,34 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     assert published.published_analysis_version == 1
 
 
+def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
+    payload = _analysis().to_record()
+    payload.pop("scientific_record_source")
+    payload.update(
+        {
+            "analysis_version": 2,
+            "origin": "human_authored",
+            "source_analysis_version": 1,
+            "created_by_user_id": "researcher-1",
+        }
+    )
+
+    authored = ObjectiveAnalysis.from_mapping(payload)
+
+    assert authored.scientific_record_source == "authored_snapshot"
+
+
+def test_objective_analysis_rejects_record_source_that_conflicts_with_origin() -> None:
+    with pytest.raises(ValueError, match="authored analysis requires authored_snapshot"):
+        _analysis(
+            analysis_version=2,
+            origin="human_authored",
+            scientific_record_source="experiment_graph",
+            source_analysis_version=1,
+            created_by_user_id="researcher-1",
+        )
+
+
 def test_research_objective_requires_newer_analysis_version() -> None:
     objective = _objective(
         confirmation_status="confirmed",

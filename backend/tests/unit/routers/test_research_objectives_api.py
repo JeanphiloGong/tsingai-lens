@@ -869,6 +869,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
             analysis = replace(
                 _analysis(),
                 origin="agent_authored",
+                scientific_record_source="authored_snapshot",
                 created_by_user_id="user-1",
                 created_by_tool_call_id="call-agent-analysis",
             )

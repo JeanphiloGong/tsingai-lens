@@ -25,6 +25,23 @@ depends_on = None
 
 _JSON_DOCUMENT = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 _AUTOINCREMENT_ID = sa.BigInteger().with_variant(sa.Integer(), "sqlite")
+_RECORD_SOURCE_KEY = "scientific_record_source"
+
+
+def _bounded_legacy_key(value: object) -> str:
+    text = str(value)
+    if len(text) <= 400:
+        return text
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return f"{text[:335]}:{digest}"
+
+
+def _checkpoint_payloads(value: object) -> list[tuple[str, object]]:
+    if isinstance(value, dict):
+        return [(str(key), item) for key, item in value.items()]
+    if value is None:
+        return []
+    return [("__invalid_checkpoint_payload__", value)]
 
 
 def upgrade() -> None:
@@ -81,14 +98,20 @@ def upgrade() -> None:
     ).mappings()
     now = datetime.now(timezone.utc)
     for row in rows:
-        payload = dict(row["payload"] or {})
+        raw_payload = row["payload"]
+        if isinstance(raw_payload, dict):
+            payload = dict(raw_payload)
+        else:
+            # Keep malformed historical JSON available for manual inspection
+            # while giving the runtime a valid ObjectiveAnalysis mapping.
+            payload = {"legacy_payload": raw_payload}
+        had_checkpoint_key = "document_evidence_checkpoints" in payload
         checkpoints = payload.pop("document_evidence_checkpoints", None)
-        if not isinstance(checkpoints, dict) or not checkpoints:
-            continue
-        for legacy_key, checkpoint in checkpoints.items():
+        for legacy_key, checkpoint in _checkpoint_payloads(checkpoints):
             checkpoint_payload = (
                 checkpoint if isinstance(checkpoint, dict) else {"value": checkpoint}
             )
+            bounded_key = _bounded_legacy_key(legacy_key)
             encoded = json.dumps(
                 checkpoint_payload,
                 ensure_ascii=False,
@@ -97,44 +120,67 @@ def upgrade() -> None:
             ).encode("utf-8")
             document_id = checkpoint_payload.get("document_id")
             fingerprint = checkpoint_payload.get("input_fingerprint")
-            bind.execute(
-                sa.insert(legacy).values(
-                    collection_id=row["collection_id"],
-                    objective_id=row["objective_id"],
-                    analysis_version=row["analysis_version"],
-                    legacy_key=str(legacy_key),
-                    document_id=str(document_id) if document_id else None,
-                    input_fingerprint=(
-                        str(fingerprint) if fingerprint else None
-                    ),
-                    checkpoint_status=(
-                        str(checkpoint_payload.get("status"))
-                        if checkpoint_payload.get("status")
-                        else None
-                    ),
-                    payload_hash=hashlib.sha256(encoded).hexdigest(),
-                    classification="manual_review_required",
-                    reason=(
-                        "Retired per-document checkpoint cannot be promoted to a "
-                        "PaperExperiment without rechecking source bindings."
-                    ),
-                    created_at=now,
+            already_classified = bind.execute(
+                sa.select(legacy.c.id).where(
+                    legacy.c.collection_id == row["collection_id"],
+                    legacy.c.objective_id == row["objective_id"],
+                    legacy.c.analysis_version == row["analysis_version"],
+                    legacy.c.legacy_key == bounded_key,
                 )
+            ).first()
+            if already_classified is None:
+                bind.execute(
+                    sa.insert(legacy).values(
+                        collection_id=row["collection_id"],
+                        objective_id=row["objective_id"],
+                        analysis_version=row["analysis_version"],
+                        legacy_key=bounded_key,
+                        document_id=str(document_id) if document_id else None,
+                        input_fingerprint=(
+                            str(fingerprint) if fingerprint else None
+                        ),
+                        checkpoint_status=(
+                            str(checkpoint_payload.get("status"))
+                            if checkpoint_payload.get("status")
+                            else None
+                        ),
+                        payload_hash=hashlib.sha256(encoded).hexdigest(),
+                        classification="manual_review_required",
+                        reason=(
+                            "Retired per-document checkpoint cannot be promoted to a "
+                            "PaperExperiment without rechecking source bindings."
+                        ),
+                        created_at=now,
+                    )
+                )
+        origin = payload.get("origin")
+        if origin in (None, "system_generated"):
+            # Every row that predates the experiment writer is an explicit
+            # read-only legacy snapshot, including a valid scientific abstention
+            # with no checkpoint or result rows. New automatic rows write the
+            # experiment_graph marker themselves.
+            if payload.get(_RECORD_SOURCE_KEY) not in {
+                "experiment_graph",
+                "legacy_snapshot",
+            }:
+                payload[_RECORD_SOURCE_KEY] = "legacy_snapshot"
+        elif origin in {"human_authored", "agent_authored", "hybrid"}:
+            if payload.get(_RECORD_SOURCE_KEY) != "authored_snapshot":
+                payload[_RECORD_SOURCE_KEY] = "authored_snapshot"
+        if had_checkpoint_key or payload != (raw_payload if isinstance(raw_payload, dict) else {}):
+            bind.execute(
+                sa.update(analyses)
+                .where(
+                    analyses.c.collection_id == row["collection_id"],
+                    analyses.c.objective_id == row["objective_id"],
+                    analyses.c.analysis_version == row["analysis_version"],
+                )
+                .values(payload=payload, updated_at=now)
             )
-        bind.execute(
-            sa.update(analyses)
-            .where(
-                analyses.c.collection_id == row["collection_id"],
-                analyses.c.objective_id == row["objective_id"],
-                analyses.c.analysis_version == row["analysis_version"],
-            )
-            .values(payload=payload)
-        )
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_objective_analysis_legacy_checkpoints_objective",
-        table_name="objective_analysis_legacy_checkpoints",
+    raise RuntimeError(
+        "20260924_0075 is irreversible: legacy checkpoint payloads were removed "
+        "after their audit hashes were retained"
     )
-    op.drop_table("objective_analysis_legacy_checkpoints")

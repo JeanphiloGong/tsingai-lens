@@ -851,6 +851,21 @@ def test_context_attribute_applies_to_outcome(
             )
         )
     if outcome_matches_objective_scope(outcome, applies_to_outcomes):
+        # ``sample density`` and ``relative density`` are the same bounded
+        # outcome family for source routing, but a test method is only usable
+        # for the normalized result when the source also supplies a numeric
+        # reference/nominal density.
+        if normalize_property_label(outcome) == "relative density" and any(
+            _source_density_label_is_measurement(value)
+            for value in applies_to_outcomes
+        ):
+            return _relative_density_test_context_matches(
+                attribute,
+                outcome,
+                applies_to_outcomes=applies_to_outcomes,
+                context_attributes=tuple(context_attributes) or (attribute,),
+                reference_attributes=tuple(reference_attributes),
+            )
         return True
     return _relative_density_test_context_matches(
         attribute,

@@ -62,11 +62,26 @@ class ExperimentAnalysisWriteResult:
 
 
 @dataclass(frozen=True)
+class ExperimentSelectionWriteResult:
+    """Fixed experiment revisions and Objective-scoped selections."""
+
+    revisions: tuple[StoredPaperExperimentRevision, ...]
+    selections: tuple[ObjectiveExperimentSelection, ...]
+
+
+@dataclass(frozen=True)
 class _ExperimentContext:
     stored: StoredPaperExperimentRevision
     converted: ConvertedPaperExperiment
     selections_by_outcome: Mapping[str, ObjectiveExperimentSelection]
     outcome_by_observation_id: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class _PreparedExperimentSelections:
+    result: ExperimentSelectionWriteResult
+    contexts: tuple[_ExperimentContext, ...]
+    selection_by_id: Mapping[str, ObjectiveExperimentSelection]
 
 
 class ExperimentAnalysisWriter:
@@ -109,6 +124,104 @@ class ExperimentAnalysisWriter:
         inputs.
         """
 
+        prepared = await self._write_experiment_selections(
+            collection_id=collection_id,
+            objective=objective,
+            analysis=analysis,
+            experiments=experiments,
+            source_fingerprints=source_fingerprints,
+            created_by=created_by,
+        )
+
+        groups: list[ComparisonGroup] = []
+        published_findings: list[Finding] = []
+        skipped_finding_ids: list[str] = []
+        group_by_selection_key: dict[tuple[str, ...], ComparisonGroup] = {}
+
+        for finding in sorted(
+            findings,
+            key=lambda item: (item.display_rank, item.finding_id),
+        ):
+            selected = self._select_for_finding(
+                finding,
+                prepared.contexts,
+                selection_by_id=prepared.selection_by_id,
+            )
+            if not selected:
+                skipped_finding_ids.append(finding.finding_id)
+                continue
+
+            selected_ids = tuple(item.selection_id for item in selected)
+            experiment_ids = {item.experiment_id for item in selected}
+            group_ids: tuple[str, ...] = ()
+            if len(experiment_ids) > 1:
+                key = tuple(sorted(selected_ids))
+                group = group_by_selection_key.get(key)
+                if group is None:
+                    group = self._build_comparison_group(
+                        finding,
+                        selected,
+                        collection_id=collection_id,
+                    )
+                    group = await self.group_repository.add_group(collection_id, group)
+                    group_by_selection_key[key] = group
+                    groups.append(group)
+                group_ids = (group.group_id,)
+
+            converted_finding = self._convert_finding(
+                finding,
+                selection_ids=selected_ids,
+                comparison_group_ids=group_ids,
+                experiment_count=len(experiment_ids),
+            )
+            published = await self.finding_publisher.publish(converted_finding)
+            published_findings.append(published.finding)
+
+        return ExperimentAnalysisWriteResult(
+            revisions=prepared.result.revisions,
+            selections=prepared.result.selections,
+            groups=tuple(groups),
+            findings=tuple(published_findings),
+            skipped_finding_ids=tuple(skipped_finding_ids),
+        )
+
+    async def write_experiment_selections(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        experiments: Sequence[LegacyPaperExperiment],
+        source_fingerprints: Mapping[str, str] | None = None,
+        created_by: str | None = None,
+    ) -> ExperimentSelectionWriteResult:
+        """Persist experiment facts and selections without publishing Findings.
+
+        Finding synthesis is a separate scientific decision over these fixed
+        records.  Keeping this operation independent lets that decision read
+        the same immutable revisions that later queries and exports use.
+        """
+
+        prepared = await self._write_experiment_selections(
+            collection_id=collection_id,
+            objective=objective,
+            analysis=analysis,
+            experiments=experiments,
+            source_fingerprints=source_fingerprints,
+            created_by=created_by,
+        )
+        return prepared.result
+
+    async def _write_experiment_selections(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        experiments: Sequence[LegacyPaperExperiment],
+        source_fingerprints: Mapping[str, str] | None,
+        created_by: str | None,
+    ) -> _PreparedExperimentSelections:
         if objective.collection_id != collection_id:
             raise ValueError("experiment analysis objective belongs to another collection")
         if (
@@ -151,56 +264,13 @@ class ExperimentAnalysisWriter:
                 (item.selection_id, item) for item in context_selections
             )
 
-        groups: list[ComparisonGroup] = []
-        published_findings: list[Finding] = []
-        skipped_finding_ids: list[str] = []
-        group_by_selection_key: dict[tuple[str, ...], ComparisonGroup] = {}
-
-        for finding in sorted(
-            findings,
-            key=lambda item: (item.display_rank, item.finding_id),
-        ):
-            selected = self._select_for_finding(
-                finding,
-                contexts,
-                selection_by_id=selection_by_id,
-            )
-            if not selected:
-                skipped_finding_ids.append(finding.finding_id)
-                continue
-
-            selected_ids = tuple(item.selection_id for item in selected)
-            experiment_ids = {item.experiment_id for item in selected}
-            group_ids: tuple[str, ...] = ()
-            if len(experiment_ids) > 1:
-                key = tuple(sorted(selected_ids))
-                group = group_by_selection_key.get(key)
-                if group is None:
-                    group = self._build_comparison_group(
-                        finding,
-                        selected,
-                        collection_id=collection_id,
-                    )
-                    group = await self.group_repository.add_group(collection_id, group)
-                    group_by_selection_key[key] = group
-                    groups.append(group)
-                group_ids = (group.group_id,)
-
-            converted_finding = self._convert_finding(
-                finding,
-                selection_ids=selected_ids,
-                comparison_group_ids=group_ids,
-                experiment_count=len(experiment_ids),
-            )
-            published = await self.finding_publisher.publish(converted_finding)
-            published_findings.append(published.finding)
-
-        return ExperimentAnalysisWriteResult(
-            revisions=tuple(revisions),
-            selections=tuple(selections),
-            groups=tuple(groups),
-            findings=tuple(published_findings),
-            skipped_finding_ids=tuple(skipped_finding_ids),
+        return _PreparedExperimentSelections(
+            result=ExperimentSelectionWriteResult(
+                revisions=tuple(revisions),
+                selections=tuple(selections),
+            ),
+            contexts=tuple(contexts),
+            selection_by_id=selection_by_id,
         )
 
     async def _write_experiment(
@@ -510,4 +580,8 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:28]}"
 
 
-__all__ = ["ExperimentAnalysisWriteResult", "ExperimentAnalysisWriter"]
+__all__ = [
+    "ExperimentAnalysisWriteResult",
+    "ExperimentAnalysisWriter",
+    "ExperimentSelectionWriteResult",
+]

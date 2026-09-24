@@ -305,6 +305,26 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     assert findings.records["finding-1"].paper_contributions == ()
 
 
+async def test_writer_can_fix_experiment_selections_before_finding_synthesis():
+    writer, revisions, selections, groups, findings = _writer()
+
+    result = await writer.write_experiment_selections(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiments=(_experiment("paper-a", 72, "NP"),),
+    )
+
+    assert len(result.revisions) == 1
+    assert result.revisions[0].revision.document_id == "paper-a"
+    assert len(result.selections) == 1
+    assert result.selections[0].outcome == "elongation"
+    assert len(revisions.records) == 1
+    assert len(selections.records) == 1
+    assert groups.records == {}
+    assert findings.records == {}
+
+
 async def test_writer_creates_conditional_group_for_cross_paper_finding():
     writer, _, selections, groups, findings = _writer()
     result = await writer.write(

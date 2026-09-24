@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from application.feedback.feedback_case_service import FeedbackCaseService
 from controllers.dependencies.auth import current_user_id
@@ -117,6 +117,9 @@ async def submit_feedback_review(
     case_id: str,
     payload: FeedbackReviewRequest,
     request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", max_length=128
+    ),
 ) -> FeedbackReviewDecisionResponse:
     try:
         decision = await _service(request).submit_review_for_user(
@@ -125,6 +128,7 @@ async def submit_feedback_review(
             expected_annotation_digest=payload.expected_annotation_digest,
             decision=payload.decision,
             reason=payload.reason,
+            idempotency_key=idempotency_key,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -134,6 +138,7 @@ async def submit_feedback_review(
             "feedback_case_stale",
             "feedback_case_not_reviewable",
             "feedback_case_not_withdrawable",
+            "idempotency_key_invalid",
         } else 422
         raise HTTPException(
             status_code=status,

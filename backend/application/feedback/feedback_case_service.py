@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
@@ -193,6 +194,7 @@ class FeedbackCaseService:
         expected_annotation_digest: str,
         decision: str,
         reason: str | None,
+        idempotency_key: str | None = None,
         now: str | None = None,
     ) -> ReviewDecision:
         case, _ = await self._authorized_case(case_id, user_id)
@@ -207,7 +209,11 @@ class FeedbackCaseService:
         previous = await reader(case.case_id) if reader is not None else ()
         timestamp = now or datetime.now(timezone.utc).isoformat()
         review = ReviewDecision(
-            decision_id=f"review_{uuid4().hex[:32]}",
+            decision_id=_review_decision_id(
+                case_id=case.case_id,
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+            ),
             case_id=case.case_id,
             annotation_digest=annotation.annotation_digest,
             decision=decision,  # type: ignore[arg-type]
@@ -415,6 +421,25 @@ def _case_source_refs(
         if value:
             refs.add(str(value))
     return refs
+
+
+def _review_decision_id(
+    *, case_id: str, user_id: str, idempotency_key: str | None
+) -> str:
+    """Bind an HTTP retry key to one user's case without persisting another key.
+
+    The review table already treats ``decision_id`` as the idempotency identity.
+    A stable digest lets the public API reuse that guarantee while keeping the
+    key scoped to the authenticated user and case. Requests without a key keep
+    the historical random identity and remain append-only.
+    """
+    if idempotency_key is None:
+        return f"review_{uuid4().hex[:32]}"
+    key = idempotency_key.strip()
+    if not key:
+        raise ValueError("idempotency_key_invalid")
+    digest = sha256(f"{user_id}\0{case_id}\0{key}".encode("utf-8")).hexdigest()
+    return f"review_{digest[:48]}"
 
 
 def _previous_user_question(messages: tuple[Any, ...], answer: Any | None) -> str:

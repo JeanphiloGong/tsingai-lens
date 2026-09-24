@@ -58,6 +58,19 @@ class _Cases:
     async def append_review_decision(self, decision, *, expected_annotation_digest, now):
         if expected_annotation_digest != self.annotation.annotation_digest:
             raise ValueError("feedback_case_stale")
+        for existing in self.decisions:
+            if existing.decision_id != decision.decision_id:
+                continue
+            same_identity = (
+                existing.case_id == decision.case_id
+                and existing.annotation_digest == decision.annotation_digest
+                and existing.decision == decision.decision
+                and existing.reason == decision.reason
+                and existing.created_by == decision.created_by
+            )
+            if not same_identity:
+                raise ValueError("review_decision_identity_conflict")
+            return existing
         if decision.decision == "withdraw":
             if self.case.status != "accepted":
                 raise ValueError("feedback_case_not_withdrawable")
@@ -212,6 +225,40 @@ async def test_concurrent_accepts_have_one_history_winner() -> None:
     assert len(failures) == 1
     assert str(failures[0]) == "feedback_case_not_reviewable"
     assert repo.case.status == "accepted"
+
+
+async def test_idempotency_key_replays_one_review_and_rejects_payload_reuse() -> None:
+    service, repo, annotation = _fixture()
+    first = await service.submit_review_for_user(
+        case_id="case-1",
+        user_id="user-1",
+        expected_annotation_digest=annotation.annotation_digest,
+        decision="accept",
+        reason="evidence checked",
+        idempotency_key="retry-1",
+        now="2026-09-24T00:05:00+00:00",
+    )
+    replay = await service.submit_review_for_user(
+        case_id="case-1",
+        user_id="user-1",
+        expected_annotation_digest=annotation.annotation_digest,
+        decision="accept",
+        reason="evidence checked",
+        idempotency_key="retry-1",
+        now="2026-09-24T00:06:00+00:00",
+    )
+    assert replay == first
+    assert len(repo.decisions) == 1
+
+    with pytest.raises(ValueError, match="review_decision_identity_conflict"):
+        await service.submit_review_for_user(
+            case_id="case-1",
+            user_id="user-1",
+            expected_annotation_digest=annotation.annotation_digest,
+            decision="accept",
+            reason="changed payload",
+            idempotency_key="retry-1",
+        )
 
 
 def test_review_digest_must_be_hex_sha256() -> None:

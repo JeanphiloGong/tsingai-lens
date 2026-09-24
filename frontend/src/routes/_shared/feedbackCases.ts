@@ -135,11 +135,14 @@ export async function saveFeedbackAnnotation(
 export async function submitFeedbackReview(
 	collectionId: string,
 	caseId: string,
-	input: { expected_annotation_digest: string; decision: string; reason: string }
+	input: { expected_annotation_digest: string; decision: string; reason: string },
+	idempotencyKey?: string
 ) {
+	const headers = new Headers({ 'Content-Type': 'application/json' });
+	if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
 	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/review', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		headers,
 		body: JSON.stringify(input)
 	})) as FeedbackReviewDecision;
 }

@@ -10,7 +10,7 @@
 		Search,
 		XCircle
 	} from '@lucide/svelte';
-	import { errorMessage } from '../../../_shared/api';
+	import { ApiError, errorMessage } from '../../../_shared/api';
 	import { t } from '../../../_shared/i18n';
 	import {
 		fetchFeedbackCase,
@@ -34,6 +34,7 @@
 	let reviewSaving = false;
 	let reviewError = '';
 	let reviewReason = '';
+	let reviewRequestKey = '';
 	let annotationProblemType = 'source_missing';
 	let annotationSeverity = 'medium';
 	let annotationTarget = '';
@@ -79,6 +80,7 @@
 		error = '';
 		try {
 			selected = await fetchFeedbackCase(collectionId, item.case_id);
+			reviewRequestKey = '';
 			loadAnnotationForm(selected);
 		} catch (err) {
 			error = errorMessage(err);
@@ -130,6 +132,7 @@
 			});
 			selected = await fetchFeedbackCase(collectionId, selected.case_id);
 			loadAnnotationForm(selected);
+			reviewRequestKey = '';
 			annotationSaved = true;
 			await loadCases();
 		} catch (err) {
@@ -143,20 +146,32 @@
 		if (!selected || reviewSaving || !selected.current_annotation_digest) return;
 		reviewSaving = true;
 		reviewError = '';
+		if (!reviewRequestKey) reviewRequestKey = newReviewRequestKey();
 		try {
 			await submitFeedbackReview(collectionId, selected.case_id, {
 				expected_annotation_digest: selected.current_annotation_digest,
 				decision,
 				reason: reviewReason.trim()
-			});
+			}, reviewRequestKey);
 			selected = await fetchFeedbackCase(collectionId, selected.case_id);
 			loadAnnotationForm(selected);
+			reviewRequestKey = '';
 			await loadCases();
 		} catch (err) {
 			reviewError = errorMessage(err);
+			// A validation or stale-digest response describes a new attempt; a
+			// transport/server failure should keep the key for a safe retry.
+			if (err instanceof ApiError && err.status < 500) reviewRequestKey = '';
 		} finally {
 			reviewSaving = false;
 		}
+	}
+
+	function newReviewRequestKey() {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return `review-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 	}
 
 	function formatDate(value: string) {

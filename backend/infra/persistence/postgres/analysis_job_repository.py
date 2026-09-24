@@ -142,6 +142,43 @@ class PostgresAnalysisJobRepository:
             error_code=error_code,
         )
 
+    async def requeue_failed_feedback_analysis_job(
+        self,
+        job_id: str,
+        now: str,
+    ) -> AnalysisJob:
+        """Atomically return one failed feedback-analysis job to ``pending``.
+
+        This is deliberately a manual operation.  The row lock prevents a
+        worker or another operator from changing the terminal state between
+        validation and the reset of the execution fields.
+        """
+        if not job_id.strip():
+            raise ValueError("job_id is required")
+        timestamp = _datetime(now)
+        available_at = _iso(timestamp)
+        async with self.session_factory.begin() as session:
+            row = await session.get(AnalysisJobRow, job_id, with_for_update=True)
+            if row is None:
+                raise FileNotFoundError(f"analysis job not found: {job_id}")
+            if row.job_type != "feedback_analysis":
+                raise ValueError("only feedback analysis jobs can be requeued")
+            if row.status != "failed":
+                raise ValueError(f"cannot requeue analysis job in status {row.status}")
+            if row.result_id is not None:
+                raise ValueError("failed analysis job with a result cannot be requeued")
+
+            requeued = _job(row).requeue_failed_feedback_analysis(available_at)
+            row.status = requeued.status
+            row.available_at = timestamp
+            row.started_at = None
+            row.finished_at = None
+            row.result_id = None
+            row.error_code = None
+            row.updated_at = timestamp
+            await session.flush()
+            return _job(row)
+
     async def cancel_feedback_analysis_jobs(
         self,
         feedback_id: str,

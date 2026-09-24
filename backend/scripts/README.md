@@ -7,6 +7,30 @@ Benchmark and probe scripts live under [`benchmarks/`](benchmarks/). Keep
 general local debugging helpers at this level instead of adding them to the
 benchmark-only directory.
 
+## Feedback Analysis Worker
+
+Run one feedback-analysis job:
+
+```bash
+cd backend
+./.venv/bin/python scripts/feedback_analysis_worker.py --once
+```
+
+The worker does not retry failed jobs automatically. An operator can explicitly
+return one failed, result-less `feedback_analysis` job to `pending`:
+
+```bash
+cd backend
+./.venv/bin/python scripts/feedback_analysis_worker.py \
+  --requeue-job <job_id>
+```
+
+The command clears the failed run's timestamps and error code, preserves the
+job identity and idempotency key, and prints `pending`. It rejects succeeded,
+running, cancelled, non-feedback, or already-resulted jobs. This is an
+internal CLI operation; this checkpoint does not add an HTTP endpoint, RBAC, or
+automatic retry policy.
+
 The PaperExperiment live chain acceptance probe is maintained at
 [`benchmarks/paper_experiment_chain_probe.py`](benchmarks/paper_experiment_chain_probe.py).
 It is opt-in because it uses a real PDF and an online model; see the benchmark

@@ -44,6 +44,12 @@ class AnalysisJobRepository(Protocol):
         finished_at: str,
     ) -> AnalysisJob: ...
 
+    async def requeue_failed_feedback_analysis_job(
+        self,
+        job_id: str,
+        now: str,
+    ) -> AnalysisJob: ...
+
     async def read_job(self, job_id: str) -> AnalysisJob | None: ...
 
     async def list_jobs(

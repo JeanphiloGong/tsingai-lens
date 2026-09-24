@@ -168,3 +168,58 @@ def test_terminal_analysis_job_requires_a_finish_time() -> None:
             created_at="2026-09-24T00:00:00+00:00",
             updated_at="2026-09-24T00:00:00+00:00",
         )
+
+
+def _failed_job(**overrides) -> AnalysisJob:
+    values = {
+        "job_id": "job-1",
+        "job_type": "feedback_analysis",
+        "payload_version": 1,
+        "payload": {"feedback_id": "feedback-1"},
+        "status": "failed",
+        "idempotency_key": "feedback-version-1",
+        "available_at": "2026-09-24T00:00:00+00:00",
+        "created_at": "2026-09-24T00:00:00+00:00",
+        "updated_at": "2026-09-24T00:00:02+00:00",
+        "started_at": "2026-09-24T00:00:01+00:00",
+        "finished_at": "2026-09-24T00:00:02+00:00",
+        "result_id": None,
+        "error_code": "feedback_analysis_failed",
+    }
+    values.update(overrides)
+    return AnalysisJob(**values)
+
+
+def test_failed_feedback_analysis_job_can_be_requeued() -> None:
+    requeued = _failed_job().requeue_failed_feedback_analysis(
+        "2026-09-24T00:01:00+00:00"
+    )
+
+    assert requeued.status == "pending"
+    assert requeued.available_at == "2026-09-24T00:01:00+00:00"
+    assert requeued.updated_at == requeued.available_at
+    assert requeued.started_at is None
+    assert requeued.finished_at is None
+    assert requeued.result_id is None
+    assert requeued.error_code is None
+    assert requeued.job_id == "job-1"
+    assert requeued.payload == {"feedback_id": "feedback-1"}
+    assert requeued.idempotency_key == "feedback-version-1"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"job_type": "tool_failure_analysis"}, "only feedback analysis jobs"),
+        ({"status": "pending", "finished_at": None}, "status pending"),
+        ({"status": "running", "finished_at": None}, "status running"),
+        ({"status": "succeeded", "result_id": "result-1"}, "status succeeded"),
+        ({"status": "cancelled"}, "status cancelled"),
+        ({"result_id": "result-1"}, "with a result"),
+    ],
+)
+def test_requeue_rejects_invalid_job_state(overrides, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _failed_job(**overrides).requeue_failed_feedback_analysis(
+            "2026-09-24T00:01:00+00:00"
+        )

@@ -278,8 +278,59 @@ identity and cannot receive feedback.
 `GET /chat-sessions/{session_id}/messages` returns a separate `feedback` array
 containing the current user's records, alongside `items` and `pending_approval`.
 The immutable message records and turn/stream contracts contain no feedback.
-MVP feedback is not supplied to models, training, evaluation datasets, or
-scientific review services.
+The rating is not supplied directly to a model and does not itself assert that
+an answer is wrong. In the current feedback-workbench flow, a saved rating is
+an input signal for an internal analysis job; only a later human annotation,
+review decision, and immutable dataset snapshot can make it available to an
+evaluation or training export.
+
+### Feedback Analysis Workbench
+
+The feedback workbench turns a saved Chat rating into a reviewable, source-
+grounded case. It does not rewrite the original messages or model-call audit:
+
+- `GET /api/v1/feedback-cases`
+- `GET /api/v1/feedback-cases/{case_id}`
+- `PATCH /api/v1/feedback-cases/{case_id}/annotation`
+- `POST /api/v1/feedback-cases/{case_id}/review`
+- `GET /api/v1/feedback-cases/{case_id}/review-decisions`
+- `POST /api/v1/dataset-snapshots`
+- `GET /api/v1/dataset-snapshots`
+- `GET /api/v1/dataset-snapshots/{dataset_id}`
+- `GET /api/v1/dataset-snapshots/{dataset_id}/download`
+
+The authenticated user must be able to access the case's Collection. The
+current validation phase has no separate annotator, reviewer, or dataset-admin
+role, so one authorized Collection user may perform each step. The frontend
+chooses cases, Sources, labels, targets, and dataset uses; it carries business
+IDs and annotation digests automatically rather than asking the user to type
+them.
+
+The flow is ordered:
+
+```text
+Chat feedback
+  -> internal feedback_analysis job
+  -> candidate AnalysisResult and FeedbackCase
+  -> human Annotation
+  -> append-only ReviewDecision
+  -> immutable DatasetSnapshot
+  -> evaluation / sft / preference JSONL
+```
+
+Analysis is a candidate signal only. A failed worker records a technical job
+failure; it cannot declare an answer incorrect or approve data. Annotation
+requires the current `expected_digest`. Review requires the current
+`expected_annotation_digest` and validates dataset-use prerequisites. The
+review POST also accepts an optional `Idempotency-Key` header (1..128
+characters): the same authenticated user, case, key, and request body replay
+returns the original decision, while reusing the key with a different digest,
+decision, or reason returns `422 review_decision_identity_conflict`. Different
+users and cases are isolated, and requests without the header keep the
+append-only random decision identity.
+
+P6 dataset preparation and offline evaluation are read-only scripts over a
+frozen snapshot; they do not add an online training endpoint or modify Chat.
 
 A user message may carry up to 12 `source_contexts` items selected from the
 same Collection's document reader. The item contains a stable Source resource

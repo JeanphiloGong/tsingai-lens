@@ -367,7 +367,7 @@
 					{#if selected.technical_error}<p class="technical-note">{$t('feedbackWorkbench.statusFailed')}: {$t('feedbackWorkbench.statusHelp')}</p>{/if}
 					</section>
 
-					{#if selected.status === 'needs_annotation' || selected.status === 'ready_for_review'}
+					{#if selected.status === 'needs_annotation' || selected.status === 'ready_for_review' || selected.status === 'rejected' || selected.status === 'insufficient'}
 						<section class="detail-section annotation-panel">
 							<div class="section-heading"><h3>{$t('feedbackWorkbench.annotationTitle')}</h3><span>{$t('feedbackWorkbench.annotationHint')}</span></div>
 							{#if annotationError}<div class="inline-error" role="alert"><AlertTriangle size={15} />{annotationError}</div>{/if}

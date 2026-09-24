@@ -202,6 +202,13 @@ class PostgresFeedbackCaseRepository:
                 raise FileNotFoundError(f"feedback case not found: {annotation.case_id}")
             if expected_digest != case.annotation_digest:
                 raise ValueError("feedback_case_stale")
+            if case.status not in {
+                "needs_annotation",
+                "ready_for_review",
+                "rejected",
+                "insufficient",
+            }:
+                raise ValueError("feedback_case_not_annotatable")
             current = await session.scalar(
                 select(FeedbackAnnotationRow)
                 .where(FeedbackAnnotationRow.case_id == annotation.case_id)
@@ -210,7 +217,8 @@ class PostgresFeedbackCaseRepository:
             )
             if current is not None and current.annotation_digest == annotation.annotation_digest:
                 return _annotation(current)
-            if current is not None and annotation.version <= current.version:
+            expected_version = (current.version + 1) if current is not None else 1
+            if annotation.version != expected_version:
                 raise ValueError("annotation_version_conflict")
             row = FeedbackAnnotationRow(
                 annotation_id=annotation.annotation_id,

@@ -129,7 +129,16 @@ class FeedbackCaseService:
     ) -> FeedbackAnnotation:
         """Persist a human judgment after re-reading the case's evidence boundary."""
         case, results = await self._authorized_case(case_id, user_id)
-        if case.status not in {"needs_annotation", "ready_for_review"}:
+        # A rejected or insufficient review is a request for better material,
+        # not a terminal deletion.  A new annotation version may reopen those
+        # cases, while accepted/withdrawn cases remain immutable until an
+        # explicit future workflow defines how to revoke them.
+        if case.status not in {
+            "needs_annotation",
+            "ready_for_review",
+            "rejected",
+            "insufficient",
+        }:
             raise ValueError("feedback_case_not_annotatable")
         allowed_source_refs = _case_source_refs(case, results)
         requested_refs = tuple(dict.fromkeys(str(item).strip() for item in support_source_refs if str(item).strip()))

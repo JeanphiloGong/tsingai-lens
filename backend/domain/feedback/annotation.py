@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import string
 from typing import Any, Literal
 
 from domain.feedback.analysis_result import FeedbackProblemType
@@ -26,6 +27,7 @@ _PROBLEM_TYPES = {
     "style_or_format",
     "undetermined_dissatisfaction",
 }
+_HEX_DIGITS = frozenset(string.hexdigits)
 
 
 @dataclass(frozen=True)
@@ -75,9 +77,15 @@ class FeedbackAnnotation:
             raise ValueError("invalid dataset use")
         if "sft" in uses and not self.target:
             raise ValueError("sft annotation requires a target")
+        if "sft" in uses and not refs:
+            raise ValueError("sft annotation requires support sources")
+        if "preference" in uses and not self.target:
+            raise ValueError("preference annotation requires a target")
+        if "preference" in uses and not refs:
+            raise ValueError("preference annotation requires support sources")
         object.__setattr__(self, "support_source_refs", refs)
         object.__setattr__(self, "dataset_uses", uses)
-        if len(self.annotation_digest) != 64:
+        if not _is_sha256(self.annotation_digest):
             raise ValueError("annotation digest must be sha256")
         expected_digest = self.digest_for(
             case_id=self.case_id,
@@ -185,3 +193,7 @@ class FeedbackAnnotation:
 
 
 __all__ = ["AnnotationSeverity", "DatasetUse", "FeedbackAnnotation"]
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(character in _HEX_DIGITS for character in value)

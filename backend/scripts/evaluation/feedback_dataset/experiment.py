@@ -207,24 +207,39 @@ def _metrics(
 ) -> dict[str, Any]:
     if dataset_type == "preference":
         chosen = 0
+        invalid = 0
         for row in eval_rows:
-            value = str(predictions[str(row["row_id"])].get("choice") or predictions[str(row["row_id"])].get("prediction") or "").strip().lower()
+            prediction = predictions[str(row["row_id"])]
+            value = str(
+                prediction.get("choice") or prediction.get("prediction") or ""
+            ).strip().lower()
             if value == "chosen":
                 chosen += 1
+            elif value != "rejected":
+                invalid += 1
         return {
             "evaluated": len(eval_rows),
             "chosen_rate": round(chosen / len(eval_rows), 4),
+            "invalid_choices": invalid,
         }
     correct = 0
+    scoreable = 0
+    reference_missing = 0
     for row in eval_rows:
         prediction = str(predictions[str(row["row_id"])].get("prediction") or "")
         expected = row.get("reference") if dataset_type == "evaluation" else row.get("target")
+        if dataset_type == "evaluation" and not _normalise_text(expected):
+            reference_missing += 1
+            continue
+        scoreable += 1
         if _normalise_text(prediction) == _normalise_text(expected):
             correct += 1
     return {
         "evaluated": len(eval_rows),
+        "scoreable": scoreable,
+        "reference_missing": reference_missing,
         "correct": correct,
-        "exact_match": round(correct / len(eval_rows), 4),
+        "exact_match": round(correct / scoreable, 4) if scoreable else None,
     }
 
 
@@ -234,6 +249,8 @@ def _compare(baseline: dict[str, Any], experiment: dict[str, Any]) -> dict[str, 
     baseline_metrics = baseline["metrics"]
     experiment_metrics = experiment["metrics"]
     if "exact_match" in baseline_metrics:
+        if baseline_metrics["exact_match"] is None or experiment_metrics["exact_match"] is None:
+            return {"status": "not_comparable", "reason": "no_scoreable_eval_references"}
         return {
             "status": "completed",
             "exact_match_delta": round(

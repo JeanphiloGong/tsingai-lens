@@ -177,9 +177,16 @@ def load_prepared(prepared_dir: str | Path) -> dict[str, Any]:
         "rows_digest"
     ):
         raise SnapshotValidationError("prepared_rows_digest_mismatch")
-    prepared_ids = {(str(row.get("row_id")), str(row.get("split"))) for row in all_rows}
-    snapshot_ids = {(str(row.get("row_id")), str(row.get("split"))) for row in validated.rows}
-    if prepared_ids != snapshot_ids:
+    expected_rows = [
+        _prepare_row(
+            row,
+            dataset_type=str(snapshot["dataset_type"]),
+            max_input_tokens=max_input_tokens,
+        )
+        for row in validated.rows
+    ]
+    expected_rows.sort(key=lambda row: (str(row["split"]), str(row["row_id"])))
+    if sorted(all_rows, key=lambda row: (str(row.get("split")), str(row.get("row_id")))) != expected_rows:
         raise SnapshotValidationError("prepared_snapshot_rows_mismatch")
     result = dict(prepared)
     result["rows_by_split"] = rows_by_split
@@ -226,6 +233,13 @@ def _validate_snapshot(snapshot: dict[str, Any], *, max_input_tokens: int) -> _V
         raise SnapshotValidationError("manifest_digest_mismatch")
     if manifest.get("content_digest") != snapshot["content_digest"]:
         raise SnapshotValidationError("manifest_content_digest_mismatch")
+    for field in ("owner_id", "collection_id", "dataset_type"):
+        if manifest.get(field) != snapshot.get(field):
+            raise SnapshotValidationError(f"manifest_{field}_mismatch")
+    if manifest.get("rows") != rows or manifest.get("exclusions") != exclusions:
+        raise SnapshotValidationError("manifest_rows_mismatch")
+    if manifest.get("provenance_digest") != snapshot["provenance_digest"]:
+        raise SnapshotValidationError("manifest_provenance_digest_mismatch")
     if manifest.get("row_count") != len(rows) or manifest.get("excluded_count") != len(exclusions):
         raise SnapshotValidationError("manifest_count_mismatch")
     manifest_basis = {
@@ -275,6 +289,7 @@ def _validate_snapshot(snapshot: dict[str, Any], *, max_input_tokens: int) -> _V
         _validate_row_shape(row, dataset_type=dataset_type, row_id=row_id, max_input_tokens=max_input_tokens)
         validated_rows.append(row)
     _validate_split_isolation(validated_rows)
+    _validate_provenance(provenance, validated_rows, snapshot=snapshot)
     return _ValidatedSnapshot(snapshot=snapshot, rows=tuple(validated_rows))
 
 
@@ -350,6 +365,40 @@ def _validate_split_isolation(rows: Iterable[dict[str, Any]]) -> None:
     leaked = sorted(key for key, splits in seen.items() if len(splits) > 1)
     if leaked:
         raise SnapshotValidationError("split_leakage:" + ",".join(leaked))
+
+
+def _validate_provenance(
+    provenance: dict[str, Any], rows: list[dict[str, Any]], *, snapshot: dict[str, Any]
+) -> None:
+    if provenance.get("schema_version") != "feedback-dataset-provenance.v1":
+        raise SnapshotValidationError("provenance_schema_invalid")
+    if provenance.get("collection_id") != snapshot.get("collection_id"):
+        raise SnapshotValidationError("provenance_collection_mismatch")
+    if provenance.get("dataset_type") != snapshot.get("dataset_type"):
+        raise SnapshotValidationError("provenance_dataset_type_mismatch")
+    items = provenance.get("items")
+    if not isinstance(items, list):
+        raise SnapshotValidationError("provenance_items_invalid")
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            raise SnapshotValidationError("provenance_item_invalid")
+        key = (str(item.get("case_id") or ""), str(item.get("split") or ""))
+        if not key[0] or key[1] not in SPLITS or key in by_key:
+            raise SnapshotValidationError("provenance_item_identity_invalid")
+        by_key[key] = item
+    row_keys = {(str(row["case_id"]), str(row["split"])) for row in rows}
+    for row in rows:
+        key = (str(row["case_id"]), str(row["split"]))
+        item = by_key.get(key)
+        if item is None:
+            raise SnapshotValidationError(f"provenance_item_missing:{row['row_id']}")
+        if list(item.get("source_refs") or []) != list(row.get("source_refs") or []):
+            raise SnapshotValidationError(f"provenance_sources_mismatch:{row['row_id']}")
+        if item.get("session_tree_id") != row.get("session_tree_id"):
+            raise SnapshotValidationError(f"provenance_session_tree_mismatch:{row['row_id']}")
+    if set(by_key) != row_keys:
+        raise SnapshotValidationError("provenance_item_extra")
 
 
 def _messages_text(messages: list[Any]) -> str:

@@ -263,6 +263,20 @@ def test_experiment_compares_predictions_on_same_eval_rows(
     assert report["comparison"]["exact_match_delta"] == -1.0
 
 
+def test_evaluation_without_reference_is_reported_as_unscorable(experiment_module):
+    rows = [{"row_id": "row-1", "reference": None}]
+    metrics = experiment_module._metrics(
+        rows,
+        {"row-1": {"prediction": ""}},
+        dataset_type="evaluation",
+    )
+
+    assert metrics["evaluated"] == 1
+    assert metrics["scoreable"] == 0
+    assert metrics["reference_missing"] == 1
+    assert metrics["exact_match"] is None
+
+
 def test_experiment_rejects_prediction_set_that_changes_eval_rows(
     tmp_path, prepare_module, experiment_module
 ):
@@ -335,7 +349,7 @@ def test_experiment_rechecks_snapshot_before_consuming_prepared_rows(
     tampered["rows"][1]["input"] = "tampered"
     (prepared_dir / "snapshot.json").write_text(json.dumps(tampered), encoding="utf-8")
 
-    with pytest.raises(experiment_module.ExperimentProtocolError, match="digest_mismatch"):
+    with pytest.raises(experiment_module.ExperimentProtocolError, match="mismatch"):
         experiment_module.run_experiment(
             prepared_dir=prepared_dir,
             output_path=tmp_path / "report.json",

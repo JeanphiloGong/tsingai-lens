@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +40,18 @@ def _digest(value: object) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _run_cli(script_name: str, *arguments: object) -> subprocess.CompletedProcess[str]:
+    backend_root = Path(__file__).resolve().parents[3]
+    script_path = backend_root / "scripts" / "evaluation" / "feedback_dataset" / script_name
+    return subprocess.run(
+        [sys.executable, str(script_path), *(str(argument) for argument in arguments)],
+        cwd=backend_root.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _snapshot(*, dataset_type: str = "evaluation", rows: list[dict] | None = None) -> dict:
@@ -412,3 +425,107 @@ def test_experiment_rejects_prepared_metadata_tampering(
             prepared_dir=prepared_dir,
             output_path=tmp_path / "report.json",
         )
+
+
+def test_cli_prepare_to_experiment_round_trip(tmp_path):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+
+    prepared = _run_cli(
+        "prepare.py",
+        snapshot_path,
+        prepared_dir,
+        "--revision",
+        "cli-revision",
+        "--seed",
+        13,
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    assert json.loads(prepared.stdout)["status"] == "ready"
+
+    not_run_report = tmp_path / "not-run.json"
+    not_run = _run_cli("experiment.py", prepared_dir, not_run_report)
+    assert not_run.returncode == 0, not_run.stderr
+    assert json.loads(not_run.stdout)["status"] == "not_run"
+    assert json.loads(not_run_report.read_text(encoding="utf-8"))["status"] == "not_run"
+
+    baseline = tmp_path / "baseline.jsonl"
+    candidate = tmp_path / "candidate.jsonl"
+    baseline.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."})
+        + "\n",
+        encoding="utf-8",
+    )
+    candidate.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        encoding="utf-8",
+    )
+    complete_report = tmp_path / "complete.json"
+    complete = _run_cli(
+        "experiment.py",
+        prepared_dir,
+        complete_report,
+        "--baseline-predictions",
+        baseline,
+        "--experiment-predictions",
+        candidate,
+    )
+    assert complete.returncode == 0, complete.stderr
+    report = json.loads(complete.stdout)
+    assert report["status"] == "completed"
+    assert report["comparison"]["exact_match_delta"] == -1.0
+    assert json.loads(complete_report.read_text(encoding="utf-8"))["status"] == "completed"
+
+
+def test_cli_rejects_lineage_and_prepared_metadata_tampering(tmp_path):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+    prepared = _run_cli("prepare.py", snapshot_path, prepared_dir, "--revision", "cli-revision")
+    assert prepared.returncode == 0, prepared.stderr
+
+    stored_snapshot = json.loads((prepared_dir / "snapshot.json").read_text(encoding="utf-8"))
+    stored_snapshot["provenance"]["items"][0]["source_refs"] = ["tampered-source"]
+    (prepared_dir / "snapshot.json").write_text(
+        json.dumps(stored_snapshot), encoding="utf-8"
+    )
+    lineage_check = _run_cli("experiment.py", prepared_dir, tmp_path / "lineage.json")
+    assert lineage_check.returncode != 0
+    assert "provenance_digest_mismatch" in lineage_check.stderr
+
+    # Recreate a clean directory so the prepared metadata check is isolated
+    # from the previous snapshot corruption.
+    prepared = _run_cli("prepare.py", snapshot_path, prepared_dir, "--revision", "cli-revision")
+    assert prepared.returncode == 0, prepared.stderr
+    prepared_metadata = json.loads((prepared_dir / "prepared.json").read_text(encoding="utf-8"))
+    prepared_metadata["revision"] = "tampered-revision"
+    (prepared_dir / "prepared.json").write_text(
+        json.dumps(prepared_metadata), encoding="utf-8"
+    )
+    metadata_check = _run_cli("experiment.py", prepared_dir, tmp_path / "metadata.json")
+    assert metadata_check.returncode != 0
+    assert "prepared_digest_mismatch" in metadata_check.stderr
+
+
+def test_cli_rejects_prediction_rows_outside_frozen_eval_set(tmp_path):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+    prepared = _run_cli("prepare.py", snapshot_path, prepared_dir, "--revision", "cli-revision")
+    assert prepared.returncode == 0, prepared.stderr
+    predictions = tmp_path / "predictions.jsonl"
+    predictions.write_text(
+        json.dumps({"row_id": "unknown", "prediction": "x"}) + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_cli(
+        "experiment.py",
+        prepared_dir,
+        tmp_path / "report.json",
+        "--baseline-predictions",
+        predictions,
+    )
+    assert result.returncode != 0
+    assert "eval_row_ids_mismatch" in result.stderr

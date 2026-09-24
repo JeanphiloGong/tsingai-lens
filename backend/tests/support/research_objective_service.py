@@ -5,9 +5,6 @@ from hashlib import sha256
 from typing import Any
 
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
-)
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
@@ -77,12 +74,7 @@ def build_research_objective_service(
             source_artifact_repository=source_repository,
             document_profile_repository=document_profile_repository,
         )
-    finding_synthesis_service = kwargs.pop(
-        "finding_synthesis_service",
-        FindingSynthesisService(
-            assertion_judge=objective_judgments,
-        ),
-    )
+    kwargs.pop("finding_synthesis_service", None)
     objective_input_service = kwargs.pop(
         "objective_input_service",
         ObjectiveInputService(
@@ -98,7 +90,6 @@ def build_research_objective_service(
         collection_service=collection_service,
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        finding_synthesis_service=finding_synthesis_service,
         objective_input_service=objective_input_service,
         **kwargs,
     )

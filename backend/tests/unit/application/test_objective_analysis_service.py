@@ -470,6 +470,7 @@ class FakeObjectiveRepository:
         objective_id,
         analysis_version,
         *,
+        contributions=(),
         abstention_reason=None,
         abstention_note=None,
     ):
@@ -484,7 +485,7 @@ class FakeObjectiveRepository:
             if self.native_findings is not None
             else (_native_finding(analysis_version),)
         )
-        self.contributions[analysis_version] = _artifacts(
+        self.contributions[analysis_version] = contributions or _artifacts(
             analysis_version
         ).contributions
         # Native publication does not copy the legacy ObjectiveEvidence ledger.

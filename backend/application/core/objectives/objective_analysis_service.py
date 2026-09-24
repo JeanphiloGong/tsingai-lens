@@ -1,26 +1,16 @@
 from __future__ import annotations
 
-import json
 import logging
 from asyncio import Semaphore, gather, to_thread
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from hashlib import sha256
 from typing import Any, Callable, Mapping, Sequence
 
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
-from application.core.objectives.analysis.evidence_materialization import (
-    OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION,
-    rebind_persisted_contribution,
-    rebind_persisted_evidence,
-)
 from application.core.objectives.analysis.evidence_routing import (
     OBJECTIVE_EVIDENCE_ROUTING_VERSION,
     EvidenceCandidate,
     route_sources,
-)
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
 )
 from application.core.objectives.analysis.paper_experiment import (
     PAPER_EXPERIMENT_RECONSTRUCTION_VERSION,
@@ -59,7 +49,6 @@ from application.source.collection_service import CollectionService
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     PaperContribution,
     PaperExperiment,
@@ -86,15 +75,6 @@ class ObjectiveAnalysisInputs(ObjectiveSourceInputs):
     paper_maps: tuple[PaperResearchMap, ...]
 
 
-_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v2"
-OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
-    ("paper_framing", OBJECTIVE_PAPER_FRAME_PROMPT_VERSION),
-    ("evidence_routing", OBJECTIVE_EVIDENCE_ROUTING_VERSION),
-    ("source_extraction", OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION),
-    ("source_grounding", OBJECTIVE_SOURCE_GROUNDING_VERSION),
-    ("paper_experiment", PAPER_EXPERIMENT_RECONSTRUCTION_VERSION),
-    ("evidence_materialization", OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION),
-)
 _OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
 # Paper reconstruction needs title/abstract/materials context, not a second
 # copy of the entire document.  Keep this bounded so context recovery cannot
@@ -144,7 +124,19 @@ def _transient_paper_contribution(
                 )
             )
         )
-    analysis_status = "failed" if failed_audits and not experiments else "analyzed"
+    excluded_by_frame = bool(
+        frame is not None
+        and (frame.relevance == "irrelevant" or frame.paper_role == "irrelevant")
+    )
+    if excluded_by_frame:
+        analysis_status = "excluded"
+        exclusion_reason = (
+            (frame.screening_note if frame is not None else None)
+            or "Paper is not relevant to this objective."
+        )
+    else:
+        analysis_status = "failed" if failed_audits and not experiments else "analyzed"
+        exclusion_reason = None
     return PaperContribution(
         collection_id=collection_id,
         objective_id=objective.objective_id,
@@ -166,7 +158,7 @@ def _transient_paper_contribution(
         test_environment_scope=(
             frame.test_environment_scope if frame is not None else ()
         ),
-        exclusion_reason=None,
+        exclusion_reason=exclusion_reason,
         warnings=warnings,
         confidence=0.9 if experiments else 0.0,
     )
@@ -184,8 +176,8 @@ class ObjectiveAnalysisArtifacts:
 
 
 @dataclass(frozen=True)
-class ObjectiveDocumentEvidenceArtifacts:
-    """Scientific inspection result for one Objective and one document."""
+class PaperExperimentDocumentArtifacts:
+    """Source inspection result for one Objective and one document."""
 
     contribution: PaperContribution
     evidence_records: tuple[ObjectiveEvidence, ...]
@@ -217,7 +209,6 @@ class ObjectiveEvidenceAnalysisService:
         collection_service: CollectionService,
         paper_map_repository: PaperMapRepository,
         objective_repository: ObjectiveRepository,
-        finding_synthesis_service: FindingSynthesisService,
         objective_input_service: ObjectiveInputService,
         objective_source_screener: ObjectiveSourceScreener | None = None,
         objective_source_extractor: ObjectiveSourceExtractor | None = None,
@@ -229,7 +220,6 @@ class ObjectiveEvidenceAnalysisService:
         self._paper_facts_extractor = paper_facts_extractor
         self.paper_map_repository = paper_map_repository
         self.objective_repository = objective_repository
-        self.finding_synthesis_service = finding_synthesis_service
         self.objective_input_service = objective_input_service
 
     async def preview_objective_scope(
@@ -303,7 +293,7 @@ class ObjectiveEvidenceAnalysisService:
 
         async def inspect_document(
             document_input: PreparedDocumentInput,
-        ) -> ObjectiveDocumentEvidenceArtifacts:
+        ) -> PaperExperimentDocumentArtifacts:
             document_objective_inputs = self._objective_inputs_for_document(
                 collection_id,
                 objective_inputs,
@@ -349,7 +339,7 @@ class ObjectiveEvidenceAnalysisService:
                     document_input.document_id,
                     type(exc).__name__,
                 )
-                artifacts = ObjectiveDocumentEvidenceArtifacts(
+                artifacts = PaperExperimentDocumentArtifacts(
                     contribution=self._failed_document_contribution(
                         collection_id=collection_id,
                         objective_id=active_objective.objective_id,
@@ -398,7 +388,7 @@ class ObjectiveEvidenceAnalysisService:
         objective: ResearchObjective,
         objective_inputs: ObjectiveAnalysisInputs,
         progress_callback: ProgressCallback | None,
-    ) -> ObjectiveDocumentEvidenceArtifacts:
+    ) -> PaperExperimentDocumentArtifacts:
         screened_sources = screen_sources(
             collection_id=collection_id,
             source_screener=self._objective_source_screener,
@@ -473,7 +463,7 @@ class ObjectiveEvidenceAnalysisService:
             audits=tuple(read_audits),
             experiments=experiments,
         )
-        return ObjectiveDocumentEvidenceArtifacts(
+        return PaperExperimentDocumentArtifacts(
             contribution=contribution,
             evidence_records=(),
             experiments=experiments,
@@ -680,43 +670,6 @@ class ObjectiveEvidenceAnalysisService:
         return contexts
 
     @staticmethod
-    def _document_evidence_input_fingerprint(
-        *,
-        objective: ResearchObjective,
-        document_input: PreparedDocumentInput,
-        model_name: str,
-        extraction_version: str,
-        scientific_versions: tuple[tuple[str, str], ...] = (
-            OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
-        ),
-    ) -> str:
-        payload = {
-            "objective": {
-                "question": objective.question,
-                "material_scope": list(objective.material_scope),
-                "variables": list(objective.variables),
-                "outcomes": list(objective.outcomes),
-                "mechanisms": list(objective.mechanisms),
-                "constraints": list(objective.constraints),
-                "requested_comparator": objective.requested_comparator,
-                "source_relationship_ids": list(objective.source_relationship_ids),
-                "excluded_document_ids": list(objective.excluded_document_ids),
-            },
-            "document": document_input.to_record(),
-            "extraction_version": extraction_version,
-            "scientific_versions": dict(scientific_versions),
-            "model_name": model_name,
-        }
-        return sha256(
-            json.dumps(
-                payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-
-    @staticmethod
     def _objective_inputs_for_document(
         collection_id: str,
         objective_inputs: ObjectiveAnalysisInputs,
@@ -758,36 +711,6 @@ class ObjectiveEvidenceAnalysisService:
                 ]
             },
         }
-
-    @staticmethod
-    def _rebind_document_evidence(
-        checkpoint: ObjectiveDocumentEvidence,
-        analysis: ObjectiveAnalysis,
-        *,
-        objective: ResearchObjective,
-        objective_inputs: ObjectiveAnalysisInputs,
-    ) -> ObjectiveDocumentEvidenceArtifacts:
-        if checkpoint.contribution is None:
-            raise ValueError("terminal document Evidence lacks a contribution")
-        evidence_records = rebind_persisted_evidence(
-            collection_id=checkpoint.collection_id,
-            analysis=analysis,
-            objective=objective,
-            evidence_records=checkpoint.evidence_records,
-            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-            tables_by_document_id=objective_inputs["tables_by_document_id"],
-            figures_by_document_id=objective_inputs["figures_by_document_id"],
-        )
-        contribution = rebind_persisted_contribution(
-            contribution=checkpoint.contribution,
-            analysis=analysis,
-            objective=objective,
-            evidence_records=evidence_records,
-        )
-        return ObjectiveDocumentEvidenceArtifacts(
-            contribution=contribution,
-            evidence_records=evidence_records,
-        )
 
     @staticmethod
     def _failed_document_contribution(
@@ -838,7 +761,7 @@ class ObjectiveEvidenceAnalysisService:
         }
 
 __all__ = [
-    "OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS",
     "ObjectiveEvidenceAnalysisService",
+    "PaperExperimentDocumentArtifacts",
     "ResearchObjectivesNotReadyError",
 ]

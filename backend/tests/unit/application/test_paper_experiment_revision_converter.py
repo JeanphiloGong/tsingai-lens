@@ -99,6 +99,58 @@ def test_conversion_preserves_multidimensional_records_and_reported_comparison()
     assert revision.source_refs[0].source_fingerprint == "prepared-v1"
 
 
+def test_conversion_expands_inline_reported_endpoints_into_comparison() -> None:
+    inline = _observation(
+        "inline",
+        value=82,
+        label="P150",
+        comparison={
+            "baseline_label": "NP",
+            "target_label": "P150",
+            "axis_names": ["preheat"],
+            "comparable": True,
+        },
+    )
+    inline = SourceObservation.from_mapping(
+        {
+            **inline.to_record(),
+            "changed_variables": [
+                {
+                    "name": "preheat",
+                    "baseline_value": 0,
+                    "target_value": 150,
+                    "unit": "C",
+                }
+            ],
+            "attribution_scope": "isolated_effect",
+            "reported_result": {
+                **inline.reported_result.to_record(),
+                "baseline_value": 72,
+                "target_value": 82,
+            },
+        }
+    )
+    legacy = assemble_paper_experiment(
+        collection_id="collection-1",
+        document_id="paper-1",
+        source_facts=(inline,),
+    )
+
+    revision = convert_paper_experiment(
+        legacy,
+        source_fingerprint="prepared-v1",
+    ).revision
+
+    assert len(revision.measurements) == 2
+    assert {item.value for item in revision.measurements} == {72, 82}
+    assert len(revision.comparisons) == 1
+    comparison = revision.comparisons[0]
+    assert comparison.basis == "reported"
+    assert comparison.status == "ready"
+    assert comparison.direction == "increase"
+    assert comparison.baseline_measurement_keys != comparison.target_measurement_keys
+
+
 def test_identity_does_not_change_when_only_objective_context_changes() -> None:
     first = _observation("np", objective_id="objective-a", value=72, label="NP")
     second = _observation("p150", objective_id="objective-a", value=82, label="P150")

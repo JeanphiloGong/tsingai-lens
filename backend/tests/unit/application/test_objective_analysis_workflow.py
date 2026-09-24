@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
@@ -30,9 +29,8 @@ from application.core.objectives.analysis.source_screening import (
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.objective_analysis_service import (
-    OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
-    ObjectiveDocumentEvidenceArtifacts,
     ObjectiveEvidenceAnalysisService,
+    PaperExperimentDocumentArtifacts,
 )
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
@@ -76,27 +74,6 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-def test_document_evidence_checkpoint_uses_current_paper_reconstruction_version():
-    assert (
-        "paper_experiment",
-        "paper-experiment-reconstruction.v18",
-    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
-
-
-def test_document_evidence_checkpoint_uses_current_source_extraction_version():
-    assert (
-        "source_extraction",
-        "objective_evidence_extraction.v28",
-    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
-
-
-def test_document_evidence_checkpoint_uses_current_materialization_version():
-    assert (
-        "evidence_materialization",
-        "objective-evidence-materialization.v13",
-    ) in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
 
 
 def test_document_contexts_for_evidence_include_tables_and_figure_captions() -> None:
@@ -1371,7 +1348,6 @@ async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails
         collection_service=collection_service,
         response_client=extractor,
     )
-    service.finding_synthesis_service.assertion_judge = extractor
     await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
@@ -1462,7 +1438,6 @@ async def test_objective_analysis_does_not_invoke_a_route_model(
         collection_service=collection_service,
         response_client=extractor,
     )
-    service.finding_synthesis_service.assertion_judge = extractor
     await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
@@ -1536,7 +1511,6 @@ async def test_objective_analysis_does_not_invoke_a_route_model(
     )
 
     failing_extractor = _ObjectiveExtractor()
-    service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
@@ -1563,7 +1537,6 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
         collection_service=collection_service,
         response_client=extractor,
     )
-    service.finding_synthesis_service.assertion_judge = extractor
     await service.objective_input_service.source_artifact_repository.replace_document(
         collection_id,
         source_documents_from_records(
@@ -1736,11 +1709,6 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
 
     native_writer = _NativeExperimentWriter()
 
-    class _LegacySynthesisGuard:
-        def synthesize(self, **_payload):
-            pytest.fail("legacy Finding synthesis must not be called")
-
-    service.finding_synthesis_service = _LegacySynthesisGuard()
     extraction_calls: list[str] = []
     generated_artifacts = []
     paper_2_failures_remaining = 1
@@ -1763,7 +1731,7 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
         if document_id == "paper-2" and paper_2_failures_remaining:
             paper_2_failures_remaining -= 1
             raise RuntimeError("provider unavailable")
-        return ObjectiveDocumentEvidenceArtifacts(
+        return PaperExperimentDocumentArtifacts(
             contribution=PaperContribution.from_mapping(
                 {
                     "collection_id": collection_id,
@@ -1852,7 +1820,7 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
         "analyzed",
         "failed",
     ]
-    assert service.objective_repository._document_evidence == {}
+    assert not hasattr(service.objective_repository, "_document_evidence")
     failure_diagnostic = next(
         record
         for record in first["analysis"].diagnostics
@@ -1900,84 +1868,6 @@ async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
         for item in generated_artifacts[1].contributions
     )
     assert len(native_writer.calls) == 2
-
-
-def test_document_evidence_fingerprint_covers_every_reuse_input(tmp_path) -> None:
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    service = _build_research_objective_service(
-        collection_service=collection_service,
-        response_client=_ObjectiveExtractor(),
-    )
-    objective = _research_objective(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "How does laser power affect relative density?",
-            "variables": ["laser power"],
-            "outcomes": ["relative density"],
-        }
-    )
-    document_input = PreparedDocumentInput("paper-1", "preparation-1")
-
-    def fingerprint(
-        *,
-        current_objective=objective,
-        current_document_input=document_input,
-        model_name="model-a",
-        extraction_version="objective-document-evidence.v1",
-        scientific_versions=OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS,
-    ) -> str:
-        return service._document_evidence_input_fingerprint(
-            objective=current_objective,
-            document_input=current_document_input,
-            model_name=model_name,
-            extraction_version=extraction_version,
-            scientific_versions=scientific_versions,
-        )
-
-    changed_scientific_versions = (
-        tuple(
-            (name, f"{version}.changed" if name == changed_name else version)
-            for name, version in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
-        )
-        for changed_name, _version in OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
-    )
-
-    fingerprints = {
-        fingerprint(),
-        fingerprint(
-            current_objective=replace(
-                objective,
-                question="How does laser energy affect relative density?",
-            )
-        ),
-        fingerprint(
-            current_objective=replace(
-                objective,
-                excluded_document_ids=("paper-1",),
-            )
-        ),
-        fingerprint(
-            current_objective=replace(
-                objective,
-                source_relationship_ids=("relationship-paper-1-density",),
-            )
-        ),
-        fingerprint(
-            current_document_input=PreparedDocumentInput(
-                "paper-1", "preparation-2"
-            )
-        ),
-        fingerprint(model_name="model-b"),
-        fingerprint(extraction_version="objective-document-evidence.v2"),
-        *(
-            fingerprint(scientific_versions=versions)
-            for versions in changed_scientific_versions
-        ),
-    }
-
-    assert len(OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS) == 6
-    assert len(fingerprints) == 13
 
 
 async def test_objective_source_loading_uses_one_exact_document_batch(tmp_path) -> None:

@@ -1,14 +1,10 @@
-"""Write experiment-backed analysis records from one completed legacy run.
+"""Write the automatic Objective analysis graph.
 
-The source extraction pipeline still returns the legacy in-process experiment
-and Finding objects.  This service is the one-way application boundary used
-while the hard switch is being completed: it assigns stable identities,
-persists immutable revisions, creates Objective-scoped selections, and then
-publishes Findings that point at those selections.
-
-It deliberately does not copy legacy Evidence records into the new Finding.
-The caller can keep the old publication path during the migration checkpoint;
-this writer only owns the new experiment-domain records.
+Source extraction returns transient experiment drafts. This service assigns
+stable identities, persists immutable revisions, creates Objective-scoped
+selections, and publishes Findings that point at those selections. It never
+copies legacy Evidence records into the automatic graph; authored snapshots
+use their separate publication path.
 """
 
 from __future__ import annotations

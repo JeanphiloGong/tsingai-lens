@@ -6,7 +6,6 @@ from typing import Any, Protocol
 
 from domain.core.research_objective import (
     ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -134,19 +133,6 @@ class ObjectiveRepository(Protocol):
 
     async def interrupt_active_analyses(self) -> int: ...
 
-    async def write_document_evidence(
-        self,
-        checkpoint: ObjectiveDocumentEvidence,
-    ) -> None: ...
-
-    async def read_document_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_id: str,
-        input_fingerprint: str,
-    ) -> ObjectiveDocumentEvidence | None: ...
-
     async def publish_analysis(
         self,
         collection_id: str,
@@ -166,6 +152,7 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
         analysis_version: int,
         *,
+        contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...

@@ -109,7 +109,9 @@ class ExperimentFindingSynthesisService:
 
         rank = 0
         for key in sorted(grouped):
-            for cluster in _comparability_clusters(grouped[key]):
+            clusters = _comparability_clusters(grouped[key])
+            context_was_split = len(clusters) > 1
+            for cluster in clusters:
                 group = None
                 if len(cluster) > 1:
                     group = _build_group(
@@ -125,6 +127,7 @@ class ExperimentFindingSynthesisService:
                     analysis_version=analysis_version,
                     studies=cluster,
                     group=group,
+                    context_was_split=context_was_split,
                     display_rank=rank,
                 )
                 findings.append(finding)
@@ -189,7 +192,7 @@ def _selected_study(
     subject_values = _attribute_values(
         attribute
         for variant in variants
-        for attribute in variant.subject_attributes
+        for attribute in (*variant.subject_attributes, *variant.state)
     )
     factor_levels = frozenset(
         _variable_signature(variable)
@@ -355,6 +358,7 @@ def _build_finding(
     analysis_version: int,
     studies: Sequence[_SelectedStudy],
     group: ComparisonGroup | None,
+    context_was_split: bool,
     display_rank: int,
 ) -> Finding:
     first = studies[0]
@@ -365,8 +369,15 @@ def _build_finding(
         (item.attribution_scope for item in studies),
         key=lambda item: _ATTRIBUTION_RANK[item],
     )
+    # A singleton study remains associative when it is the only context under
+    # consideration. Once the same factor/outcome is split into incompatible
+    # context clusters, a singleton cluster is only a context-bound
+    # description and must not read like a generally supported association.
     assertion_strength = (
-        "descriptive" if attribution_scope == "descriptive_only" else "associative"
+        "descriptive"
+        if attribution_scope == "descriptive_only"
+        or (context_was_split and len(studies) == 1)
+        else "associative"
     )
     selection_ids = tuple(item.selection.selection_id for item in studies)
     limitations = _terms(

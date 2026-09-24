@@ -54,6 +54,10 @@ class PostgresComparisonGroupRepository(ComparisonGroupRepository):
                 limitations_json=list(group.limitations),
             )
             session.add(row)
+            # The member rows reference the group's natural key.  Flush the
+            # parent first because these tables intentionally use explicit
+            # foreign keys without an ORM relationship for persistence order.
+            await session.flush()
             session.add_all(
                 ComparisonGroupMemberRow(
                     group_id=group.group_id,

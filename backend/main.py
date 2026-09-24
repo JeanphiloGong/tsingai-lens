@@ -52,9 +52,6 @@ from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
-)
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
 )
@@ -453,6 +450,7 @@ async def build_application_runtime(
                 selection_repository=objective_experiment_selection_repository,
                 group_repository=comparison_group_repository,
                 finding_repository=experiment_finding_repository,
+                objective_repository=objective_repository,
             )
         if session_factory is not None and (
             experiment_analysis_writer is None
@@ -563,7 +561,6 @@ async def build_application_runtime(
             source_artifact_repository=source_artifact_repository,
             document_profile_service=document_profile_service,
         )
-        finding_synthesis_service = FindingSynthesisService()
         finding_feedback_service = FindingFeedbackService(
             review_repository=finding_review_repository,
             objective_repository=objective_repository,
@@ -591,7 +588,6 @@ async def build_application_runtime(
             collection_service=collection_service,
             paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
-            finding_synthesis_service=finding_synthesis_service,
             objective_input_service=objective_input_service,
         )
         document_markdown_service = DocumentMarkdownService(

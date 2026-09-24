@@ -9,6 +9,7 @@ query ownership while keeping the HTTP contract stable.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha1
 from typing import Any, Mapping
@@ -20,6 +21,7 @@ from application.repositories.experiment_finding_repository import (
 from application.repositories.objective_experiment_selection_repository import (
     ObjectiveExperimentSelectionRepository,
 )
+from application.repositories.objective_repository import ObjectiveRepository
 from application.repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
@@ -39,11 +41,15 @@ from .experiment_query_service import ExperimentAnalysisBundle, ExperimentQueryS
 
 @dataclass(frozen=True)
 class _ProjectionState:
+    collection_id: str
+    objective_id: str
+    analysis_version: int
     bundle: ExperimentAnalysisBundle
     revisions_by_identity: Mapping[tuple[str, int], PaperExperimentRevision]
     selections_by_id: Mapping[str, Any]
     evidence_by_id: Mapping[str, dict[str, Any]]
     evidence_ids_by_selection: Mapping[str, tuple[str, ...]]
+    contributions_by_document: Mapping[str, dict[str, Any]]
 
 
 class ExperimentCompatibilityProjection:
@@ -56,6 +62,7 @@ class ExperimentCompatibilityProjection:
         selection_repository: ObjectiveExperimentSelectionRepository,
         group_repository: ComparisonGroupRepository,
         finding_repository: ExperimentFindingRepository,
+        objective_repository: ObjectiveRepository | None = None,
     ) -> None:
         self._query = ExperimentQueryService(
             paper_experiment_repository=paper_experiment_repository,
@@ -63,6 +70,7 @@ class ExperimentCompatibilityProjection:
             group_repository=group_repository,
             finding_repository=finding_repository,
         )
+        self._objective_repository = objective_repository
 
     async def list_findings(
         self,
@@ -153,47 +161,57 @@ class ExperimentCompatibilityProjection:
         analysis_version: int,
     ) -> tuple[dict[str, Any], ...]:
         state = await self._state(collection_id, objective_id, analysis_version)
-        contribution_by_document: dict[str, dict[str, Any]] = {}
-        for selection in state.bundle.selections:
+        return self._project_contributions(state, state.bundle.selections)
+
+    def _project_contributions(
+        self,
+        state: _ProjectionState,
+        selections: Any,
+        *,
+        include_links: bool = False,
+    ) -> tuple[dict[str, Any], ...]:
+        """Keep coverage metadata while replacing legacy Evidence ids.
+
+        PaperContribution describes which papers were inspected, including
+        excluded or failed papers. It is not a second scientific-fact store.
+        The experiment graph supplies the current evidence ids for selected
+        records; the coverage rows remain available for the legacy response.
+        """
+        contribution_by_document = {
+            document_id: _reset_contribution_links(record)
+            for document_id, record in state.contributions_by_document.items()
+        }
+        initialized_documents: set[str] = set()
+        for selection in selections:
             revision = state.revisions_by_identity.get(
                 (selection.experiment_id, selection.experiment_version)
             )
             if revision is None:
                 continue
             evidence_ids = state.evidence_ids_by_selection.get(selection.selection_id, ())
-            contribution = contribution_by_document.setdefault(
-                revision.document_id,
-                {
-                    "collection_id": collection_id,
-                    "objective_id": objective_id,
-                    "analysis_version": analysis_version,
-                    "document_id": revision.document_id,
-                    "analysis_status": "analyzed",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "contribution_summary": revision.scope_description,
-                    "material_match": [],
-                    "changed_variables": [],
-                    "measured_property_scope": [selection.outcome],
-                    "test_environment_scope": [],
-                    "exclusion_reason": None,
-                    "supporting_evidence_ids": [],
-                    "contradicting_evidence_ids": [],
-                    "context_evidence_ids": [],
-                    "condition_boundary_evidence_ids": [],
-                    "warnings": [],
-                    "confidence": 1.0,
-                    "evidence_disposition": "comparable_evidence",
-                    "routed_source_count": 0,
-                    "extracted_source_count": 0,
-                    "comparable_evidence_count": 0,
-                    "failed_source_count": 0,
-                    "uninspected_source_count": 0,
-                    "evidence_disposition_reason": None,
-                    "evidence_status_counts": {},
-                    "inspected_source_refs": [],
-                },
-            )
+            if revision.document_id not in initialized_documents:
+                contribution = contribution_by_document.setdefault(
+                    revision.document_id,
+                    _new_experiment_contribution(
+                        collection_id=state.collection_id,
+                        objective_id=selection.objective_id,
+                        analysis_version=selection.analysis_version,
+                        document_id=revision.document_id,
+                        scope_description=revision.scope_description,
+                        outcome=selection.outcome,
+                    ),
+                )
+                _reset_experiment_accounting(contribution)
+                initialized_documents.add(revision.document_id)
+            else:
+                contribution = contribution_by_document[revision.document_id]
+            measured_scope = list(contribution.get("measured_property_scope") or ())
+            if selection.outcome not in measured_scope:
+                measured_scope.append(selection.outcome)
+            contribution["measured_property_scope"] = measured_scope
+            contribution["contribution_summary"] = contribution.get(
+                "contribution_summary"
+            ) or revision.scope_description
             for evidence_id in evidence_ids:
                 if evidence_id not in contribution["supporting_evidence_ids"]:
                     contribution["supporting_evidence_ids"].append(evidence_id)
@@ -210,9 +228,22 @@ class ExperimentCompatibilityProjection:
                 contribution["evidence_disposition_reason"] = (
                     "The experiment contains selected results but no comparable paper-internal relation."
                 )
-        return tuple(
+            else:
+                contribution["evidence_disposition"] = "comparable_evidence"
+                contribution["evidence_disposition_reason"] = None
+        records = tuple(
             contribution_by_document[key]
             for key in sorted(contribution_by_document)
+        )
+        if include_links:
+            return records
+        return tuple(
+            {
+                key: value
+                for key, value in record.items()
+                if key not in _CONTRIBUTION_LINK_FIELDS
+            }
+            for record in records
         )
 
     async def read_analysis_records(
@@ -533,12 +564,41 @@ class ExperimentCompatibilityProjection:
                 dict.fromkeys(evidence_ids)
             )
         return _ProjectionState(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
             bundle=bundle,
             revisions_by_identity=revisions_by_identity,
             selections_by_id=selections_by_id,
             evidence_by_id=evidence_by_id,
             evidence_ids_by_selection=evidence_ids_by_selection,
+            contributions_by_document=await self._load_contributions(
+                collection_id,
+                objective_id,
+                analysis_version,
+            ),
         )
+
+    async def _load_contributions(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> dict[str, dict[str, Any]]:
+        if self._objective_repository is None:
+            return {}
+        records = await self._objective_repository.list_contributions(
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
+        result: dict[str, dict[str, Any]] = {}
+        for item in records:
+            record = item.to_record() if hasattr(item, "to_record") else dict(item)
+            document_id = str(record.get("document_id") or "")
+            if document_id:
+                result[document_id] = record
+        return result
 
     def _finding_record(self, finding: Any, state: _ProjectionState) -> dict[str, Any]:
         record = finding.to_record()
@@ -551,8 +611,7 @@ class ExperimentCompatibilityProjection:
         # the established Finding response never exposed them.
         record.pop("selection_ids", None)
         record.pop("comparison_group_ids", None)
-        contributions: list[dict[str, Any]] = []
-        by_document: dict[str, dict[str, Any]] = {}
+        selected = []
         for selection_id in finding.selection_ids:
             selection = state.selections_by_id.get(selection_id)
             if selection is None:
@@ -562,21 +621,11 @@ class ExperimentCompatibilityProjection:
             )
             if revision is None:
                 raise ValueError(f"finding selection has no revision: {selection_id}")
-            contribution = by_document.setdefault(
-                revision.document_id,
-                {
-                    "document_id": revision.document_id,
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": [],
-                    "contradicting_evidence_ids": [],
-                    "context_evidence_ids": [],
-                    "condition_boundary_evidence_ids": [],
-                },
-            )
-            for evidence_id in state.evidence_ids_by_selection.get(selection_id, ()):
-                if evidence_id not in contribution["supporting_evidence_ids"]:
-                    contribution["supporting_evidence_ids"].append(evidence_id)
-        contributions.extend(by_document[key] for key in sorted(by_document))
+            selected.append(selection)
+        contributions = [
+            _finding_contribution_view(item)
+            for item in self._project_contributions(state, selected, include_links=True)
+        ]
         if not contributions:
             raise ValueError(f"finding has no projectable selections: {finding.finding_id}")
         record["paper_contributions"] = contributions
@@ -767,6 +816,93 @@ def _by_key(items: Any, field_name: str, key: str | None) -> Any | None:
     if not key:
         return None
     return next((item for item in items if getattr(item, field_name, None) == key), None)
+
+
+_CONTRIBUTION_LINK_FIELDS = (
+    "supporting_evidence_ids",
+    "contradicting_evidence_ids",
+    "context_evidence_ids",
+    "condition_boundary_evidence_ids",
+)
+
+
+def _reset_contribution_links(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy coverage metadata without carrying obsolete Evidence identities."""
+
+    result = deepcopy(dict(record))
+    for field_name in _CONTRIBUTION_LINK_FIELDS:
+        result[field_name] = []
+    return result
+
+
+def _finding_contribution_view(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return exactly the established Finding contribution contract."""
+
+    return {
+        "document_id": record.get("document_id"),
+        "analysis_status": record.get("analysis_status") or "analyzed",
+        **{
+            field_name: list(record.get(field_name) or ())
+            for field_name in _CONTRIBUTION_LINK_FIELDS
+        },
+    }
+
+
+def _new_experiment_contribution(
+    *,
+    collection_id: str,
+    objective_id: str,
+    analysis_version: int,
+    document_id: str,
+    scope_description: str,
+    outcome: str,
+) -> dict[str, Any]:
+    return {
+        "collection_id": collection_id,
+        "objective_id": objective_id,
+        "analysis_version": analysis_version,
+        "document_id": document_id,
+        "analysis_status": "analyzed",
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "contribution_summary": scope_description,
+        "material_match": [],
+        "changed_variables": [],
+        "measured_property_scope": [outcome],
+        "test_environment_scope": [],
+        "exclusion_reason": None,
+        "warnings": [],
+        "confidence": 1.0,
+        "evidence_disposition": "no_comparable_evidence",
+        "routed_source_count": 0,
+        "extracted_source_count": 0,
+        "comparable_evidence_count": 0,
+        "failed_source_count": 0,
+        "uninspected_source_count": 0,
+        "evidence_disposition_reason": None,
+        "evidence_status_counts": {},
+        "inspected_source_refs": [],
+        **{field_name: [] for field_name in _CONTRIBUTION_LINK_FIELDS},
+    }
+
+
+def _reset_experiment_accounting(record: dict[str, Any]) -> None:
+    """Reset counters before overlaying the new experiment evidence IDs."""
+
+    record["analysis_status"] = "analyzed"
+    record["relevance"] = "high"
+    record["paper_role"] = "primary_experiment"
+    record["exclusion_reason"] = None
+    record["evidence_disposition"] = "no_comparable_evidence"
+    record["routed_source_count"] = 0
+    record["extracted_source_count"] = 0
+    record["comparable_evidence_count"] = 0
+    record["failed_source_count"] = 0
+    record["uninspected_source_count"] = 0
+    record["evidence_disposition_reason"] = None
+    record["evidence_status_counts"] = {}
+    for field_name in _CONTRIBUTION_LINK_FIELDS:
+        record[field_name] = []
 
 
 def _source_refs(*groups: tuple[SourceReference, ...]) -> tuple[SourceReference, ...]:

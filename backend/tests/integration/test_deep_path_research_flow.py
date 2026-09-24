@@ -356,7 +356,6 @@ async def test_deep_path_round_trips_one_source_grounded_research_cycle(
         collection_service=collection_service,
         paper_map_repository=SimpleNamespace(),
         objective_repository=objective_repository,
-        finding_synthesis_service=SimpleNamespace(),
         objective_input_service=SimpleNamespace(),
     )
     objective_authoring_service = ObjectiveAuthoringService(

@@ -8,10 +8,6 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.finding_synthesis import (
-    StructuredFindingSynthesis,
-    StructuredFindingSynthesisItem,
-)
 from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,
@@ -36,9 +32,6 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
     """Deterministic scientific decisions at the external model boundary only."""
 
     model = "deterministic-four-paper-research-model"
-
-    def __init__(self) -> None:
-        self.finding_payloads: list[dict[str, Any]] = []
 
     def complete(
         self,
@@ -256,30 +249,6 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             ]
         )
 
-    def judge_result_set(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredFindingSynthesis:
-        self.finding_payloads.append(payload)
-        document_ids = {
-            str(item.get("document_id") or "")
-            for item in (payload.get("result_set") or {}).get(
-                "document_evidence_summaries", []
-            )
-            if isinstance(item, dict)
-        }
-        if len(document_ids) < 2:
-            return StructuredFindingSynthesis()
-        return StructuredFindingSynthesis(
-            findings=[
-                StructuredFindingSynthesisItem(
-                    assertion_strength="associative",
-                    context_evidence_ids=[],
-                    mechanisms=[],
-                )
-            ]
-        )
-
 
 def _wait_for_run(client: TestClient, run_id: str) -> dict[str, Any]:
     deadline = monotonic() + 20
@@ -332,7 +301,6 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         research_service = client.app.state.evidence_analysis_service
         research_service.objective_input_service._response_client = model
         client.app.state.objective_discovery_service._response_client = model
-        research_service.finding_synthesis_service.assertion_judge = model
 
         login = client.post(
             f"{API_PREFIX}/auth/login",
@@ -531,10 +499,3 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         assert published_again.json()["published_analysis"] == analysis[
             "published_analysis"
         ]
-        assert len(model.finding_payloads) == 1
-        assert {
-            item["document_id"]
-            for item in model.finding_payloads[0]["result_set"][
-                "document_evidence_summaries"
-            ]
-        } == {paper_a_id, paper_b_id}

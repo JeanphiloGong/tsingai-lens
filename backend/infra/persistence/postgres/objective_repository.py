@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -465,50 +464,6 @@ class PostgresObjectiveRepository:
                 self._write_analysis(row, analysis)
             return len(rows)
 
-    async def write_document_evidence(
-        self,
-        checkpoint: ObjectiveDocumentEvidence,
-    ) -> None:
-        now = datetime.now(timezone.utc)
-        async with self.session_factory.begin() as session:
-            row = await self._locked_analysis(
-                session,
-                checkpoint.collection_id,
-                checkpoint.objective_id,
-                checkpoint.analysis_version,
-            )
-            payload = dict(row.payload or {})
-            checkpoints = dict(payload.get("document_evidence_checkpoints") or {})
-            checkpoints[_checkpoint_storage_key(checkpoint)] = checkpoint.to_record()
-            payload["document_evidence_checkpoints"] = checkpoints
-            row.payload = payload
-            row.updated_at = now
-
-    async def read_document_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_id: str,
-        input_fingerprint: str,
-    ) -> ObjectiveDocumentEvidence | None:
-        async with self.session_factory() as session:
-            analysis_rows = tuple(
-                await session.scalars(
-                    select(ObjectiveAnalysisRecord).where(
-                        ObjectiveAnalysisRecord.collection_id == collection_id,
-                        ObjectiveAnalysisRecord.objective_id == objective_id,
-                    ).order_by(ObjectiveAnalysisRecord.analysis_version.desc())
-                )
-            )
-            key = f"{document_id}:{input_fingerprint}"
-            for analysis_row in analysis_rows:
-                checkpoint = (analysis_row.payload or {}).get(
-                    "document_evidence_checkpoints", {}
-                ).get(key)
-                if checkpoint is not None:
-                    return ObjectiveDocumentEvidence.from_mapping(checkpoint)
-            return None
-
     async def publish_analysis(
         self,
         collection_id: str,
@@ -568,6 +523,7 @@ class PostgresObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
@@ -593,6 +549,13 @@ class PostgresObjectiveRepository:
             analysis = self._analysis_from_row(analysis_row)
             if analysis.status != "running":
                 raise ValueError("only running objective analysis can be published")
+            input_documents = {item.document_id for item in analysis.document_inputs}
+            contribution_documents = {item.document_id for item in contributions}
+            if contribution_documents != input_documents:
+                raise ValueError("paper contributions must cover every analysis input")
+            if any(item.key[:3] != (collection_id, objective_id, analysis_version) for item in contributions):
+                raise ValueError("paper contribution belongs to another analysis")
+            self._write_contributions(analysis_row, contributions)
             analysis = analysis.succeed(
                 completed_at=datetime.now(timezone.utc),
                 abstention_reason=abstention_reason,
@@ -933,7 +896,6 @@ class PostgresObjectiveRepository:
         payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
         for key in (
             "paper_contributions",
-            "document_evidence_checkpoints",
             "evidence_records",
             "findings",
         ):
@@ -1022,11 +984,6 @@ class PostgresObjectiveRepository:
 
 
 __all__ = ["PostgresObjectiveRepository"]
-
-
-def _checkpoint_storage_key(checkpoint: ObjectiveDocumentEvidence) -> str:
-    return f"{checkpoint.document_id}:{checkpoint.input_fingerprint}"
-
 
 def _sorted_finding_records(values: Any) -> list[dict[str, Any]]:
     return sorted(

@@ -28,6 +28,7 @@ from infra.persistence.postgres.models.evaluation import (
     FindingFeedbackRecord,
 )
 from infra.persistence.postgres.models.objective import (
+    ObjectiveAnalysisLegacyCheckpointRecord,
     ObjectiveAnalysisRecord,
     ObjectiveResearchRecord,
 )
@@ -88,6 +89,7 @@ __all__ = [
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
+    "ObjectiveAnalysisLegacyCheckpointRecord",
     "ObjectiveExperimentSelectionRow",
     "ObjectiveExperimentPlan",
     "ObjectiveResearchRecord",

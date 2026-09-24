@@ -11,7 +11,6 @@ from application.repositories.objective_repository import StoredObjective
 from domain.core import (
     Finding,
     ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -33,9 +32,6 @@ class MemoryObjectiveRepository:
             tuple[str, str], tuple[datetime, datetime]
         ] = {}
         self._analyses: dict[tuple[str, str, int], ObjectiveAnalysis] = {}
-        self._document_evidence: dict[
-            tuple[str, str, str, str], ObjectiveDocumentEvidence
-        ] = {}
         self._contributions: dict[
             tuple[str, str, int], tuple[PaperContribution, ...]
         ] = {}
@@ -405,24 +401,6 @@ class MemoryObjectiveRepository:
             interrupted_count += 1
         return interrupted_count
 
-    async def write_document_evidence(
-        self,
-        checkpoint: ObjectiveDocumentEvidence,
-    ) -> None:
-        self._require_objective(checkpoint.collection_id, checkpoint.objective_id)
-        self._document_evidence[checkpoint.key] = checkpoint
-
-    async def read_document_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_id: str,
-        input_fingerprint: str,
-    ) -> ObjectiveDocumentEvidence | None:
-        return self._document_evidence.get(
-            (collection_id, objective_id, document_id, input_fingerprint)
-        )
-
     async def publish_analysis(
         self,
         collection_id: str,
@@ -471,6 +449,7 @@ class MemoryObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
@@ -478,6 +457,12 @@ class MemoryObjectiveRepository:
         analysis = self._require_analysis(*key)
         if analysis.status != "running":
             raise ValueError("only running objective analysis can be published")
+        input_documents = {item.document_id for item in analysis.document_inputs}
+        contribution_documents = {item.document_id for item in contributions}
+        if contribution_documents != input_documents:
+            raise ValueError("paper contributions must cover every analysis input")
+        if any(item.key[:3] != key for item in contributions):
+            raise ValueError("paper contribution belongs to another analysis")
         analysis = analysis.succeed(
             completed_at=datetime.now(timezone.utc),
             abstention_reason=abstention_reason,
@@ -488,6 +473,7 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))
+        self._contributions[key] = contributions
         return objective, analysis
 
     async def publish_authored_analysis(

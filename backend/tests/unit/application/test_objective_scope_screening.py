@@ -230,7 +230,6 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
         collection_service=collection_service,
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        finding_synthesis_service=SimpleNamespace(),
         objective_input_service=SimpleNamespace(),
     )
 
@@ -257,7 +256,6 @@ async def test_service_reports_scope_not_ready_without_collection_paper_maps() -
                 _objective()
             )
         ),
-        finding_synthesis_service=SimpleNamespace(),
         objective_input_service=SimpleNamespace(),
     )
 

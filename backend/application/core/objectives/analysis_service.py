@@ -833,6 +833,7 @@ class ObjectiveAnalysisService:
                 collection_id,
                 objective_id,
                 analysis_version,
+                contributions=artifacts.contributions,
                 abstention_reason=abstention_reason,
                 abstention_note=abstention_note,
             )
@@ -1016,26 +1017,6 @@ class ObjectiveAnalysisService:
                         continue
                     seen_warnings.add(scoped_status)
                     warnings.append(scoped_status)
-                evidence_disposition = _record_value(contribution, "evidence_disposition")
-                evidence_disposition_reason = _record_value(
-                    contribution, "evidence_disposition_reason"
-                )
-                if (
-                    evidence_disposition
-                    in {
-                        "no_routable_evidence",
-                        "no_comparable_evidence",
-                        "extraction_failed",
-                    }
-                    and evidence_disposition_reason
-                ):
-                    scoped_reason = (
-                        f"{document_id}: "
-                        f"{evidence_disposition_reason}"
-                    )
-                    if scoped_reason not in seen_warnings:
-                        seen_warnings.add(scoped_reason)
-                        warnings.append(scoped_reason)
             for evidence in evidence_records:
                 for warning in (_record_value(evidence, "warnings") or ()):
                     scoped_warning = (

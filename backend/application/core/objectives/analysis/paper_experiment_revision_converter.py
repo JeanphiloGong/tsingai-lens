@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from domain.core.paper_experiment import (
@@ -154,6 +154,28 @@ def convert_paper_experiment(
         variant_keys=variant_keys,
         source_fingerprint=source_fingerprint,
     )
+    (
+        endpoint_variants,
+        endpoint_measurements,
+        reported_comparisons,
+        reported_comparison_keys,
+    ) = _convert_inline_reported_comparisons(
+        experiment,
+        observations=observations,
+        measurements=converted_measurements,
+        measurement_keys=measurement_keys,
+        source_fingerprint=source_fingerprint,
+    )
+    variants = _merge_variants(variants, endpoint_variants)
+    converted_measurements = _merge_measurements(
+        converted_measurements,
+        endpoint_measurements,
+    )
+    comparisons = (*comparisons, *reported_comparisons)
+    comparison_key_by_observation_id = {
+        **comparison_key_by_observation_id,
+        **reported_comparison_keys,
+    }
     interpretations = _convert_interpretations(
         experiment,
         observations=observations,
@@ -198,6 +220,237 @@ def convert_paper_experiment(
         measurement_key_by_observation_id=measurement_keys,
         comparison_key_by_observation_id=comparison_key_by_observation_id,
     )
+
+
+def _convert_inline_reported_comparisons(
+    experiment: LegacyPaperExperiment,
+    *,
+    observations: Mapping[str, SourceObservation],
+    measurements: tuple[ExperimentMeasurementResult, ...],
+    measurement_keys: Mapping[str, str],
+    source_fingerprint: str,
+) -> tuple[
+    tuple[ExperimentalVariant, ...],
+    tuple[ExperimentMeasurementResult, ...],
+    tuple[ExperimentComparison, ...],
+    Mapping[str, str],
+]:
+    """Materialize endpoints when one Source reports both values inline.
+
+    Extractors commonly return one result such as ``2.4% -> 0.8%``.  That is
+    still two reported measurements and one comparison; keeping only the
+    target scalar would make the new experiment graph unable to synthesize a
+    Finding.  The baseline endpoint is copied from the same Source reference,
+    never inferred from an absent value.
+    """
+
+    measurements_by_key = {item.measurement_key: item for item in measurements}
+    variants: list[ExperimentalVariant] = []
+    endpoint_measurements: list[ExperimentMeasurementResult] = []
+    comparisons: list[ExperimentComparison] = []
+    comparison_keys: dict[str, str] = {}
+
+    for observation in experiment.source_observations:
+        comparison = observation.comparison
+        result = observation.reported_result
+        if (
+            observation.derived_from_observation_ids
+            or comparison is None
+            or result is None
+            or result.baseline_value is None
+            or result.target_value is None
+        ):
+            continue
+        target_measurement_key = measurement_keys.get(observation.observation_id)
+        target_measurement = measurements_by_key.get(target_measurement_key or "")
+        if target_measurement is None:
+            continue
+
+        baseline_measurement_key = _local_key(
+            "m",
+            f"{observation.observation_id}:baseline",
+        )
+        baseline_variant_key = _local_key(
+            "v",
+            f"{observation.observation_id}:baseline",
+        )
+        target_variant_key = _local_key(
+            "v",
+            f"{observation.observation_id}:target",
+        )
+        source_refs = _source_refs(
+            (observation,),
+            source_fingerprint=source_fingerprint,
+        )
+        binding_status = _binding_relation_status(observation)
+        baseline_process = _endpoint_process_attributes(
+            observation,
+            endpoint="baseline",
+        )
+        target_process = _endpoint_process_attributes(
+            observation,
+            endpoint="target",
+        )
+        variants.extend(
+            (
+                ExperimentalVariant(
+                    variant_key=baseline_variant_key,
+                    variant_label=comparison.baseline_label,
+                    subject_attributes=_attributes_from_context(observation, "material"),
+                    intervention_attributes=baseline_process,
+                    state=_attributes_from_context(observation, "sample"),
+                    source_refs=source_refs,
+                    binding_source_refs=source_refs,
+                    binding_status=binding_status,
+                    notes=("Endpoint reported inline with the Source result.",),
+                ),
+                ExperimentalVariant(
+                    variant_key=target_variant_key,
+                    variant_label=comparison.target_label,
+                    subject_attributes=_attributes_from_context(observation, "material"),
+                    intervention_attributes=target_process,
+                    state=_attributes_from_context(observation, "sample"),
+                    source_refs=source_refs,
+                    binding_source_refs=source_refs,
+                    binding_status=binding_status,
+                    notes=("Endpoint reported inline with the Source result.",),
+                ),
+            )
+        )
+        endpoint_measurements.append(
+            ExperimentMeasurementResult(
+                measurement_key=baseline_measurement_key,
+                outcome=target_measurement.outcome,
+                variant_key=baseline_variant_key,
+                test_key=target_measurement.test_key,
+                value=result.baseline_value,
+                unit=target_measurement.unit or result.unit,
+                result_text=(
+                    f"{result.outcome}: {result.baseline_value}"
+                    + (f" {result.unit}" if result.unit else "")
+                ),
+                statistics={},
+                measurement_scope={
+                    **target_measurement.measurement_scope,
+                    "reported_endpoint": "baseline",
+                },
+                result_kind=target_measurement.result_kind,
+                source_refs=source_refs,
+                binding_source_refs=source_refs,
+                binding_status=binding_status,
+                notes=("Endpoint reported inline with the Source result.",),
+            )
+        )
+        measurements_by_key[target_measurement.measurement_key] = replace(
+            target_measurement,
+            variant_key=target_variant_key,
+            measurement_scope={
+                **target_measurement.measurement_scope,
+                "reported_endpoint": "target",
+            },
+        )
+        comparison_key = _local_key("c", observation.observation_id)
+        comparison_keys[observation.observation_id] = comparison_key
+        direction = _direction(result.direction)
+        if direction == "unknown":
+            direction = _numeric_direction(
+                SourceObservation.from_mapping(
+                    {
+                        **observation.to_record(),
+                        "observation_id": f"{observation.observation_id}:baseline",
+                        "reported_result": {
+                            **result.to_record(),
+                            "value": result.baseline_value,
+                        },
+                    }
+                ),
+                observation,
+                result.outcome,
+            )
+        comparisons.append(
+            ExperimentComparison(
+                comparison_key=comparison_key,
+                baseline_variant_key=baseline_variant_key,
+                target_variant_key=target_variant_key,
+                outcome=result.outcome,
+                baseline_measurement_keys=(baseline_measurement_key,),
+                target_measurement_keys=(target_measurement_key,),
+                changed_variables=tuple(observation.changed_variables),
+                basis="reported",
+                direction=direction,
+                reported_statement=result.result_text,
+                attribution_scope=(
+                    observation.attribution_scope
+                    if observation.attribution_scope != "not_attributable"
+                    else "undetermined"
+                ),
+                status=("ready" if comparison.comparable else "non_comparable"),
+                reasons=comparison.incomparability_reasons,
+                source_refs=source_refs,
+                binding_source_refs=source_refs,
+                relation_status=binding_status,
+            )
+        )
+
+    replaced_measurements = tuple(
+        measurements_by_key[item.measurement_key] for item in measurements
+    )
+    return (
+        tuple(variants),
+        (*replaced_measurements, *endpoint_measurements),
+        tuple(comparisons),
+        comparison_keys,
+    )
+
+
+def _merge_variants(
+    existing: tuple[ExperimentalVariant, ...],
+    additional: tuple[ExperimentalVariant, ...],
+) -> tuple[ExperimentalVariant, ...]:
+    by_key = {item.variant_key: item for item in existing}
+    for item in additional:
+        by_key.setdefault(item.variant_key, item)
+    return tuple(by_key.values())
+
+
+def _merge_measurements(
+    existing: tuple[ExperimentMeasurementResult, ...],
+    additional: tuple[ExperimentMeasurementResult, ...],
+) -> tuple[ExperimentMeasurementResult, ...]:
+    by_key = {item.measurement_key: item for item in existing}
+    for item in additional:
+        by_key[item.measurement_key] = item
+    return tuple(by_key.values())
+
+
+def _endpoint_process_attributes(
+    observation: SourceObservation,
+    *,
+    endpoint: str,
+) -> tuple[ScientificAttribute, ...]:
+    """Overlay reported factor endpoints on the shared process context."""
+
+    values = list(_attributes_from_context(observation, "process"))
+    for variable in observation.changed_variables:
+        value = (
+            variable.baseline_value
+            if endpoint == "baseline"
+            else variable.target_value
+        )
+        if value is None:
+            continue
+        replacement = ScientificAttribute(
+            name=variable.name,
+            value=value,
+            unit=variable.unit,
+        )
+        for index, attribute in enumerate(values):
+            if attribute.name.casefold() == variable.name.casefold():
+                values[index] = replacement
+                break
+        else:
+            values.append(replacement)
+    return tuple(values)
 
 
 def _convert_variants(

@@ -35,6 +35,26 @@ Collection. An Objective selects experiment content through
   task states, and existing response semantics remain compatible unless a
   separate API change is approved.
 
+## HTTP compatibility matrix
+
+The experiment migration is an internal replacement of the scientific state
+behind the existing Objective endpoints. Until a separately approved API
+change is documented, the following are frozen:
+
+| Surface | Rule during V0--V9 |
+| :--- | :--- |
+| Existing path and method | Keep the same path, HTTP method, operation identity, and authentication dependency. |
+| Existing request | Keep parameter names, required/optional status, validation limits, and task-control semantics. |
+| Existing response | Keep the fields and meanings consumed by current clients; a query projection may obtain them from the new records. |
+| Internal application/repository calls | May change to pass experiment revisions, selections, or groups; these are not public HTTP parameters. |
+| New experiment detail/export capability | Add a new route and schema; do not overload an existing request or silently change its response. |
+
+The implementation check is deliberately mechanical: the migration commits
+must not edit `backend/controllers/` or the existing controller schemas unless
+the chapter explicitly declares an approved API addition, and the final
+checkpoint runs the existing router/schema tests. A database column or domain
+field added for traceability is not by itself an HTTP contract change.
+
 ## Persistence boundary
 
 The target database uses one `paper_experiment` table for stable identity and

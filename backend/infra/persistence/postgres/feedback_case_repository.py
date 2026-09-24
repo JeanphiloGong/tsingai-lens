@@ -227,37 +227,52 @@ class PostgresFeedbackCaseRepository:
         async with self.session_factory() as session:
             rows = list(await session.scalars(statement))
             if problem_type is not None and rows:
-                result_ids = {
+                analysis_result_ids = {
                     result_id
                     for row in rows
                     for result_id in (row.analysis_result_ids or ())
                 }
-                matching_result_ids: set[str] = set()
-                if result_ids:
-                    result_rows = await session.scalars(
+                signal_result_ids = {
+                    result_id
+                    for row in rows
+                    for result_id in (row.signal_analysis_result_ids or ())
+                }
+                analysis_rows: tuple[Any, ...] = ()
+                signal_rows: tuple[Any, ...] = ()
+                if analysis_result_ids:
+                    analysis_rows = tuple(await session.scalars(
                         select(FeedbackAnalysisResultRow).where(
-                            FeedbackAnalysisResultRow.result_id.in_(result_ids),
+                            FeedbackAnalysisResultRow.result_id.in_(analysis_result_ids),
                         )
-                    )
-                    by_case_result = {
-                        result_row.result_id: result_row for result_row in result_rows
-                    }
-                    for row in rows:
-                        latest = max(
-                            (
-                                by_case_result[result_id]
-                                for result_id in (row.analysis_result_ids or ())
-                                if result_id in by_case_result
-                            ),
-                            key=lambda item: (item.created_at, item.result_id),
-                            default=None,
+                    ))
+                if signal_result_ids:
+                    signal_rows = tuple(await session.scalars(
+                        select(FeedbackSignalAnalysisResultRow).where(
+                            FeedbackSignalAnalysisResultRow.result_id.in_(signal_result_ids),
                         )
-                        if latest is not None and latest.problem_type == problem_type:
-                            matching_result_ids.add(latest.result_id)
+                    ))
+                by_result_id = {
+                    result_row.result_id: result_row
+                    for result_row in (*analysis_rows, *signal_rows)
+                }
                 rows = [
                     row
                     for row in rows
-                    if any(result_id in matching_result_ids for result_id in (row.analysis_result_ids or ()))
+                    if (
+                        (latest := max(
+                            (
+                                by_result_id[result_id]
+                                for result_id in (
+                                    *(row.analysis_result_ids or ()),
+                                    *(row.signal_analysis_result_ids or ()),
+                                )
+                                if result_id in by_result_id
+                            ),
+                            key=lambda item: (item.created_at, item.result_id),
+                            default=None,
+                        )) is not None
+                        and latest.problem_type == problem_type
+                    )
                 ]
             rows = rows[offset:] if limit is None else rows[offset : offset + limit]
             return tuple(_case(row) for row in rows)

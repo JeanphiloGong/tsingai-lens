@@ -7,16 +7,13 @@ import pytest
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
 )
-from application.core.objectives.analysis.experiment_finding_publisher import (
-    ExperimentFindingPublisher,
+from application.repositories.experiment_analysis_repository import (
+    ExperimentAnalysisWrite,
+    StoredExperimentAnalysis,
 )
 from application.repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
-from domain.core.comparison_group import ComparisonGroup
-from domain.core.finding import Finding
-from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
 from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
 from domain.core.research_process import SourceObservation
 from application.core.objectives.analysis.paper_experiment import (
@@ -124,15 +121,6 @@ def _observation(
     )
 
 
-def _experiment(document_id: str, value: float, label: str):
-    observation = _observation(f"{document_id}-result", document_id, value, label)
-    return assemble_paper_experiment(
-        collection_id="collection-1",
-        document_id=document_id,
-        source_facts=(observation,),
-    )
-
-
 def _comparison_experiment(document_id: str):
     baseline_id = f"{document_id}-np"
     target_id = f"{document_id}-p150"
@@ -221,46 +209,6 @@ def _multi_factor_comparison_experiment(document_id: str):
     )
 
 
-def _finding(
-    *,
-    documents: tuple[str, ...],
-    evidence_ids: tuple[str, ...],
-    synthesis_status: str = "insufficient_confirmation",
-) -> Finding:
-    contributions = [
-        {
-            "document_id": document_id,
-            "analysis_status": "analyzed",
-            "supporting_evidence_ids": [evidence_id],
-            "contradicting_evidence_ids": [],
-            "context_evidence_ids": [],
-            "condition_boundary_evidence_ids": [],
-        }
-        for document_id, evidence_id in zip(documents, evidence_ids)
-    ]
-    return Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1" if len(documents) == 1 else "finding-cross",
-            "statement": "Preheat was associated with a change in elongation.",
-            "factors": ["preheat"],
-            "outcome": "elongation",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "association_only",
-            "synthesis_status": synthesis_status,
-            "certainty": 0.5,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {},
-            "limitations": [],
-            "paper_contributions": contributions,
-        }
-    )
-
-
 class _RevisionRepository:
     def __init__(self):
         self.records: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
@@ -297,174 +245,90 @@ class _RevisionRepository:
         return stored
 
 
-class _SelectionRepository:
-    def __init__(self):
-        self.records: dict[str, ObjectiveExperimentSelection] = {}
+class _AnalysisRepository:
+    def __init__(self, revisions: _RevisionRepository) -> None:
+        self.revisions = revisions
+        self.graphs: list[ExperimentAnalysisWrite] = []
         self.transaction_handles: list[object | None] = []
 
-    async def add_selection(
-        self, collection_id, selection, *, revision_id, transaction=None
-    ):
+    async def write_graph(self, graph, *, transaction=None):
+        self.graphs.append(graph)
         self.transaction_handles.append(transaction)
-        existing = self.records.get(selection.selection_id)
-        if existing is not None and existing != selection:
-            raise ValueError("selection conflict")
-        self.records[selection.selection_id] = selection
-        return selection
-
-    async def read_selection(self, collection_id, selection_id, *, transaction=None):
-        self.transaction_handles.append(transaction)
-        return self.records.get(selection_id)
-
-    async def list_selections(self, collection_id, objective_id, analysis_version):
-        return tuple(
-            item
-            for item in self.records.values()
-            if item.objective_id == objective_id and item.analysis_version == analysis_version
+        stored_revisions = tuple(
+            [
+                await self.revisions.add_revision(
+                    revision,
+                    created_by=graph.created_by,
+                    transaction=transaction,
+                )
+                for revision in graph.revisions
+            ]
         )
-
-
-class _GroupRepository:
-    def __init__(self):
-        self.records: dict[str, ComparisonGroup] = {}
-        self.transaction_handles: list[object | None] = []
-
-    async def add_group(self, collection_id, group, *, transaction=None):
-        self.transaction_handles.append(transaction)
-        existing = self.records.get(group.group_id)
-        if existing is not None and existing != group:
-            raise ValueError("group conflict")
-        self.records[group.group_id] = group
-        return group
-
-    async def read_group(self, collection_id, group_id, *, transaction=None):
-        self.transaction_handles.append(transaction)
-        return self.records.get(group_id)
-
-    async def list_groups(self, collection_id, objective_id, analysis_version):
-        return tuple(
-            item
-            for item in self.records.values()
-            if item.objective_id == objective_id and item.analysis_version == analysis_version
-        )
-
-
-class _FindingRepository:
-    def __init__(self):
-        self.records: dict[str, Finding] = {}
-        self.transaction_handles: list[object | None] = []
-
-    async def add_finding(self, finding, *, transaction=None):
-        self.transaction_handles.append(transaction)
-        existing = self.records.get(finding.finding_id)
-        if existing is not None:
-            if existing == finding:
-                return existing
-            raise ValueError("finding conflict")
-        self.records[finding.finding_id] = finding
-        return finding
-
-    async def read_finding(self, collection_id, finding_id):
-        return self.records.get(finding_id)
-
-    async def list_findings(self, collection_id, objective_id, analysis_version):
-        return tuple(
-            item
-            for item in self.records.values()
-            if item.objective_id == objective_id and item.analysis_version == analysis_version
+        return StoredExperimentAnalysis(
+            revisions=stored_revisions,
+            selections=graph.selections,
+            groups=graph.groups,
+            findings=graph.findings,
         )
 
 
 def _writer():
     revisions = _RevisionRepository()
-    selections = _SelectionRepository()
-    groups = _GroupRepository()
-    findings = _FindingRepository()
+    analyses = _AnalysisRepository(revisions)
     writer = ExperimentAnalysisWriter(
         paper_experiment_repository=revisions,
-        selection_repository=selections,
-        group_repository=groups,
-        finding_publisher=ExperimentFindingPublisher(selections, groups, findings),
-        finding_repository=findings,
+        experiment_analysis_repository=analyses,
     )
-    return writer, revisions, selections, groups, findings
+    return writer, revisions, analyses
 
 
 async def test_writer_creates_revision_selection_and_finding_idempotently():
-    writer, revisions, selections, groups, findings = _writer()
-    experiment = _experiment("paper-a", 72, "NP")
-    source_facts = ("paper-a-result",)
-    finding = _finding(documents=("paper-a",), evidence_ids=source_facts)
+    writer, revisions, analyses = _writer()
+    experiment = _comparison_experiment("paper-a")
 
-    first = await writer.write(
+    first = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiments=(experiment,),
-        findings=(finding,),
     )
-    second = await writer.write(
+    second = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiments=(experiment,),
-        findings=(finding,),
     )
 
     assert len(first.revisions) == len(second.revisions) == 1
     assert first.revisions[0].revision.experiment_version == 1
-    assert len(selections.records) == 1
-    assert len(groups.records) == 0
-    assert len(findings.records) == 1
-    assert findings.records["finding-1"].selection_ids
-    assert findings.records["finding-1"].paper_contributions == ()
+    assert len(revisions.records) == 1
+    assert len(first.selections) == 1
+    assert first.groups == ()
+    assert len(first.findings) == 1
+    assert first.findings == second.findings
+    assert first.findings[0].paper_contributions == ()
+    assert len(analyses.graphs) == 2
 
 
 async def test_writer_passes_one_transaction_to_every_graph_repository():
-    writer, revisions, selections, groups, findings = _writer()
+    writer, revisions, analyses = _writer()
     transaction = object()
 
-    await writer.write(
+    await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(_experiment("paper-a", 72, "NP"),),
-        findings=(_finding(documents=("paper-a",), evidence_ids=("paper-a-result",)),),
+        experiments=(_comparison_experiment("paper-a"),),
         transaction=transaction,
     )
 
-    handles = (
-        revisions.transaction_handles
-        + selections.transaction_handles
-        + groups.transaction_handles
-        + findings.transaction_handles
-    )
+    handles = revisions.transaction_handles + analyses.transaction_handles
     assert handles
     assert all(handle is transaction for handle in handles)
 
 
-async def test_writer_can_fix_experiment_selections_before_finding_synthesis():
-    writer, revisions, selections, groups, findings = _writer()
-
-    result = await writer.write_experiment_selections(
-        collection_id="collection-1",
-        objective=_objective(),
-        analysis=_analysis(),
-        experiments=(_experiment("paper-a", 72, "NP"),),
-    )
-
-    assert len(result.revisions) == 1
-    assert result.revisions[0].revision.document_id == "paper-a"
-    assert len(result.selections) == 1
-    assert result.selections[0].outcome == "elongation"
-    assert len(revisions.records) == 1
-    assert len(selections.records) == 1
-    assert groups.records == {}
-    assert findings.records == {}
-
-
 async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
-    writer, _, _, groups, findings = _writer()
+    writer, _, analyses = _writer()
 
     result = await writer.write_experiment_analysis(
         collection_id="collection-1",
@@ -474,7 +338,6 @@ async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
     )
 
     assert result.groups == ()
-    assert groups.records == {}
     assert len(result.findings) == 1
     finding = result.findings[0]
     assert finding.selection_ids == (result.selections[0].selection_id,)
@@ -482,13 +345,13 @@ async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
     assert finding.direction == "increase"
     assert finding.synthesis_status == "single_study"
     assert finding.paper_contributions == ()
-    assert findings.records == {finding.finding_id: finding}
+    assert analyses.graphs[0].findings == (finding,)
 
 
 async def test_writer_keeps_different_factor_sets_in_separate_selections():
-    writer, _, _, _, _ = _writer()
+    writer, _, _ = _writer()
 
-    result = await writer.write_experiment_selections(
+    result = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(variables=("preheat", "scan speed")),
         analysis=_analysis(),
@@ -510,50 +373,41 @@ async def test_writer_keeps_different_factor_sets_in_separate_selections():
 
 
 async def test_writer_creates_conditional_group_for_cross_paper_finding():
-    writer, _, selections, groups, findings = _writer()
-    result = await writer.write(
+    writer, _, analyses = _writer()
+    result = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiments=(
-            _experiment("paper-a", 72, "NP"),
-            _experiment("paper-b", 68, "NP"),
-        ),
-        findings=(
-            _finding(
-                documents=("paper-a", "paper-b"),
-                evidence_ids=("paper-a-result", "paper-b-result"),
-                synthesis_status="agreement",
-            ),
+            _comparison_experiment("paper-a"),
+            _comparison_experiment("paper-b"),
         ),
     )
 
-    assert len(selections.records) == 2
-    assert len(groups.records) == 1
-    assert result.groups[0].status == "conditional"
+    assert len(result.selections) == 2
+    assert len(result.groups) == 1
+    assert result.groups[0].status == "comparable"
     assert len(result.groups[0].members) == 2
-    assert findings.records["finding-cross"].comparison_group_ids
+    assert result.findings[0].comparison_group_ids == (result.groups[0].group_id,)
+    assert analyses.graphs[0].groups == result.groups
 
 
 async def test_changed_source_fingerprint_creates_successor_without_overwrite():
-    writer, revisions, _, _, _ = _writer()
-    experiment = _experiment("paper-a", 72, "NP")
-    finding = _finding(documents=("paper-a",), evidence_ids=("paper-a-result",))
+    writer, revisions, _ = _writer()
+    experiment = _comparison_experiment("paper-a")
 
-    await writer.write(
+    await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiments=(experiment,),
-        findings=(finding,),
         source_fingerprints={"paper-a": "prepared-v1"},
     )
-    await writer.write(
+    await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiments=(experiment,),
-        findings=(),
         source_fingerprints={"paper-a": "prepared-v2"},
     )
 
@@ -569,15 +423,16 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
 
 
 async def test_writer_does_not_fabricate_finding_without_matching_experiment():
-    writer, _, _, _, findings = _writer()
-    result = await writer.write(
+    writer, _, analyses = _writer()
+    result = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiments=(),
-        findings=(_finding(documents=("paper-a",), evidence_ids=("missing",)),),
     )
 
+    assert result.revisions == ()
+    assert result.selections == ()
+    assert result.groups == ()
     assert result.findings == ()
-    assert result.skipped_finding_ids == ("finding-1",)
-    assert findings.records == {}
+    assert analyses.graphs[0].findings == ()

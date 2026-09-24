@@ -58,9 +58,6 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
-from application.core.objectives.analysis.experiment_finding_publisher import (
-    ExperimentFindingPublisher,
-)
 from application.core.objectives.analysis.experiment_query_service import (
     ExperimentQueryService,
 )
@@ -181,6 +178,9 @@ from infra.persistence.postgres.comparison_group_repository import (
 )
 from infra.persistence.postgres.experiment_finding_repository import (
     PostgresExperimentFindingRepository,
+)
+from infra.persistence.postgres.experiment_analysis_repository import (
+    PostgresExperimentAnalysisRepository,
 )
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
@@ -406,6 +406,7 @@ async def build_application_runtime(
         )
         comparison_group_repository = overrides.comparison_group_repository
         experiment_finding_repository = overrides.experiment_finding_repository
+        experiment_analysis_repository = None
         if session_factory is not None:
             paper_experiment_repository = (
                 paper_experiment_repository
@@ -423,6 +424,9 @@ async def build_application_runtime(
                 experiment_finding_repository
                 or PostgresExperimentFindingRepository(session_factory)
             )
+            experiment_analysis_repository = PostgresExperimentAnalysisRepository(
+                session_factory
+            )
 
         experiment_analysis_writer = overrides.experiment_analysis_writer
         experiment_analysis_transaction_factory = (
@@ -435,20 +439,11 @@ async def build_application_runtime(
         if (
             experiment_analysis_writer is None
             and paper_experiment_repository is not None
-            and objective_experiment_selection_repository is not None
-            and comparison_group_repository is not None
-            and experiment_finding_repository is not None
+            and experiment_analysis_repository is not None
         ):
             experiment_analysis_writer = ExperimentAnalysisWriter(
                 paper_experiment_repository=paper_experiment_repository,
-                selection_repository=objective_experiment_selection_repository,
-                group_repository=comparison_group_repository,
-                finding_publisher=ExperimentFindingPublisher(
-                    selection_repository=objective_experiment_selection_repository,
-                    group_repository=comparison_group_repository,
-                    finding_repository=experiment_finding_repository,
-                ),
-                finding_repository=experiment_finding_repository,
+                experiment_analysis_repository=experiment_analysis_repository,
             )
         experiment_compatibility_projection = overrides.experiment_compatibility_projection
         if (

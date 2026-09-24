@@ -8,6 +8,7 @@ from typing import Protocol
 from application.repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
+from application.repositories.transaction import RepositoryTransaction
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
@@ -87,6 +88,8 @@ class ExperimentAnalysisRepository(Protocol):
     async def write_graph(
         self,
         graph: ExperimentAnalysisWrite,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> StoredExperimentAnalysis: ...
 
 

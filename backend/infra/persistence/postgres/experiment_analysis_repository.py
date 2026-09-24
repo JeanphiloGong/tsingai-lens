@@ -9,6 +9,7 @@ from application.repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,
     StoredExperimentAnalysis,
 )
+from application.repositories.transaction import RepositoryTransaction
 from infra.persistence.postgres.comparison_group_repository import _add_group
 from infra.persistence.postgres.experiment_finding_repository import _add_finding
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
@@ -16,6 +17,7 @@ from infra.persistence.postgres.objective_experiment_selection_repository import
     _add_selection,
 )
 from infra.persistence.postgres.paper_experiment_repository import _add_revision
+from infra.persistence.postgres.transaction import database_session_scope
 
 
 class PostgresExperimentAnalysisRepository:
@@ -29,8 +31,14 @@ class PostgresExperimentAnalysisRepository:
     async def write_graph(
         self,
         graph: ExperimentAnalysisWrite,
+        *,
+        transaction: RepositoryTransaction | None = None,
     ) -> StoredExperimentAnalysis:
-        async with self.session_factory.begin() as session:
+        async with database_session_scope(
+            self.session_factory,
+            transaction,
+            write=True,
+        ) as session:
             analysis = await session.scalar(
                 select(ObjectiveAnalysisRecord)
                 .where(

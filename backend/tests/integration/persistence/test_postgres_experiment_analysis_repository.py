@@ -15,6 +15,9 @@ from infra.persistence.postgres.comparison_group_repository import (
 from infra.persistence.postgres.experiment_analysis_repository import (
     PostgresExperimentAnalysisRepository,
 )
+from infra.persistence.postgres.experiment_analysis_transaction import (
+    PostgresExperimentAnalysisTransactionFactory,
+)
 from infra.persistence.postgres.experiment_finding_repository import (
     PostgresExperimentFindingRepository,
 )
@@ -254,6 +257,80 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
                 created_by="test-agent",
             )
         )
+
+    experiments = PostgresPaperExperimentRepository(session_factory)
+    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
+    groups = PostgresComparisonGroupRepository(session_factory)
+    findings = PostgresExperimentFindingRepository(session_factory)
+    assert await experiments.read_latest_revision("experiment-a") is None
+    assert await experiments.read_latest_revision("experiment-b") is None
+    assert await selections.list_selections(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+    ) == ()
+    assert await groups.list_groups(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+    ) == ()
+    assert await findings.list_findings(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+    ) == ()
+
+
+async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
+    objective_repository,
+) -> None:
+    _, analysis = await _queue_and_claim(objective_repository)
+    revision_a = _revision(
+        experiment_id="experiment-a",
+        document_id="doc_a",
+        measurement_key="strength-a",
+        value=900,
+    )
+    revision_b = _revision(
+        experiment_id="experiment-b",
+        document_id="doc_b",
+        measurement_key="strength-b",
+        value=950,
+    )
+    selection_a = _selection(
+        selection_id="selection-a",
+        experiment_id="experiment-a",
+        measurement_key="strength-a",
+        analysis_version=analysis.analysis_version,
+    )
+    selection_b = _selection(
+        selection_id="selection-b",
+        experiment_id="experiment-b",
+        measurement_key="strength-b",
+        analysis_version=analysis.analysis_version,
+    )
+    graph = ExperimentAnalysisWrite(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        analysis_version=analysis.analysis_version,
+        revisions=(revision_a, revision_b),
+        selections=(selection_a, selection_b),
+        groups=(_group(analysis_version=analysis.analysis_version),),
+        findings=(
+            _finding(analysis_version=analysis.analysis_version, with_group=True),
+        ),
+        created_by="test-agent",
+    )
+    session_factory = objective_repository.session_factory
+    repository = PostgresExperimentAnalysisRepository(session_factory)
+    transaction_factory = PostgresExperimentAnalysisTransactionFactory(
+        session_factory
+    )
+
+    with pytest.raises(RuntimeError, match="objective publication failed"):
+        async with transaction_factory.begin() as transaction:
+            await repository.write_graph(graph, transaction=transaction)
+            raise RuntimeError("objective publication failed")
 
     experiments = PostgresPaperExperimentRepository(session_factory)
     selections = PostgresObjectiveExperimentSelectionRepository(session_factory)

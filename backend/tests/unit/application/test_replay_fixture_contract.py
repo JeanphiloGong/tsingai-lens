@@ -1,7 +1,11 @@
 import copy
 import pytest
 
-from scripts.evaluation.research_agent.run_scenarios import validate_fixture, database_url
+from scripts.evaluation.research_agent.run_scenarios import (
+    SCIENTIFIC_SNAPSHOT_TABLES,
+    database_url,
+    validate_fixture,
+)
 
 
 def fixture():
@@ -46,6 +50,37 @@ def test_template_and_missing_scenarios_cannot_run():
         validate_fixture(record)
     with pytest.raises(ValueError, match="exactly once"):
         validate_fixture({"scenarios": []})
+
+
+def test_scientific_snapshot_covers_the_experiment_and_plan_contract():
+    assert SCIENTIFIC_SNAPSHOT_TABLES == (
+        "documents",
+        "document_preparations",
+        "collections",
+        "research_objectives",
+        "objective_analyses",
+        "paper_experiment",
+        "experimental_variant",
+        "test_condition",
+        "measurement_result",
+        "experiment_comparison",
+        "experiment_comparison_measurement",
+        "reported_interpretation",
+        "objective_experiment_selection",
+        "selection_measurement",
+        "selection_comparison",
+        "comparison_group",
+        "comparison_group_member",
+        "finding",
+        "finding_selection",
+        "finding_comparison_group",
+        "objective_experiment_plans",
+        "finding_feedback_records",
+        "finding_curation_records",
+        "evaluation_gold_sets",
+        "evaluation_prediction_snapshots",
+        "evaluation_runs",
+    )
 
 
 @pytest.mark.parametrize("url", ["postgresql+psycopg://u@remote/test_test", "postgresql+psycopg://u@localhost/production", "sqlite:///local_test"])

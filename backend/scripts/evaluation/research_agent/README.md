@@ -71,6 +71,15 @@ until a researcher compares the saved trajectory and database against the rubric
 Keep S08 unknown grade versus proven difference, S13 UTS versus yield strength,
 and S17 unread literature versus absence of prior validation as explicit checks.
 
+The before/after scientific snapshot covers the current Source and Objective
+records, the PaperExperiment revision graph, fixed Objective selections,
+optional comparison groups, automatic Finding links, Objective experiment plans,
+and Finding review/evaluation aggregates. Chat trajectory and pipeline-run
+tables remain technical execution records; they are reported separately and do
+not count as scientific writes. This keeps the replay aligned with the
+experiment-native Source/Evidence contract after the automatic path moved off
+the legacy analysis payload.
+
 The report records failures rather than retrying an entire write conversation.
 Provider retry policy belongs to the production Runner. Resume a failed study
 using a fresh isolated fixture; never blindly rerun a partially saved case.

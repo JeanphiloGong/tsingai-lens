@@ -16,6 +16,39 @@ from pathlib import Path
 import subprocess
 
 
+# These tables are the durable objects whose mutation changes a research
+# result.  Keep the list aligned with the database contract so S01-S21 replay
+# can detect writes after the automatic path moved off the legacy payload.
+SCIENTIFIC_SNAPSHOT_TABLES = (
+    "documents",
+    "document_preparations",
+    "collections",
+    "research_objectives",
+    "objective_analyses",
+    "paper_experiment",
+    "experimental_variant",
+    "test_condition",
+    "measurement_result",
+    "experiment_comparison",
+    "experiment_comparison_measurement",
+    "reported_interpretation",
+    "objective_experiment_selection",
+    "selection_measurement",
+    "selection_comparison",
+    "comparison_group",
+    "comparison_group_member",
+    "finding",
+    "finding_selection",
+    "finding_comparison_group",
+    "objective_experiment_plans",
+    "finding_feedback_records",
+    "finding_curation_records",
+    "evaluation_gold_sets",
+    "evaluation_prediction_snapshots",
+    "evaluation_runs",
+)
+
+
 def validate_fixture(fixture):
     from domain.chat.permissions import AUTO_ACTIONS
 
@@ -61,8 +94,7 @@ def scientific_snapshot(url):
     try:
         with engine.connect() as connection:
             connection.execute(text("SET TRANSACTION READ ONLY"))
-            for table in ("documents", "document_preparations", "research_objectives",
-                          "objective_analyses", "finding_feedback_records", "finding_curation_records"):
+            for table in SCIENTIFIC_SNAPSHOT_TABLES:
                 rows = connection.execute(text(f"SELECT md5(to_jsonb(t)::text) FROM {table} t ORDER BY 1")).scalars().all()
                 result[table] = {"count": len(rows), "sha256": hashlib.sha256(json.dumps(rows).encode()).hexdigest()}
     finally:

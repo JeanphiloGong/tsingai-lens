@@ -366,7 +366,8 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
         paper_contributions=[
-            item.to_record() for item in payload.get("paper_contributions") or ()
+            item if isinstance(item, dict) else item.to_record()
+            for item in payload.get("paper_contributions") or ()
         ],
         evidence_review=payload.get("evidence_review")
         or {

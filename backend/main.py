@@ -57,6 +57,9 @@ from application.core.objectives.analysis.finding_synthesis import (
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
 )
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
 from application.core.objectives.analysis.experiment_finding_publisher import (
     ExperimentFindingPublisher,
 )
@@ -256,6 +259,7 @@ class ApplicationOverrides:
     comparison_group_repository: ComparisonGroupRepository | None = None
     experiment_finding_repository: ExperimentFindingRepository | None = None
     experiment_analysis_writer: ExperimentAnalysisWriter | None = None
+    experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None
 
     def requires_database(self) -> bool:
         required_dependencies = (
@@ -303,6 +307,7 @@ class ApplicationRuntime:
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
     experiment_analysis_writer: ExperimentAnalysisWriter | None
+    experiment_compatibility_projection: ExperimentCompatibilityProjection | None
     experiment_query_service: ExperimentQueryService | None
 
     async def close(self) -> None:
@@ -405,6 +410,20 @@ async def build_application_runtime(
                 ),
                 finding_repository=experiment_finding_repository,
             )
+        experiment_compatibility_projection = overrides.experiment_compatibility_projection
+        if (
+            experiment_compatibility_projection is None
+            and paper_experiment_repository is not None
+            and objective_experiment_selection_repository is not None
+            and comparison_group_repository is not None
+            and experiment_finding_repository is not None
+        ):
+            experiment_compatibility_projection = ExperimentCompatibilityProjection(
+                paper_experiment_repository=paper_experiment_repository,
+                selection_repository=objective_experiment_selection_repository,
+                group_repository=comparison_group_repository,
+                finding_repository=experiment_finding_repository,
+            )
         finding_review_repository = (
             overrides.finding_review_repository
             or PostgresFindingReviewRepository(session_factory)
@@ -494,6 +513,7 @@ async def build_application_runtime(
             objective_input_service=objective_input_service,
             document_profile_service=document_profile_service,
             experiment_analysis_writer=experiment_analysis_writer,
+            experiment_compatibility_projection=experiment_compatibility_projection,
         )
         experiment_query_service = None
         if (
@@ -673,6 +693,7 @@ async def build_application_runtime(
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
             experiment_analysis_writer=experiment_analysis_writer,
+            experiment_compatibility_projection=experiment_compatibility_projection,
             experiment_query_service=experiment_query_service,
         )
     except BaseException:
@@ -711,6 +732,9 @@ def install_application_runtime(
     application.state.experiment_plan_service = runtime.experiment_plan_service
     application.state.objective_analysis_service = runtime.objective_analysis_service
     application.state.experiment_analysis_writer = runtime.experiment_analysis_writer
+    application.state.experiment_compatibility_projection = (
+        runtime.experiment_compatibility_projection
+    )
     application.state.experiment_query_service = runtime.experiment_query_service
 
 
@@ -870,6 +894,7 @@ def create_app(
     comparison_group_repository: ComparisonGroupRepository | None = None,
     experiment_finding_repository: ExperimentFindingRepository | None = None,
     experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
+    experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None,
 ) -> FastAPI:
     overrides = ApplicationOverrides(
         auth_session_service=auth_session_service,
@@ -888,6 +913,7 @@ def create_app(
         comparison_group_repository=comparison_group_repository,
         experiment_finding_repository=experiment_finding_repository,
         experiment_analysis_writer=experiment_analysis_writer,
+        experiment_compatibility_projection=experiment_compatibility_projection,
     )
     app = FastAPI(
         title="TsingAI-Lens API",

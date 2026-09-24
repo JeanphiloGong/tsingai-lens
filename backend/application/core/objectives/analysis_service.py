@@ -14,7 +14,7 @@ from collections.abc import Coroutine
 from dataclasses import replace
 import logging
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.diagnostics import (
@@ -23,6 +23,9 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
+)
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
 )
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
@@ -66,32 +69,38 @@ def _evidence_review_summary(
     result_count = 0
     gaps: list[dict[str, Any]] = []
     for evidence in evidence_records:
-        status = str(getattr(evidence, "evidence_status", "") or "unknown")
+        status = str(
+            _record_value(evidence, "evidence_status")
+            or _record_value(evidence, "resolution_status")
+            or "unknown"
+        )
         status_counts[status] = status_counts.get(status, 0) + 1
-        if getattr(evidence, "reported_result", None) is not None:
+        if _record_value(evidence, "reported_result") is not None:
             result_count += 1
         if status == "comparable":
             continue
         result = getattr(evidence, "reported_result", None)
+        if isinstance(evidence, dict):
+            result = evidence.get("reported_result")
         gaps.append(
             {
-                "evidence_id": str(getattr(evidence, "evidence_id", "") or ""),
-                "document_id": str(getattr(evidence, "document_id", "") or ""),
-                "source_kind": str(getattr(evidence, "source_kind", "") or ""),
-                "source_ref": str(getattr(evidence, "source_ref", "") or ""),
-                "page_numbers": list(getattr(evidence, "page_numbers", ()) or ()),
+                "evidence_id": str(_record_value(evidence, "evidence_id") or ""),
+                "document_id": str(_record_value(evidence, "document_id") or ""),
+                "source_kind": str(_record_value(evidence, "source_kind") or ""),
+                "source_ref": str(_record_value(evidence, "source_ref") or ""),
+                "page_numbers": list(_record_value(evidence, "page_numbers") or ()),
                 "evidence_status": status,
                 "reason": str(
-                    getattr(evidence, "evidence_status_reason", "")
+                    _record_value(evidence, "evidence_status_reason")
                     or "Evidence is not ready for a strict cross-paper comparison."
                 ),
                 "outcome": (
-                    str(getattr(result, "outcome", "") or "")
+                    str(_record_value(result, "outcome") or "")
                     if result is not None
                     else None
                 ),
                 "source_excerpt": str(
-                    getattr(evidence, "source_excerpt", "") or ""
+                    _record_value(evidence, "source_excerpt") or ""
                 )[:1200],
             }
         )
@@ -113,6 +122,20 @@ def _evidence_review_summary(
         "gaps": ordered_gaps[:_EVIDENCE_REVIEW_GAP_LIMIT],
         "omitted_gap_count": max(0, len(ordered_gaps) - _EVIDENCE_REVIEW_GAP_LIMIT),
     }
+
+
+def _record_value(record: Any, name: str) -> Any:
+    """Read a legacy domain object or a compatibility projection mapping."""
+
+    if isinstance(record, Mapping):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def _record_dict(record: Any) -> dict[str, Any]:
+    if isinstance(record, Mapping):
+        return dict(record)
+    return record.to_record()
 
 
 def _scientific_abstention(
@@ -195,6 +218,8 @@ class ObjectiveAnalysisService:
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
         experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
+        experiment_compatibility_projection: ExperimentCompatibilityProjection
+        | None = None,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
         task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
@@ -205,6 +230,7 @@ class ObjectiveAnalysisService:
         self.objective_input_service = objective_input_service
         self.document_profile_service = document_profile_service
         self.experiment_analysis_writer = experiment_analysis_writer
+        self.experiment_compatibility_projection = experiment_compatibility_projection
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
@@ -381,18 +407,27 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        findings, total = await self.objective_repository.list_findings(
-            collection_id,
-            objective_id,
-            version,
-            offset=offset,
-            limit=limit,
-        )
+        if self.experiment_compatibility_projection is not None:
+            findings, total = await self.experiment_compatibility_projection.list_findings(
+                collection_id,
+                objective_id,
+                version,
+                offset=offset,
+                limit=limit,
+            )
+        else:
+            findings, total = await self.objective_repository.list_findings(
+                collection_id,
+                objective_id,
+                version,
+                offset=offset,
+                limit=limit,
+            )
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": version,
-            "items": [finding.to_record() for finding in findings],
+            "items": [_record_dict(finding) for finding in findings],
             "evidence_reviews": await self._finding_evidence_reviews(
                 collection_id, objective_id, version, findings
             ),
@@ -414,12 +449,20 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        finding = await self.objective_repository.read_finding(
-            collection_id,
-            objective_id,
-            version,
-            finding_id,
-        )
+        if self.experiment_compatibility_projection is not None:
+            finding = await self.experiment_compatibility_projection.read_finding(
+                collection_id,
+                objective_id,
+                version,
+                finding_id,
+            )
+        else:
+            finding = await self.objective_repository.read_finding(
+                collection_id,
+                objective_id,
+                version,
+                finding_id,
+            )
         if finding is None:
             raise FileNotFoundError(
                 f"finding not found: {objective_id}/v{version}/{finding_id}"
@@ -428,10 +471,10 @@ class ObjectiveAnalysisService:
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": version,
-            "finding": finding.to_record(),
+            "finding": _record_dict(finding),
             "evidence_review": (await self._finding_evidence_reviews(
                 collection_id, objective_id, version, (finding,)
-            ))[finding.finding_id],
+            ))[_record_value(finding, "finding_id")],
         }
 
     async def _finding_evidence_reviews(
@@ -441,11 +484,18 @@ class ObjectiveAnalysisService:
         if not findings:
             return {}
         evidence = await self._all_published_evidence(collection_id, objective_id, version)
-        evidence_by_id = {item.evidence_id: item for item in evidence}
+        evidence_by_id = {
+            str(_record_value(item, "evidence_id") or ""): item for item in evidence
+        }
         reviews = {}
         for finding in findings:
-            replacements = finding.evidence_replacements(evidence_by_id)
-            reviews[finding.finding_id] = {
+            if isinstance(finding, Mapping):
+                finding_id = str(finding.get("finding_id") or "")
+                replacements = {}
+            else:
+                finding_id = finding.finding_id
+                replacements = finding.evidence_replacements(evidence_by_id)
+            reviews[finding_id] = {
                 "needs_review": bool(replacements),
                 "evidence_replacements": replacements,
             }
@@ -463,20 +513,30 @@ class ObjectiveAnalysisService:
         detail = await self.get_finding(
             collection_id, objective_id, finding_id, analysis_version=analysis_version
         )
-        records, total = await self.objective_repository.list_evidence(
-            collection_id,
-            objective_id,
-            analysis_version,
-            finding_id=finding_id,
-            offset=0,
-            limit=MAX_SUMMARY_EVIDENCE,
-        )
+        if self.experiment_compatibility_projection is not None:
+            records, total = await self.experiment_compatibility_projection.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id=finding_id,
+                offset=0,
+                limit=MAX_SUMMARY_EVIDENCE,
+            )
+        else:
+            records, total = await self.objective_repository.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id=finding_id,
+                offset=0,
+                limit=MAX_SUMMARY_EVIDENCE,
+            )
         if total > MAX_SUMMARY_EVIDENCE:
             raise FindingSummaryUnavailable("summary_input_too_large")
         result = await to_thread(
             summarize_finding_evidence,
             finding=detail["finding"],
-            evidence=[item.to_record() for item in records],
+            evidence=[_record_dict(item) for item in records],
             language=language,
         )
         await self._published_version(collection_id, objective_id, analysis_version)
@@ -497,14 +557,24 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        evidence, total = await self.objective_repository.list_evidence(
-            collection_id,
-            objective_id,
-            version,
-            finding_id=finding_id,
-            offset=offset,
-            limit=limit,
-        )
+        if self.experiment_compatibility_projection is not None:
+            evidence, total = await self.experiment_compatibility_projection.list_evidence(
+                collection_id,
+                objective_id,
+                version,
+                finding_id=finding_id,
+                offset=offset,
+                limit=limit,
+            )
+        else:
+            evidence, total = await self.objective_repository.list_evidence(
+                collection_id,
+                objective_id,
+                version,
+                finding_id=finding_id,
+                offset=offset,
+                limit=limit,
+            )
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -512,9 +582,17 @@ class ObjectiveAnalysisService:
             "finding_id": finding_id,
             "items": [
                 {
-                    **item.to_record(),
-                    "supports_finding": item.supports_finding,
-                    "eligible_for_finding_authoring": item.eligible_for_finding_authoring,
+                    **_record_dict(item),
+                    "supports_finding": (
+                        item.get("supports_finding")
+                        if isinstance(item, Mapping)
+                        else item.supports_finding
+                    ),
+                    "eligible_for_finding_authoring": (
+                        item.get("eligible_for_finding_authoring")
+                        if isinstance(item, Mapping)
+                        else item.eligible_for_finding_authoring
+                    ),
                 }
                 for item in evidence
             ],
@@ -551,6 +629,12 @@ class ObjectiveAnalysisService:
             collection_id,
             tuple(item.document_id for item in analysis.document_inputs),
         )
+        if self.experiment_compatibility_projection is not None:
+            return await self.experiment_compatibility_projection.build_evidence_map(
+                objective=objective,
+                analysis=analysis,
+                profiles=profiles,
+            )
         return build_objective_evidence_map(
             objective=objective,
             analysis=analysis,
@@ -570,6 +654,15 @@ class ObjectiveAnalysisService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Any, ...]:
+        if self.experiment_compatibility_projection is not None:
+            findings, _ = await self.experiment_compatibility_projection.list_findings(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=0,
+                limit=200,
+            )
+            return tuple(findings)
         records: list[Any] = []
         offset = 0
         while True:
@@ -591,6 +684,15 @@ class ObjectiveAnalysisService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Any, ...]:
+        if self.experiment_compatibility_projection is not None:
+            evidence, _ = await self.experiment_compatibility_projection.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=0,
+                limit=500,
+            )
+            return tuple(evidence)
         records: list[Any] = []
         offset = 0
         while True:
@@ -797,70 +899,104 @@ class ObjectiveAnalysisService:
         evidence_records = ()
         warnings: list[str] = []
         if published is not None:
-            paper_contributions = await self.objective_repository.list_contributions(
-                collection_id,
-                objective.objective_id,
-                published.analysis_version,
-            )
-            findings, finding_total = await self.objective_repository.list_findings(
-                collection_id,
-                objective.objective_id,
-                published.analysis_version,
-                offset=0,
-                limit=50,
-            )
-            evidence_records = await self._all_published_evidence(
-                collection_id,
-                objective.objective_id,
-                published.analysis_version,
-            )
+            if self.experiment_compatibility_projection is not None:
+                paper_contributions = (
+                    await self.experiment_compatibility_projection.list_contributions(
+                        collection_id,
+                        objective.objective_id,
+                        published.analysis_version,
+                    )
+                )
+                findings, finding_total = (
+                    await self.experiment_compatibility_projection.list_findings(
+                        collection_id,
+                        objective.objective_id,
+                        published.analysis_version,
+                        offset=0,
+                        limit=50,
+                    )
+                )
+                evidence_records = await self._all_published_evidence(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                )
+            else:
+                paper_contributions = await self.objective_repository.list_contributions(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                )
+                findings, finding_total = await self.objective_repository.list_findings(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                    offset=0,
+                    limit=50,
+                )
+                evidence_records = await self._all_published_evidence(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                )
             seen_warnings: set[str] = set()
             for contribution in paper_contributions:
-                for warning in contribution.warnings:
-                    scoped_warning = f"{contribution.document_id}: {warning}"
+                document_id = str(_record_value(contribution, "document_id") or "")
+                for warning in (_record_value(contribution, "warnings") or ()):
+                    scoped_warning = f"{document_id}: {warning}"
                     if scoped_warning in seen_warnings:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
-                for status, count in contribution.evidence_status_counts:
+                status_counts = _record_value(contribution, "evidence_status_counts") or {}
+                if isinstance(status_counts, Mapping):
+                    status_counts = tuple(status_counts.items())
+                for status, count in status_counts:
                     if status == "comparable" or count <= 0:
                         continue
                     scoped_status = (
-                        f"{contribution.document_id}: {count} Evidence item(s) "
+                        f"{document_id}: {count} Evidence item(s) "
                         f"classified as {status}."
                     )
                     if scoped_status in seen_warnings:
                         continue
                     seen_warnings.add(scoped_status)
                     warnings.append(scoped_status)
+                evidence_disposition = _record_value(contribution, "evidence_disposition")
+                evidence_disposition_reason = _record_value(
+                    contribution, "evidence_disposition_reason"
+                )
                 if (
-                    contribution.evidence_disposition
+                    evidence_disposition
                     in {
                         "no_routable_evidence",
                         "no_comparable_evidence",
                         "extraction_failed",
                     }
-                    and contribution.evidence_disposition_reason
+                    and evidence_disposition_reason
                 ):
                     scoped_reason = (
-                        f"{contribution.document_id}: "
-                        f"{contribution.evidence_disposition_reason}"
+                        f"{document_id}: "
+                        f"{evidence_disposition_reason}"
                     )
                     if scoped_reason not in seen_warnings:
                         seen_warnings.add(scoped_reason)
                         warnings.append(scoped_reason)
             for evidence in evidence_records:
-                for warning in evidence.warnings:
+                for warning in (_record_value(evidence, "warnings") or ()):
                     scoped_warning = (
-                        f"{evidence.document_id}/{evidence.source_ref}: {warning}"
+                        f"{_record_value(evidence, 'document_id')}/"
+                        f"{_record_value(evidence, 'source_ref')}: {warning}"
                     )
                     if scoped_warning in seen_warnings:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
             for finding in findings:
-                for warning in finding.warnings:
-                    scoped_warning = f"Finding {finding.finding_id}: {warning}"
+                for warning in (_record_value(finding, "warnings") or ()):
+                    scoped_warning = (
+                        f"Finding {_record_value(finding, 'finding_id')}: {warning}"
+                    )
                     if scoped_warning in seen_warnings:
                         continue
                     seen_warnings.add(scoped_warning)

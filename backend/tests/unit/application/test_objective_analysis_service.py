@@ -599,7 +599,13 @@ class RecordingExperimentAnalysisWriter:
         return SimpleNamespace()
 
 
-def _service(*, repository=None, analyzer=None, experiment_analysis_writer=None):
+def _service(
+    *,
+    repository=None,
+    analyzer=None,
+    experiment_analysis_writer=None,
+    experiment_compatibility_projection=None,
+):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeObjectiveEvidenceAnalysisService()
     inputs = FakeObjectiveInputService()
@@ -609,8 +615,59 @@ def _service(*, repository=None, analyzer=None, experiment_analysis_writer=None)
         objective_input_service=inputs,
         document_profile_service=inputs.document_profile_service,
         experiment_analysis_writer=experiment_analysis_writer,
+        experiment_compatibility_projection=experiment_compatibility_projection,
     )
     return service, repository, analyzer
+
+
+class RecordingExperimentCompatibilityProjection:
+    async def list_findings(self, *args, **kwargs):
+        return (
+            ({"finding_id": "projected-finding", "paper_contributions": []},),
+            1,
+        )
+
+    async def read_finding(self, *args, **kwargs):
+        return {"finding_id": "projected-finding", "paper_contributions": []}
+
+    async def list_evidence(self, *args, **kwargs):
+        return (
+            (
+                {
+                    "evidence_id": "projected-evidence",
+                    "supports_finding": True,
+                    "eligible_for_finding_authoring": True,
+                },
+            ),
+            1,
+        )
+
+
+async def test_analysis_queries_use_experiment_projection_without_changing_arguments() -> None:
+    projection = RecordingExperimentCompatibilityProjection()
+    service, _repository, _analyzer = _service(
+        repository=FakeObjectiveRepository(published=True),
+        experiment_compatibility_projection=projection,
+    )
+
+    findings = await service.list_findings(
+        "collection-1",
+        "objective-1",
+        analysis_version=1,
+        offset=2,
+        limit=7,
+    )
+    evidence = await service.list_evidence(
+        "collection-1",
+        "objective-1",
+        analysis_version=1,
+        finding_id="projected-finding",
+        offset=3,
+        limit=8,
+    )
+
+    assert findings["items"][0]["finding_id"] == "projected-finding"
+    assert evidence["items"][0]["evidence_id"] == "projected-evidence"
 
 
 async def test_objective_analysis_publishes_one_complete_version() -> None:

@@ -8,6 +8,7 @@ import pytest
 
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.paper_experiment import (
+    _bind_unambiguous_document_context,
     assemble_paper_experiment,
     assemble_paper_experiments,
     reconstruct_paper_experiments,
@@ -250,6 +251,135 @@ def test_derived_comparison_is_not_another_measured_result() -> None:
         "obs-np",
         "obs-p150",
     }
+
+
+def _group_context(
+    identifier: str,
+    sample: str,
+    *,
+    method: str | None = "Archimedes method",
+    applies_to_outcomes: list[str] | None = None,
+    source_ref: str | None = None,
+) -> SourceObservation:
+    source_ref = source_ref or f"methods-{sample}"
+    test = (
+        [
+            {
+                "name": "density measurement method",
+                "value": method,
+                "context_scope": "experimental",
+                "applies_to_outcomes": applies_to_outcomes or ["relative density"],
+            }
+        ]
+        if method is not None
+        else []
+    )
+    return SourceObservation.from_mapping(
+        {
+            "observation_id": identifier,
+            "collection_id": "col-1",
+            "objective_id": "obj-density",
+            "document_id": "doc-density",
+            "source_kind": "text_window",
+            "source_ref": source_ref,
+            "observation_role": "condition_context",
+            "source_excerpt": f"Group {sample} was tested.",
+            "scientific_context": {
+                "sample": [{"name": "sample", "value": sample}],
+                "test": test,
+            },
+            "source_refs": [
+                {"source_kind": "text_window", "source_ref": source_ref}
+            ],
+            "confidence": 0.9,
+        }
+    )
+
+
+def _density_result() -> SourceObservation:
+    return SourceObservation.from_mapping(
+        {
+            "observation_id": "density-result",
+            "collection_id": "col-1",
+            "objective_id": "obj-density",
+            "document_id": "doc-density",
+            "source_kind": "table",
+            "source_ref": "table-density",
+            "observation_role": "direct_result",
+            "source_excerpt": "Relative density was 99.1%.",
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 99.1,
+                "unit": "%",
+                "direction": "unknown",
+                "result_text": "Relative density was 99.1%.",
+            },
+            "source_refs": [
+                {"source_kind": "table", "source_ref": "table-density"}
+            ],
+            "confidence": 0.9,
+        }
+    )
+
+
+def test_consistent_group_test_context_binds_to_result_with_provenance() -> None:
+    bound = _bind_unambiguous_document_context(
+        (
+            _group_context("context-a", "A"),
+            _group_context("context-b", "B"),
+            _density_result(),
+        )
+    )
+
+    result = next(item for item in bound if item.observation_id == "density-result")
+    assert [item.to_record() for item in result.scientific_context.test] == [
+        {
+            "name": "density measurement method",
+            "value": "Archimedes method",
+            "unit": None,
+            "context_scope": "experimental",
+            "applies_to_outcomes": ["relative density"],
+        }
+    ]
+    refs = {
+        ref["source_ref"]: set(ref.get("supports", ()))
+        for ref in result.source_refs
+    }
+    assert refs["methods-A"] >= {"scientific_context.test"}
+    assert refs["methods-B"] >= {"scientific_context.test"}
+
+
+@pytest.mark.parametrize(
+    "contexts",
+    [
+        (
+            _group_context("context-a", "A", method="Archimedes method"),
+            _group_context("context-b", "B", method="helium pycnometry"),
+        ),
+        (
+            _group_context("context-a", "A"),
+            _group_context("context-b", "B", method=None),
+        ),
+        (
+            _group_context(
+                "context-a", "A", applies_to_outcomes=["relative density"]
+            ),
+            _group_context("context-b", "B", applies_to_outcomes=["hardness"]),
+        ),
+    ],
+    ids=["conflicting-values", "missing-group-context", "conflicting-outcomes"],
+)
+def test_inconsistent_group_test_context_stays_unresolved(
+    contexts: tuple[SourceObservation, SourceObservation],
+) -> None:
+    bound = _bind_unambiguous_document_context((*contexts, _density_result()))
+
+    result = next(item for item in bound if item.observation_id == "density-result")
+    assert result.scientific_context.test == ()
+    assert all(
+        ref["source_ref"] not in {"methods-A", "methods-B"}
+        for ref in result.source_refs
+    )
 
 
 def _p002_result(identifier: str, sample: str, value: float) -> SourceObservation:

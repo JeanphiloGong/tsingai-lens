@@ -691,6 +691,11 @@ def _bind_unambiguous_document_context(
             unique_values[key] = next(iter(signatures.values()))
         unique_values_by_scope[scope] = unique_values
 
+    _merge_consistent_group_test_context(
+        unique_values_by_scope=unique_values_by_scope,
+        units=units,
+    )
+
     bound: list[SourceObservation] = []
     for unit in units:
         is_named_condition = bool(
@@ -740,6 +745,63 @@ def _bind_unambiguous_document_context(
                 for item in context.get(section, [])
             }
             if field_name in existing_names:
+                if section == "test":
+                    existing_attribute = next(
+                        (
+                            item
+                            for item in context.get(section, [])
+                            if (
+                                property_matching.normalize_property_label(
+                                    item.get("name")
+                                )
+                                or _objective_column_key(item.get("name"))
+                            )
+                            == field_name
+                        ),
+                        None,
+                    )
+                    same_fact = (
+                        existing_attribute is not None
+                        and _objective_fact_scalar_key(
+                            existing_attribute.get("value")
+                        )
+                        == _objective_fact_scalar_key(attribute.get("value"))
+                        and _objective_fact_text_key(existing_attribute.get("unit"))
+                        == _objective_fact_text_key(attribute.get("unit"))
+                        and (
+                            not _objective_fact_text_key(
+                                existing_attribute.get("context_scope")
+                            )
+                            or not _objective_fact_text_key(
+                                attribute.get("context_scope")
+                            )
+                            or _objective_fact_text_key(
+                                existing_attribute.get("context_scope")
+                            )
+                            == _objective_fact_text_key(attribute.get("context_scope"))
+                        )
+                        and not any(
+                            property_matching.axis_values_match(
+                                attribute.get("name"), axis.name
+                            )
+                            or property_matching.process_axis_matches_objective_scope(
+                                attribute.get("name"), axis.name
+                            )
+                            for axis in unit.changed_variables
+                        )
+                    )
+                    if same_fact:
+                        source_ref_groups.append(
+                            _objective_source_refs_with_supports(
+                                tuple(entry["source_refs"]),
+                                "scientific_context.test",
+                            )
+                        )
+                        payload["confidence"] = min(
+                            float(payload.get("confidence") or 0.0),
+                            float(entry["confidence"]),
+                        )
+                        added = True
                 continue
             if any(
                 property_matching.axis_values_match(attribute.get("name"), axis.name)
@@ -772,6 +834,216 @@ def _bind_unambiguous_document_context(
         )
         bound.append(SourceObservation.from_mapping(payload))
     return tuple(bound)
+
+
+def _merge_consistent_group_test_context(
+    *,
+    unique_values_by_scope: dict[
+        tuple[str, str],
+        dict[tuple[str, str], dict[str, Any]],
+    ],
+    units: tuple[SourceObservation, ...],
+) -> None:
+    """Add only test facts shared by every same-paper group context.
+
+    A Methods Source can describe several named groups together and report one
+    measurement method for all of them.  The normal document-context registry
+    intentionally skips group-scoped Sources so their sample/process facts are
+    not promoted to every result.  Test facts are different: when every group
+    context states the same method, carrying that method to the result rows is
+    a source-grounded join.  Conflicting, missing, or outcome-inapplicable
+    group facts remain unresolved.
+    """
+
+    grouped_contexts: dict[tuple[str, str], list[SourceObservation]] = {}
+    seen_context_keys: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
+    for unit in units:
+        if (
+            unit.selection_status == "failed"
+            or unit.reported_result is not None
+            or unit.evidence_role not in _OBJECTIVE_CONTEXT_ROLES
+            or not _objective_context_has_group_identity(unit)
+        ):
+            continue
+        scope = (unit.objective_id, unit.document_id)
+        group_identity = tuple(
+            sorted(
+                (
+                    property_matching.normalize_property_label(attribute.name)
+                    or _objective_column_key(attribute.name),
+                    _objective_fact_scalar_key(attribute.value),
+                    _objective_fact_text_key(attribute.unit),
+                )
+                for attribute in unit.scientific_context.sample
+            )
+        )
+        test_identity = tuple(
+            sorted(
+                (
+                    property_matching.normalize_property_label(attribute.name)
+                    or _objective_column_key(attribute.name),
+                    _objective_fact_scalar_key(attribute.value),
+                    _objective_fact_text_key(attribute.unit),
+                    _objective_fact_text_key(attribute.context_scope),
+                    tuple(
+                        sorted(
+                            property_matching.normalize_property_label(value)
+                            or _objective_column_key(value)
+                            for value in attribute.applies_to_outcomes
+                            if str(value).strip()
+                        )
+                    ),
+                )
+                for attribute in unit.scientific_context.test
+            )
+        )
+        source_key = (
+            unit.source_kind,
+            unit.source_ref or f"observation:{unit.observation_id}",
+            json.dumps(
+                (group_identity, test_identity),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        if source_key in seen_context_keys.setdefault(scope, set()):
+            continue
+        seen_context_keys[scope].add(source_key)
+        grouped_contexts.setdefault(scope, []).append(unit)
+
+    for scope, contexts in grouped_contexts.items():
+        if not contexts:
+            continue
+        by_name: dict[str, list[tuple[Any, SourceObservation]]] = {}
+        signatures_by_name: dict[str, set[tuple[tuple[str, str], str]]] = {}
+        for context in contexts:
+            attrs_by_name: dict[str, list[Any]] = {}
+            for attribute in context.scientific_context.test:
+                if attribute.context_scope == "background":
+                    continue
+                name = (
+                    property_matching.normalize_property_label(attribute.name)
+                    or _objective_column_key(attribute.name)
+                )
+                if name:
+                    attrs_by_name.setdefault(name, []).append(attribute)
+            for name, attributes in attrs_by_name.items():
+                signatures = {
+                    (
+                        _objective_fact_scalar_key(attribute.value),
+                        _objective_fact_text_key(attribute.unit),
+                    )
+                    for attribute in attributes
+                }
+                signatures_by_name.setdefault(name, set()).update(signatures)
+                if len(signatures) == 1:
+                    by_name.setdefault(name, []).append((attributes[0], context))
+
+        scope_values = unique_values_by_scope.setdefault(scope, {})
+        for name, signatures in signatures_by_name.items():
+            if len(signatures) > 1:
+                # A paper-wide fallback cannot resolve a contradiction among
+                # explicitly named groups.  Keep the disagreement visible by
+                # withholding the field from every result.
+                scope_values.pop(("test", name), None)
+
+        for name, entries in by_name.items():
+            # Every distinct group context must state this field.  A field
+            # present in only one context is not a paper-wide test condition.
+            if len(entries) != len(contexts):
+                continue
+            signatures = {
+                (
+                    _objective_fact_scalar_key(attribute.value),
+                    _objective_fact_text_key(attribute.unit),
+                )
+                for attribute, _context in entries
+            }
+            if len(signatures) != 1:
+                continue
+            merged_attribute = _merge_group_test_attributes(
+                tuple(attribute for attribute, _context in entries)
+            )
+            if merged_attribute is None:
+                continue
+            source_refs = tuple(
+                ref
+                for _attribute, context in entries
+                for ref in (
+                    context.source_refs
+                    or (
+                        {
+                            "source_kind": context.source_kind,
+                            "source_ref": context.source_ref,
+                        },
+                    )
+                )
+            )
+            source_refs = _dedupe_objective_source_refs((source_refs,))
+            existing = scope_values.get(("test", name))
+            if existing is not None:
+                existing_attribute = existing["attribute"]
+                existing_signature = (
+                    _objective_fact_scalar_key(existing_attribute.get("value")),
+                    _objective_fact_text_key(existing_attribute.get("unit")),
+                )
+                if existing_signature != next(iter(signatures)):
+                    scope_values.pop(("test", name), None)
+                    continue
+                existing["source_refs"] = tuple(
+                    _dedupe_objective_source_refs(
+                        (existing["source_refs"], source_refs)
+                    )
+                )
+                existing["confidence"] = min(
+                    float(existing["confidence"]),
+                    min(context.confidence for _attribute, context in entries),
+                )
+                existing["attribute"] = merged_attribute
+                continue
+            scope_values[("test", name)] = {
+                "attribute": merged_attribute,
+                "source_refs": source_refs,
+                "confidence": min(
+                    context.confidence for _attribute, context in entries
+                ),
+            }
+
+
+def _merge_group_test_attributes(attributes: tuple[Any, ...]) -> dict[str, Any] | None:
+    """Merge compatible applicability metadata without changing the fact."""
+
+    if not attributes:
+        return None
+    applicability_sets = [
+        {
+            property_matching.normalize_property_label(value)
+            or _objective_column_key(value)
+            for value in attribute.applies_to_outcomes
+            if str(value).strip()
+        }
+        for attribute in attributes
+    ]
+    non_empty = [values for values in applicability_sets if values]
+    common_outcomes = set(non_empty[0]) if non_empty else set()
+    for values in non_empty[1:]:
+        common_outcomes.intersection_update(values)
+    if len(non_empty) > 1 and not common_outcomes:
+        return None
+    applicability = tuple(
+        dict.fromkeys(
+            str(value).strip()
+            for attribute in attributes
+            for value in attribute.applies_to_outcomes
+            if str(value).strip()
+        )
+    )
+    merged = attributes[0].to_record()
+    if applicability:
+        merged["applies_to_outcomes"] = list(applicability)
+    else:
+        merged.pop("applies_to_outcomes", None)
+    return merged
 
 
 def _document_context_text(context: Mapping[str, Any]) -> str:

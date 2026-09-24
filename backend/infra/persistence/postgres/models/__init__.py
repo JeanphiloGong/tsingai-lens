@@ -41,6 +41,11 @@ from infra.persistence.postgres.models.comparison_group import (
     ComparisonGroupMemberRow,
     ComparisonGroupRow,
 )
+from infra.persistence.postgres.models.experiment_finding import (
+    ExperimentFindingRow,
+    FindingComparisonGroupRow,
+    FindingSelectionRow,
+)
 __all__ = [
     "AuthSession",
     "AuthUser",
@@ -51,6 +56,9 @@ __all__ = [
     "Collection",
     "ComparisonGroupMemberRow",
     "ComparisonGroupRow",
+    "ExperimentFindingRow",
+    "FindingComparisonGroupRow",
+    "FindingSelectionRow",
     "Document",
     "DocumentPreparationRow",
     "EvaluationGoldSetRecord",

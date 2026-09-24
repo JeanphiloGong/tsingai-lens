@@ -161,6 +161,39 @@ def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
         assert removed not in record
 
 
+def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> None:
+    finding = Finding.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 2,
+            "finding_id": "finding-experiment-1",
+            "statement": "The reported outcome changes under the selected condition.",
+            "factors": ["preheating"],
+            "outcome": "elongation",
+            "direction": "mixed",
+            "assertion_strength": "descriptive",
+            "attribution_scope": "descriptive_only",
+            "synthesis_status": "single_study",
+            "certainty": 0.4,
+            "display_rank": 0,
+            "mechanisms": [],
+            "scientific_context": {},
+            "limitations": ["The selected record has no cross-paper confirmation."],
+            "paper_contributions": [],
+            "selection_ids": ["selection-1"],
+            "comparison_group_ids": [],
+        }
+    )
+
+    record = finding.to_record()
+    restored = Finding.from_mapping(record)
+
+    assert restored.selection_ids == ("selection-1",)
+    assert restored.comparison_group_ids == ()
+    assert restored.support_scope == "paper"
+
+
 def test_finding_validates_direct_evidence_and_complete_paper_coverage() -> None:
     finding = _finding(
         paper_contributions=[

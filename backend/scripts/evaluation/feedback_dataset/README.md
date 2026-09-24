@@ -13,8 +13,10 @@ python backend/scripts/evaluation/feedback_dataset/prepare.py \
 `prepare.py` verifies the snapshot and writes `snapshot.json`, `prepared.json`,
 `train.jsonl`, and `eval.jsonl`. It checks the manifest, provenance and content
 digests, row digests, dataset-specific fields, and train/eval isolation by paper
-family and session tree. Context overflow is an error; Source or target text is
-never silently truncated. The token accounting format is
+family and session tree. `prepared.json` also carries a digest over its revision,
+seed, tokenizer, counts, and file names; changing those values makes the
+directory unusable until it is prepared again. Context overflow is an error;
+Source or target text is never silently truncated. The token accounting format is
 `lens-whitespace-v1`; it documents prompt/target loss masks but is not a model
 tokenizer or a claim that training has happened.
 
@@ -32,6 +34,8 @@ python backend/scripts/evaluation/feedback_dataset/experiment.py \
 ```
 
 The report records the snapshot digests, source revision, seed, evaluation row
-set, baseline/candidate metrics, weight provenance and deployment status. If a
-prediction or model artifact is unavailable, the report stays `not_run`; this
+set, baseline/candidate metrics, weight provenance and deployment status. Both
+baseline and candidate prediction artifacts are required before the report is
+marked `completed`; a partial run remains `not_run` with its completed branch
+preserved for diagnosis. If a prediction or model artifact is unavailable, the
 protocol never deploys weights or changes online Chat behavior.

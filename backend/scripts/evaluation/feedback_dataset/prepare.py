@@ -14,7 +14,7 @@ import subprocess
 from typing import Any, Iterable
 
 
-PREPARED_SCHEMA_VERSION = "feedback-offline-prepared.v1"
+PREPARED_SCHEMA_VERSION = "feedback-offline-prepared.v2"
 TOKENIZER_NAME = "lens-whitespace-v1"
 TOKENIZER_VERSION = 1
 DATASET_TYPES = {"evaluation", "sft", "preference"}
@@ -102,7 +102,7 @@ def prepare_snapshot(
         for split in ("train", "eval")
     }
     rows_digest = _digest(prepared_rows)
-    prepared = {
+    prepared_body = {
         "schema_version": PREPARED_SCHEMA_VERSION,
         "snapshot": {
             "dataset_id": snapshot["dataset_id"],
@@ -129,6 +129,13 @@ def prepare_snapshot(
         },
         "status": "ready",
     }
+    prepared = {
+        **prepared_body,
+        # Keep revision, seed, tokenizer and file names under the same
+        # integrity boundary as the snapshot rows.  Otherwise an operator
+        # could rewrite prepared.json and misattribute an experiment.
+        "prepared_digest": _digest(prepared_body),
+    }
 
     destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
@@ -146,6 +153,13 @@ def load_prepared(prepared_dir: str | Path) -> dict[str, Any]:
     prepared = _read_json_object(directory / "prepared.json", error_prefix="prepared")
     if prepared.get("schema_version") != PREPARED_SCHEMA_VERSION:
         raise SnapshotValidationError("prepared_schema_invalid")
+    prepared_digest = prepared.get("prepared_digest")
+    if not isinstance(prepared_digest, str) or len(prepared_digest) != 64:
+        raise SnapshotValidationError("prepared_digest_missing")
+    prepared_basis = dict(prepared)
+    prepared_basis.pop("prepared_digest", None)
+    if _digest(prepared_basis) != prepared_digest:
+        raise SnapshotValidationError("prepared_digest_mismatch")
     files = prepared.get("files")
     if not isinstance(files, dict):
         raise SnapshotValidationError("prepared_files_missing")

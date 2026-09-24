@@ -227,6 +227,39 @@ def test_experiment_records_not_run_without_prediction_artifact(tmp_path, prepar
     assert report["protocol"]["snapshot_manifest_digest"]
 
 
+def test_experiment_keeps_partial_prediction_run_not_run(
+    tmp_path, prepare_module, experiment_module
+):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+    prepare_module.prepare_snapshot(
+        snapshot_path=snapshot_path,
+        output_dir=prepared_dir,
+        revision="abc123",
+        seed=7,
+    )
+    baseline = tmp_path / "baseline.jsonl"
+    baseline.write_text(
+        json.dumps(
+            {"row_id": "row-2", "prediction": "Source B reports a lower value."}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = experiment_module.run_experiment(
+        prepared_dir=prepared_dir,
+        output_path=tmp_path / "report.json",
+        baseline_predictions=baseline,
+    )
+
+    assert report["status"] == "not_run"
+    assert report["baseline"]["status"] == "completed"
+    assert report["experiment"]["status"] == "not_run"
+    assert report["comparison"]["status"] == "not_run"
+
+
 def test_experiment_compares_predictions_on_same_eval_rows(
     tmp_path, prepare_module, experiment_module
 ):
@@ -350,6 +383,31 @@ def test_experiment_rechecks_snapshot_before_consuming_prepared_rows(
     (prepared_dir / "snapshot.json").write_text(json.dumps(tampered), encoding="utf-8")
 
     with pytest.raises(experiment_module.ExperimentProtocolError, match="mismatch"):
+        experiment_module.run_experiment(
+            prepared_dir=prepared_dir,
+            output_path=tmp_path / "report.json",
+        )
+
+
+def test_experiment_rejects_prepared_metadata_tampering(
+    tmp_path, prepare_module, experiment_module
+):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+    prepare_module.prepare_snapshot(
+        snapshot_path=snapshot_path,
+        output_dir=prepared_dir,
+        revision="abc123",
+        seed=7,
+    )
+    prepared = json.loads((prepared_dir / "prepared.json").read_text(encoding="utf-8"))
+    prepared["revision"] = "attacker-revision"
+    (prepared_dir / "prepared.json").write_text(
+        json.dumps(prepared), encoding="utf-8"
+    )
+
+    with pytest.raises(experiment_module.ExperimentProtocolError, match="prepared_digest"):
         experiment_module.run_experiment(
             prepared_dir=prepared_dir,
             output_path=tmp_path / "report.json",

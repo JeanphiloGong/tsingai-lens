@@ -103,7 +103,14 @@ def run_experiment(
         label="experiment",
     )
     comparison = _compare(baseline, experiment)
-    completed = baseline["status"] == "completed" or experiment["status"] == "completed"
+    # A comparison is only a completed experiment when both sides were
+    # produced for the exact same eval set.  A single artifact is useful for
+    # diagnostics, but must remain ``not_run`` at the report level so callers
+    # cannot mistake a partial run for a baseline/candidate result.
+    completed = (
+        baseline["status"] == "completed"
+        and experiment["status"] == "completed"
+    )
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "status": "completed" if completed else "not_run",

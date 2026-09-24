@@ -33,9 +33,20 @@ python backend/scripts/evaluation/feedback_dataset/experiment.py \
   --weights-manifest /tmp/weights.json
 ```
 
-The report records the snapshot digests, source revision, seed, evaluation row
-set, baseline/candidate metrics, weight provenance and deployment status. Both
-baseline and candidate prediction artifacts are required before the report is
-marked `completed`; a partial run remains `not_run` with its completed branch
-preserved for diagnosis. If a prediction or model artifact is unavailable, the
-protocol never deploys weights or changes online Chat behavior.
+The report records the snapshot digests, the prepared directory digest, source
+revision, seed, evaluation row set, baseline/candidate metrics, weight
+provenance and deployment status. It also contains a
+`feedback-offline-run-manifest.v1` `run_manifest`. Its deterministic `run_id`
+is derived from the validated protocol and the byte digests of the prediction
+and weight-manifest inputs, so moving the same files to another directory does
+not create a different run identity. Each provided prediction artifact records
+its SHA-256, byte size and non-empty JSONL record count; a weight manifest
+records its SHA-256 and byte size. Absolute paths remain only in the detailed
+branch report for diagnosis and are excluded from `run_id`.
+
+Both baseline and candidate prediction artifacts are required before the report
+is marked `completed`; a partial run remains `not_run` with its completed branch
+preserved for diagnosis. The manifest is an audit ledger, not evidence that a
+training framework loaded weights. If a prediction or model artifact is
+unavailable, training and deployment remain outside this protocol, and the
+script never changes online Chat behavior.

@@ -238,6 +238,10 @@ def test_experiment_records_not_run_without_prediction_artifact(tmp_path, prepar
     assert report["baseline"]["status"] == "not_run"
     assert report["experiment"]["status"] == "not_run"
     assert report["protocol"]["snapshot_manifest_digest"]
+    assert report["protocol"]["prepared_digest"]
+    assert report["run_manifest"]["status"] == "not_run"
+    assert report["run_manifest"]["artifacts"]["baseline_predictions"]["status"] == "missing"
+    assert report["deployment"]["status"] == "not_run"
 
 
 def test_experiment_keeps_partial_prediction_run_not_run(
@@ -307,6 +311,141 @@ def test_experiment_compares_predictions_on_same_eval_rows(
     assert report["baseline"]["metrics"]["exact_match"] == 1.0
     assert report["experiment"]["metrics"]["exact_match"] == 0.0
     assert report["comparison"]["exact_match_delta"] == -1.0
+
+
+def test_experiment_run_manifest_is_deterministic_and_records_input_artifacts(
+    tmp_path, prepare_module, experiment_module
+):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+    prepare_module.prepare_snapshot(
+        snapshot_path=snapshot_path,
+        output_dir=prepared_dir,
+        revision="abc123",
+        seed=7,
+    )
+    baseline = tmp_path / "baseline.jsonl"
+    candidate = tmp_path / "candidate.jsonl"
+    baseline.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."}) + "\n",
+        encoding="utf-8",
+    )
+    candidate.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        encoding="utf-8",
+    )
+
+    first = experiment_module.run_experiment(
+        prepared_dir=prepared_dir,
+        output_path=tmp_path / "first.json",
+        baseline_predictions=baseline,
+        experiment_predictions=candidate,
+    )
+    second = experiment_module.run_experiment(
+        prepared_dir=prepared_dir,
+        output_path=tmp_path / "second.json",
+        baseline_predictions=baseline,
+        experiment_predictions=candidate,
+    )
+
+    manifest = first["run_manifest"]
+    assert first["run_manifest"]["run_id"] == second["run_manifest"]["run_id"]
+    assert manifest["prepared_digest"] == first["protocol"]["prepared_digest"]
+    assert manifest["comparison_status"] == "completed"
+    baseline_artifact = manifest["artifacts"]["baseline_predictions"]
+    assert baseline_artifact["status"] == "provided"
+    assert baseline_artifact["sha256"] == hashlib.sha256(baseline.read_bytes()).hexdigest()
+    assert baseline_artifact["byte_size"] == baseline.stat().st_size
+    assert baseline_artifact["line_count"] == 1
+    assert "path" not in baseline_artifact
+
+
+def test_experiment_run_id_changes_when_prediction_bytes_change(
+    tmp_path, prepare_module, experiment_module
+):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
+    prepare_module.prepare_snapshot(
+        snapshot_path=snapshot_path,
+        output_dir=prepared_dir,
+        revision="abc123",
+        seed=7,
+    )
+    baseline = tmp_path / "baseline.jsonl"
+    candidate = tmp_path / "candidate.jsonl"
+    baseline.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."}) + "\n",
+        encoding="utf-8",
+    )
+    candidate.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        encoding="utf-8",
+    )
+    first = experiment_module.run_experiment(
+        prepared_dir=prepared_dir,
+        output_path=tmp_path / "first.json",
+        baseline_predictions=baseline,
+        experiment_predictions=candidate,
+    )
+    candidate.write_text(
+        json.dumps({"row_id": "row-2", "prediction": "a different wrong answer"}) + "\n",
+        encoding="utf-8",
+    )
+    second = experiment_module.run_experiment(
+        prepared_dir=prepared_dir,
+        output_path=tmp_path / "second.json",
+        baseline_predictions=baseline,
+        experiment_predictions=candidate,
+    )
+
+    assert first["run_manifest"]["run_id"] != second["run_manifest"]["run_id"]
+    assert first["run_manifest"]["artifacts"]["experiment_predictions"]["sha256"] != second[
+        "run_manifest"
+    ]["artifacts"]["experiment_predictions"]["sha256"]
+
+
+def test_experiment_records_weight_manifest_as_validated_metadata(
+    tmp_path, prepare_module, experiment_module
+):
+    snapshot_path = tmp_path / "snapshot.json"
+    prepared_dir = tmp_path / "prepared"
+    snapshot = _snapshot()
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    prepare_module.prepare_snapshot(
+        snapshot_path=snapshot_path,
+        output_dir=prepared_dir,
+        revision="abc123",
+        seed=7,
+    )
+    weights = tmp_path / "weights.json"
+    weights.write_text(
+        json.dumps(
+            {
+                "model_id": "candidate-1",
+                "snapshot_manifest_digest": snapshot["manifest_digest"],
+                "revision": "abc123",
+                "seed": 7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = experiment_module.run_experiment(
+        prepared_dir=prepared_dir,
+        output_path=tmp_path / "report.json",
+        weights_manifest=weights,
+    )
+
+    assert report["weights"]["status"] == "validated"
+    assert report["weights"]["artifact"]["status"] == "provided"
+    assert report["weights"]["artifact"]["sha256"] == hashlib.sha256(
+        weights.read_bytes()
+    ).hexdigest()
+    assert report["run_manifest"]["artifacts"]["weights_manifest"]["byte_size"] == weights.stat().st_size
+    assert report["deployment"]["status"] == "not_run"
+    assert report["status"] == "not_run"
 
 
 def test_evaluation_without_reference_is_reported_as_unscorable(experiment_module):
@@ -475,7 +614,10 @@ def test_cli_prepare_to_experiment_round_trip(tmp_path):
     report = json.loads(complete.stdout)
     assert report["status"] == "completed"
     assert report["comparison"]["exact_match_delta"] == -1.0
-    assert json.loads(complete_report.read_text(encoding="utf-8"))["status"] == "completed"
+    assert report["run_manifest"]["run_id"]
+    persisted = json.loads(complete_report.read_text(encoding="utf-8"))
+    assert persisted["status"] == "completed"
+    assert persisted["run_manifest"]["run_id"] == report["run_manifest"]["run_id"]
 
 
 def test_cli_rejects_lineage_and_prepared_metadata_tampering(tmp_path):

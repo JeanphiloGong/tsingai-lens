@@ -32,6 +32,7 @@ _SnapshotValidationError, _load_prepared = _prepare_api()
 
 
 REPORT_SCHEMA_VERSION = "feedback-offline-experiment-report.v1"
+RUN_MANIFEST_SCHEMA_VERSION = "feedback-offline-run-manifest.v1"
 
 
 class ExperimentProtocolError(ValueError):
@@ -111,14 +112,24 @@ def run_experiment(
         baseline["status"] == "completed"
         and experiment["status"] == "completed"
     )
+    overall_status = "completed" if completed else "not_run"
+    run_manifest = _run_manifest(
+        protocol=protocol,
+        baseline=baseline,
+        experiment=experiment,
+        weights=weights,
+        status=overall_status,
+        comparison=comparison,
+    )
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "status": "completed" if completed else "not_run",
+        "status": overall_status,
         "protocol": protocol,
         "baseline": baseline,
         "experiment": experiment,
         "comparison": comparison,
         "weights": weights,
+        "run_manifest": run_manifest,
         "deployment": {"status": "not_run", "reason": "offline_protocol_only"},
     }
     destination = Path(output_path).expanduser().resolve()
@@ -141,7 +152,10 @@ def _protocol_metadata(prepared: dict[str, Any]) -> dict[str, Any]:
     if any(not row_id for row_id in row_ids) or len(set(row_ids)) != len(row_ids):
         raise ExperimentProtocolError("eval_row_ids_invalid")
     return {
+        "prepared_schema_version": prepared.get("schema_version"),
+        "prepared_digest": prepared.get("prepared_digest"),
         "snapshot_id": snapshot.get("dataset_id"),
+        "collection_id": snapshot.get("collection_id"),
         "snapshot_manifest_digest": snapshot.get("manifest_digest"),
         "snapshot_provenance_digest": snapshot.get("provenance_digest"),
         "snapshot_content_digest": snapshot.get("content_digest"),
@@ -158,12 +172,22 @@ def _validate_weights_manifest(
     path: str | Path | None, protocol: dict[str, Any]
 ) -> dict[str, Any]:
     if path is None:
-        return {"status": "not_run", "reason": "no_weight_manifest"}
+        return {
+            "status": "not_run",
+            "reason": "no_weight_manifest",
+            "artifact": {"status": "missing"},
+        }
     weight_path = Path(path).expanduser().resolve()
     try:
-        value = json.loads(weight_path.read_text(encoding="utf-8"))
+        raw = weight_path.read_bytes()
     except FileNotFoundError as exc:
         raise ExperimentProtocolError(f"weights_manifest_not_found:{weight_path}") from exc
+    except OSError as exc:
+        raise ExperimentProtocolError(f"weights_manifest_unreadable:{weight_path}") from exc
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ExperimentProtocolError(f"weights_manifest_malformed_utf8:{weight_path}") from exc
     except json.JSONDecodeError as exc:
         raise ExperimentProtocolError(f"weights_manifest_malformed_json:{exc.lineno}") from exc
     if not isinstance(value, dict):
@@ -181,6 +205,11 @@ def _validate_weights_manifest(
         "snapshot_manifest_digest": value["snapshot_manifest_digest"],
         "revision": value["revision"],
         "seed": value["seed"],
+        "artifact": {
+            "status": "provided",
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "byte_size": len(raw),
+        },
     }
 
 
@@ -192,9 +221,13 @@ def _evaluate_artifact(
     label: str,
 ) -> dict[str, Any]:
     if path is None:
-        return {"status": "not_run", "reason": "prediction_artifact_missing"}
+        return {
+            "status": "not_run",
+            "reason": "prediction_artifact_missing",
+            "artifact": {"status": "missing"},
+        }
     prediction_path = Path(path).expanduser().resolve()
-    predictions = _read_predictions(prediction_path)
+    predictions, artifact = _read_prediction_artifact(prediction_path)
     expected_ids = {str(row["row_id"]) for row in eval_rows}
     actual_ids = set(predictions)
     if actual_ids != expected_ids:
@@ -205,8 +238,57 @@ def _evaluate_artifact(
     return {
         "status": "completed",
         "path": str(prediction_path),
+        "artifact": artifact,
         "metrics": metrics,
     }
+
+
+def _run_manifest(
+    *,
+    protocol: dict[str, Any],
+    baseline: dict[str, Any],
+    experiment: dict[str, Any],
+    weights: dict[str, Any],
+    status: str,
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a stable input ledger without claiming a training run occurred."""
+
+    artifacts = {
+        "baseline_predictions": _manifest_artifact(baseline),
+        "experiment_predictions": _manifest_artifact(experiment),
+        "weights_manifest": _manifest_artifact(weights),
+    }
+    basis = {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "protocol": protocol,
+        "artifacts": artifacts,
+    }
+    return {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "run_id": _digest(basis),
+        "snapshot_id": protocol["snapshot_id"],
+        "snapshot_manifest_digest": protocol["snapshot_manifest_digest"],
+        "snapshot_provenance_digest": protocol["snapshot_provenance_digest"],
+        "snapshot_content_digest": protocol["snapshot_content_digest"],
+        "prepared_digest": protocol["prepared_digest"],
+        "dataset_type": protocol["dataset_type"],
+        "revision": protocol["revision"],
+        "seed": protocol["seed"],
+        "eval_row_ids_digest": protocol["eval_row_ids_digest"],
+        "artifacts": artifacts,
+        "status": status,
+        "comparison_status": comparison.get("status"),
+    }
+
+
+def _manifest_artifact(value: dict[str, Any]) -> dict[str, Any]:
+    artifact = value.get("artifact")
+    if not isinstance(artifact, dict):
+        return {"status": "unknown"}
+    # Paths are useful in the detailed branch report, but make a poor identity
+    # component because the same artifact can be mounted at different paths.
+    return {key: item for key, item in artifact.items() if key != "path"}
 
 
 def _metrics(
@@ -273,10 +355,20 @@ def _compare(baseline: dict[str, Any], experiment: dict[str, Any]) -> dict[str, 
 
 
 def _read_predictions(path: Path) -> dict[str, dict[str, Any]]:
+    return _read_prediction_artifact(path)[0]
+
+
+def _read_prediction_artifact(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        raw = path.read_bytes()
     except FileNotFoundError as exc:
         raise ExperimentProtocolError(f"prediction_artifact_not_found:{path}") from exc
+    except OSError as exc:
+        raise ExperimentProtocolError(f"prediction_artifact_unreadable:{path}") from exc
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ExperimentProtocolError(f"prediction_artifact_malformed_utf8:{path}") from exc
     predictions: dict[str, dict[str, Any]] = {}
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
@@ -291,7 +383,12 @@ def _read_predictions(path: Path) -> dict[str, dict[str, Any]]:
         if row_id in predictions:
             raise ExperimentProtocolError(f"prediction_duplicate_row:{row_id}")
         predictions[row_id] = value
-    return predictions
+    return predictions, {
+        "status": "provided",
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "byte_size": len(raw),
+        "line_count": sum(1 for line in lines if line.strip()),
+    }
 
 
 def _normalise_text(value: Any) -> str:
@@ -307,4 +404,9 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["ExperimentProtocolError", "run_experiment"]
+__all__ = [
+    "ExperimentProtocolError",
+    "REPORT_SCHEMA_VERSION",
+    "RUN_MANIFEST_SCHEMA_VERSION",
+    "run_experiment",
+]

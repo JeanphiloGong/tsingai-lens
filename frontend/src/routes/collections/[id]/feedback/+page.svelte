@@ -15,6 +15,7 @@
 	import {
 		fetchFeedbackCase,
 		fetchFeedbackCases,
+		saveFeedbackAnnotation,
 		type FeedbackCaseDetail,
 		type FeedbackCaseSummary
 	} from '../../../_shared/feedbackCases';
@@ -26,6 +27,15 @@
 	let error = '';
 	let filter = '';
 	let activeStatus = 'all';
+	let annotationSaving = false;
+	let annotationError = '';
+	let annotationSaved = false;
+	let annotationProblemType = 'source_missing';
+	let annotationSeverity = 'medium';
+	let annotationTarget = '';
+	let annotationReason = '';
+	let annotationSupportRefs: string[] = [];
+	let annotationDatasetUses: string[] = ['evaluation'];
 
 	$: collectionId = $page.params.id ?? '';
 	$: visibleCases = cases.filter((item) => {
@@ -65,10 +75,61 @@
 		error = '';
 		try {
 			selected = await fetchFeedbackCase(collectionId, item.case_id);
+			loadAnnotationForm(selected);
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
 			detailLoading = false;
+		}
+	}
+
+	function loadAnnotationForm(detail: FeedbackCaseDetail) {
+		const annotation = detail.annotation;
+		annotationProblemType = String(annotation?.problem_type ?? detail.analysis?.problem_type ?? 'source_missing');
+		annotationSeverity = String(annotation?.severity ?? 'medium');
+		annotationTarget = String(annotation?.target ?? detail.analysis?.suggested_target ?? '');
+		annotationReason = String(annotation?.reason ?? '');
+		annotationSupportRefs = Array.isArray(annotation?.support_source_refs)
+			? annotation.support_source_refs.map(String)
+			: [];
+		annotationDatasetUses = Array.isArray(annotation?.dataset_uses)
+			? annotation.dataset_uses.map(String)
+			: ['evaluation'];
+		annotationError = '';
+		annotationSaved = false;
+	}
+
+	$: annotationSources = selected
+		? [...selected.inspected_sources, ...selected.claim_support]
+			.filter((source, index, values) => {
+				const ref = String(source.source_ref ?? source.source_id ?? '');
+				return ref && values.findIndex((item) => String(item.source_ref ?? item.source_id ?? '') === ref) === index;
+			})
+		: [];
+
+	async function saveAnnotation() {
+		if (!selected || annotationSaving) return;
+		annotationSaving = true;
+		annotationError = '';
+		annotationSaved = false;
+		try {
+			await saveFeedbackAnnotation(collectionId, selected.case_id, {
+				expected_digest: selected.current_annotation_digest,
+				problem_type: annotationProblemType,
+				severity: annotationSeverity,
+				target: annotationTarget.trim() || null,
+				support_source_refs: annotationSupportRefs,
+				dataset_uses: annotationDatasetUses,
+				reason: annotationReason.trim()
+			});
+			selected = await fetchFeedbackCase(collectionId, selected.case_id);
+			loadAnnotationForm(selected);
+			annotationSaved = true;
+			await loadCases();
+		} catch (err) {
+			annotationError = errorMessage(err);
+		} finally {
+			annotationSaving = false;
 		}
 	}
 
@@ -269,14 +330,33 @@
 					{#if selected.gaps.length}<ul class="gap-list">{#each selected.gaps as gap}<li>{gap}</li>{/each}</ul>{:else}<p class="muted">{$t('feedbackWorkbench.noGaps')}</p>{/if}
 				</section>
 
-				<section class="detail-section analysis-panel">
+					<section class="detail-section analysis-panel">
 					<div class="section-heading"><h3>{$t('feedbackWorkbench.aiSuggestion')}</h3><span>{$t('feedbackWorkbench.candidateOnly')}</span></div>
 					{#if selected.analysis}
 						<div class="analysis-grid"><div><span class="section-label">{$t('feedbackWorkbench.possibleIssue')}</span><strong>{label(selected.analysis.problem_type)}</strong></div><div><span class="section-label">{$t('feedbackWorkbench.confidence')}</span><strong>{Math.round(selected.analysis.confidence * 100)}%</strong></div></div>
 					{:else}<p class="muted">{$t('feedbackWorkbench.analysisCollecting')}</p>{/if}
 					{#if selected.technical_error}<p class="technical-note">{$t('feedbackWorkbench.statusFailed')}: {$t('feedbackWorkbench.statusHelp')}</p>{/if}
-				</section>
-			{/if}
+					</section>
+
+					{#if selected.status === 'needs_annotation' || selected.status === 'ready_for_review'}
+						<section class="detail-section annotation-panel">
+							<div class="section-heading"><h3>{$t('feedbackWorkbench.annotationTitle')}</h3><span>{$t('feedbackWorkbench.annotationHint')}</span></div>
+							{#if annotationError}<div class="inline-error" role="alert"><AlertTriangle size={15} />{annotationError}</div>{/if}
+							{#if annotationSaved}<div class="inline-success" role="status"><CheckCircle2 size={15} />{$t('feedbackWorkbench.annotationSaved')}</div>{/if}
+							<div class="annotation-grid">
+								<label><span class="field-label">{$t('feedbackWorkbench.annotationProblem')}</span><select bind:value={annotationProblemType}><option value="fact_error">{$t('feedbackWorkbench.problemFactError')}</option><option value="source_missing">{$t('feedbackWorkbench.problemSourceMissing')}</option><option value="evidence_mismatch">{$t('feedbackWorkbench.problemEvidenceMismatch')}</option><option value="retrieval_failure">{$t('feedbackWorkbench.problemRetrievalFailure')}</option><option value="tool_failure">{$t('feedbackWorkbench.problemToolFailure')}</option><option value="intent_mismatch">{$t('feedbackWorkbench.problemIntentMismatch')}</option><option value="incomplete_answer">{$t('feedbackWorkbench.problemIncomplete')}</option><option value="style_or_format">{$t('feedbackWorkbench.problemStyle')}</option><option value="undetermined_dissatisfaction">{$t('feedbackWorkbench.problemUndetermined')}</option></select></label>
+								<label><span class="field-label">{$t('feedbackWorkbench.annotationSeverity')}</span><select bind:value={annotationSeverity}><option value="low">{$t('feedbackWorkbench.severityLow')}</option><option value="medium">{$t('feedbackWorkbench.severityMedium')}</option><option value="high">{$t('feedbackWorkbench.severityHigh')}</option><option value="critical">{$t('feedbackWorkbench.severityCritical')}</option></select></label>
+							</div>
+							<label class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationTarget')}</span><textarea bind:value={annotationTarget} rows="4" placeholder={$t('feedbackWorkbench.annotationTargetPlaceholder')}></textarea></label>
+							{#if annotationSources.length}
+								<div class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationSources')}</span><div class="annotation-sources">{#each annotationSources as source}<label class="source-choice"><input type="checkbox" value={String(source.source_ref ?? source.source_id)} bind:group={annotationSupportRefs} /><span><strong>{sourceTitle(source)}</strong><small>{sourceLocator(source)}</small></span></label>{/each}</div></div>
+							{:else}<p class="muted">{$t('feedbackWorkbench.annotationNoSources')}</p>{/if}
+							<div class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationUses')}</span><div class="use-choices"><label><input type="checkbox" value="evaluation" bind:group={annotationDatasetUses} />{$t('feedbackWorkbench.useEvaluation')}</label><label><input type="checkbox" value="sft" bind:group={annotationDatasetUses} />{$t('feedbackWorkbench.useSft')}</label><label><input type="checkbox" value="preference" bind:group={annotationDatasetUses} />{$t('feedbackWorkbench.usePreference')}</label></div></div>
+							<label class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationReason')}</span><textarea bind:value={annotationReason} rows="3" placeholder={$t('feedbackWorkbench.annotationReasonPlaceholder')}></textarea></label>
+							<div class="annotation-actions"><span class="muted">{$t('feedbackWorkbench.annotationNoIds')}</span><button type="button" class="primary-button" on:click={saveAnnotation} disabled={annotationSaving || !annotationReason.trim()}>{annotationSaving ? $t('feedbackWorkbench.annotationSaving') : $t('feedbackWorkbench.annotationSave')}</button></div>
+						</section>
+					{/if}
+				{/if}
 		</main>
 	</div>
 </section>
@@ -355,8 +435,25 @@
 	.analysis-panel { background: var(--brand-soft); }
 	.analysis-grid { justify-content: flex-start; gap: 44px; }
 	.analysis-grid strong { display: block; margin-top: 5px; font-size: 14px; text-transform: capitalize; }
-	.technical-note { margin: 16px 0 0; color: var(--danger-text); font-size: 12px; line-height: 1.5; }
+		.technical-note { margin: 16px 0 0; color: var(--danger-text); font-size: 12px; line-height: 1.5; }
+		.annotation-panel { background: var(--bg-subtle); }
+		.annotation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+		.field-block, .annotation-grid label { display: grid; gap: 6px; margin-top: 12px; }
+		.field-label { color: var(--text-secondary); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+		textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 74px; padding: 9px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-card); font: inherit; line-height: 1.5; }
+		.annotation-sources { display: grid; gap: 8px; }
+		.source-choice { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-card); cursor: pointer; }
+		.source-choice span { display: grid; gap: 2px; min-width: 0; }
+		.source-choice small { color: var(--text-secondary); overflow-wrap: anywhere; }
+		.use-choices { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+		.use-choices label { display: flex; align-items: center; gap: 6px; }
+		.annotation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; }
+		.primary-button { padding: 9px 14px; border: 0; border-radius: 6px; background: var(--brand-primary); color: white; font: inherit; font-weight: 700; cursor: pointer; }
+		.primary-button:disabled { opacity: .55; cursor: default; }
+		.inline-error, .inline-success { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-radius: 6px; font-size: 12px; }
+		.inline-error { color: var(--danger-text); background: var(--danger-bg); }
+		.inline-success { color: var(--success-text); background: var(--success-bg); }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
-	@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } }
+		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }
 </style>

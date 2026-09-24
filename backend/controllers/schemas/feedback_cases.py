@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,5 +48,43 @@ class FeedbackCaseDetailResponse(BaseModel):
     annotation: dict[str, Any] | None = None
     current_annotation_digest: str | None = None
     technical_error: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class FeedbackAnnotationRequest(BaseModel):
+    expected_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    problem_type: Literal[
+        "fact_error",
+        "source_missing",
+        "evidence_mismatch",
+        "retrieval_failure",
+        "tool_failure",
+        "intent_mismatch",
+        "incomplete_answer",
+        "style_or_format",
+        "undetermined_dissatisfaction",
+    ]
+    severity: Literal["low", "medium", "high", "critical"]
+    target: str | None = Field(default=None, max_length=20000)
+    support_source_refs: list[str] = Field(default_factory=list, max_length=100)
+    dataset_uses: list[Literal["evaluation", "sft", "preference"]] = Field(
+        default_factory=list, max_length=3
+    )
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+class FeedbackAnnotationResponse(BaseModel):
+    annotation_id: str
+    case_id: str
+    version: int
+    problem_type: str
+    severity: str
+    target: str | None
+    support_source_refs: list[str]
+    dataset_uses: list[str]
+    reason: str
+    annotation_digest: str
+    created_by: str
     created_at: str
     updated_at: str

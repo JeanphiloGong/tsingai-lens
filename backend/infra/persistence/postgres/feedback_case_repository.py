@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.feedback.analysis_result import AnalysisResult
+from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
 from infra.persistence.postgres.models.feedback import (
+    FeedbackAnnotationRow,
     FeedbackAnalysisResultRow,
     FeedbackCaseRow,
 )
@@ -169,6 +171,66 @@ class PostgresFeedbackCaseRepository:
             rows = rows[offset:] if limit is None else rows[offset : offset + limit]
             return tuple(_case(row) for row in rows)
 
+    async def read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(FeedbackAnnotationRow)
+                .where(FeedbackAnnotationRow.case_id == case_id)
+                .order_by(FeedbackAnnotationRow.version.desc())
+                .limit(1)
+            )
+            return _annotation(row) if row is not None else None
+
+    async def save_annotation(
+        self,
+        annotation: FeedbackAnnotation,
+        *,
+        expected_digest: str | None,
+        now: str,
+    ) -> FeedbackAnnotation:
+        timestamp = _datetime(now)
+        async with self.session_factory.begin() as session:
+            case = await session.scalar(
+                select(FeedbackCaseRow)
+                .where(FeedbackCaseRow.case_id == annotation.case_id)
+                .with_for_update()
+            )
+            if case is None:
+                raise FileNotFoundError(f"feedback case not found: {annotation.case_id}")
+            if expected_digest != case.annotation_digest:
+                raise ValueError("feedback_case_stale")
+            current = await session.scalar(
+                select(FeedbackAnnotationRow)
+                .where(FeedbackAnnotationRow.case_id == annotation.case_id)
+                .order_by(FeedbackAnnotationRow.version.desc())
+                .limit(1)
+            )
+            if current is not None and current.annotation_digest == annotation.annotation_digest:
+                return _annotation(current)
+            if current is not None and annotation.version <= current.version:
+                raise ValueError("annotation_version_conflict")
+            row = FeedbackAnnotationRow(
+                annotation_id=annotation.annotation_id,
+                case_id=annotation.case_id,
+                version=annotation.version,
+                problem_type=annotation.problem_type,
+                severity=annotation.severity,
+                target=annotation.target,
+                support_source_refs=list(annotation.support_source_refs),
+                dataset_uses=list(annotation.dataset_uses),
+                reason=annotation.reason,
+                annotation_digest=annotation.annotation_digest,
+                created_by=annotation.created_by,
+                created_at=_datetime(annotation.created_at),
+                updated_at=timestamp,
+            )
+            session.add(row)
+            case.annotation_digest = annotation.annotation_digest
+            case.status = "ready_for_review"
+            case.updated_at = timestamp
+            await session.flush()
+            return _annotation(row)
+
 
 async def _save_result_row(
     session: AsyncSession, result: AnalysisResult
@@ -257,6 +319,24 @@ def _case(row: FeedbackCaseRow) -> FeedbackCase:
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
         annotation_digest=row.annotation_digest,
+    )
+
+
+def _annotation(row: FeedbackAnnotationRow) -> FeedbackAnnotation:
+    return FeedbackAnnotation(
+        annotation_id=row.annotation_id,
+        case_id=row.case_id,
+        version=row.version,
+        problem_type=row.problem_type,
+        severity=row.severity,
+        target=row.target,
+        support_source_refs=tuple(row.support_source_refs or ()),
+        dataset_uses=tuple(row.dataset_uses or ()),
+        reason=row.reason,
+        annotation_digest=row.annotation_digest,
+        created_by=row.created_by,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
     )
 
 

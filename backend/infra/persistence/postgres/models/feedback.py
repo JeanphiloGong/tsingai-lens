@@ -232,9 +232,60 @@ class FeedbackCaseRow(Base):
     annotation_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class FeedbackAnnotationRow(Base):
+    """Immutable versions of a user's confirmation for one feedback case."""
+
+    __tablename__ = "feedback_annotations"
+    __table_args__ = (
+        CheckConstraint(
+            "problem_type IN ('fact_error', 'source_missing', 'evidence_mismatch', "
+            "'retrieval_failure', 'tool_failure', 'intent_mismatch', "
+            "'incomplete_answer', 'style_or_format', 'undetermined_dissatisfaction')",
+            name="feedback_annotation_problem_type_valid",
+        ),
+        CheckConstraint(
+            "severity IN ('low', 'medium', 'high', 'critical')",
+            name="feedback_annotation_severity_valid",
+        ),
+        CheckConstraint("length(annotation_digest) = 64", name="feedback_annotation_digest_length"),
+        CheckConstraint("version >= 1", name="feedback_annotation_version_positive"),
+        UniqueConstraint("case_id", "version", name="uq_feedback_annotations_case_version"),
+        Index("ix_feedback_annotations_case_created", "case_id", "created_at"),
+    )
+
+    annotation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_cases.case_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    problem_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    target: Mapped[str | None] = mapped_column(Text, nullable=True)
+    support_source_refs: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    dataset_uses: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    annotation_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_by: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("auth_users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 __all__ = [
     "AnalysisJobRow",
     "ChatModelCallRow",
     "FeedbackAnalysisResultRow",
     "FeedbackCaseRow",
+    "FeedbackAnnotationRow",
 ]

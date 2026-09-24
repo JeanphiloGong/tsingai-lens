@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260924_0071"
+HEAD_REVISION = "20260924_0072"
 
 
 def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:

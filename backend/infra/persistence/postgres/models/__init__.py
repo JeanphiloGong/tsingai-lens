@@ -12,6 +12,7 @@ from infra.persistence.postgres.models.feedback import (
     AnalysisJobRow,
     ChatModelCallRow,
     FeedbackAnalysisResultRow,
+    FeedbackAnnotationRow,
     FeedbackCaseRow,
 )
 from infra.persistence.postgres.models.collection import Collection
@@ -78,6 +79,7 @@ __all__ = [
     "ExperimentTestConditionRow",
     "ExperimentalVariantRow",
     "FeedbackAnalysisResultRow",
+    "FeedbackAnnotationRow",
     "FeedbackCaseRow",
     "FindingCurationRecord",
     "FindingFeedbackRecord",

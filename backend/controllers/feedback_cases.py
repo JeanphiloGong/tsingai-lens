@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from application.feedback.feedback_case_service import FeedbackCaseService
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.feedback_cases import (
+    FeedbackAnnotationRequest,
+    FeedbackAnnotationResponse,
     FeedbackCaseDetailResponse,
     FeedbackCaseListResponse,
     FeedbackCaseSummaryResponse,
@@ -75,6 +77,36 @@ async def get_feedback_case(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FeedbackCaseDetailResponse.model_validate(detail)
+
+
+@router.patch("/{case_id}/annotation", response_model=FeedbackAnnotationResponse)
+async def save_feedback_annotation(
+    case_id: str,
+    payload: FeedbackAnnotationRequest,
+    request: Request,
+) -> FeedbackAnnotationResponse:
+    try:
+        annotation = await _service(request).save_annotation_for_user(
+            case_id=case_id,
+            user_id=await current_user_id(request),
+            expected_digest=payload.expected_digest,
+            problem_type=payload.problem_type,
+            severity=payload.severity,
+            target=payload.target,
+            support_source_refs=tuple(payload.support_source_refs),
+            dataset_uses=tuple(payload.dataset_uses),
+            reason=payload.reason,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        code = str(exc)
+        status = 409 if code in {"feedback_case_stale", "annotation_version_conflict"} else 422
+        raise HTTPException(
+            status_code=status,
+            detail={"code": code, "message": code.replace("_", " ")},
+        ) from exc
+    return FeedbackAnnotationResponse.model_validate(annotation.to_record())
 
 
 __all__ = ["router"]

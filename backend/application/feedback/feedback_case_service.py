@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from application.repositories.chat_repository import ChatRepository
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.source.collection_service import CollectionService
 from domain.chat import ChatMessageRole
-from domain.feedback import AnalysisResult, FeedbackCase
+from domain.feedback import AnalysisResult, FeedbackAnnotation, FeedbackCase
 
 
 @dataclass(frozen=True)
@@ -101,7 +103,76 @@ class FeedbackCaseService:
             ):
                 feedback_items.append(item)
         feedback = tuple(feedback_items)
-        return _detail(case, messages, results, feedback)
+        annotation_reader = getattr(self.case_repository, "read_annotation", None)
+        annotation = (
+            await annotation_reader(case.case_id)
+            if annotation_reader is not None
+            else None
+        )
+        return _detail(case, messages, results, feedback, annotation)
+
+    async def save_annotation_for_user(
+        self,
+        *,
+        case_id: str,
+        user_id: str,
+        expected_digest: str | None,
+        problem_type: str,
+        severity: str,
+        target: str | None,
+        support_source_refs: tuple[str, ...],
+        dataset_uses: tuple[str, ...],
+        reason: str,
+        now: str | None = None,
+    ) -> FeedbackAnnotation:
+        """Persist a human judgment after re-reading the case's evidence boundary."""
+        case, results = await self._authorized_case(case_id, user_id)
+        if case.status not in {"needs_annotation", "ready_for_review"}:
+            raise ValueError("feedback_case_not_annotatable")
+        allowed_source_refs = _case_source_refs(case, results)
+        requested_refs = tuple(dict.fromkeys(str(item).strip() for item in support_source_refs if str(item).strip()))
+        if any(ref not in allowed_source_refs for ref in requested_refs):
+            raise ValueError("annotation_source_not_in_case")
+        current = await self._read_annotation(case.case_id)
+        timestamp = now or datetime.now(timezone.utc).isoformat()
+        version = current.version + 1 if current is not None else 1
+        annotation = FeedbackAnnotation.build(
+            annotation_id=f"annotation_{uuid4().hex[:32]}",
+            case_id=case.case_id,
+            version=version,
+            problem_type=problem_type,  # type: ignore[arg-type]
+            severity=severity,  # type: ignore[arg-type]
+            target=target,
+            support_source_refs=requested_refs,
+            dataset_uses=tuple(dataset_uses),  # type: ignore[arg-type]
+            reason=reason,
+            created_by=user_id,
+            created_at=timestamp,
+        )
+        saver = getattr(self.case_repository, "save_annotation", None)
+        if saver is None:
+            raise RuntimeError("feedback annotation persistence is not configured")
+        return await saver(annotation, expected_digest=expected_digest, now=timestamp)
+
+    async def _authorized_case(
+        self, case_id: str, user_id: str
+    ) -> tuple[FeedbackCase, tuple[AnalysisResult, ...]]:
+        case = await self.case_repository.read_case(case_id)
+        if case is None:
+            raise FileNotFoundError(f"feedback case not found: {case_id}")
+        await self.collection_service.get_collection_for_user(case.collection_id, user_id)
+        session = await self.chat_repository.read_session(case.session_id)
+        if (
+            session is None
+            or session.user_id != user_id
+            or session.collection_id != case.collection_id
+        ):
+            raise FileNotFoundError(f"feedback case not found: {case_id}")
+        return case, await self.case_repository.read_analysis_results(case.analysis_result_ids)
+
+    async def _read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
+        reader = getattr(self.case_repository, "read_annotation", None)
+        return await reader(case_id) if reader is not None else None
 
     async def _authorized_collection_ids(
         self, user_id: str, collection_id: str | None
@@ -171,6 +242,7 @@ def _detail(
     messages: tuple[Any, ...],
     results: tuple[AnalysisResult, ...],
     feedback: tuple[Any, ...],
+    annotation: FeedbackAnnotation | None = None,
 ) -> dict[str, Any]:
     latest = max(results, key=lambda item: (item.created_at, item.result_id), default=None)
     answer = next(
@@ -223,12 +295,35 @@ def _detail(
             if latest
             else None
         ),
-        "annotation": None,
+        "annotation": annotation.to_record() if annotation is not None else None,
         "current_annotation_digest": case.annotation_digest,
         "technical_error": case.context_snapshot.get("technical_error"),
         "created_at": case.created_at,
         "updated_at": case.updated_at,
     }
+
+
+def _case_source_refs(
+    case: FeedbackCase, results: tuple[AnalysisResult, ...]
+) -> set[str]:
+    refs: set[str] = set()
+    for result in results:
+        coverage = result.evidence_coverage.to_record()
+        for field in ("inspected_sources", "omitted_candidates", "claim_support"):
+            for item in coverage.get(field) or ():
+                if isinstance(item, dict):
+                    value = item.get("source_ref") or item.get("source_id")
+                    if value:
+                        refs.add(str(value))
+        refs.update(str(value) for value in result.suggested_evidence if value)
+    for item in (case.context_snapshot.get("source_refs") or ()):
+        if isinstance(item, dict):
+            value = item.get("source_ref") or item.get("source_id")
+        else:
+            value = item
+        if value:
+            refs.add(str(value))
+    return refs
 
 
 def _previous_user_question(messages: tuple[Any, ...], answer: Any | None) -> str:

@@ -46,6 +46,32 @@ export type FeedbackCaseDetail = FeedbackCaseSummary & {
 	updated_at: string;
 };
 
+export type FeedbackAnnotation = {
+	annotation_id: string;
+	case_id: string;
+	version: number;
+	problem_type: string;
+	severity: string;
+	target: string | null;
+	support_source_refs: string[];
+	dataset_uses: string[];
+	reason: string;
+	annotation_digest: string;
+	created_by: string;
+	created_at: string;
+	updated_at: string;
+};
+
+export type FeedbackAnnotationInput = {
+	expected_digest: string | null;
+	problem_type: string;
+	severity: string;
+	target: string | null;
+	support_source_refs: string[];
+	dataset_uses: string[];
+	reason: string;
+};
+
 type FeedbackCaseList = {
 	items: FeedbackCaseSummary[];
 	limit: number;
@@ -80,4 +106,16 @@ export async function fetchFeedbackCases(
 
 export async function fetchFeedbackCase(collectionId: string, caseId: string) {
 	return (await requestJson(path(collectionId, caseId), { method: 'GET' })) as FeedbackCaseDetail;
+}
+
+export async function saveFeedbackAnnotation(
+	collectionId: string,
+	caseId: string,
+	input: FeedbackAnnotationInput
+) {
+	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/annotation', {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(input)
+	})) as FeedbackAnnotation;
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from domain.feedback.analysis_result import AnalysisResult
+from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
 
 
@@ -36,6 +37,16 @@ class FeedbackCaseRepository(Protocol):
         limit: int | None = 50,
         offset: int = 0,
     ) -> tuple[FeedbackCase, ...]: ...
+
+    async def read_annotation(self, case_id: str) -> FeedbackAnnotation | None: ...
+
+    async def save_annotation(
+        self,
+        annotation: FeedbackAnnotation,
+        *,
+        expected_digest: str | None,
+        now: str,
+    ) -> FeedbackAnnotation: ...
 
 
 __all__ = ["FeedbackCaseRepository"]

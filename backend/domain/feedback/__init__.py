@@ -7,6 +7,7 @@ from domain.feedback.analysis_result import (
 )
 from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.feedback_case import FeedbackCase, FeedbackCaseStatus
+from domain.feedback.annotation import AnnotationSeverity, DatasetUse, FeedbackAnnotation
 
 __all__ = [
     "AnalysisJob",
@@ -16,4 +17,7 @@ __all__ = [
     "FeedbackCase",
     "FeedbackCaseStatus",
     "FeedbackProblemType",
+    "FeedbackAnnotation",
+    "AnnotationSeverity",
+    "DatasetUse",
 ]

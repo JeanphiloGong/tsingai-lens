@@ -32,6 +32,11 @@ from infra.persistence.postgres.models.paper_experiment import (
     PaperExperimentRow,
     ReportedInterpretationRow,
 )
+from infra.persistence.postgres.models.objective_experiment_selection import (
+    ObjectiveExperimentSelectionRow,
+    SelectionComparisonRow,
+    SelectionMeasurementRow,
+)
 __all__ = [
     "AuthSession",
     "AuthUser",
@@ -53,9 +58,12 @@ __all__ = [
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
+    "ObjectiveExperimentSelectionRow",
     "ObjectiveExperimentPlan",
     "ObjectiveResearchRecord",
     "PaperExperimentRow",
     "PipelineRunRow",
     "ReportedInterpretationRow",
+    "SelectionComparisonRow",
+    "SelectionMeasurementRow",
 ]

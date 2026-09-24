@@ -40,6 +40,28 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     ) == saved
 
 
+async def test_collection_default_permission_can_be_persistent(tmp_path) -> None:
+    service = CollectionService(
+        repository=MemoryCollectionRepository(),
+        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+    )
+    collection = await service.create_collection("Persistent Agent settings", owner_user_id="owner")
+
+    saved = await service.set_agent_default_permission_for_user(
+        collection["collection_id"],
+        "owner",
+        mode="auto",
+        actions=["create_finding_version"],
+        expires_at=None,
+        expected_revision=0,
+    )
+
+    assert saved["expires_at"] is None
+    assert await service.get_agent_default_permission_for_user(
+        collection["collection_id"], "owner"
+    ) == saved
+
+
 async def test_collection_default_permission_hides_collection_from_other_users(tmp_path) -> None:
     service = CollectionService(
         repository=MemoryCollectionRepository(),

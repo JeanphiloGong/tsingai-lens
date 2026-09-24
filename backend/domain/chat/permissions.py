@@ -26,16 +26,20 @@ AUTO_ACTIONS = frozenset({
     "create_research_plan",
     "revise_research_plan",
 })
+# A non-null expiry is a temporary grant; persistent grants use ``None``.
 MAX_AUTOMATIC_PERMISSION_HOURS = 24
 
 
 def permission_record(value: Mapping[str, Any] | None) -> dict[str, Any]:
-    return dict(value) if value else {
+    record = {
         "mode": "confirm",
         "actions": [],
         "expires_at": None,
         "revision": 0,
     }
+    if value:
+        record.update(value)
+    return record
 
 
 def change_permission(
@@ -60,17 +64,21 @@ def change_permission(
     if all_actions:
         actions = sorted(AUTO_ACTIONS)
     if mode == "auto":
-        if not actions or not expires_at:
-            raise ValueError("automatic_permission_requires_actions_and_expiry")
-        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
-            raise ValueError("permission_expiry_must_be_in_the_future")
-        maximum = datetime.now(timezone.utc) + timedelta(
-            hours=MAX_AUTOMATIC_PERMISSION_HOURS
-        )
-        if expiry > maximum:
-            raise ValueError("permission_expiry_cannot_exceed_24_hours")
-    elif actions or expires_at:
+        if not actions:
+            raise ValueError("automatic_permission_requires_actions")
+        if expires_at is not None:
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ValueError("invalid_permission_expiry") from exc
+            if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
+                raise ValueError("permission_expiry_must_be_in_the_future")
+            maximum = datetime.now(timezone.utc) + timedelta(
+                hours=MAX_AUTOMATIC_PERMISSION_HOURS
+            )
+            if expiry > maximum:
+                raise ValueError("permission_expiry_cannot_exceed_24_hours")
+    elif actions or expires_at is not None:
         raise ValueError("only_automatic_permission_accepts_actions_and_expiry")
     return {
         "mode": mode,
@@ -87,12 +95,23 @@ def permits_automatic(
     now: str,
 ) -> bool:
     record = permission_record(permission)
+    expiry = record.get("expires_at")
+    if expiry is not None:
+        try:
+            expires_at = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+            current_time = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError):
+            return False
+        if expires_at.tzinfo is None or current_time.tzinfo is None:
+            return False
+        is_current = expires_at > current_time
+    else:
+        is_current = True
     return bool(
-        record["mode"] == "auto"
+        record.get("mode") == "auto"
         and name in AUTO_ACTIONS
-        and name in record["actions"]
-        and datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
-        > datetime.fromisoformat(now.replace("Z", "+00:00"))
+        and name in (record.get("actions") or ())
+        and is_current
     )
 
 

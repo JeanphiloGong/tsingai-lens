@@ -145,8 +145,10 @@ handoff record or a second research-result identity.
 
 Session operation permissions are exposed by authenticated
 `GET/PUT /api/v1/chat-sessions/{session_id}/permissions`. PUT accepts `mode`
-(`read_only`, `confirm`, `auto`), an explicit `actions` list, nullable
-`expires_at` (a future time no more than 24 hours ahead), `all_actions`, and `expected_revision`. A session without a collection default and every branched session defaults
+(`read_only`, `confirm`, `auto`), an explicit `actions` list, and
+`expires_at` (`null` keeps an automatic grant active until it is
+revoked or changed, while a non-null value must be no more than 24 hours
+ahead), `all_actions`, and `expected_revision`. A session without a collection default and every branched session defaults
 to `confirm`; revision conflicts and invalid grants return `409`, inaccessible
 sessions return `404`. The model cannot call this settings endpoint.
 
@@ -154,8 +156,8 @@ Automatic grants can cover every currently registered write action listed in
 `domain/chat/permissions.py`, including research-process and Objective actions,
 Evidence/Finding publication, review annotations, and research-plan changes.
 Evidence and Finding version creation publish a new analysis version; there is no
-separate save-only permission. The user selects the exact actions and expiry in
-the session permission control, while the default mode still requires exact
+separate save-only permission. The user selects the exact actions and optional
+expiry in the session permission control, while the default mode still requires exact
 confirmation. Calls record `decision_basis` (`explicit` or `scope_grant`) and
 `authorization_revision`.
 
@@ -171,7 +173,7 @@ settings are the deterministic control.
 
 Collection owners can set a default for newly created collection Agent sessions through
 authenticated `GET/PUT /api/v1/collections/{collection_id}/agent-permissions`.
-The endpoint uses the same mode, action, expiry, and revision contract and
+The endpoint uses the same mode, action, optional expiry, and revision contract and
 returns `404` for a collection the caller does not own. A collection default is
 copied when a session is created; changing it does not silently change an
 active session. Branches continue to default to confirmation. `all_actions=true` is expanded by the backend to every current

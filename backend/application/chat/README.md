@@ -31,10 +31,11 @@ user message -> bounded model decision -> capability call
 
 Read capabilities may inspect canonical collection resources. Write
 capabilities stop for exact user approval by default. Collection defaults can
-choose read-only, confirmation, or an expiring automatic grant for new
-sessions; a session permission can then override that authority. Both scopes
-can authorize any currently registered write action selected by the user until
-expiry, and the backend expands an all-actions request. ChatSessionService
+choose read-only, confirmation, or an automatic grant for new sessions; a
+session permission can then override that authority. An automatic grant may
+be persistent (`expires_at: null`, until revoked or changed) or temporary (up
+to 24 hours). Both scopes can authorize any currently registered write action
+selected by the user, and the backend expands an all-actions request. ChatSessionService
 claims every automatic write in the repository before resuming the same Runner;
 it never sends write calls through the parallel read executor. Revocation and
 claim share the session row lock. Chat never owns a second Objective,

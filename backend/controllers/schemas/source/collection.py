@@ -29,7 +29,12 @@ class CollectionAgentPermissionRequest(BaseModel):
     mode: Literal["read_only", "confirm", "auto"]
     actions: list[str] = Field(default_factory=list, max_length=len(AUTO_ACTIONS))
     all_actions: bool = False
-    expires_at: str | None = None
+    expires_at: str | None = Field(
+        default=None,
+        description=(
+            "Optional automatic-grant expiry; null keeps the grant active until revoked."
+        ),
+    )
     expected_revision: int = Field(ge=0)
 
 

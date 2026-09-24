@@ -169,6 +169,15 @@ async def test_permission_controller_enforces_owner_and_revision():
             },
             None,
         ),
+        (
+            {
+                "mode": "auto",
+                "actions": ["create_finding_version"],
+                "expires_at": None,
+                "revision": 4,
+            },
+            None,
+        ),
     ],
 )
 async def test_new_session_inherits_collection_default_permission(default, expected) -> None:
@@ -191,6 +200,7 @@ async def test_new_session_inherits_collection_default_permission(default, expec
     if expected is None:
         assert permission["mode"] == "auto"
         assert permission["actions"] == ["create_finding_version"]
+        assert permission["expires_at"] == default["expires_at"]
         assert permission["revision"] == 1
     else:
         assert permission == expected
@@ -253,6 +263,23 @@ def test_automatic_permission_covers_every_registered_write_action() -> None:
     assert all(
         permits_automatic(permission, action, now=datetime.now(timezone.utc).isoformat())
         for action in expected
+    )
+
+
+def test_automatic_permission_without_expiry_stays_active_until_revoked() -> None:
+    permission = change_permission(
+        None,
+        mode="auto",
+        actions=["create_finding_version"],
+        expires_at=None,
+        expected_revision=0,
+    )
+
+    assert permission["expires_at"] is None
+    assert permits_automatic(
+        permission,
+        "create_finding_version",
+        now=(datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
     )
 
 

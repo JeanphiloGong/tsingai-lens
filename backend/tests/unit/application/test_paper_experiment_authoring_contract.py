@@ -697,3 +697,43 @@ def test_boundary_merge_keeps_conflicting_measurement_reports() -> None:
     measurements = reconciled.output.experiments[0].payload["measurements"]
     assert {item["value"] for item in measurements if item["outcome"] == "elongation"} >= {72, 75}
     assert any("conflict" in str(item.get("description")) for item in reconciled.audit_issues)
+
+
+def test_boundary_reconciliation_maps_retained_split_to_its_own_accepted_key() -> None:
+    payload = _output_payload()
+    parent = payload["experiments"][0]
+    parent["series_key"] = "parent"
+    selected = deepcopy(parent)
+    selected.update(
+        {
+            "series_key": "selected-p150",
+            "scope_kind": "selected_stratum",
+            "parent_series_key": "parent",
+            "scope_selector": {
+                "selected_levels": [{"name": "preheat", "value": 150, "unit": "C"}]
+            },
+            "source_labels": ["table"],
+        }
+    )
+    physical = deepcopy(parent)
+    physical.update(
+        {
+            "series_key": "physical-followup",
+            "scope_kind": "physical_split",
+            "split_reason": "different population",
+            "split_evidence": [{"source_label": "methods"}],
+            "source_labels": ["methods"],
+        }
+    )
+    payload["experiments"] = [parent, selected, physical]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("parent", "selected-p150", "physical-followup"),
+    )
+
+    assert len(reconciled.output.experiments) == 2
+    assert reconciled.accepted_experiment_keys == ("parent", "physical-followup")
+    assert [
+        item.payload.get("series_key") for item in reconciled.output.experiments
+    ] == ["parent", "physical-followup"]

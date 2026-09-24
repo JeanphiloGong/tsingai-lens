@@ -115,7 +115,15 @@ class SourceReference:
 
 @dataclass(frozen=True)
 class ExperimentalVariant:
-    """An experimental object or group inside one PaperExperiment revision."""
+    """An experimental object or group inside one PaperExperiment revision.
+
+    ``identity_specificity`` and ``missing_dimensions`` are source/model
+    declarations about how completely the object was identified.  They are
+    deliberately distinct from ``binding_status``: the latter is computed by
+    the application after source and relationship checks.  Keeping both lets
+    a partial record remain auditable instead of silently becoming a generic
+    sample or an apparently exact variant.
+    """
 
     variant_key: str
     variant_label: str
@@ -127,6 +135,9 @@ class ExperimentalVariant:
     binding_source_refs: tuple[SourceReference, ...] = ()
     binding_status: str = "uncertain"
     notes: tuple[str, ...] = ()
+    identity_specificity: str = "unknown"
+    missing_dimensions: tuple[str, ...] = ()
+    identity_evidence: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _text(self.variant_key) or not _text(self.variant_label):
@@ -134,6 +145,13 @@ class ExperimentalVariant:
         if self.binding_status not in RELATION_STATUSES:
             raise ValueError(f"unsupported variant binding status: {self.binding_status}")
         object.__setattr__(self, "notes", _strings(self.notes))
+        object.__setattr__(
+            self,
+            "identity_specificity",
+            _text(self.identity_specificity) or "unknown",
+        )
+        object.__setattr__(self, "missing_dimensions", _strings(self.missing_dimensions))
+        object.__setattr__(self, "identity_evidence", _strings(self.identity_evidence))
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentalVariant":
@@ -160,6 +178,11 @@ class ExperimentalVariant:
             ),
             binding_status=_text(payload.get("binding_status")) or "uncertain",
             notes=_strings(payload.get("notes")),
+            identity_specificity=(
+                _text(payload.get("identity_specificity")) or "unknown"
+            ),
+            missing_dimensions=_strings(payload.get("missing_dimensions")),
+            identity_evidence=_strings(payload.get("identity_evidence")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -180,12 +203,21 @@ class ExperimentalVariant:
             "binding_source_refs": [item.to_record() for item in self.binding_source_refs],
             "binding_status": self.binding_status,
             "notes": list(self.notes),
+            "identity_specificity": self.identity_specificity,
+            "missing_dimensions": list(self.missing_dimensions),
+            "identity_evidence": list(self.identity_evidence),
         }
 
 
 @dataclass(frozen=True)
 class ExperimentTestCondition:
-    """A test or characterization method and its applicable parameters."""
+    """A test or characterization method and its applicable parameters.
+
+    A paper may only identify a category such as ``mechanical test``.  The
+    protocol metadata records that limitation without promoting the category
+    to an exact protocol.  ``binding_status`` remains the service-owned
+    relationship result.
+    """
 
     test_key: str
     test_type: str
@@ -194,6 +226,15 @@ class ExperimentTestCondition:
     source_refs: tuple[SourceReference, ...] = ()
     binding_status: str = "uncertain"
     notes: tuple[str, ...] = ()
+    protocol_specificity: str = "unknown"
+    test_identity_status: str = "unknown"
+    protocol_completeness: str = "unknown"
+    missing_parameters: tuple[str, ...] = ()
+    method: str | None = None
+    standard: str | None = None
+    outcome_scope: tuple[str, ...] = ()
+    binding_source_refs: tuple[SourceReference, ...] = ()
+    protocol_evidence: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _text(self.test_key) or not _text(self.test_type):
@@ -201,6 +242,26 @@ class ExperimentTestCondition:
         if self.binding_status not in RELATION_STATUSES:
             raise ValueError(f"unsupported test binding status: {self.binding_status}")
         object.__setattr__(self, "notes", _strings(self.notes))
+        object.__setattr__(
+            self,
+            "protocol_specificity",
+            _text(self.protocol_specificity) or "unknown",
+        )
+        object.__setattr__(
+            self,
+            "test_identity_status",
+            _text(self.test_identity_status) or "unknown",
+        )
+        object.__setattr__(
+            self,
+            "protocol_completeness",
+            _text(self.protocol_completeness) or "unknown",
+        )
+        object.__setattr__(self, "missing_parameters", _strings(self.missing_parameters))
+        object.__setattr__(self, "method", _text(self.method) or None)
+        object.__setattr__(self, "standard", _text(self.standard) or None)
+        object.__setattr__(self, "outcome_scope", _strings(self.outcome_scope))
+        object.__setattr__(self, "protocol_evidence", _strings(self.protocol_evidence))
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentTestCondition":
@@ -220,6 +281,25 @@ class ExperimentTestCondition:
             ),
             binding_status=_text(payload.get("binding_status")) or "uncertain",
             notes=_strings(payload.get("notes")),
+            protocol_specificity=(
+                _text(payload.get("protocol_specificity")) or "unknown"
+            ),
+            test_identity_status=(
+                _text(payload.get("test_identity_status")) or "unknown"
+            ),
+            protocol_completeness=(
+                _text(payload.get("protocol_completeness")) or "unknown"
+            ),
+            missing_parameters=_strings(payload.get("missing_parameters")),
+            method=_text(payload.get("method")) or None,
+            standard=_text(payload.get("standard")) or None,
+            outcome_scope=_strings(payload.get("outcome_scope")),
+            binding_source_refs=tuple(
+                SourceReference.from_mapping(item)
+                for item in payload.get("binding_source_refs") or ()
+                if isinstance(item, Mapping)
+            ),
+            protocol_evidence=_strings(payload.get("protocol_evidence")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -235,6 +315,17 @@ class ExperimentTestCondition:
             "source_refs": [item.to_record() for item in self.source_refs],
             "binding_status": self.binding_status,
             "notes": list(self.notes),
+            "protocol_specificity": self.protocol_specificity,
+            "test_identity_status": self.test_identity_status,
+            "protocol_completeness": self.protocol_completeness,
+            "missing_parameters": list(self.missing_parameters),
+            "method": self.method,
+            "standard": self.standard,
+            "outcome_scope": list(self.outcome_scope),
+            "binding_source_refs": [
+                item.to_record() for item in self.binding_source_refs
+            ],
+            "protocol_evidence": list(self.protocol_evidence),
         }
 
 

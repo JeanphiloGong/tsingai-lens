@@ -134,3 +134,68 @@ def test_reported_result_can_preserve_non_numeric_text_and_unresolved_issue() ->
     assert experiment.measurements[-1].value is None
     assert experiment.measurements[-1].result_text == "ductile-looking fracture"
     assert experiment.unresolved_issues[0]["target_ref"] == "measurements/b-text"
+
+
+def test_broad_variant_and_test_metadata_survive_domain_round_trip() -> None:
+    """Broad source labels remain auditable without becoming exact bindings."""
+
+    source = {
+        "document_id": "doc-1",
+        "source_fingerprint": "prep-1",
+        "source_kind": "section",
+        "source_ref": "methods-1",
+        "quote": "Mechanical tests were reported for as-SLM samples.",
+    }
+    payload = _experiment_payload()
+    payload["variants"][0].update(
+        {
+            "variant_label": "as-SLM",
+            "identity_specificity": "partial",
+            "missing_dimensions": ["laser power", "scan speed"],
+            "identity_evidence": ["methods-1"],
+            "source_refs": [source],
+        }
+    )
+    payload["test_conditions"][0].update(
+        {
+            "test_type": "mechanical test",
+            "protocol_specificity": "partial",
+            "test_identity_status": "category",
+            "protocol_completeness": "partial",
+            "missing_parameters": ["standard", "strain rate"],
+            "method": "mechanical test",
+            "standard": None,
+            "outcome_scope": ["elongation", "yield_strength"],
+            "protocol_evidence": ["methods-1"],
+            "source_refs": [source],
+            "binding_source_refs": [source],
+        }
+    )
+
+    experiment = PaperExperimentRevision.from_mapping(payload)
+    variant = experiment.variants[0]
+    test = experiment.test_conditions[0]
+
+    assert variant.identity_specificity == "partial"
+    assert variant.missing_dimensions == ("laser power", "scan speed")
+    assert variant.identity_evidence == ("methods-1",)
+    assert test.protocol_specificity == "partial"
+    assert test.test_identity_status == "category"
+    assert test.protocol_completeness == "partial"
+    assert test.missing_parameters == ("standard", "strain rate")
+    assert test.outcome_scope == ("elongation", "yield_strength")
+    assert test.protocol_evidence == ("methods-1",)
+    assert len(test.binding_source_refs) == 1
+
+    restored = PaperExperimentRevision.from_mapping(experiment.to_record())
+    assert restored.to_record() == experiment.to_record()
+
+
+def test_missing_specificity_defaults_to_unknown_instead_of_claiming_exact() -> None:
+    payload = _experiment_payload()
+
+    experiment = PaperExperimentRevision.from_mapping(payload)
+
+    assert experiment.variants[0].identity_specificity == "unknown"
+    assert experiment.test_conditions[0].protocol_specificity == "unknown"
+    assert experiment.test_conditions[0].protocol_completeness == "unknown"

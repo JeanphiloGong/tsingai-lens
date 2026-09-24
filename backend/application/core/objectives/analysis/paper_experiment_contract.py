@@ -422,9 +422,13 @@ def reconcile_model_output(
         for item in output.experiments
         if _local_series_key(item.payload)
     }
+    # Only an explicit parent/matrix proposal can establish a physical parent.
+    # ``unknown`` is deliberately *not* a parent: treating the first unknown
+    # proposal as the archive owner is the source of the boundary-first
+    # over-merge bug.  It turns an arbitrary section/table view into the
+    # experiment identity before the service has reconciled its scope.
     has_physical_parent = any(
-        str(item.payload.get("scope_kind") or "").strip().lower()
-        not in {"selected_stratum", "follow_up", "physical_split", "split", "independent"}
+        _boundary_kind(item.payload) in _EXPLICIT_PARENT_KINDS
         for item in output.experiments
     )
     synthetic_parent_allowed = len(output.experiments) > 1 and not has_physical_parent
@@ -487,22 +491,10 @@ def reconcile_model_output(
         output.experiments,
         accepted_input,
     )
-    if not reconciled_drafts:
-        accepted = ()
-    elif len(accepted_input) == len(reconciled_drafts):
-        accepted = accepted_input
-    elif len(reconciled_drafts) < len(accepted_input):
-        # Unsupported proposals were collapsed into their parent. Keep the
-        # service-supplied parent key and discard keys for proposals that no
-        # longer represent a physical experiment.
-        parent_key = _local_series_key(reconciled_drafts[0].payload)
-        accepted = (parent_key or accepted_input[0],) + tuple(
-            accepted_input[1 : len(reconciled_drafts)]
-        )
-    else:
-        raise ValueError(
-            "boundary reconciliation must provide one accepted key per retained scope"
-        )
+    accepted = _map_reconciled_experiment_keys(
+        reconciled_drafts,
+        accepted_input,
+    )
     accepted = tuple(str(key).strip() for key in accepted)
     if len(set(accepted)) != len(accepted) or any(not key for key in accepted):
         raise ValueError("accepted experiment keys must be non-empty and unique")
@@ -531,6 +523,47 @@ def reconcile_model_output(
     )
 
 
+def _map_reconciled_experiment_keys(
+    drafts: Sequence[PaperExperimentDraft],
+    accepted_input: Sequence[str],
+) -> tuple[str, ...]:
+    """Map accepted local keys by retained scope identity, not array position.
+
+    Boundary reconciliation can collapse several advisory scopes into one
+    parent while retaining a later physical split.  Positional slicing would
+    then assign the removed scope's key to that split.  A retained draft must
+    therefore either carry its own accepted local key or, for a service-created
+    synthetic parent, explicitly name the accepted parent key.
+    """
+
+    if not drafts:
+        return ()
+    accepted = tuple(str(key).strip() for key in accepted_input)
+    available = set(accepted)
+    mapped: list[str] = []
+    for index, draft in enumerate(drafts):
+        declared = _local_series_key(draft.payload)
+        chosen = declared if declared in available else ""
+        if not chosen and index == 0 and draft.payload.get("synthetic_parent"):
+            parent_key = str(draft.payload.get("parent_series_key") or "").strip()
+            if parent_key in available:
+                chosen = parent_key
+        # Older callers may omit a local series key when there is exactly one
+        # retained scope and provide only the service-selected key. Preserve
+        # that established single-scope contract; multi-scope reconciliation
+        # remains strict and must use each retained draft's local key.
+        if not chosen and len(drafts) == 1 and not declared and len(available) == 1:
+            chosen = next(iter(available))
+        if not chosen:
+            raise ValueError(
+                "boundary reconciliation must provide an accepted key for retained "
+                f"scope {declared or index!r}"
+            )
+        mapped.append(chosen)
+        available.remove(chosen)
+    return tuple(mapped)
+
+
 def _local_series_key(payload: Mapping[str, Any]) -> str:
     return str(
         payload.get("series_key")
@@ -538,6 +571,18 @@ def _local_series_key(payload: Mapping[str, Any]) -> str:
         or payload.get("experiment_key")
         or ""
     ).strip()
+
+
+# Boundary labels are advisory, but these categories have distinct service
+# semantics.  In particular, an omitted/unknown kind must not be promoted to
+# a physical parent merely because it appeared first in the model response.
+_EXPLICIT_PARENT_KINDS = frozenset({"parent", "matrix"})
+_OVERLAPPING_SCOPE_KINDS = frozenset({"selected_stratum", "follow_up"})
+_PHYSICAL_SPLIT_KINDS = frozenset({"physical_split", "split", "independent"})
+
+
+def _boundary_kind(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("scope_kind") or "").strip().lower()
 
 
 def _has_positive_split_evidence(
@@ -1031,7 +1076,9 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
         )
         scope = dict(measurement.get("measurement_scope") or {})
         resolution = "exact" if exact else (
-            "ambiguous"
+            "unbound"
+            if variant_resolution == "unbound" or test_resolution == "unbound"
+            else "ambiguous"
             if (
                 variant_resolution == "ambiguous"
                 or test_resolution == "ambiguous"
@@ -1043,6 +1090,9 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
         scope["binding_resolution"] = resolution
         scope["variant_binding_resolution"] = variant_resolution
         scope["test_binding_resolution"] = test_resolution
+        scope["test_protocol_completeness"] = str(
+            test_record.get("protocol_completeness") or "unknown"
+        ).strip().lower()
         measurement["measurement_scope"] = scope
         if combined_refs:
             measurement["binding_source_refs"] = combined_refs

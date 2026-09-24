@@ -74,7 +74,6 @@ def build_research_objective_service(
             source_artifact_repository=source_repository,
             document_profile_repository=document_profile_repository,
         )
-    kwargs.pop("finding_synthesis_service", None)
     objective_input_service = kwargs.pop(
         "objective_input_service",
         ObjectiveInputService(

@@ -12,6 +12,7 @@ without changing collection state.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from copy import deepcopy
 from hashlib import sha256
@@ -37,14 +38,7 @@ from application.core.document_profiles.extraction import DocumentProfileExtract
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
 )
-from application.core.objectives.analysis.evidence_materialization import (
-    materialize_evidence,
-)
 from application.core.objectives.analysis.evidence_routing import route_sources
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingAssertionJudge,
-    FindingSynthesisService,
-)
 from application.core.objectives.analysis.paper_experiment import (
     assemble_paper_experiments,
     reconstruct_paper_experiments,
@@ -84,8 +78,10 @@ from paper_experiment_chain_probe import (  # noqa: E402
     RecordingPaperFactsExtractor,
     RecordingStructuredResponseClient,
     _build_live_profile,
+    _live_model_boundary_check,
     _source_read_audit_record,
     _source_payload,
+    _write_experiment_graph,
 )
 
 
@@ -175,7 +171,8 @@ def main() -> int:
                         "case_id": item.get("case_id"),
                         "status": item.get("status"),
                         "paper_experiment_count": item.get("paper_experiment_count", 0),
-                        "objective_evidence_count": item.get("objective_evidence_count", 0),
+                        "selection_count": item.get("selection_count", 0),
+                        "comparison_group_count": item.get("comparison_group_count", 0),
                         "finding_count": item.get("finding_count", 0),
                         "failed_checks": [
                             check["name"]
@@ -368,28 +365,12 @@ def _run_case(
                 document_id=document.document_id,
                 source_facts=reconstructed,
             )
-            evidence, contributions = materialize_evidence(
-                collection_id=collection_id,
-                analysis=analysis,
-                objective=objective,
-                experiments=experiments,
-                technical_audits=tuple(read_audits),
-                paper_maps=(paper_map,),
-                frames=frames,
-                routes=routes,
-                blocks_by_document_id=blocks,
-                tables_by_document_id=tables,
-                figures_by_document_id=figures,
-                document_trees_by_document_id={},
-            )
-            findings = FindingSynthesisService(
-                assertion_judge=FindingAssertionJudge(response_client)
-            ).synthesize(
-                collection_id=collection_id,
-                objective=objective,
-                analysis=analysis,
-                contributions=contributions,
-                evidence_records=evidence,
+            graph_result, revision_repository, graph_repository = asyncio.run(
+                _write_experiment_graph(
+                    objective=objective,
+                    analysis=analysis,
+                    experiments=tuple(experiments),
+                )
             )
 
         report.update(
@@ -404,9 +385,17 @@ def _run_case(
                 ],
                 "source_observations": [item.to_record() for item in reconstructed],
                 "paper_experiments": [item.to_record() for item in experiments],
-                "objective_evidence": [item.to_record() for item in evidence],
-                "paper_contributions": [item.to_record() for item in contributions],
-                "findings": [item.to_record() for item in findings],
+                "experiment_revisions": [
+                    {"revision_id": item.revision_id, **item.revision.to_record()}
+                    for item in graph_result.revisions
+                ],
+                "selections": [item.to_record() for item in graph_result.selections],
+                "comparison_groups": [item.to_record() for item in graph_result.groups],
+                "findings": [item.to_record() for item in graph_result.findings],
+                "graph_write": {
+                    "revision_count": len(revision_repository.records),
+                    "graph_present": graph_repository.graph is not None,
+                },
                 "diagnostics": list(diagnostics.records),
                 "model_traces": {
                     "document_profile": [profile_trace] if profile_trace else [],
@@ -419,8 +408,9 @@ def _run_case(
             {
                 "source_observation_count": len(reconstructed),
                 "paper_experiment_count": len(experiments),
-                "objective_evidence_count": len(evidence),
-                "finding_count": len(findings),
+                "selection_count": len(graph_result.selections),
+                "comparison_group_count": len(graph_result.groups),
+                "finding_count": len(graph_result.findings),
             }
         )
         report["execution_stats"] = usage.execution_stats(
@@ -520,10 +510,10 @@ def _checks(report: dict[str, Any]) -> list[dict[str, Any]]:
     paper_map = report["paper_map"]
     observations = report["source_observations"]
     experiments = report["paper_experiments"]
-    evidence = report["objective_evidence"]
+    revisions = report.get("experiment_revisions", [])
+    selections = report.get("selections", [])
+    groups = report.get("comparison_groups", [])
     findings = report["findings"]
-    traces = report.get("model_traces", {})
-    usage = report.get("execution_stats", {})
     checks: list[dict[str, Any]] = []
 
     def add(name: str, passed: bool, detail: Any) -> None:
@@ -569,94 +559,74 @@ def _checks(report: dict[str, Any]) -> list[dict[str, Any]]:
             },
         )
 
-    source_ids = {str(item.get("observation_id")) for item in observations}
-    evidence_ids = {str(item.get("evidence_id")) for item in evidence}
-    measurement_ids = {
-        str(measurement.get("result_id"))
-        for experiment in experiments
-        for measurement in experiment.get("measurements", [])
+    source_refs = {
+        (str(item.get("source_kind") or ""), str(item.get("source_ref") or ""))
+        for item in observations
     }
-    bound_measurements = {
-        str(measurement.get("result_id"))
-        for experiment in experiments
-        for measurement in experiment.get("measurements", [])
-        if measurement.get("variant_id") and measurement.get("test_condition_id")
+    measurement_rows = [
+        measurement
+        for revision in revisions
+        for measurement in revision.get("measurements", [])
+    ]
+    measurement_ids = {str(item.get("measurement_key") or "") for item in measurement_rows}
+    linked_measurement_ids = {
+        str(ref.get("source_ref") or "")
+        for item in measurement_rows
+        for ref in item.get("source_refs", [])
     }
     add(
         "measurement_lineage_is_source_backed",
-        measurement_ids <= source_ids and bound_measurements <= source_ids,
+        bool(measurement_ids) and bool(linked_measurement_ids & {ref[1] for ref in source_refs}),
         {
             "measurement_count": len(measurement_ids),
-            "source_observation_count": len(source_ids),
-            "unbound_measurement_ids": sorted(measurement_ids - source_ids),
+            "source_observation_count": len(observations),
+            "linked_source_ref_count": len(linked_measurement_ids & {ref[1] for ref in source_refs}),
         },
     )
-    finding_evidence_ids = {
-        str(evidence_id)
+    selection_ids = {str(item.get("selection_id") or "") for item in selections}
+    group_ids = {str(item.get("group_id") or "") for item in groups}
+    finding_selection_ids = {
+        str(selection_id)
         for finding in findings
-        for contribution in finding.get("paper_contributions", [])
-        for evidence_id in (
-            contribution.get("supporting_evidence_ids", [])
-            + contribution.get("contradicting_evidence_ids", [])
-        )
+        for selection_id in finding.get("selection_ids", [])
+    }
+    finding_group_ids = {
+        str(group_id)
+        for finding in findings
+        for group_id in finding.get("comparison_group_ids", [])
     }
     add(
-        "finding_lineage_points_to_materialized_evidence",
-        finding_evidence_ids <= evidence_ids,
+        "finding_lineage_points_to_fixed_experiment_graph",
+        finding_selection_ids <= selection_ids and finding_group_ids <= group_ids,
         {
-            "finding_evidence_count": len(finding_evidence_ids),
-            "evidence_count": len(evidence_ids),
-            "missing_evidence_ids": sorted(finding_evidence_ids - evidence_ids),
+            "finding_selection_count": len(finding_selection_ids),
+            "selection_count": len(selection_ids),
+            "finding_group_count": len(finding_group_ids),
+            "group_count": len(group_ids),
         },
     )
-    comparable_ids = {
-        str(item.get("evidence_id"))
-        for item in evidence
-        if item.get("evidence_status") == "comparable"
+    group_member_ids = {
+        str(member.get("selection_id") or "")
+        for group in groups
+        for member in group.get("members", [])
     }
     add(
-        "technical_or_incomplete_inputs_do_not_become_findings",
-        finding_evidence_ids <= comparable_ids
-        and (bool(findings) if comparable_ids else not findings),
+        "groups_and_findings_use_declared_selections",
+        group_member_ids <= selection_ids
+        and (bool(findings) == bool(selections) if expected_role != "review" else not findings),
         {
-            "comparable_evidence_count": len(comparable_ids),
+            "group_member_count": len(group_member_ids),
+            "selection_count": len(selection_ids),
             "finding_count": len(findings),
         },
     )
-    required_tasks = {
-        "document_profile",
-        "paper_map",
-        "objective_paper_frame",
-    }
-    if expected_role != "review":
-        required_tasks.add("objective_evidence_extraction")
-    if comparable_ids:
-        required_tasks.add("finding_synthesis")
-    observed_tasks = {
-        str(trace.get("task_type"))
-        for trace_group in traces.values()
-        if isinstance(trace_group, list)
-        for trace in trace_group
-        if isinstance(trace, dict)
-        and trace.get("trace_status") == "available"
-        and trace.get("raw_output")
-    }
-    model_usage = usage.get("model_usage", [])
-    request_count = sum(item.get("request_count", 0) for item in model_usage)
-    add(
-        "model_boundaries_have_live_traces_and_usage",
-        required_tasks <= observed_tasks
-        and bool(model_usage)
-        and usage.get("unreported_request_count") == 0
-        and request_count >= sum(
-            len(group) for group in traces.values() if isinstance(group, list)
-        ),
-        {
-            "required_tasks": sorted(required_tasks),
-            "observed_tasks": sorted(observed_tasks),
-            "request_count": request_count,
-            "unreported_request_count": usage.get("unreported_request_count"),
-        },
+    checks.append(
+        _live_model_boundary_check(
+            report=report,
+            comparable_evidence_count=sum(
+                bool(item.get("comparison_keys")) for item in selections
+            ),
+        )
     )
     return checks
 

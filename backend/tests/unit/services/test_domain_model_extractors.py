@@ -15,12 +15,6 @@ from application.core.document_profiles.extraction import (
     DocumentProfileExtractor,
 )
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingAssertionJudge,
-    StructuredFindingMechanism,
-    StructuredFindingSynthesis,
-    build_finding_synthesis_prompt,
-)
 from application.core.objectives.analysis.source_extraction import (
     DirectEvidenceExtractionsModelOutput,
     ObjectiveSourceExtractor,
@@ -905,7 +899,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     objective_client = _FakeOpenAIClient(
         "unused",
-        parsed={"findings": []},
+        parsed={"decisions": []},
     )
 
     with capture_llm_usage() as usage:
@@ -913,26 +907,21 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
             {"title": "Paper", "abstract_or_lead_text": "Experimental study."}
         )
         _paper_facts_extractor(facts_client).repair_table_matrix({"source": {}})
-        FindingAssertionJudge(
+        ResearchAxisEquivalenceClassifier(
             StructuredResponseClient(
                 client=objective_client,
                 model="fake-model",
                 extraction_mode="provider_parse",
             )
-        ).judge_result_set(
-            {
-                "objective": {"question": "How does power affect density?"},
-                "result_set": {},
-            }
-        )
+        ).classify({"axis_pairs": []})
 
     assert usage.execution_stats().model_usage == (
         ModelUsage("fake-model", 3, TokenUsage(300, 60, 360)),
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v15",
         "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v7",
+        "research_axis_canonicalization": "research_axis_canonicalization.v7",
     }
 
 
@@ -1238,11 +1227,11 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
 
     with pytest.raises(RuntimeError, match="returned no JSON object"):
         extractor.complete(
-            system_prompt="Return structured findings.",
+            system_prompt="Return structured axis decisions.",
             user_prompt="No Source content is needed for this transport test.",
-            response_model=StructuredFindingSynthesis,
-            task_type="finding_synthesis",
-            prompt_version="finding_synthesis.test",
+            response_model=AxisCanonicalizationPlanModelOutput,
+            task_type="axis_equivalence",
+            prompt_version="axis_equivalence.test",
         )
 
     trace = extractor.consume_last_trace()
@@ -1271,48 +1260,15 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
     ]
 
 
-def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
-    parsed = StructuredFindingSynthesis(findings=[])
-    client = _FakeOpenAIClient("unused", parsed={"findings": []})
-    extractor = StructuredResponseClient(
-        client=client,
-        model="fake-model",
-        extraction_mode="provider_parse",
-    )
-    payload = {
-        "objective": {"question": "How does energy density affect density?"},
-        "result_set": {
-            "result_set_id": "result-set-1",
-            "factors": ["energy density"],
-            "outcome": "density",
-            "result_evidence": [],
-        },
-    }
-
-    result = FindingAssertionJudge(extractor).judge_result_set(payload)
-
-    assert result == parsed
-    parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"].__name__ == (
-        "FindingSynthesisModelOutput"
-    )
-    assert parse_call["max_completion_tokens"] == 1024
-    trace = extractor.consume_last_trace()
-    assert trace is not None
-    assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v15"
-    assert trace["parsed_output"] == {"findings": []}
-
-
 def test_structured_response_traces_are_isolated_between_concurrent_calls():
-    client = _response_client(_FakeOpenAIClient('{"findings": []}'))
+    client = _response_client(_FakeOpenAIClient('{"decisions": []}'))
     calls_completed = Barrier(2)
 
     def complete_and_consume_trace(task_type: str):
         client.complete(
-            system_prompt="Return structured findings.",
+            system_prompt="Return structured axis decisions.",
             user_prompt=f"Analyze {task_type}.",
-            response_model=StructuredFindingSynthesis,
+            response_model=AxisCanonicalizationPlanModelOutput,
             task_type=task_type,
             prompt_version="test.v1",
         )
@@ -1331,259 +1287,6 @@ def test_structured_response_traces_are_isolated_between_concurrent_calls():
         "collection-one",
         "collection-two",
     }
-
-
-def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():
-    client = _FakeOpenAIClient('{"findings": []}')
-    extractor = _response_client(client)
-
-    result = FindingAssertionJudge(extractor).judge_result_set(
-        {
-            "objective": {"question": "How does energy density affect density?"},
-            "result_set": {},
-        }
-    )
-
-    assert result == StructuredFindingSynthesis(findings=[])
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    (
-        ("result_set_id", "result-set-1"),
-        ("statement", "Energy density increases relative density."),
-        ("direction", "increase"),
-        ("condition_boundary_evidence_ids", ["evidence-1"]),
-        ("supporting_evidence_ids", ["evidence-1"]),
-        ("contradicting_evidence_ids", ["evidence-2"]),
-    ),
-)
-def test_finding_synthesis_schema_rejects_backend_owned_fields(
-    field: str,
-    value: object,
-) -> None:
-    payload = {
-        "assertion_strength": "associative",
-        "context_evidence_ids": [],
-        "mechanisms": [],
-        field: value,
-    }
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        StructuredFindingSynthesis.model_validate({"findings": [payload]})
-
-
-def test_finding_synthesis_schema_accepts_only_model_judgment_fields() -> None:
-    parsed = StructuredFindingSynthesis.model_validate(
-        {
-            "findings": [
-                {
-                    "assertion_strength": "associative",
-                    "context_evidence_ids": ["mechanism-1"],
-                    "mechanisms": [
-                        {
-                            "source_term": "melt-pool stability",
-                            "relation_type": "associated_with",
-                            "target_term": "relative density",
-                            "direction": "increase",
-                            "assertion_strength": "associative",
-                            "supporting_evidence_ids": ["mechanism-1"],
-                        }
-                    ],
-                }
-            ]
-        }
-    )
-
-    assert parsed.model_dump() == {
-        "findings": [
-            {
-                "assertion_strength": "associative",
-                "context_evidence_ids": ["mechanism-1"],
-                "mechanisms": [
-                    {
-                        "source_term": "melt-pool stability",
-                        "relation_type": "associated_with",
-                        "target_term": "relative density",
-                        "direction": "increase",
-                        "assertion_strength": "associative",
-                        "supporting_evidence_ids": ["mechanism-1"],
-                    }
-                ],
-            }
-        ]
-    }
-
-
-def test_finding_synthesis_prompt_assigns_backend_and_model_ownership():
-    payload = {
-        "objective": {"question": "How does energy density affect density?"},
-        "result_set": {
-            "result_set_id": "result-set-1",
-            "factors": ["laser power", "scan speed", "energy density"],
-            "outcome": "maximum defect length",
-            "primary_direction": "decrease",
-            "total_evidence_count": 21,
-            "result_evidence": [
-                {
-                    "evidence_id": "evidence-1",
-                    "document_id": "paper-1",
-                    "attribution_scope": "joint_effect",
-                }
-            ],
-            "document_evidence_summaries": [
-                {
-                    "document_id": "paper-1",
-                    "evidence_count": 21,
-                    "direction_counts": {"decrease": 21},
-                    "attribution_scope_counts": {"joint_effect": 21},
-                }
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-    }
-
-    system_prompt, user_prompt = build_finding_synthesis_prompt(
-        payload
-    )
-
-    assert "INPUT SCHEMA" in system_prompt
-    assert "DECISION PROCESS" in system_prompt
-    assert "HARD RULES" in system_prompt
-    assert "BOUNDARY EXAMPLES" in system_prompt
-    assert "OUTPUT CONTRACT" in system_prompt
-    normalized_system_prompt = " ".join(system_prompt.split())
-    assert "backend owns" in normalized_system_prompt
-    assert "primary_direction" in normalized_system_prompt
-    assert "model decides only" in normalized_system_prompt
-    assert "assertion_strength" in normalized_system_prompt
-    assert "context_evidence_labels" in normalized_system_prompt
-    assert "mechanisms" in normalized_system_prompt
-    assert "result_set_id" not in user_prompt
-    assert "statement" not in user_prompt
-    assert "condition_boundary_evidence_ids" not in user_prompt
-    assert "21" in user_prompt
-    assert '"paper_label":"P1"' in user_prompt
-    assert "paper-1" not in user_prompt
-    mechanism_schema = StructuredFindingMechanism.model_json_schema()
-    assert "supporting_evidence_ids" in mechanism_schema["properties"]
-
-
-def test_finding_synthesis_rebinds_local_context_and_paper_labels():
-    client = _FakeOpenAIClient(
-        json.dumps(
-            {
-                "findings": [
-                    {
-                        "assertion_strength": "associative",
-                        "context_evidence_labels": ["C1"],
-                        "mechanisms": [
-                            {
-                                "source_term": "melt-pool stability",
-                                "relation_type": "associated_with",
-                                "target_term": "relative density",
-                                "assertion_strength": "associative",
-                                "supporting_context_labels": ["C1"],
-                            }
-                        ],
-                    }
-                ]
-            }
-        )
-    )
-    result = FindingAssertionJudge(_response_client(client)).judge_result_set(
-        {
-            "objective": {
-                "objective_id": "objective-internal",
-                "question": "How does energy density affect relative density?",
-            },
-            "result_set": {
-                "factors": ["energy density"],
-                "outcome": "relative density",
-                "primary_direction": "increase",
-                "result_evidence": [
-                    {
-                        "evidence_id": "result-evidence-internal",
-                        "document_id": "document-internal",
-                        "reported_result": {
-                            "outcome": "relative density",
-                            "direction": "increase",
-                        },
-                    }
-                ],
-                "document_evidence_summaries": [
-                    {
-                        "document_id": "document-internal",
-                        "evidence_count": 1,
-                    }
-                ],
-            },
-            "paper_contributions": [
-                {
-                    "document_id": "document-internal",
-                    "analysis_status": "analyzed",
-                }
-            ],
-            "context_evidence": [
-                {
-                    "evidence_id": "context-evidence-internal",
-                    "document_id": "document-internal",
-                    "evidence_role": "mechanism_context",
-                    "source_excerpt": (
-                        "Stable melt pools were associated with higher relative density."
-                    ),
-                }
-            ],
-        }
-    )
-
-    assert result.findings[0].context_evidence_ids == [
-        "context-evidence-internal"
-    ]
-    assert result.findings[0].mechanisms[0].supporting_evidence_ids == [
-        "context-evidence-internal"
-    ]
-    request_text = client.chat.completions.calls[0]["messages"][1]["content"]
-    assert '"paper_label":"P1"' in request_text
-    assert '"context_label":"C1"' in request_text
-    for internal_value in (
-        "objective-internal",
-        "document-internal",
-        "result-evidence-internal",
-        "context-evidence-internal",
-    ):
-        assert internal_value not in request_text
-
-
-def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
-    payload = {
-        "objective": {"question": "How does energy density affect density?"},
-        "result_set": {
-            "result_set_id": "result-set-1",
-            "factors": ["energy density"],
-            "outcome": "density",
-            "result_evidence": [],
-        },
-        "candidate_rejection": {
-            "reason": "candidate references unavailable context Evidence",
-            "previous_candidate": {
-                "assertion_strength": "associative",
-                "context_evidence_ids": ["missing-context"],
-                "mechanisms": [],
-            },
-        },
-    }
-
-    system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-
-    assert "present only for one bounded repair attempt" in system_prompt
-    assert "correction guidance, not Evidence" in system_prompt
-    assert "Semantic repair required:" in user_prompt
-    assert payload["candidate_rejection"]["reason"] in user_prompt
-    assert "previous_candidate" not in user_prompt
-    assert "Return only labels present in `context_evidence`" in user_prompt
 
 
 def test_table_repair_allows_explicit_json_text_mode(monkeypatch):

@@ -6,17 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from application.core.objectives.analysis.diagnostics import (
-    capture_analysis_diagnostics,
-)
-from application.core.objectives.analysis.evidence_materialization import (
-    _experiment_source_observations,
-    materialize_evidence,
-)
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
-)
 from application.core.objectives.analysis.paper_experiment import (
     assemble_paper_experiment,
     assemble_paper_experiments,
@@ -29,13 +19,7 @@ from application.core.objectives.analysis.source_extraction import (
     _extract_source_round,
     _failed_source_read,
 )
-from domain.core import (
-    ObjectiveAnalysis,
-    PreparedDocumentInput,
-    ResearchObjective,
-    ScientificAttribute,
-    ScientificContext,
-)
+from domain.core import ResearchObjective, ScientificAttribute
 from domain.source import SourceTable
 
 
@@ -210,6 +194,40 @@ def test_different_tables_and_tests_share_the_parent_experiment() -> None:
     }
 
 
+def test_conflicting_values_from_different_sources_are_retained() -> None:
+    first = _p002_result("obs-first", "NP", 72)
+    second = replace(
+        _p002_result("obs-second", "NP", 75),
+        source_kind="text_window",
+        source_ref="results-text",
+        source_refs=(
+            {
+                "source_kind": "text_window",
+                "source_ref": "results-text",
+                "source_excerpt": "NP elongation was 75%.",
+            },
+        ),
+    )
+
+    experiments = assemble_paper_experiments(
+        collection_id="col-1",
+        document_id="doc-1",
+        source_facts=(first, second),
+    )
+
+    assert len(experiments) == 1
+    experiment = experiments[0]
+    assert [item.value_payload["value"] for item in experiment.measurements] == [72, 75]
+    assert {item.result_id for item in experiment.measurements} == {
+        "obs-first",
+        "obs-second",
+    }
+    assert {item.source_ref for item in experiment.source_observations} == {
+        "table-2",
+        "results-text",
+    }
+
+
 def test_derived_comparison_is_not_another_measured_result() -> None:
     baseline = _observation("obs-np")
     target = _observation("obs-p150")
@@ -232,331 +250,6 @@ def test_derived_comparison_is_not_another_measured_result() -> None:
         "obs-np",
         "obs-p150",
     }
-
-
-def test_materialization_reads_source_facts_from_experiment_first() -> None:
-    draft = SourceObservation.from_mapping(
-        {
-            "evidence_id": "ev-2",
-            "objective_id": "obj-1",
-            "document_id": "doc-1",
-            "source_kind": "text_window",
-            "source_ref": "block-2",
-            "evidence_role": "condition_context",
-            "source_refs": [
-                {
-                    "source_kind": "text_window",
-                    "source_ref": "block-2",
-                    "source_excerpt": "The tensile test used room temperature.",
-                    "page": 4,
-                }
-            ],
-            "scientific_context": {
-                "test": [{"name": "temperature", "value": 25, "unit": "C"}]
-            },
-            "confidence": 0.8,
-        }
-    )
-    experiment = assemble_paper_experiment(
-        collection_id="col-1",
-        document_id="doc-1",
-        source_facts=(draft,),
-    )
-
-    merged = _experiment_source_observations(
-        experiments=(experiment,),
-    )
-
-    assert len(merged) == 1
-    assert merged[0].source_refs[0]["page"] == 4
-    assert merged[0].scientific_context.test[0].name == "temperature"
-    assert merged[0].status == draft.status
-
-
-def test_materialization_exposes_only_the_experiment_fact_input() -> None:
-    draft = _observation("obs-1")
-    experiment = assemble_paper_experiment(
-        collection_id="col-1",
-        document_id="doc-1",
-        source_facts=(draft,),
-    )
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "question": "How does temperature affect strength?",
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-        }
-    )
-    analysis = ObjectiveAnalysis(
-        collection_id="col-1",
-        objective_id="obj-1",
-        analysis_version=1,
-        document_inputs=(
-            PreparedDocumentInput(
-                document_id="doc-1", preparation_fingerprint="fixture"
-            ),
-        ),
-        total_document_count=1,
-        pipeline_version="test",
-        model_name=None,
-        prompt_versions={},
-    )
-
-    with pytest.raises(TypeError, match="unexpected keyword argument 'observations'"):
-        materialize_evidence(
-            collection_id="col-1",
-            analysis=analysis,
-            objective=objective,
-            observations=(draft,),
-            experiments=(experiment,),
-            paper_maps=(),
-            frames=(),
-            routes=(),
-            blocks_by_document_id={},
-            tables_by_document_id={},
-            figures_by_document_id={},
-        )
-
-
-def test_experiment_measurement_cannot_disagree_with_its_source_observation() -> None:
-    draft = _observation("obs-1")
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-    altered = replace(
-        experiment.measurements[0],
-        value_payload={**experiment.measurements[0].value_payload, "value": 999},
-    )
-
-    with pytest.raises(ValueError, match="measurement disagrees with Source"):
-        _experiment_source_observations(
-            experiments=(replace(experiment, measurements=(altered,)),)
-        )
-
-
-def test_experiment_measurement_result_type_cannot_disagree_with_source() -> None:
-    draft = _observation(
-        "obs-1",
-        reported_result={
-            "outcome": "elongation",
-            "value": 82,
-            "unit": "%",
-            "direction": "unknown",
-            "result_text": "P150: elongation 82%.",
-            "result_kind": "measured",
-        },
-    )
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-    altered = replace(experiment.measurements[0], result_type="predicted")
-
-    with pytest.raises(ValueError, match="measurement disagrees with Source"):
-        _experiment_source_observations(
-            experiments=(replace(experiment, measurements=(altered,)),)
-        )
-
-
-def test_experiment_sample_binding_cannot_disagree_with_source_context() -> None:
-    draft = _observation(
-        "obs-1",
-        scientific_context={"sample": [{"name": "sample", "value": "P150"}]},
-    )
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-    altered = replace(experiment.sample_variants[0], variant_label="WRONG-SAMPLE")
-
-    with capture_analysis_diagnostics() as diagnostics:
-        with pytest.raises(ValueError, match="sample binding disagrees with Source"):
-            _experiment_source_observations(
-                experiments=(replace(experiment, sample_variants=(altered,)),)
-            )
-
-    assert diagnostics.records == (
-        {
-            "trace_type": "paper_experiment_binding_mismatch",
-            "collection_id": experiment.collection_id,
-            "document_id": experiment.document_id,
-            "experiment_id": experiment.experiment_id,
-            "measurement_id": "obs-1",
-            "binding_kind": "sample",
-            "disposition": "rejected",
-        },
-    )
-
-
-def test_experiment_test_binding_cannot_disagree_with_source_context() -> None:
-    draft = _observation(
-        "obs-1",
-        scientific_context={
-            "test": [{"name": "strain rate", "value": 0.001, "unit": "s^-1"}]
-        },
-    )
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-    altered = replace(
-        experiment.test_conditions[0],
-        condition_payload={"strain rate": {"value": 99, "unit": "s^-1"}},
-    )
-
-    with capture_analysis_diagnostics() as diagnostics:
-        with pytest.raises(ValueError, match="test binding disagrees with Source"):
-            _experiment_source_observations(
-                experiments=(replace(experiment, test_conditions=(altered,)),)
-            )
-
-    assert diagnostics.records == (
-        {
-            "trace_type": "paper_experiment_binding_mismatch",
-            "collection_id": experiment.collection_id,
-            "document_id": experiment.document_id,
-            "experiment_id": experiment.experiment_id,
-            "measurement_id": "obs-1",
-            "binding_kind": "test",
-            "disposition": "rejected",
-        },
-    )
-
-
-def test_materialization_projects_context_from_structured_experiment_facts() -> None:
-    draft = _observation(
-        "obs-1",
-        scientific_context={
-            "material": [{"name": "alloy", "value": "316L"}],
-            "sample": [{"name": "sample", "value": "P150"}],
-            "process": [
-                {"name": "manufacturing process", "value": "LPBF"},
-                {"name": "laser power", "value": 150, "unit": "W"},
-            ],
-            "test": [
-                {
-                    "name": "strain rate",
-                    "value": 0.001,
-                    "unit": "s^-1",
-                    "applies_to_outcomes": ["elongation"],
-                }
-            ],
-        },
-    )
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-    source_only = replace(draft, scientific_context=ScientificContext())
-
-    projected = _experiment_source_observations(
-        experiments=(replace(experiment, source_observations=(source_only,)),)
-    )[0]
-
-    assert projected.scientific_context.material[0].value == "316L"
-    assert projected.scientific_context.sample[0].value == "P150"
-    assert projected.scientific_context.process[0].value == "LPBF"
-    assert projected.scientific_context.process[1].unit == "W"
-    assert projected.scientific_context.test[0].value == 0.001
-    assert projected.scientific_context.test[0].applies_to_outcomes == (
-        "elongation",
-    )
-    measurement = experiment.measurements[0]
-    assert projected.reported_result is not None
-    assert projected.reported_result.outcome == measurement.property_normalized
-    assert projected.reported_result.value == measurement.value_payload["value"]
-    assert projected.reported_result.unit == measurement.unit
-
-
-@pytest.mark.parametrize(
-    ("scientific_context", "missing_binding"),
-    (
-        (
-            {
-                "test": [
-                    {
-                        "name": "strain rate",
-                        "value": 0.001,
-                        "unit": "s^-1",
-                        "applies_to_outcomes": ["elongation"],
-                    }
-                ]
-            },
-            "sample",
-        ),
-        (
-            {"sample": [{"name": "sample", "value": "P150"}]},
-            "test",
-        ),
-    ),
-)
-def test_missing_structured_binding_materializes_as_needs_context(
-    scientific_context: dict[str, object],
-    missing_binding: str,
-) -> None:
-    draft = _observation("obs-1", scientific_context=scientific_context)
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-    table = SourceTable.from_record(
-        {
-            "table_id": "table-2",
-            "document_id": "doc-1",
-            "table_order": 2,
-            "page": 4,
-            "caption_text": "Elongation",
-            "column_headers": ["Sample", "Elongation (%)"],
-            "table_matrix": [["P150", "82"]],
-        }
-    )
-    analysis = ObjectiveAnalysis(
-        collection_id="col-1",
-        objective_id="obj-1",
-        analysis_version=1,
-        document_inputs=(
-            PreparedDocumentInput(
-                document_id="doc-1", preparation_fingerprint="fixture"
-            ),
-        ),
-        total_document_count=1,
-        pipeline_version="test",
-        model_name=None,
-        prompt_versions={},
-    )
-
-    evidence, _ = materialize_evidence(
-        collection_id="col-1",
-        analysis=analysis,
-        objective=_objective(),
-        experiments=(experiment,),
-        paper_maps=(),
-        frames=(),
-        routes=(),
-        blocks_by_document_id={},
-        tables_by_document_id={"doc-1": [table]},
-        figures_by_document_id={},
-    )
-
-    assert len(evidence) == 1
-    assert evidence[0].reported_result is not None
-    assert evidence[0].reported_result.value == 82
-    assert evidence[0].selection_status == "candidate"
-    assert evidence[0].resolution_status == "unresolved"
-    assert evidence[0].evidence_status == "needs_context"
-    assert missing_binding in (evidence[0].selection_reason or "")
-    assert not FindingSynthesisService.is_synthesizable_result_evidence(
-        _objective(), evidence[0]
-    )
-
-
-def test_experiment_cannot_materialize_unbound_raw_result_as_evidence() -> None:
-    draft = _observation("obs-1")
-    experiment = assemble_paper_experiment(
-        collection_id="col-1", document_id="doc-1", source_facts=(draft,)
-    )
-
-    with pytest.raises(ValueError, match="result lacks a MeasurementResult"):
-        _experiment_source_observations(
-            experiments=(replace(experiment, measurements=()),)
-        )
 
 
 def _p002_result(identifier: str, sample: str, value: float) -> SourceObservation:
@@ -937,9 +630,7 @@ def test_bound_aggregate_round_trips_all_measurement_links_and_source_states() -
     assert type(experiment).from_mapping(experiment.to_record()) == experiment
 
 
-def test_retained_p002_table_survives_read_bind_and_materialize_without_methods() -> (
-    None
-):
+def test_retained_p002_table_survives_read_and_bind_without_methods() -> None:
     fixture = json.loads(
         (
             Path(__file__).resolve().parents[2]
@@ -984,54 +675,16 @@ def test_retained_p002_table_survives_read_bind_and_materialize_without_methods(
     assert read_audits == []
     measured = [
         item
-        for fact in experiments
-        for item in fact.measurements
+        for experiment in experiments
+        for item in experiment.measurements
         if item.property_normalized == "elongation"
     ]
     assert [item.value_payload["value"] for item in measured] == [72, 82]
     assert all(item.epistemic_status == "validated" for item in measured)
-    assert all(experiment.status == "incomplete" for experiment in experiments)
-    analysis = ObjectiveAnalysis(
-        collection_id="col-1",
-        objective_id=objective.objective_id,
-        analysis_version=1,
-        total_document_count=1,
-        document_inputs=(
-            PreparedDocumentInput(
-                document_id=table.document_id, preparation_fingerprint="p002-fixture"
-            ),
-        ),
-        pipeline_version="test",
-        model_name=None,
-        prompt_versions={},
-    )
-    evidence, _ = materialize_evidence(
-        collection_id="col-1",
-        analysis=analysis,
-        objective=objective,
-        experiments=experiments,
-        technical_audits=tuple(read_audits),
-        paper_maps=(),
-        frames=(),
-        routes=(route,),
-        blocks_by_document_id={},
-        tables_by_document_id={table.document_id: [table]},
-        figures_by_document_id={},
-    )
-    assert [
-        item.reported_result.value
-        for item in evidence
-        if item.reported_result and item.reported_result.outcome == "elongation"
-    ] == [72, 82]
-    assert all(item.source_ref == table.table_id for item in evidence)
-    result_evidence = tuple(
-        item for item in evidence if item.reported_result is not None
-    )
-    assert result_evidence
-    assert all(item.evidence_status == "needs_context" for item in result_evidence)
-    assert not any(
-        FindingSynthesisService.is_synthesizable_result_evidence(objective, item)
-        for item in result_evidence
+    assert all(
+        observation.source_refs
+        for experiment in experiments
+        for observation in experiment.source_observations
     )
 
 

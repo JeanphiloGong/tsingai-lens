@@ -9,8 +9,10 @@ provider. It contains no recorded model response or synthetic scientific fact.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
@@ -36,13 +38,15 @@ from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
 )
-from application.core.objectives.analysis.evidence_materialization import (
-    materialize_evidence,
-)
 from application.core.objectives.analysis.evidence_routing import route_sources
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingAssertionJudge,
-    FindingSynthesisService,
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriter,
+)
+from application.repositories.experiment_analysis_repository import (
+    StoredExperimentAnalysis,
+)
+from application.repositories.paper_experiment_repository import (
+    StoredPaperExperimentRevision,
 )
 from application.core.objectives.analysis.paper_experiment import (
     assemble_paper_experiments,
@@ -95,6 +99,96 @@ EXPECTED_TABLE_ROWS = (
     ("P1", 400.0, 99.5),
     ("P2", 500.0, 98.7),
 )
+
+
+class _InMemoryExperimentRevisionRepository:
+    """Read-only probe storage with the same immutable-revision contract."""
+
+    def __init__(self) -> None:
+        self.records: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
+        self._next_id = 1
+
+    async def read_latest_revision(self, experiment_id: str, *, transaction=None):
+        records = [
+            item
+            for (identity, _), item in self.records.items()
+            if identity == experiment_id
+        ]
+        return max(
+            records,
+            key=lambda item: item.revision.experiment_version,
+            default=None,
+        )
+
+    async def add_revision(
+        self,
+        revision,
+        *,
+        created_by=None,
+        created_at=None,
+        transaction=None,
+    ):
+        key = (revision.experiment_id, revision.experiment_version)
+        existing = self.records.get(key)
+        if existing is not None:
+            if existing.revision == revision:
+                return existing
+            raise ValueError("probe revision is immutable")
+        stored = StoredPaperExperimentRevision(
+            revision_id=self._next_id,
+            revision=revision,
+            created_at=created_at or datetime.now(timezone.utc),
+            created_by=created_by,
+        )
+        self._next_id += 1
+        self.records[key] = stored
+        return stored
+
+
+class _InMemoryExperimentAnalysisRepository:
+    """Capture the complete graph without writing a production database."""
+
+    def __init__(self, revisions: _InMemoryExperimentRevisionRepository) -> None:
+        self.revisions = revisions
+        self.graph: Any | None = None
+
+    async def write_graph(self, graph, *, transaction=None):
+        self.graph = graph
+        stored_revisions = tuple(
+            await self.revisions.add_revision(
+                revision,
+                created_by=graph.created_by,
+                transaction=transaction,
+            )
+            for revision in graph.revisions
+        )
+        return StoredExperimentAnalysis(
+            revisions=stored_revisions,
+            selections=graph.selections,
+            groups=graph.groups,
+            findings=graph.findings,
+        )
+
+
+async def _write_experiment_graph(
+    *,
+    objective: ResearchObjective,
+    analysis: ObjectiveAnalysis,
+    experiments: tuple[Any, ...],
+):
+    revisions = _InMemoryExperimentRevisionRepository()
+    graph_repository = _InMemoryExperimentAnalysisRepository(revisions)
+    writer = ExperimentAnalysisWriter(
+        paper_experiment_repository=revisions,
+        experiment_analysis_repository=graph_repository,
+    )
+    result = await writer.write_experiment_analysis(
+        collection_id=objective.collection_id,
+        objective=objective,
+        analysis=analysis,
+        experiments=experiments,
+    )
+    return result, revisions, graph_repository
 
 
 class RecordingStructuredResponseClient(StructuredResponseClient):
@@ -330,23 +424,16 @@ def main() -> int:
                 document_id=document.document_id,
                 source_facts=reconstructed,
             )
-            evidence, contributions = materialize_evidence(
-                collection_id=objective.collection_id,
-                analysis=analysis,
-                objective=objective,
-                experiments=experiments,
-                technical_audits=tuple(read_audits),
-                paper_maps=(paper_map,),
-                frames=frames,
-                routes=routes,
-                blocks_by_document_id=blocks_by_document_id,
-                tables_by_document_id=tables_by_document_id,
-                figures_by_document_id=figures_by_document_id,
-                document_trees_by_document_id={},
+            graph_result, revision_repository, graph_repository = asyncio.run(
+                _write_experiment_graph(
+                    objective=objective,
+                    analysis=analysis,
+                    experiments=tuple(experiments),
+                )
             )
             report.update(
                 {
-                    "stage": "finding_synthesis",
+                    "stage": "experiment_graph",
                     "profile": profile.to_record(),
                     "paper_map": paper_map.to_record(),
                     "objective": objective.to_record(),
@@ -361,10 +448,22 @@ def main() -> int:
                     "paper_experiments": [
                         item.to_record() for item in experiments
                     ],
-                    "objective_evidence": [item.to_record() for item in evidence],
-                    "paper_contributions": [
-                        item.to_record() for item in contributions
+                    "experiment_revisions": [
+                        {
+                            "revision_id": item.revision_id,
+                            **item.revision.to_record(),
+                        }
+                        for item in graph_result.revisions
                     ],
+                    "selections": [item.to_record() for item in graph_result.selections],
+                    "comparison_groups": [
+                        item.to_record() for item in graph_result.groups
+                    ],
+                    "findings": [item.to_record() for item in graph_result.findings],
+                    "graph_write": {
+                        "revision_count": len(revision_repository.records),
+                        "graph_present": graph_repository.graph is not None,
+                    },
                     "model_traces": {
                         "document_profile": [profile_trace] if profile_trace else [],
                         "objective_pipeline": response_client.traces,
@@ -373,15 +472,6 @@ def main() -> int:
                 }
             )
             write_json_output(args.summary_output, report)
-            findings = FindingSynthesisService(
-                assertion_judge=FindingAssertionJudge(response_client)
-            ).synthesize(
-                collection_id=objective.collection_id,
-                objective=objective,
-                analysis=analysis,
-                contributions=contributions,
-                evidence_records=evidence,
-            )
 
         elapsed_s = perf_counter() - started_at
         execution_stats = usage.execution_stats(
@@ -399,9 +489,6 @@ def main() -> int:
                 ],
                 "source_observations": [item.to_record() for item in reconstructed],
                 "paper_experiments": [item.to_record() for item in experiments],
-                "objective_evidence": [item.to_record() for item in evidence],
-                "paper_contributions": [item.to_record() for item in contributions],
-                "findings": [item.to_record() for item in findings],
                 "diagnostics": list(diagnostics.records),
                 "execution_stats": execution_stats,
                 "model_traces": {
@@ -420,8 +507,10 @@ def main() -> int:
             audits=read_audits,
             observations=reconstructed,
             experiments=experiments,
-            evidence=evidence,
-            findings=findings,
+            revisions=graph_result.revisions,
+            selections=graph_result.selections,
+            groups=graph_result.groups,
+            findings=graph_result.findings,
         )
         report["status"] = (
             "pass" if all(item["passed"] for item in report["checks"]) else "fail"
@@ -469,7 +558,8 @@ def main() -> int:
                 ),
                 "source_observation_count": len(report["source_observations"]),
                 "paper_experiment_count": len(report["paper_experiments"]),
-                "objective_evidence_count": len(report["objective_evidence"]),
+                "selection_count": len(report["selections"]),
+                "comparison_group_count": len(report["comparison_groups"]),
                 "finding_count": len(report["findings"]),
                 "failed_checks": [
                     item["name"] for item in report["checks"] if not item["passed"]
@@ -634,71 +724,39 @@ def _experiment_binding_check(
     *,
     observations: Any,
     experiments: Any,
-    evidence: Any,
+    revisions: Any,
 ) -> dict[str, Any]:
     expected_values = sorted(density for _, _, density in EXPECTED_TABLE_ROWS)
-    evidence_by_id = {item.evidence_id: item for item in evidence}
-    derived_ids = {
-        observation.observation_id
-        for experiment in experiments
-        for observation in experiment.source_observations
-        if observation.derived_from_observation_ids
-    }
     binding_rows: list[dict[str, Any]] = []
-    for experiment in experiments:
-        variants = {item.variant_id for item in experiment.sample_variants}
-        conditions = {
-            item.test_condition_id for item in experiment.test_conditions
-        }
+    for revision_record in revisions:
+        revision = revision_record.revision
+        variants = {item.variant_key for item in revision.variants}
+        tests = {item.test_key for item in revision.test_conditions}
         source_ids = {
-            item.observation_id for item in experiment.source_observations
+            ref.source_ref
+            for ref in revision.source_refs
         }
-        for measurement in experiment.measurements:
+        for measurement in revision.measurements:
             if (
-                not isinstance(measurement.value_payload.get("value"), (int, float))
-                or measurement.property_normalized.casefold() != "relative density"
+                not isinstance(measurement.value, (int, float))
+                or measurement.outcome.casefold() != "relative density"
             ):
                 continue
-            projected = evidence_by_id.get(measurement.result_id)
-            sample_bound = measurement.variant_id in variants
-            test_bound = measurement.test_condition_id in conditions
-            fully_bound = bool(sample_bound and test_bound)
-            source_lineage_bound = bool(
-                projected is not None
-                and projected.source_ref
-                and any(
-                    str(ref.get("source_kind") or "") == projected.source_kind
-                    and str(ref.get("source_ref") or "") == projected.source_ref
-                    for ref in projected.related_source_refs
-                )
-            )
             binding_rows.append(
                 {
-                    "measurement_id": measurement.result_id,
-                    "value": float(measurement.value_payload["value"]),
+                    "measurement_key": measurement.measurement_key,
+                    "value": float(measurement.value),
                     "unit": measurement.unit,
-                    "source_observation_bound": measurement.result_id in source_ids,
-                    "source_lineage_bound": source_lineage_bound,
-                    "sample_bound": sample_bound,
-                    "test_bound": test_bound,
-                    "derived_measurement": measurement.result_id in derived_ids,
-                    "experiment_status": experiment.status,
-                    "evidence_status": (
-                        projected.evidence_status if projected is not None else None
+                    "variant_bound": measurement.variant_key in variants,
+                    "test_bound": measurement.test_key in tests,
+                    "source_bound": bool(
+                        source_ids & {ref.source_ref for ref in measurement.source_refs}
                     ),
-                    "selection_status": (
-                        projected.selection_status if projected is not None else None
-                    ),
-                    "resolution_status": (
-                        projected.resolution_status if projected is not None else None
-                    ),
-                    "binding_disposition": (
-                        "complete" if fully_bound else "needs_context"
-                    ),
+                    "binding_status": measurement.binding_status,
                 }
             )
     measurement_values = sorted(item["value"] for item in binding_rows)
-    table_result_observations = tuple(
+    table_results = tuple(
         item
         for item in observations
         if item.source_kind == "table"
@@ -708,149 +766,72 @@ def _experiment_binding_check(
         and isinstance(item.reported_result.value, (int, float))
     )
     bindings_are_honest = all(
-        item["source_observation_bound"]
-        and item["source_lineage_bound"]
-        and item["sample_bound"]
-        and not item["derived_measurement"]
+        item["variant_bound"]
+        and item["source_bound"]
         and item["unit"] == "%"
-        and (
-            item["test_bound"]
-            or (
-                item["experiment_status"] == "incomplete"
-                and item["evidence_status"] == "needs_context"
-                and item["selection_status"] == "candidate"
-                and item["resolution_status"] == "unresolved"
-            )
-        )
+        and item["binding_status"] in {"direct", "derived", "uncertain", "conflict"}
         for item in binding_rows
     )
     return {
         "acceptance_target": "B_experiment_binding",
-        "name": "measurements_have_valid_or_explicitly_incomplete_bindings",
+        "name": "measurements_have_source_and_local_bindings",
         "passed": measurement_values == expected_values
-        and len(table_result_observations) == len(EXPECTED_TABLE_ROWS)
+        and len(table_results) == len(EXPECTED_TABLE_ROWS)
+        and bool(binding_rows)
         and bindings_are_honest,
         "detail": {
             "expected_measurements": expected_values,
             "actual_measurements": measurement_values,
-            "table_result_count": len(table_result_observations),
+            "table_result_count": len(table_results),
             "binding_rows": binding_rows,
-            "binding_complete": bool(binding_rows)
-            and all(item["binding_disposition"] == "complete" for item in binding_rows),
         },
     }
 
 
 def _comparison_eligibility_check(
     *,
-    document_id: str,
-    experiments: Any,
-    evidence: Any,
+    selections: Any,
+    groups: Any,
     findings: Any,
 ) -> dict[str, Any]:
-    objective = _objective(document_id)
-    evidence_by_id = {item.evidence_id: item for item in evidence}
-    comparison_rows: list[dict[str, Any]] = []
-    for experiment in experiments:
-        for observation in experiment.source_observations:
-            if (
-                not observation.derived_from_observation_ids
-                or observation.reported_result is None
-                or observation.reported_result.outcome.casefold()
-                != "relative density"
-            ):
-                continue
-            comparison_status = experiment.comparison_status(
-                objective, *observation.derived_from_observation_ids
-            )
-            projected = evidence_by_id.get(observation.observation_id)
-            strategy = next(
-                (
-                    str(attribute.value)
-                    for attribute in observation.scientific_context.sample
-                    if attribute.name.casefold() == "strategy"
-                ),
-                "",
-            )
-            evidence_status = (
-                projected.evidence_status if projected is not None else None
-            )
-            synthesis_eligible = bool(
-                projected is not None
-                and FindingSynthesisService.is_synthesizable_result_evidence(
-                    objective, projected
-                )
-            )
-            comparison_rows.append(
-                {
-                    "observation_id": observation.observation_id,
-                    "parent_measurement_ids": list(
-                        observation.derived_from_observation_ids
-                    ),
-                    "strategy": strategy,
-                    "changed_variables": [
-                        variable.name for variable in observation.changed_variables
-                    ],
-                    "comparison_status": comparison_status,
-                    "evidence_status": evidence_status,
-                    "synthesis_eligible": synthesis_eligible,
-                }
-            )
-    expected_strategy_counts = {"Speed": 1, "Intermediate": 2, "Performance": 2}
-    strategy_counts = _count(item["strategy"] for item in comparison_rows)
-    comparison_shapes_are_preserved = (
-        strategy_counts == expected_strategy_counts
-        and all(
-            {name.casefold() for name in item["changed_variables"]}
-            == {"laser power"}
-            for item in comparison_rows
-        )
-    )
-    eligibility_is_consistent = all(
-        (
-            item["evidence_status"] == "comparable"
-            and item["synthesis_eligible"]
-        )
-        if item["comparison_status"] == "comparable"
-        else (
-            item["evidence_status"] != "comparable"
-            and not item["synthesis_eligible"]
-        )
-        for item in comparison_rows
-    )
-    comparable_evidence_ids = {
-        item.evidence_id
-        for item in evidence
-        if item.evidence_status == "comparable"
-        and FindingSynthesisService.is_synthesizable_result_evidence(
-            objective, item
-        )
+    selected_ids = {item.selection_id for item in selections}
+    group_selection_ids = {
+        member.selection_id
+        for group in groups
+        for member in group.members
     }
-    finding_claim_evidence_ids = {
-        evidence_id
+    finding_selection_ids = {
+        selection_id
         for finding in findings
-        for contribution in finding.paper_contributions
-        for evidence_id in (
-            *contribution.supporting_evidence_ids,
-            *contribution.contradicting_evidence_ids,
-        )
+        for selection_id in finding.selection_ids
     }
-    finding_lineage_is_consistent = (
-        finding_claim_evidence_ids <= comparable_evidence_ids
-        and (bool(findings) if comparable_evidence_ids else not findings)
+    finding_group_ids = {
+        group_id
+        for finding in findings
+        for group_id in finding.comparison_group_ids
+    }
+    groups_are_closed = group_selection_ids <= selected_ids
+    findings_are_closed = (
+        finding_selection_ids <= selected_ids
+        and finding_group_ids <= {item.group_id for item in groups}
+    )
+    cross_paper_groups_are_explicit = all(
+        len(group.members) < 2 or group.group_id in finding_group_ids
+        for group in groups
     )
     return {
         "acceptance_target": "C_comparison_eligibility",
-        "name": "comparisons_and_findings_require_complete_bindings",
-        "passed": bool(comparison_rows)
-        and comparison_shapes_are_preserved
-        and eligibility_is_consistent
-        and finding_lineage_is_consistent,
+        "name": "findings_reference_fixed_selections_and_optional_groups",
+        "passed": bool(findings) == bool(selections)
+        and groups_are_closed
+        and findings_are_closed
+        and cross_paper_groups_are_explicit,
         "detail": {
-            "comparison_rows": comparison_rows,
-            "strategy_counts": strategy_counts,
-            "comparable_evidence_ids": sorted(comparable_evidence_ids),
-            "finding_claim_evidence_ids": sorted(finding_claim_evidence_ids),
+            "selection_ids": sorted(selected_ids),
+            "group_selection_ids": sorted(group_selection_ids),
+            "finding_selection_ids": sorted(finding_selection_ids),
+            "finding_group_ids": sorted(finding_group_ids),
+            "group_count": len(groups),
             "finding_count": len(findings),
         },
     }
@@ -866,7 +847,9 @@ def _acceptance_checks(
     audits: Any,
     observations: Any,
     experiments: Any,
-    evidence: Any,
+    revisions: Any,
+    selections: Any,
+    groups: Any,
     findings: Any,
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
@@ -890,12 +873,12 @@ def _acceptance_checks(
             "study_count": len(paper_map.studies),
         },
     )
-    comparable_evidence_count = sum(
-        item.evidence_status == "comparable" for item in evidence
-    )
     checks.append(
         _live_model_boundary_check(
-            report=report, comparable_evidence_count=comparable_evidence_count
+            report=report,
+            comparable_evidence_count=sum(
+                bool(item.comparison_keys) for item in selections
+            ),
         )
     )
     add(
@@ -933,14 +916,13 @@ def _acceptance_checks(
         _experiment_binding_check(
             observations=observations,
             experiments=experiments,
-            evidence=evidence,
+            revisions=revisions,
         )
     )
     checks.append(
         _comparison_eligibility_check(
-            document_id=document.document_id,
-            experiments=experiments,
-            evidence=evidence,
+            selections=selections,
+            groups=groups,
             findings=findings,
         )
     )
@@ -950,6 +932,13 @@ def _acceptance_checks(
 def _live_model_boundary_check(
     *, report: dict[str, Any], comparable_evidence_count: int
 ) -> dict[str, Any]:
+    """Verify live model boundaries; Finding synthesis is deterministic now.
+
+    ``comparable_evidence_count`` remains a helper argument for old benchmark
+    callers, but it no longer enables a required ``finding_synthesis`` task.
+    Findings are produced from the fixed experiment graph by the application
+    service after this probe's model-backed Source extraction.
+    """
     stats = report["execution_stats"]
     prompt_versions = stats.get("prompt_versions", {})
     required_tasks = {
@@ -958,8 +947,6 @@ def _live_model_boundary_check(
         "objective_paper_frame",
         "objective_evidence_extraction",
     }
-    if comparable_evidence_count:
-        required_tasks.add("finding_synthesis")
     # A registered task without a trace is also an incomplete live run.
     required_tasks.update(prompt_versions)
     expected_model = str(report["runtime"]["model"])

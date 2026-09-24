@@ -332,10 +332,7 @@ def upgrade():
         sa.ForeignKeyConstraint(
             ["paper_experiment_id"],
             ["paper_experiment.id"],
-            name=(
-                "fk_experiment_comparison_measurement_paper_experiment_id_"
-                "paper_experiment"
-            ),
+            name="fk_experiment_comparison_measurement_experiment",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(

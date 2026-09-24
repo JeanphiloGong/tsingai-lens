@@ -372,7 +372,11 @@ class ExperimentComparisonMeasurementRow(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     paper_experiment_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("paper_experiment.id", ondelete="CASCADE"),
+        ForeignKey(
+            "paper_experiment.id",
+            name="fk_experiment_comparison_measurement_experiment",
+            ondelete="CASCADE",
+        ),
         nullable=False,
         index=True,
     )

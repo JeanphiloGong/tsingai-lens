@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.engine import URL
+from sqlalchemy.dialects import postgresql
 
 from infra.persistence.postgres.base import Base
 import infra.persistence.postgres.models  # noqa: F401
@@ -29,6 +31,37 @@ import infra.persistence.postgres.models  # noqa: F401
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 HEAD_REVISION = "20260924_0075"
+POSTGRES_IDENTIFIER_LIMIT = 63
+
+
+def test_migration_and_orm_names_fit_postgres_identifier_limit() -> None:
+    violations: list[str] = []
+    migration_root = BACKEND_ROOT / "migrations" / "versions"
+    for path in sorted(migration_root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.keyword) or node.arg != "name":
+                continue
+            value = node.value.value if isinstance(node.value, ast.Constant) else None
+            if isinstance(value, str) and len(value) > POSTGRES_IDENTIFIER_LIMIT:
+                violations.append(f"{path.name}:{node.lineno}:{value}")
+
+    preparer = postgresql.dialect().identifier_preparer
+    for table in Base.metadata.tables.values():
+        for constraint in table.constraints:
+            if not constraint.name:
+                continue
+            rendered = preparer.format_constraint(constraint).strip('"')
+            if len(rendered) > POSTGRES_IDENTIFIER_LIMIT:
+                violations.append(f"orm:{table.name}:{rendered}")
+        for index in table.indexes:
+            if not index.name:
+                continue
+            rendered = preparer.format_index(index).strip('"')
+            if len(rendered) > POSTGRES_IDENTIFIER_LIMIT:
+                violations.append(f"orm:{table.name}:{rendered}")
+
+    assert violations == []
 
 
 def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:

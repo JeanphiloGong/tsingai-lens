@@ -53,7 +53,9 @@ class FeedbackAnalysisWorker:
             )
 
         try:
-            await self.case_repository.save_analysis_result(result)
+            # The Postgres case repository persists the result and case in one
+            # transaction. Keeping this as one repository operation prevents
+            # an orphan AnalysisResult when case assembly fails.
             await self.case_repository.upsert_case_from_analysis(
                 result,
                 context_snapshot=context_snapshot,

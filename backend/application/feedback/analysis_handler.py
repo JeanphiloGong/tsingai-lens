@@ -201,6 +201,12 @@ def _coverage_from_messages(
     source_records: list[dict[str, Any]] = []
     requested: dict[str, dict[str, Any]] = {}
     for message in messages:
+        # Source contexts are attached to the user's selected question. They
+        # are useful provenance, but they do not prove that the model read a
+        # source; never pull selections from later or unrelated turns into
+        # this answer's coverage.
+        if message.role is not ChatMessageRole.USER or message.created_at > answer.created_at:
+            continue
         for source in message.source_contexts:
             record = source.to_record()
             key = str(record.get("source_ref") or record.get("resource_ref", {}).get("resource_id") or "")
@@ -209,14 +215,18 @@ def _coverage_from_messages(
             document_id = str(record.get("document_id") or "")
             if document_id:
                 requested.setdefault(document_id, {"document_id": document_id})
-    gaps: tuple[str, ...] = () if source_records else ("no verifiable Source context was recorded",)
+    gaps: tuple[str, ...] = (
+        ("model Source-read audit is unavailable; selected context is only a coverage signal",)
+        if source_records
+        else ("no verifiable Source context was recorded",)
+    )
     return EvidenceCoverage(
         requested_scope=tuple(requested.values()),
         inspected_sources=tuple(source_records),
         omitted_candidates=(),
         claim_support=(),
         gaps=gaps,
-        coverage_status="complete" if source_records else "unknown",
+        coverage_status="partial" if source_records else "unknown",
     )
 
 

@@ -94,6 +94,9 @@ class _Cases:
         return result
 
     async def upsert_case_from_analysis(self, result, *, context_snapshot, source_signal_ids, now):
+        if self.fail_on_save:
+            raise RuntimeError("database unavailable")
+        self.results.append(result)
         self.cases.append({"result": result, "context_snapshot": context_snapshot, "source_signal_ids": source_signal_ids})
         return self.cases[-1]
 

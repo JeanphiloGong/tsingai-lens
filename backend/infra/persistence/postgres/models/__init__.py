@@ -37,6 +37,10 @@ from infra.persistence.postgres.models.objective_experiment_selection import (
     SelectionComparisonRow,
     SelectionMeasurementRow,
 )
+from infra.persistence.postgres.models.comparison_group import (
+    ComparisonGroupMemberRow,
+    ComparisonGroupRow,
+)
 __all__ = [
     "AuthSession",
     "AuthUser",
@@ -45,6 +49,8 @@ __all__ = [
     "ChatSessionRow",
     "ChatToolCallRow",
     "Collection",
+    "ComparisonGroupMemberRow",
+    "ComparisonGroupRow",
     "Document",
     "DocumentPreparationRow",
     "EvaluationGoldSetRecord",

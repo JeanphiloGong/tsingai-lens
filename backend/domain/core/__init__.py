@@ -53,6 +53,7 @@ from domain.core.paper_experiment import (
     SourceReference,
 )
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
+from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     EVIDENCE_ORIGINS,
@@ -138,6 +139,8 @@ __all__ = [
     "PAPER_EXPERIMENT_IDENTITY_STATUSES",
     "PaperExperimentRevision",
     "ObjectiveExperimentSelection",
+    "ComparisonGroup",
+    "ComparisonGroupMember",
     "RELATION_STATUSES",
     "ReportedInterpretation",
     "SourceReference",

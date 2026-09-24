@@ -880,12 +880,33 @@ therefore means derivation, not in-place editing.
 A researcher may instead submit one of `no_comparable_evidence`,
 `no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with
 an explanatory `limitations` entry and no statement, parent, or Evidence roles.
+
 The new analysis version records the abstention as metadata and creates no
 placeholder Finding. An unauthenticated request returns `401`; missing or
 unowned collections and missing Objectives return `404`; stale source versions,
 concurrent analysis, unknown or ineligible Evidence, and scientifically
 inconsistent role selections return `409`; malformed request shapes return
 `422`.
+
+### Paper Experiment Analysis Projection
+
+The experiment-domain migration adds read-only routes; it does not replace or
+change the Objective, Finding, Evidence, or Agent request contracts above:
+
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis?analysis_version={n}`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis/export?analysis_version={n}&format=json|csv`
+
+Both routes require a positive, explicit `analysis_version` and read the same
+fixed Selection, optional ComparisonGroup, Finding, and PaperExperiment
+revisions. The JSON projection preserves relations and source references; the
+CSV projection is a long table with one selected reported measurement per row.
+The export never uses a later experiment revision implicitly and never turns a
+derived difference into a reported measurement.
+
+These are additive capabilities. Existing route paths, request parameters,
+authentication, task states, and response meanings remain frozen while the
+internal scientific records are migrated. A client that does not use these
+routes requires no request change.
 
 The Evidence POST command records one source-grounded Evidence decision from a
 specific prepared Document Source. It accepts `source_analysis_version`,

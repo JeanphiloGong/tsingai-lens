@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from application.evaluation.core_evaluation_service import CoreEvaluationService
@@ -590,6 +592,49 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> Non
     dataset = await feedback_service.export_dataset(
         collection_id="col-gold",
         objective_id="obj-1",
+    )
+
+    assert snapshot.items[0].payload["finding_id"] == "finding-1"
+    assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
+
+
+async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_available() -> None:
+    repository = await _published_objective_repository()
+    source = await repository.read_analysis("col-gold", "obj-1", 1)
+    assert source is not None
+    repository._analyses[("col-gold", "obj-1", 1)] = replace(
+        source,
+        origin="human_authored",
+        source_analysis_version=0,
+        created_by_user_id="researcher-1",
+    )
+
+    class RejectingProjection:
+        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def read_finding(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def list_contributions(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+    snapshot_service, _ = _prediction_snapshot_service(repository)
+    snapshot_service.experiment_projection = RejectingProjection()
+    feedback_service = FindingFeedbackService(
+        review_repository=InMemoryObjectiveReviewRepository(),
+        objective_repository=repository,
+        experiment_projection=RejectingProjection(),
+    )
+
+    snapshot = await snapshot_service.create_core_snapshot(
+        collection_id="col-gold", snapshot_id="authored-snapshot"
+    )
+    dataset = await feedback_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1"
     )
 
     assert snapshot.items[0].payload["finding_id"] == "finding-1"

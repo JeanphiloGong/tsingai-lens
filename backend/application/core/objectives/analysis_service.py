@@ -27,6 +27,9 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
+from application.core.objectives.analysis.analysis_record_source import (
+    should_read_experiment_projection,
+)
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.finding_summary import (
@@ -433,7 +436,9 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
             findings, total = await self.experiment_compatibility_projection.list_findings(
                 collection_id,
                 objective_id,
@@ -475,7 +480,9 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
             finding = await self.experiment_compatibility_projection.read_finding(
                 collection_id,
                 objective_id,
@@ -539,7 +546,9 @@ class ObjectiveAnalysisService:
         detail = await self.get_finding(
             collection_id, objective_id, finding_id, analysis_version=analysis_version
         )
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
             records, total = await self.experiment_compatibility_projection.list_evidence(
                 collection_id,
                 objective_id,
@@ -583,7 +592,9 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
             evidence, total = await self.experiment_compatibility_projection.list_evidence(
                 collection_id,
                 objective_id,
@@ -655,7 +666,9 @@ class ObjectiveAnalysisService:
             collection_id,
             tuple(item.document_id for item in analysis.document_inputs),
         )
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
             return await self.experiment_compatibility_projection.build_evidence_map(
                 objective=objective,
                 analysis=analysis,
@@ -680,7 +693,9 @@ class ObjectiveAnalysisService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Any, ...]:
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
             findings, _ = await self.experiment_compatibility_projection.list_findings(
                 collection_id,
                 objective_id,
@@ -710,7 +725,9 @@ class ObjectiveAnalysisService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Any, ...]:
-        if self.experiment_compatibility_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
             evidence, _ = await self.experiment_compatibility_projection.list_evidence(
                 collection_id,
                 objective_id,
@@ -933,7 +950,10 @@ class ObjectiveAnalysisService:
         evidence_records = ()
         warnings: list[str] = []
         if published is not None:
-            if self.experiment_compatibility_projection is not None:
+            if (
+                published.uses_experiment_records
+                and self.experiment_compatibility_projection is not None
+            ):
                 paper_contributions = (
                     await self.experiment_compatibility_projection.list_contributions(
                         collection_id,
@@ -1075,6 +1095,29 @@ class ObjectiveAnalysisService:
         if requested_version is not None and requested_version != published_version:
             raise ValueError("requested analysis version is not published")
         return published_version
+
+    async def _should_use_experiment_projection(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> bool:
+        """Select the scientific read owner for one fixed analysis version.
+
+        The production runtime always supplies the projection for automatic
+        analyses.  The ``None`` case remains usable for authored-only test and
+        memory runtimes; it must never make an automatic production analysis
+        silently switch its persisted scientific source because runtime
+        construction rejects that configuration.
+        """
+
+        return await should_read_experiment_projection(
+            objective_repository=self.objective_repository,
+            experiment_projection=self.experiment_compatibility_projection,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+        )
 
     def _build_progress_callback(
         self,

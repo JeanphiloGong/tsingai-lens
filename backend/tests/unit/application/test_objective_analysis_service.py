@@ -764,6 +764,39 @@ async def test_analysis_queries_use_experiment_projection_without_changing_argum
     assert evidence["items"][0]["evidence_id"] == "projected-evidence"
 
 
+async def test_authored_analysis_keeps_legacy_snapshot_when_projection_is_available() -> None:
+    repository = FakeObjectiveRepository(published=True)
+    authored = replace(
+        repository.analyses[1],
+        origin="human_authored",
+        source_analysis_version=0,
+        created_by_user_id="researcher-1",
+    )
+    repository.analyses[1] = authored
+
+    class RejectingProjection:
+        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+    service, _, _ = _service(
+        repository=repository,
+        experiment_compatibility_projection=RejectingProjection(),
+    )
+
+    findings = await service.list_findings(
+        "collection-1", "objective-1", analysis_version=1
+    )
+    evidence = await service.list_evidence(
+        "collection-1", "objective-1", analysis_version=1
+    )
+
+    assert findings["items"][0]["finding_id"] == "finding-1"
+    assert evidence["items"][0]["evidence_id"] == "evidence-1"
+
+
 async def test_objective_analysis_publishes_one_complete_version() -> None:
     service, repository, _analyzer = _service()
     queued = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)

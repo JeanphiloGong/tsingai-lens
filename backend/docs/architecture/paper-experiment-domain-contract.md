@@ -21,8 +21,17 @@ Collection. An Objective selects experiment content through
 
 ## Required invariants
 
+- `ExperimentalVariant` (called `SampleVariant` in the materials-science
+  vocabulary) stores one object or object/processing combination. This is one
+  model, not a second sample entity. Processing attributes such as laser power,
+  scan speed, or heat treatment belong there; they are not a generic test
+  `condition`.
+- `ExperimentTestCondition` stores a test or characterization protocol and its
+  operating parameters. A single variant may be measured under several test
+  conditions, and one test condition may apply to several variants.
 - A measurement references only objects and test conditions in the same
-  experiment revision.
+  experiment revision; an ordinary object-level measurement carries both its
+  `variant_key` and `test_key`.
 - A selection fixes an experiment identity and version; it never means
   "latest".
 - Reported values remain separate from derived differences or trends.
@@ -52,6 +61,49 @@ unique constraints, computes or verifies statuses, and only then writes a
 `PaperExperiment` revision. A model response that contains one of these
 service-owned fields is rejected; it is never silently copied into a formal
 record.
+
+## Extraction and reconciliation boundary
+
+The model is not the final experiment assembler. The implementation follows
+this order:
+
+```text
+Source-local facts
+  -> deterministic canonicalization
+  -> boundary proposal and reconciliation
+  -> deterministic table-row comparisons
+  -> reported interpretation extraction
+  -> binding/integrity gate
+  -> PaperExperiment revision
+```
+
+`SampleVariant`/`ExperimentalVariant` and `TestCondition` are source-supported
+candidates, not permission to guess a relationship. A label such as `as-SLM`,
+`sample`, or `mechanical test` is insufficient when the same source contains
+distinguishable process levels or concrete protocols. If a measurement cannot be
+bound uniquely, its local key is left empty and a targeted unresolved issue points
+to the missing row, caption, footnote, or Methods scope. The result may remain in
+a partial Draft, but it cannot silently become a bound revision.
+
+Boundary proposals are advisory. A different table, outcome, or test does not by
+itself create a new experiment. Reconciliation may split only when the sources
+support a different object population, intervention assignment, or experimental
+design; shared variants and tests may belong to more than one proposed series.
+Conversely, a proposal that omits a measurement whose variant and concrete test
+are already explicit is completed deterministically. A measurement with either
+binding missing remains unresolved rather than being attached by proximity.
+
+Repeated source-local records are merged by a conservative semantic signature.
+When the same resolved variant/test/outcome/unit has different reported values,
+the revision retains one conflict record with both reports and their sources; it
+does not select a preferred value. Comparisons generated from enumerable table
+rows are bounded candidates and are admitted only when both sides reference
+existing measurements. Invalid or one-sided comparison proposals are rejected
+with an audit issue, not persisted as scientific relationships.
+
+These rules explain why a valid JSON response or a high source-traceability score
+is not sufficient for a revision. The minimum gate must also cover experiment
+membership, concrete bindings, conflict preservation, and comparison integrity.
 
 ## HTTP compatibility matrix
 

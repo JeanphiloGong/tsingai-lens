@@ -6,6 +6,9 @@ from typing import Any, Mapping
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
+from application.core.objectives.analysis.analysis_record_source import (
+    should_read_experiment_projection,
+)
 from application.source.collection_service import CollectionService
 from domain.evaluation import (
     EvaluationPredictionItem,
@@ -187,7 +190,9 @@ class EvaluationPredictionSnapshotService:
         offset: int,
         limit: int,
     ) -> tuple[tuple[Any, ...], int]:
-        if self.experiment_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
             return await self.experiment_projection.list_findings(
                 collection_id,
                 objective_id,
@@ -213,7 +218,9 @@ class EvaluationPredictionSnapshotService:
         offset: int,
         limit: int,
     ) -> tuple[tuple[Any, ...], int]:
-        if self.experiment_projection is not None:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
             return await self.experiment_projection.list_evidence(
                 collection_id,
                 objective_id,
@@ -229,6 +236,20 @@ class EvaluationPredictionSnapshotService:
             finding_id=finding_id,
             offset=offset,
             limit=limit,
+        )
+
+    async def _should_use_experiment_projection(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> bool:
+        return await should_read_experiment_projection(
+            objective_repository=self.objective_repository,
+            experiment_projection=self.experiment_projection,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
         )
 
 

@@ -28,6 +28,9 @@ from domain.core.research_process import (
     PaperExperiment as LegacyPaperExperiment,
     SourceObservation,
 )
+from application.core.objectives.analysis.paper_experiment import (
+    paper_experiment_series_signature,
+)
 from domain.core.scientific_fact import ScientificAttribute, ScientificVariable
 
 
@@ -58,38 +61,16 @@ def stable_experiment_id(experiment: LegacyPaperExperiment) -> str:
     reread can still resolve to the same paper-owned experiment.
     """
 
-    anchors = []
-    for observation in experiment.source_observations:
-        context = observation.scientific_context.to_record()
-        canonical_context = {
-            section: sorted(
-                values,
-                key=lambda value: json.dumps(
-                    value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-                ),
-            )
-            for section, values in context.items()
+    anchors = [
+        {
+            "document_id": experiment.document_id,
+            "series_signature": paper_experiment_series_signature(
+                observation,
+                include_objective=False,
+            ),
         }
-        anchors.append(
-            {
-                "document_id": observation.document_id,
-                "source_kind": observation.source_kind,
-                "source_ref": observation.source_ref,
-                "observation_role": observation.observation_role,
-                "context": canonical_context,
-                "changed_variables": sorted(
-                    (item.to_record() for item in observation.changed_variables),
-                    key=lambda value: json.dumps(
-                        value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-                    ),
-                ),
-                "comparison": (
-                    observation.comparison.to_record()
-                    if observation.comparison is not None
-                    else None
-                ),
-            }
-        )
+        for observation in experiment.source_observations
+    ]
     if not anchors:
         anchors = [
             {

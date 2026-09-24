@@ -178,6 +178,38 @@ def test_different_outcomes_from_one_source_share_the_parent_experiment() -> Non
     }
 
 
+def test_different_tables_and_tests_share_the_parent_experiment() -> None:
+    first = _p002_result("obs-a", "A", 72)
+    second_context = _p002_result("context-b", "B", 82).scientific_context
+    second = replace(
+        _p002_result("obs-b", "B", 82),
+        source_ref="table-3",
+        source_refs=(
+            {
+                "source_kind": "table",
+                "source_ref": "table-3",
+                "source_excerpt": "B: elongation 82%",
+            },
+        ),
+        scientific_context=replace(
+            second_context,
+            test=(replace(second_context.test[0], value=0.1),),
+        ),
+    )
+
+    experiments = assemble_paper_experiments(
+        collection_id="col-1",
+        document_id="doc-1",
+        source_facts=(first, second),
+    )
+
+    assert len(experiments) == 1
+    assert {item.value_payload["value"] for item in experiments[0].measurements} == {
+        72,
+        82,
+    }
+
+
 def test_derived_comparison_is_not_another_measured_result() -> None:
     baseline = _observation("obs-np")
     target = _observation("obs-p150")
@@ -782,10 +814,14 @@ def test_p004_treatment_states_and_source_disagreement_are_not_pooled() -> None:
         document_id="doc-1",
         source_facts=(raw, ht, prose),
     )
-    assert len(experiments) == 3
-    assert [
+    assert len(experiments) == 2
+    assert sorted(
         item.value_payload["value"] for exp in experiments for item in exp.measurements
-    ] == [35.0, 51.2, 32.8]
+    ) == [32.8, 35.0, 51.2]
+    merged = next(exp for exp in experiments if len(exp.measurements) == 2)
+    assert {
+        item.value_payload["value"] for item in merged.measurements
+    } == {32.8, 35.0}
     assert {item.unit for exp in experiments for item in exp.measurements} == {"%"}
     assert "9.6" in experiments[0].source_observations[0].reported_result.result_text
 

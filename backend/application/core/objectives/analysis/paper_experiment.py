@@ -154,7 +154,9 @@ def assemble_paper_experiments(
             raise ValueError("experiment assembly cannot include another document")
         if observation.derived_from_observation_ids:
             continue
-        groups.setdefault(_experiment_series_key(observation), []).append(observation)
+        groups.setdefault(paper_experiment_series_signature(observation), []).append(
+            observation
+        )
     for observation in source_facts:
         if not observation.derived_from_observation_ids:
             continue
@@ -168,7 +170,9 @@ def assemble_paper_experiments(
             raise ValueError(
                 "derived comparison requires its original parent observations"
             )
-        parent_scopes = {_experiment_series_key(parent) for parent in parents}
+        parent_scopes = {
+            paper_experiment_series_signature(parent) for parent in parents
+        }
         key = (
             next(iter(parent_scopes))
             if len(parent_scopes) == 1
@@ -185,17 +189,24 @@ def assemble_paper_experiments(
     )
 
 
-def _experiment_series_key(observation: SourceObservation) -> tuple[Any, ...]:
+def paper_experiment_series_signature(
+    observation: SourceObservation,
+    *,
+    include_objective: bool = True,
+) -> tuple[Any, ...]:
+    """Return the explicit boundary that can identify a paper study series.
+
+    Source coordinates, outcome labels, and test attributes locate evidence
+    within a study; they do not create a second study. Material and explicit
+    sample-state attributes are the conservative boundaries available before a
+    paper supplies a stronger design selector.
+    """
+
     context = observation.scientific_context
-    # Scope by Source and explicit context until the paper establishes a shared
-    # study. A different outcome is another measurement in the same study, not
-    # permission to create a second experiment aggregate.
-    # Non-identity sample attributes (state, orientation, treatment) stay
-    # boundaries.
     fixed = tuple(
         sorted(
             (section, item.name, str(item.value), item.unit or "")
-            for section in ("material", "sample", "test")
+            for section in ("material", "sample")
             for item in getattr(context, section)
             if not (
                 section == "sample"
@@ -206,12 +217,7 @@ def _experiment_series_key(observation: SourceObservation) -> tuple[Any, ...]:
             )
         )
     )
-    return (
-        observation.objective_id,
-        observation.source_kind,
-        observation.source_ref,
-        fixed,
-    )
+    return (observation.objective_id, fixed) if include_objective else (fixed,)
 
 
 def assemble_paper_experiment(

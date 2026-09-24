@@ -190,6 +190,18 @@ def test_identity_does_not_change_when_same_series_gains_an_outcome() -> None:
         {
             **elongation.to_record(),
             "observation_id": "hardness",
+            "source_ref": "table-3",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": "table-3",
+                    "source_excerpt": "as-built: hardness 320 HV",
+                }
+            ],
+            "scientific_context": {
+                **elongation.scientific_context.to_record(),
+                "test": [{"name": "method", "value": "hardness"}],
+            },
             "source_excerpt": "as-built: hardness 320 HV",
             "reported_result": {
                 "outcome": "hardness",
